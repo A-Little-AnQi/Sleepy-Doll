@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "example-weather",
+  "name": "Example Weather Tool",
+  "version": "1.0.0",
+  "description": "Disabled example showing the HTTP tool plugin format.",
+  "skills": ["./skills"],
+  "httpTools": [
+    {
+      "name": "weather.current",
+      "description": "Read current weather from an explicitly configured service.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "city": { "type": "string" } },
+        "required": ["city"],
+        "additionalProperties": false
+      },
+      "method": "GET",
+      "url": "https://example.invalid/weather"
+    }
+  ]
+}

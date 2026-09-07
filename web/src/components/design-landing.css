@@ -1,0 +1,35 @@
+.design-landing { position: absolute; inset: 0; display: grid; place-items: center; background: #142f67; overflow: auto; }
+.design-scene { display: block; width: 100%; height: 100%; }
+.design-scene text { fill: #213e74; font-family: "STSong", "SimSun", serif; font-synthesis: weight; }
+.design-scene .design-brand { font-family: "Vladimir Script", "Kunstler Script", "Segoe Script", "Gabriola", "Ink Free", cursive; font-size: 78px; font-weight: 400; }
+.design-scene .design-new { fill: #fff0d7; font-size: 26px; font-weight: bold; }
+.design-scene .design-label { font-size: 20px; font-weight: bold; }
+.design-scene .design-nav { font-size: 19px; }
+.design-scene .design-title { font-size: 33px; font-weight: bold; fill: #f9e8c5; letter-spacing: 1px; }
+.design-scene .design-title-large { font-size: 48px; letter-spacing: 3px; }
+.design-scene .design-subtitle { font-size: 22px; fill: #efdebd; letter-spacing: 2px; }
+.design-scene .design-model { font-family: Georgia, serif; font-size: 24px; }
+.design-scene .design-action { font-size: 24px; font-weight: bold; }
+.design-scene .design-action-sub { font-size: 18px; }
+.design-scene .design-placeholder { font-size: 22px; fill: #7d8190; }
+.landing-model { width:100%; height:100%; border:0; background:transparent; color:#213e74; font:18px Georgia,"Microsoft YaHei",serif; cursor:pointer; }
+.landing-input { width:100%; height:100%; padding:8px; resize:none; border:0; border-radius:5px; background:transparent; color:#213e74; font:20px/1.6 "Microsoft YaHei",serif; }
+.landing-input::placeholder { color:#7d8190; font-family:STSong,serif; }
+.landing-hit { display:block; width:100%; height:100%; border:1px solid transparent; border-radius:14px; background:transparent; cursor:pointer; transition:background 160ms,box-shadow 160ms; }
+.landing-hit:hover { background:#e7d5ae16; box-shadow:inset 0 0 16px #e8c88735; }
+.landing-hit:active { background:#8d6f4828; }
+.landing-hit.is-active { background:#bca58120; box-shadow:inset 3px 0 #9f3c50; }
+.landing-send { border-radius:50%; }
+.landing-send:not(:disabled):hover { box-shadow:0 0 22px #e8c88766, inset 0 0 14px #ffffff30; }
+.landing-send:not(:disabled):active { transform:scale(.94); }
+.landing-hit:disabled { cursor:default; }
+.landing-send:disabled { background:#ece4d95e; }
+.landing-hit:focus-visible,.landing-input:focus-visible,.landing-model:focus-visible { outline:2px solid #7aa5cc; outline-offset:-4px; }
+.landing-history { display:grid; grid-auto-rows:44px; gap:11px; }
+.landing-history button { border:0; background:transparent; color:#213e74; font:18px STSong,serif; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-align:left; cursor:pointer; padding:0 8px; border-radius:5px; }
+.landing-history button:hover { background:#bca58126; }
+.landing-notice { padding:8px 14px; border-radius:6px; background:#f5e6dd; color:#8a3444; font:16px/1.6 "Microsoft YaHei",sans-serif; }
+.landing-character { animation:landing-float 7s ease-in-out infinite; }
+@keyframes landing-float { 0%,100% {transform:translateY(0)} 50% {transform:translateY(-5px)} }
+@media(prefers-reduced-motion:reduce) { .landing-character {animation:none} .landing-hit {transition:none} }
+html[data-reduced-motion="true"] .landing-character {animation:none}

@@ -1,0 +1,9 @@
+{
+  "id": "mock.success",
+  "description": "离线测试：运行后返回明确成功证据",
+  "methodId": "mock.success",
+  "catalogVersion": "mock-v1",
+  "aliases": ["测试成功", "模拟动作"],
+  "resourceFields": [],
+  "postconditions": []
+}

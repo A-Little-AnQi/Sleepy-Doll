@@ -1,0 +1,79 @@
+{
+  "version": 2,
+  "activeModel": "local-mock",
+  "models": [
+    {
+      "id": "local-mock",
+      "name": "本地 Mock",
+      "protocol": "openai-chat",
+      "model": "mock-model",
+      "baseUrl": "http://127.0.0.1:47124/v1",
+      "headers": {},
+      "options": {
+        "maxOutputTokens": 4096,
+        "timeoutMs": 120000
+      }
+    },
+    {
+      "id": "local-ollama",
+      "name": "Local Ollama",
+      "protocol": "ollama-chat",
+      "model": "qwen3:8b",
+      "baseUrl": "http://127.0.0.1:11434",
+      "headers": {},
+      "options": {
+        "timeoutMs": 120000
+      }
+    },
+    {
+      "id": "primary",
+      "name": "主模型",
+      "protocol": "openai-responses",
+      "model": "your-model-id",
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "${ENV:OPENAI_API_KEY}",
+      "headers": {},
+      "options": {
+        "temperature": 0.2,
+        "maxOutputTokens": 8192,
+        "timeoutMs": 120000
+      }
+    }
+  ],
+  "agent": {
+    "maxTurns": 16,
+    "maxToolCallsPerTurn": 8,
+    "systemPrompt": "你是 Sleepy Doll，一个谨慎、可验证的 BGI 自动化 Agent。不要编造游戏状态、资源或执行结果。",
+    "skillDirectories": ["./skills"],
+    "autoLoadSkills": true,
+    "maxLoadedSkills": 4,
+    "disabledSkills": [],
+    "fallbackModels": []
+  },
+  "bridge": {
+    "enabled": false,
+    "baseUrl": "http://127.0.0.1:3499",
+    "token": "${ENV:BGI_BRIDGE_TOKEN}",
+    "instanceId": "",
+    "timeoutMs": 30000
+  },
+  "plugins": {
+    "directories": ["./plugins"],
+    "enabled": []
+  },
+  "storage": {
+    "database": "./.sleepy-doll/sleepy-doll.db"
+  },
+  "runtime": {
+    "catalogDirectory": "./catalog",
+    "maxDecisions": 32,
+    "maxTools": 128,
+    "maxReplans": 2,
+    "durationSec": 1800,
+    "contextChars": 48000,
+    "maxTokens": 100000,
+    "permissionMode": "askEach",
+    "grants": [],
+    "trustGrants": []
+  }
+}

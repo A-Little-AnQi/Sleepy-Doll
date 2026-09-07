@@ -1,0 +1,99 @@
+{
+  "activeModel": "mock-anthropic",
+  "agent": {
+    "autoLoadSkills": true,
+    "disabledSkills": [],
+    "maxLoadedSkills": 4,
+    "maxToolCallsPerTurn": 4,
+    "maxTurns": 8,
+    "skillDirectories": [
+      "./skills"
+    ],
+    "systemPrompt": "你是 Sleepy Doll 的离线测试 Agent。只报告 Mock Backend 返回的事实。"
+  },
+  "bridge": {
+    "baseUrl": "http://127.0.0.1:47124",
+    "enabled": true,
+    "instanceId": "mock-bgi",
+    "timeoutMs": 10000,
+    "token": "mock-token-not-a-secret"
+  },
+  "models": [
+    {
+      "baseUrl": "http://127.0.0.1:47124/v1",
+      "headers": {},
+      "id": "mock-responses",
+      "model": "mock-model",
+      "name": "Mock Responses",
+      "options": {
+        "maxOutputTokens": 4096,
+        "timeoutMs": 120000
+      },
+      "protocol": "openai-responses"
+    },
+    {
+      "baseUrl": "http://127.0.0.1:47124/v1",
+      "headers": {},
+      "id": "mock-chat",
+      "model": "mock-model",
+      "name": "Mock Chat",
+      "options": {
+        "timeoutMs": 120000
+      },
+      "protocol": "openai-chat"
+    },
+    {
+      "baseUrl": "http://127.0.0.1:47124/v1",
+      "headers": {},
+      "id": "mock-anthropic",
+      "model": "mock-model",
+      "name": "Mock Anthropic",
+      "options": {
+        "timeoutMs": 120000
+      },
+      "protocol": "anthropic-messages"
+    },
+    {
+      "baseUrl": "http://127.0.0.1:47124/v1",
+      "headers": {},
+      "id": "mock-gemini",
+      "model": "mock-model",
+      "name": "Mock Gemini",
+      "options": {
+        "timeoutMs": 120000
+      },
+      "protocol": "gemini"
+    },
+    {
+      "baseUrl": "http://127.0.0.1:47124",
+      "headers": {},
+      "id": "mock-ollama",
+      "model": "mock-model",
+      "name": "Mock Ollama",
+      "options": {
+        "timeoutMs": 120000
+      },
+      "protocol": "ollama-chat"
+    }
+  ],
+  "plugins": {
+    "directories": [
+      "./plugins"
+    ],
+    "enabled": []
+  },
+  "runtime": {
+    "catalogDirectory": ".",
+    "contextChars": 48000,
+    "durationSec": 1800,
+    "grants": [],
+    "maxDecisions": 32,
+    "maxReplans": 2,
+    "maxTokens": 100000,
+    "maxTools": 128
+  },
+  "storage": {
+    "database": "./.sleepy-doll/mock.db"
+  },
+  "version": 2
+}

@@ -1,0 +1,421 @@
+:root {
+  --sd-action-size: 40px;
+  --sd-action-art-size: 24px;
+  --sd-action-ink: #213e74;
+  --sd-action-paper: #fff9ef;
+  --sd-action-mint: #7aa5cc;
+  --sd-action-violet: #637eac;
+  --sd-action-yellow: #d4b98d;
+  --sd-action-coral: #91424e;
+  --sd-action-sky: #637eac;
+  --sd-action-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --sd-action-duration: 160ms;
+  --sd-action-paper-duration: 150ms;
+  --sd-action-color-duration: 190ms;
+  --sd-action-color-delay: 75ms;
+  --sd-action-detail-duration: 170ms;
+  --sd-action-detail-delay: 165ms;
+  --sd-action-trace-duration: 300ms;
+  --sd-action-trace-delay: 125ms;
+}
+
+.sd-action-button {
+  display: inline-grid;
+  width: var(--sd-action-size);
+  height: var(--sd-action-size);
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  color: var(--sd-action-ink);
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sd-action-button:focus-visible {
+  outline: 2px solid #7aa5cc;
+  outline-offset: 2px;
+}
+
+.sd-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.sd-action-art {
+  width: var(--sd-action-art-size);
+  height: var(--sd-action-art-size);
+  overflow: visible;
+  transform-origin: center;
+  transition: transform var(--sd-action-duration) var(--sd-action-ease);
+}
+
+.sd-paper,
+.sd-color,
+.sd-detail,
+.sd-trace,
+.sd-outline {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.sd-paper {
+  fill: var(--sd-action-paper);
+  opacity: 0;
+  transform: scale(0.78);
+  transition:
+    opacity 110ms var(--sd-action-ease),
+    transform var(--sd-action-paper-duration) var(--sd-action-ease);
+}
+
+.sd-color {
+  opacity: 0;
+  transform: scaleY(0.72);
+  transform-origin: bottom;
+  transition:
+    opacity 120ms var(--sd-action-ease),
+    transform var(--sd-action-color-duration) var(--sd-action-ease),
+    fill var(--sd-action-color-duration) var(--sd-action-ease);
+}
+
+.sd-detail {
+  opacity: 0;
+  transition:
+    opacity 130ms var(--sd-action-ease),
+    transform var(--sd-action-detail-duration) var(--sd-action-ease),
+    stroke var(--sd-action-detail-duration) var(--sd-action-ease);
+}
+
+.sd-outline {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  transition: stroke var(--sd-action-duration) var(--sd-action-ease);
+}
+
+.sd-trace {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.05;
+  stroke-dasharray: 54;
+  stroke-dashoffset: 54;
+  opacity: 0;
+  transition:
+    opacity 100ms var(--sd-action-ease),
+    stroke-dashoffset var(--sd-action-trace-duration) var(--sd-action-ease);
+}
+
+.sd-action-button:hover .sd-action-art,
+.sd-action-button:focus-visible .sd-action-art,
+.sd-action-button[data-active="true"] .sd-action-art,
+.sd-action-button[data-status="working"] .sd-action-art,
+.sd-action-button[data-status="success"] .sd-action-art {
+  transform: translateY(-1px) scale(1.04);
+}
+
+.sd-action-button:hover .sd-paper,
+.sd-action-button:focus-visible .sd-paper,
+.sd-action-button[data-active="true"] .sd-paper,
+.sd-action-button[data-status="working"] .sd-paper,
+.sd-action-button[data-status="success"] .sd-paper {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.sd-action-button:hover .sd-color,
+.sd-action-button:focus-visible .sd-color,
+.sd-action-button[data-active="true"] .sd-color,
+.sd-action-button[data-status="working"] .sd-color,
+.sd-action-button[data-status="success"] .sd-color {
+  opacity: 1;
+  transform: scaleY(1);
+  transition-delay: var(--sd-action-color-delay);
+}
+
+.sd-action-button:hover .sd-detail,
+.sd-action-button:focus-visible .sd-detail,
+.sd-action-button[data-active="true"] .sd-detail,
+.sd-action-button[data-status="working"] .sd-detail,
+.sd-action-button[data-status="success"] .sd-detail {
+  opacity: 1;
+  transition-delay: var(--sd-action-detail-delay);
+}
+
+.sd-action-button:hover .sd-trace,
+.sd-action-button:focus-visible .sd-trace,
+.sd-action-button[data-active="true"] .sd-trace,
+.sd-action-button[data-status="working"] .sd-trace,
+.sd-action-button[data-status="success"] .sd-trace {
+  opacity: 1;
+  stroke-dashoffset: 0;
+  transition-delay: var(--sd-action-trace-delay);
+}
+
+.sd-action-button:active .sd-action-art {
+  transform: translateY(0) scale(0.92);
+  transition-duration: 80ms;
+}
+
+.sd-action-moon .sd-moon-disc {
+  fill: transparent;
+}
+
+.sd-action-moon .sd-paper {
+  fill: transparent;
+}
+
+.sd-action-moon .sd-moon-orbit {
+  fill: none;
+  stroke: var(--sd-action-mint);
+  stroke-width: 1.15;
+  stroke-dasharray: 18 10;
+  transform-origin: center;
+}
+
+.sd-action-moon .sd-moon-orbit-back {
+  transform: rotate(-28deg);
+}
+
+.sd-action-moon:hover .sd-moon-orbit-back,
+.sd-action-moon:focus-visible .sd-moon-orbit-back,
+.sd-action-moon[data-active="true"] .sd-moon-orbit-back {
+  transform: rotate(0);
+}
+
+.sd-action-scan .sd-scan-field {
+  fill: transparent;
+}
+
+.sd-action-scan .sd-scan-line {
+  fill: none;
+  stroke: var(--sd-action-mint);
+  stroke-width: 1.1;
+}
+
+.sd-action-scan .sd-scan-lock {
+  fill: var(--sd-action-yellow);
+  stroke: currentColor;
+  stroke-width: 0.7;
+  transform: scale(0.3);
+}
+
+.sd-action-scan:hover .sd-scan-lock,
+.sd-action-scan:focus-visible .sd-scan-lock,
+.sd-action-scan[data-status="working"] .sd-scan-lock,
+.sd-action-scan[data-status="success"] .sd-scan-lock {
+  transform: scale(1);
+}
+
+.sd-action-scan .sd-success-check {
+  fill: none;
+  stroke: var(--sd-action-mint);
+  stroke-width: 1.25;
+  transform: scale(0.5);
+}
+
+.sd-action-scan:hover .sd-success-check,
+.sd-action-scan:focus-visible .sd-success-check {
+  opacity: 0;
+}
+
+.sd-action-scan[data-status="working"] .sd-scan-line {
+  opacity: 1;
+  animation: sd-scan-sweep 900ms var(--sd-action-ease) 220ms infinite alternate;
+}
+
+.sd-action-scan[data-status="success"] .sd-success-check {
+  opacity: 1;
+  transform: scale(1);
+  animation: sd-result-pop 260ms var(--sd-action-ease) both;
+}
+
+.sd-action-route .sd-route-paper {
+  stroke: none;
+}
+
+.sd-action-route .panel-one {
+  fill: var(--sd-action-mint);
+}
+
+.sd-action-route .panel-two {
+  fill: var(--sd-action-yellow);
+}
+
+.sd-action-route .panel-three {
+  fill: var(--sd-action-violet);
+}
+
+.sd-action-route:hover .panel-one,
+.sd-action-route:focus-visible .panel-one,
+.sd-action-route[data-active="true"] .panel-one {
+  transition-delay: 65ms;
+}
+
+.sd-action-route:hover .panel-two,
+.sd-action-route:focus-visible .panel-two,
+.sd-action-route[data-active="true"] .panel-two {
+  transition-delay: 115ms;
+}
+
+.sd-action-route:hover .panel-three,
+.sd-action-route:focus-visible .panel-three,
+.sd-action-route[data-active="true"] .panel-three {
+  transition-delay: 165ms;
+}
+
+.sd-action-route .sd-route-path {
+  fill: none;
+  stroke: var(--sd-action-ink);
+  stroke-width: 1.35;
+  stroke-dasharray: 20;
+  stroke-dashoffset: 20;
+}
+
+.sd-action-route:hover .sd-route-path,
+.sd-action-route:focus-visible .sd-route-path,
+.sd-action-route[data-active="true"] .sd-route-path {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 320ms var(--sd-action-ease) 190ms;
+}
+
+.sd-route-node circle {
+  stroke: none;
+}
+
+.sd-route-node.node-start circle {
+  fill: #7aa5cc;
+}
+
+.sd-route-node.node-end circle {
+  fill: #637eac;
+}
+
+.sd-route-node {
+  transform: scale(0.35);
+}
+
+.sd-action-route:hover .sd-route-node,
+.sd-action-route:focus-visible .sd-route-node,
+.sd-action-route[data-active="true"] .sd-route-node {
+  transform: scale(1);
+  transition-delay: 260ms;
+}
+
+.sd-action-route:hover .node-end,
+.sd-action-route:focus-visible .node-end,
+.sd-action-route[data-active="true"] .node-end {
+  transition-delay: 315ms;
+}
+
+.sd-action-send .sd-send-fill {
+  fill: var(--sd-action-coral);
+  clip-path: inset(100% 0 0 0);
+  transform: none;
+}
+
+.sd-action-send .sd-send-inner {
+  fill: #637eac;
+  opacity: 0;
+}
+
+.sd-action-send .sd-send-trail {
+  fill: none;
+  stroke-width: 1.2;
+}
+
+.sd-action-send .trail-one {
+  stroke: var(--sd-action-mint);
+}
+
+.sd-action-send .trail-two {
+  stroke: var(--sd-action-violet);
+}
+
+.sd-action-send:hover .sd-send-trail,
+.sd-action-send:focus-visible .sd-send-trail {
+  opacity: 0;
+}
+
+.sd-action-send:hover .sd-send-fill,
+.sd-action-send:focus-visible .sd-send-fill,
+.sd-action-send[data-launching="true"] .sd-send-fill {
+  opacity: 1;
+  clip-path: inset(0);
+  transition:
+    clip-path 190ms var(--sd-action-ease) 70ms,
+    opacity 120ms var(--sd-action-ease) 70ms;
+}
+
+.sd-action-send[data-launching="true"] .sd-action-art {
+  animation: sd-send-launch 380ms var(--sd-action-ease) 190ms both;
+}
+
+.sd-action-send[data-launching="true"] .trail-one {
+  animation: sd-trail-fade 260ms ease-out 250ms both;
+}
+
+.sd-action-send[data-launching="true"] .trail-two {
+  animation: sd-trail-fade 240ms ease-out 310ms both;
+}
+
+@keyframes sd-scan-sweep {
+  from {
+    transform: translateY(-2.5px);
+  }
+  to {
+    transform: translateY(5.5px);
+  }
+}
+
+@keyframes sd-result-pop {
+  0% {
+    transform: scale(0.2);
+  }
+  65% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes sd-send-launch {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  45% {
+    transform: translate(3px, -3px) scale(1.03) rotate(-3deg);
+  }
+  100% {
+    transform: translate(7px, -7px) scale(0.9) rotate(-5deg);
+    opacity: 0;
+  }
+}
+
+@keyframes sd-trail-fade {
+  0% {
+    opacity: 0;
+    stroke-dasharray: 0 8;
+  }
+  35% {
+    opacity: 1;
+    stroke-dasharray: 8 0;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sd-action-art,
+  .sd-paper,
+  .sd-color,
+  .sd-detail,
+  .sd-trace,
+  .sd-outline {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}
