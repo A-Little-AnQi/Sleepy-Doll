@@ -1,76 +1,23 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api";
+import { CheckIcon, PlusIcon } from "../components/icons";
 import type { Bootstrap, ModelInfo } from "../types";
 
+/** The machine protocol names are what the configuration stores, but a user
+ * picking from a dropdown needs to recognise their provider. */
 const protocols = [
-  ["openai-responses", "OpenAI Responses"],
-  ["openai-chat", "OpenAI-compatible Chat"],
-  ["anthropic-messages", "Anthropic Messages"],
+  ["openai-responses", "OpenAI（Responses 接口）"],
+  ["openai-chat", "OpenAI 兼容（Chat Completions）"],
+  ["anthropic-messages", "Anthropic Claude"],
   ["gemini", "Google Gemini"],
-  ["ollama-chat", "Ollama Chat"],
+  ["ollama-chat", "Ollama（装在自己电脑上的模型）"],
 ] as const;
 
+const protocolLabel = (value: string) =>
+  protocols.find(([id]) => id === value)?.[1] ?? value;
+
 type ModelDraft = Omit<ModelInfo, "active"> & { apiKey: string };
-
-function ModelArt({ protocol }: { protocol: string }) {
-  if (protocol === "openai-chat") {
-    return (
-      <svg viewBox="0 0 44 44" aria-hidden="true">
-        <path d="M7 10h24v18H18l-8 6 2-6H7Z" />
-        <path d="M14 17h16M14 22h10" />
-        <path d="M31 15h6v16h-9" />
-      </svg>
-    );
-  }
-  if (protocol === "anthropic-messages") {
-    return (
-      <svg viewBox="0 0 44 44" aria-hidden="true">
-        <path d="m22 6 4 11 11-4-7 9 9 7-12-1-2 12-4-11-11 4 7-9-9-7 12 1Z" />
-        <path d="M18 27 22 16l4 11M19.5 23h5" />
-      </svg>
-    );
-  }
-  if (protocol === "gemini") {
-    return (
-      <svg viewBox="0 0 44 44" aria-hidden="true">
-        <path d="M22 5c2 10 7 15 17 17-10 2-15 7-17 17-2-10-7-15-17-17C15 20 20 15 22 5Z" />
-      </svg>
-    );
-  }
-  if (protocol === "ollama-chat") {
-    return (
-      <svg viewBox="0 0 44 44" aria-hidden="true">
-        <path d="M8 11h28v23H8Z" />
-        <path d="M14 18h16M14 24h10M14 29h13" />
-        <path d="M15 7v4M29 7v4" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 44 44" aria-hidden="true">
-      <path d="M9 13h18l8 8v11H17l-8-8Z" />
-      <path d="M27 13v9h8M15 20h7M15 25h13" />
-    </svg>
-  );
-}
-
-function AddModelArt() {
-  return (
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <path d="M6 5h14l6 6v16H6Z" />
-      <path d="M20 5v7h6M11 18h10M16 13v10" />
-    </svg>
-  );
-}
-
-function CheckArt({ className = "" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 28 28" aria-hidden="true">
-      <path d="m4 15 6 6L24 6" />
-    </svg>
-  );
-}
 
 function draft(model?: ModelInfo): ModelDraft {
   return model
@@ -95,110 +42,144 @@ export function ModelsPage({ bootstrap, reload }: ModelsPageProps) {
     bootstrap.models[0]?.id ?? "new",
   );
   const selected = bootstrap.models.find((model) => model.id === selectedId);
+  const adding = selectedId === "new";
   const [form, setForm] = useState<ModelDraft>(() => draft(selected));
+  const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setForm(draft(selected));
+    setError("");
+    setNotice("");
   }, [selectedId, selected]);
 
   const update = (field: keyof ModelDraft, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
   };
 
+  const missing = [
+    !form.name.trim() && "显示名称",
+    !form.model.trim() && "模型名称",
+    !form.baseUrl.trim() && "服务地址",
+  ].filter(Boolean) as string[];
+
   const save = async () => {
     setSaving(true);
+    setError("");
     setNotice("");
     try {
       await api.saveModel(form);
       await reload();
       setSelectedId(form.id);
-      setNotice("模型配置已保存。密钥不会返回到界面。\n");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNotice("已保存。新任务会使用这份配置。");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setSaving(false);
     }
   };
 
   const activate = async () => {
-    await api.useModel(form.id);
-    await reload();
-    setNotice("已设为唯一激活模型，新任务会使用这项配置。");
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      await api.useModel(form.id);
+      await reload();
+      setNotice("已切换：之后的新任务都用这个模型。");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <section className="models-workspace">
-      <aside className="model-browser">
-        <div className="browser-title">
-          <span>模型配置</span>
+    <div className="page-sheet split-page">
+      <aside className="picker">
+        <div className="picker-head">
+          <span>已配置的模型</span>
           <button
-            className="add-model-action"
-            aria-label="添加模型"
+            type="button"
+            className="subtle-action"
             onClick={() => {
               setSelectedId("new");
               setForm(draft());
             }}
           >
-            <AddModelArt />
-            <span>添加</span>
+            <PlusIcon className="button-icon" />
+            添加
           </button>
         </div>
-        <div className="model-browser-list">
+        <div className="picker-list">
+          {adding ? (
+            <div className="picker-item is-active">
+              <span>
+                <strong>新模型</strong>
+                <small>还没保存</small>
+              </span>
+            </div>
+          ) : null}
           {bootstrap.models.map((model) => (
             <button
               key={model.id}
-              className={selectedId === model.id ? "active" : ""}
+              type="button"
+              className={`picker-item${selectedId === model.id ? " is-active" : ""}`}
               onClick={() => setSelectedId(model.id)}
             >
-              <span className="model-monogram">
-                <ModelArt protocol={model.protocol} />
-              </span>
               <span>
                 <strong>{model.name}</strong>
-                <small>{model.model}</small>
+                <small>
+                  {protocolLabel(model.protocol)} · {model.model}
+                </small>
               </span>
-              {model.active ? <CheckArt className="active-check" /> : null}
+              {model.active ? (
+                <span className="tag tag-active">
+                  <CheckIcon className="tag-icon" />
+                  正在用
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
       </aside>
 
-      <div className="model-editor">
-        <header className="editor-header">
-          <div>
-            <h2>{selected ? selected.name : "添加模型"}</h2>
-          </div>
+      <div className="detail-pane">
+        <header className="detail-head">
+          <h2>{adding ? "添加模型" : selected?.name}</h2>
           {selected?.active ? (
-            <span className="active-model-badge">
-              <CheckArt />
-              当前模型
+            <span className="tag tag-active">
+              <CheckIcon className="tag-icon" />
+              正在用
             </span>
           ) : null}
         </header>
-        {notice ? <div className="notice">{notice}</div> : null}
-        <div className="form-section">
-          <h3>基本信息</h3>
-          <div className="form-grid two-columns">
-            <label>
-              <span>显示名称</span>
-              <input
-                value={form.name}
-                onChange={(event) => update("name", event.target.value)}
-              />
-            </label>
-            <label>
-              <span>配置 ID</span>
-              <input
-                value={form.id}
-                disabled={Boolean(selected)}
-                onChange={(event) => update("id", event.target.value)}
-              />
-            </label>
+
+        {notice ? <p className="notice ok">{notice}</p> : null}
+        {error ? (
+          <div className="inline-error" role="alert">
+            <strong>保存失败</strong>
+            <span>{error}</span>
           </div>
+        ) : null}
+
+        <section className="form-section">
+          <h3>怎么称呼它</h3>
           <label>
-            <span>协议</span>
+            <span>显示名称</span>
+            <input
+              value={form.name}
+              placeholder="例如：主力模型"
+              onChange={(event) => update("name", event.target.value)}
+            />
+          </label>
+        </section>
+
+        <section className="form-section">
+          <h3>连接到哪家服务</h3>
+          <label>
+            <span>接口类型</span>
             <select
               value={form.protocol}
               onChange={(event) => update("protocol", event.target.value)}
@@ -210,62 +191,70 @@ export function ModelsPage({ bootstrap, reload }: ModelsPageProps) {
               ))}
             </select>
           </label>
-        </div>
-        <div className="form-section">
-          <h3>连接</h3>
+          <p className="field-help">
+            不确定选哪个？看你用的服务商文档里写的是哪种接口。多数第三方中转站用
+            “OpenAI 兼容”。
+          </p>
+          <label>
+            <span>服务地址</span>
+            <input
+              placeholder="https://api.openai.com/v1"
+              value={form.baseUrl}
+              onChange={(event) => update("baseUrl", event.target.value)}
+            />
+          </label>
           <label>
             <span>模型名称</span>
             <input
-              placeholder="模型 API 使用的 ID"
+              placeholder="服务商给的模型代号，例如 gpt-4o"
               value={form.model}
               onChange={(event) => update("model", event.target.value)}
             />
           </label>
           <label>
-            <span>Base URL</span>
-            <div className="input-with-icon">
-              <input
-                value={form.baseUrl}
-                onChange={(event) => update("baseUrl", event.target.value)}
-              />
-            </div>
-          </label>
-          <label>
-            <span>API Key</span>
+            <span>密钥</span>
             <input
               type="password"
               autoComplete="off"
               placeholder={
-                selected ? "留空以保留原值" : "支持 ${ENV:VARIABLE_NAME}"
+                selected ? "留空表示不改动原来的密钥" : "粘贴服务商给你的密钥"
               }
               value={form.apiKey}
               onChange={(event) => update("apiKey", event.target.value)}
             />
           </label>
           <p className="field-help">
-            密钥保存在本地配置中。建议填写环境变量引用，不要直接保存明文。
+            密钥会明文保存在配置文件里，界面不会把它显示回来。
           </p>
-        </div>
-        <footer className="editor-actions">
+        </section>
+
+        <footer className="detail-actions">
           {selected && !selected.active ? (
             <button
+              type="button"
               className="secondary-action"
+              disabled={saving}
               onClick={() => void activate()}
             >
-              设为当前
+              改用这个模型
             </button>
-          ) : (
-            <span />
-          )}
+          ) : null}
           <button
-            className="save-action"
-            disabled={saving || !form.id || !form.model || !form.baseUrl}
+            type="button"
+            className="primary-action"
+            disabled={saving || missing.length > 0}
+            title={
+              missing.length ? `还需要填写：${missing.join("、")}` : undefined
+            }
             onClick={() => void save()}
           >
-            {saving ? "保存中…" : "保存配置"}
+            {saving ? "保存中…" : "保存"}
           </button>
         </footer>
+        {missing.length ? (
+          <p className="field-help">还需要填写：{missing.join("、")}。</p>
+        ) : null}
       </div>
-    </section>
+    </div>
   );
 }

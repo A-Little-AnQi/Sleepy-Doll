@@ -1,57 +1,32 @@
 import { useMemo, useState } from "react";
 
 import { api } from "../api";
+import { AlertIcon, RefreshIcon } from "../components/icons";
 import type { Bootstrap } from "../types";
 
-type ExtensionTab = "skills" | "plugins";
+type Tab = "skills" | "plugins";
 
-function SkillArt() {
-  return (
-    <svg viewBox="0 0 44 44" aria-hidden="true">
-      <path d="M4 8c7-2 12 0 18 5v25c-6-5-11-7-18-5ZM40 8c-7-2-12 0-18 5v25c6-5 11-7 18-5Z" />
-      <path d="M22 13v25M9 15c3 0 6 1 9 3M35 15c-3 0-6 1-9 3" />
-    </svg>
-  );
-}
+const pluginStatus: Record<string, string> = {
+  enabled: "运行中",
+  disabled: "已停用",
+  failed: "加载失败",
+};
 
-function PluginArt() {
-  return (
-    <svg viewBox="0 0 44 44" aria-hidden="true">
-      <path d="M7 8h10a5 5 0 0 1 10 0h10v10a5 5 0 0 1 0 10v9H27a5 5 0 0 1-10 0H7v-9a5 5 0 0 1 0-10Z" />
-    </svg>
-  );
-}
-
-function SourceArt() {
-  return (
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <path d="M13 10H8a4 4 0 0 0-4 4v4a4 4 0 0 0 4 4h5M19 10h5a4 4 0 0 1 4 4v4a4 4 0 0 1-4 4h-5M10 16h12" />
-    </svg>
-  );
-}
-
-function TagArt() {
-  return (
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <path d="M4 5h11l13 13-10 10L5 15Z" />
-      <circle cx="10" cy="11" r="2" />
-    </svg>
-  );
-}
-
-interface ExtensionsPageProps {
+interface Props {
   bootstrap: Bootstrap;
   reload(): Promise<void>;
 }
 
-export function ExtensionsPage({ bootstrap, reload }: ExtensionsPageProps) {
-  const [tab, setTab] = useState<ExtensionTab>("skills");
+export function ExtensionsPage({ bootstrap, reload }: Props) {
+  const [tab, setTab] = useState<Tab>("skills");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(
     bootstrap.skills[0]?.name ?? bootstrap.plugins[0]?.manifest.id ?? "",
   );
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
   const [installPath, setInstallPath] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const skills = useMemo(
     () =>
@@ -78,9 +53,11 @@ export function ExtensionsPage({ bootstrap, reload }: ExtensionsPageProps) {
     (plugin) => plugin.manifest.id === selectedId,
   );
 
-  const switchTab = (next: ExtensionTab) => {
+  const switchTab = (next: Tab) => {
     setTab(next);
     setQuery("");
+    setNotice("");
+    setError("");
     setSelectedId(
       next === "skills"
         ? (bootstrap.skills[0]?.name ?? "")
@@ -88,296 +65,329 @@ export function ExtensionsPage({ bootstrap, reload }: ExtensionsPageProps) {
     );
   };
 
-  const setSkillEnabled = async (name: string, enabled: boolean) => {
-    await api.setSkillEnabled(name, enabled);
-    await reload();
-    setNotice(
-      enabled
-        ? "Skill 已启用，新任务会加载它。"
-        : "Skill 已停用，新任务不会加载它。",
-    );
+  /** Every mutation reports both outcomes. Previously these calls had no catch,
+   * so a failed toggle silently did nothing while the switch looked like it had
+   * flipped. */
+  const run = async (
+    action: () => Promise<unknown>,
+    success: string,
+  ): Promise<void> => {
+    setBusy(true);
+    setNotice("");
+    setError("");
+    try {
+      await action();
+      await reload();
+      setNotice(success);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const setPluginEnabled = async (id: string, enabled: boolean) => {
-    const result = await api.setPluginEnabled(id, enabled);
-    await reload();
-    setNotice(
-      result.restartRequired
-        ? "Plugin 配置已保存，重启 Sleepy Doll 后生效。"
-        : "Plugin 状态已更新。",
-    );
-  };
+  const skillEnabled = selectedSkill?.enabled !== false;
+  const pluginEnabled = Boolean(
+    selectedPlugin &&
+    (selectedPlugin.configuredEnabled ?? selectedPlugin.status === "enabled"),
+  );
 
   return (
-    <section className="extensions-workspace">
-      <aside className="extension-browser">
-        <button
-          className="runtime-action"
-          onClick={() =>
-            void api
-              .reloadExtensions()
-              .then(reload)
-              .catch((e) => setNotice(String(e)))
-          }
-        >
-          刷新能力库
-        </button>
-        <div className="segmented-control">
-          <button
-            className={tab === "skills" ? "active" : ""}
-            onClick={() => switchTab("skills")}
-          >
-            Skills <span>{bootstrap.skills.length}</span>
-          </button>
-          <button
-            className={tab === "plugins" ? "active" : ""}
-            onClick={() => switchTab("plugins")}
-          >
-            Plugins <span>{bootstrap.plugins.length}</span>
-          </button>
+    <div className="page-sheet split-page">
+      <aside className="picker">
+        <div className="picker-head">
+          <div className="segmented" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "skills"}
+              className={tab === "skills" ? "is-active" : ""}
+              onClick={() => switchTab("skills")}
+            >
+              技能 <span>{bootstrap.skills.length}</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "plugins"}
+              className={tab === "plugins" ? "is-active" : ""}
+              onClick={() => switchTab("plugins")}
+            >
+              插件 <span>{bootstrap.plugins.length}</span>
+            </button>
+          </div>
         </div>
+
         {tab === "plugins" ? (
           <form
+            className="install-form"
             onSubmit={(event) => {
               event.preventDefault();
-              void api
-                .installPlugin(installPath)
-                .then(async (result) => {
-                  await reload();
-                  setSelectedId(result.id);
-                  setInstallPath("");
-                  setNotice("插件已导入，可在此启用。");
-                })
-                .catch((e) => setNotice(String(e)));
+              void run(
+                () => api.installPlugin(installPath),
+                "已导入。打开它的开关即可使用。",
+              ).then(() => setInstallPath(""));
             }}
           >
-            <label className="extension-search">
+            <label>
+              <span>从本地文件夹导入插件</span>
               <input
-                aria-label="本地插件文件夹"
-                placeholder="本地插件文件夹路径"
+                placeholder="粘贴插件文件夹的完整路径"
                 value={installPath}
-                onChange={(e) => setInstallPath(e.target.value)}
+                onChange={(event) => setInstallPath(event.target.value)}
               />
             </label>
-            <button className="runtime-action" disabled={!installPath.trim()}>
-              导入或更新插件
+            <button
+              type="submit"
+              className="runtime-action"
+              disabled={!installPath.trim() || busy}
+              title={installPath.trim() ? undefined : "先填写文件夹路径"}
+            >
+              导入
             </button>
           </form>
         ) : null}
-        <label className="extension-search">
+
+        <label className="picker-search">
+          <span className="sr-only">搜索</span>
           <input
-            aria-label="搜索扩展"
-            placeholder="搜索名称、说明或标签"
+            placeholder={tab === "skills" ? "搜索技能" : "搜索插件"}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
-        <div className="extension-list">
+
+        <div className="picker-list">
           {tab === "skills"
             ? skills.map((skill) => (
                 <button
                   key={skill.name}
-                  className={selectedId === skill.name ? "active" : ""}
+                  type="button"
+                  className={`picker-item${selectedId === skill.name ? " is-active" : ""}`}
                   onClick={() => setSelectedId(skill.name)}
                 >
-                  <span className="list-icon">
-                    <SkillArt />
-                  </span>
                   <span>
                     <strong>{skill.name}</strong>
                     <small>{skill.description}</small>
                   </span>
+                  {skill.enabled === false ? (
+                    <span className="tag">已停用</span>
+                  ) : null}
                 </button>
               ))
             : plugins.map((plugin) => (
                 <button
                   key={plugin.manifest.id}
-                  className={selectedId === plugin.manifest.id ? "active" : ""}
+                  type="button"
+                  className={`picker-item${selectedId === plugin.manifest.id ? " is-active" : ""}`}
                   onClick={() => setSelectedId(plugin.manifest.id)}
                 >
-                  <span className="list-icon">
-                    <PluginArt />
-                  </span>
                   <span>
                     <strong>{plugin.manifest.name}</strong>
-                    <small>v{plugin.manifest.version}</small>
+                    <small>版本 {plugin.manifest.version}</small>
                   </span>
+                  {plugin.status === "failed" ? (
+                    <span className="tag is-danger">
+                      <AlertIcon className="tag-icon" />
+                      加载失败
+                    </span>
+                  ) : null}
                 </button>
               ))}
         </div>
+
+        <button
+          type="button"
+          className="subtle-action"
+          disabled={busy}
+          onClick={() =>
+            void run(() => api.reloadExtensions(), "已重新读取本地文件。")
+          }
+        >
+          <RefreshIcon className="button-icon" />
+          重新读取
+        </button>
       </aside>
 
-      <div className="extension-detail">
-        {notice ? (
-          <div className="notice extension-notice">{notice}</div>
+      <div className="detail-pane">
+        {notice ? <p className="notice ok">{notice}</p> : null}
+        {error ? (
+          <div className="inline-error" role="alert">
+            <strong>操作失败</strong>
+            <span>{error}</span>
+          </div>
         ) : null}
+
         {tab === "skills" && selectedSkill ? (
           <>
-            <header className="detail-header">
-              <span className="detail-icon">
-                <SkillArt />
-              </span>
+            <header className="detail-head">
               <div>
                 <h2>{selectedSkill.name}</h2>
+                <p>{selectedSkill.description}</p>
               </div>
-              <button
-                className={`switch ${selectedSkill.enabled === false ? "" : "on"}`}
-                role="switch"
-                aria-checked={selectedSkill.enabled !== false}
-                aria-label={
-                  selectedSkill.enabled !== false
-                    ? "停用此 Skill"
-                    : "启用此 Skill"
-                }
-                onClick={() =>
-                  void setSkillEnabled(
-                    selectedSkill.name,
-                    selectedSkill.enabled === false,
-                  )
-                }
-              >
-                <span />
-              </button>
+              <div className="toggle-row">
+                <span className="toggle-label">
+                  {skillEnabled ? "已启用" : "已停用"}
+                </span>
+                <button
+                  type="button"
+                  className={`switch ${skillEnabled ? "on" : ""}`}
+                  role="switch"
+                  aria-checked={skillEnabled}
+                  aria-label={skillEnabled ? "停用这个技能" : "启用这个技能"}
+                  disabled={busy}
+                  onClick={() =>
+                    void run(
+                      () =>
+                        api.setSkillEnabled(selectedSkill.name, !skillEnabled),
+                      skillEnabled
+                        ? "已停用。之后的对话不会再带上它。"
+                        : "已启用。之后相关的对话会用到它。",
+                    )
+                  }
+                >
+                  <span />
+                </button>
+              </div>
             </header>
-            <p className="detail-description">{selectedSkill.description}</p>
-            <div className="detail-metadata">
+
+            <dl className="meta-list">
               <div>
-                <SourceArt />
-                <span>来源</span>
-                <strong>{selectedSkill.source}</strong>
+                <dt>来自</dt>
+                <dd>{selectedSkill.source}</dd>
               </div>
               <div>
-                <TagArt />
-                <span>标签</span>
-                <strong>{selectedSkill.tags.join("、") || "无"}</strong>
+                <dt>标签</dt>
+                <dd>{selectedSkill.tags.join("、") || "无"}</dd>
               </div>
-            </div>
-            <section className="instruction-preview">
-              <div>
-                <SkillArt />
-                <strong>指令预览</strong>
-                <span>完整内容只在匹配任务时进入上下文</span>
-              </div>
+            </dl>
+
+            <section className="page-block">
+              <h3>什么时候会用到它</h3>
+              <ul className="plain-list">
+                <li>
+                  你说的话和它的名称、说明、标签对得上时，Sleepy Doll
+                  会自己想起来用它。
+                </li>
+                <li>
+                  你也可以点名：在消息里写上 <code>${selectedSkill.name}</code>
+                  ，就会强制用它。
+                </li>
+              </ul>
+            </section>
+
+            <section className="page-block">
+              <h3>它给 Sleepy Doll 的说明</h3>
+              <p className="muted">
+                这段文字只在用到这个技能时才会发给模型，平时不占用对话。
+              </p>
               <pre>
-                {selectedSkill.instructions ??
-                  "选择此 Skill 后可查看指令；内容不会全部注入每次对话。"}
+                {selectedSkill.instructions ?? "这个技能没有提供额外说明。"}
               </pre>
             </section>
-            <div className="behavior-settings">
-              <h3>行为</h3>
-              <div>
-                <span>
-                  <strong>自动匹配</strong>
-                  <small>根据名称、说明和标签匹配用户请求</small>
-                </span>
-              </div>
-              <div>
-                <span>
-                  <strong>显式调用</strong>
-                  <small>用户可以使用 ${selectedSkill.name} 指定此 Skill</small>
-                </span>
-              </div>
-            </div>
           </>
         ) : tab === "plugins" && selectedPlugin ? (
           <>
-            <header className="detail-header">
-              <span className="detail-icon">
-                <PluginArt />
-              </span>
+            <header className="detail-head">
               <div>
                 <h2>{selectedPlugin.manifest.name}</h2>
+                <p>
+                  {selectedPlugin.manifest.description ??
+                    "这个插件没有写说明。"}
+                </p>
               </div>
+              <div className="toggle-row">
+                <span className="toggle-label">
+                  {pluginEnabled ? "已启用" : "已停用"}
+                </span>
+                <button
+                  type="button"
+                  className={`switch ${pluginEnabled ? "on" : ""}`}
+                  role="switch"
+                  aria-checked={pluginEnabled}
+                  aria-label={pluginEnabled ? "停用这个插件" : "启用这个插件"}
+                  disabled={busy}
+                  onClick={() =>
+                    void run(
+                      () =>
+                        api.setPluginEnabled(
+                          selectedPlugin.manifest.id,
+                          !pluginEnabled,
+                        ),
+                      pluginEnabled
+                        ? "已停用。它提供的能力会从列表里移除。"
+                        : "已启用。它提供的能力现在可用了。",
+                    )
+                  }
+                >
+                  <span />
+                </button>
+              </div>
+            </header>
+
+            <dl className="meta-list">
+              <div>
+                <dt>状态</dt>
+                <dd>
+                  {pluginStatus[selectedPlugin.status] ?? selectedPlugin.status}
+                </dd>
+              </div>
+              <div>
+                <dt>版本</dt>
+                <dd>{selectedPlugin.manifest.version}</dd>
+              </div>
+            </dl>
+
+            {selectedPlugin.error ? (
+              <div className="inline-error" role="alert">
+                <strong>这个插件没能加载</strong>
+                <span>{selectedPlugin.error}</span>
+              </div>
+            ) : null}
+
+            <section className="page-block">
+              <h3>它给 Sleepy Doll 增加了什么</h3>
+              <ul className="plain-list">
+                <li>可以调用的操作和工具。</li>
+                <li>附带的操作说明（技能），它们各自还有独立的开关。</li>
+              </ul>
+              <p className="muted">
+                只有打开上面的开关，这个插件才会真正运行。
+              </p>
+            </section>
+
+            <footer className="detail-actions">
               <button
-                className={`switch ${(selectedPlugin.configuredEnabled ?? selectedPlugin.status === "enabled") ? "on" : ""}`}
-                role="switch"
-                aria-label={
-                  (selectedPlugin.configuredEnabled ??
-                  selectedPlugin.status === "enabled")
-                    ? "停用此插件"
-                    : "启用此插件"
-                }
-                aria-checked={
-                  selectedPlugin.configuredEnabled ??
-                  selectedPlugin.status === "enabled"
+                type="button"
+                className="runtime-action"
+                disabled={pluginEnabled || busy}
+                title={
+                  pluginEnabled
+                    ? "先停用它，才能从列表里移除"
+                    : "把它移到回收文件夹，需要时可以再放回来"
                 }
                 onClick={() =>
-                  void setPluginEnabled(
-                    selectedPlugin.manifest.id,
-                    !(
-                      selectedPlugin.configuredEnabled ??
-                      selectedPlugin.status === "enabled"
-                    ),
-                  )
+                  void run(
+                    () => api.removePlugin(selectedPlugin.manifest.id),
+                    "已移到插件目录下的回收文件夹，需要时可以恢复。",
+                  ).then(() => setSelectedId(""))
                 }
               >
-                <span />
+                从列表移除
               </button>
-            </header>
-            <p className="detail-description">
-              {selectedPlugin.manifest.description ?? "未提供说明"}
-            </p>
-            <div className="detail-metadata">
-              <div>
-                <SourceArt />
-                <span>状态</span>
-                <strong>{selectedPlugin.status}</strong>
-              </div>
-              <div>
-                <TagArt />
-                <span>版本</span>
-                <strong>{selectedPlugin.manifest.version}</strong>
-              </div>
-            </div>
-            <section className="plugin-capabilities">
-              <h3>提供的能力</h3>
-              <div>
-                <PluginArt />
-                <span>
-                  <strong>工具与 MCP</strong>
-                  <small>只在 Plugin 明确启用后注册和启动</small>
-                </span>
-              </div>
-              <div>
-                <SkillArt />
-                <span>
-                  <strong>附带 Skills</strong>
-                  <small>与 Plugin 一起发现并遵守独立启用状态</small>
-                </span>
-              </div>
-            </section>
-            {selectedPlugin.error ? (
-              <div className="inline-error">{selectedPlugin.error}</div>
-            ) : null}
-            <button
-              className="runtime-action"
-              disabled={
-                selectedPlugin.configuredEnabled ??
-                selectedPlugin.status === "enabled"
-              }
-              onClick={() =>
-                void api
-                  .removePlugin(selectedPlugin.manifest.id)
-                  .then(async () => {
-                    await reload();
-                    setSelectedId("");
-                    setNotice(
-                      "插件已移入插件目录的 .retired 文件夹，可以恢复。",
-                    );
-                  })
-                  .catch((e) => setNotice(String(e)))
-              }
-            >
-              移出插件库
-            </button>
+              {pluginEnabled ? (
+                <p className="field-help">先停用它，才能从列表里移除。</p>
+              ) : null}
+            </footer>
           </>
         ) : (
-          <div className="detail-empty">
-            <PluginArt />
-            <p>没有匹配的扩展</p>
-          </div>
+          <p className="empty-note">
+            {query
+              ? `没有匹配「${query}」的${tab === "skills" ? "技能" : "插件"}。`
+              : `还没有${tab === "skills" ? "技能" : "插件"}。`}
+          </p>
         )}
       </div>
-    </section>
+    </div>
   );
 }

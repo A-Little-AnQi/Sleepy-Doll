@@ -583,7 +583,7 @@ impl AppController {
             json!({"enabled":false,"connected":false,"baseUrl":self.bridge.base_url()})
         };
         Ok(
-            json!({"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.operations.store.workflows()?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"bridge":bridge_status}),
+            json!({"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.operations.store.workflows()?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"bridge":bridge_status}),
         )
     }
 

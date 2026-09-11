@@ -154,6 +154,9 @@ export interface RunApproval {
   expiresAt: number;
 }
 export interface Bootstrap {
+  /** Absolute path of the configuration file, so the interface can point at it
+   * instead of telling the user to "edit the configuration". */
+  configPath: string;
   models: ModelInfo[];
   skills: SkillInfo[];
   plugins: PluginInfo[];

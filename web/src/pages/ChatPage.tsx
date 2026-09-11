@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import character from "../assets/moon-character-v5-feet.png";
 import { api } from "../api";
-import { SendActionButton } from "../components/actions/SleepyActionButtons";
+import { SendIcon, StopIcon } from "../components/icons";
 import type { Bootstrap, MessageInfo, TaskInfo, RunApproval } from "../types";
 
 interface ChatPageProps {
@@ -11,29 +12,33 @@ interface ChatPageProps {
   reload(): Promise<void>;
 }
 
+/** Tool identifiers are machine names. These are what each one actually does,
+ * in the words a user would use. */
 const toolNames: Record<string, string> = {
   "plan.update": "更新执行计划",
-  "user.ask": "确认任务信息",
-  "resource.search": "检索资源",
+  "user.ask": "向你确认信息",
+  "resource.search": "查找可用的资源",
   "bgi.state.get": "读取游戏状态",
-  "bgi.capability.search": "检索能力目录",
-  "bgi.capability.describe": "确认能力契约",
-  "bgi.capability.invoke": "执行 BetterGI 动作",
-  "bgi.job.get": "读取执行结果",
+  "bgi.capability.search": "查找能做的操作",
+  "bgi.capability.describe": "确认操作的用法",
+  "bgi.capability.invoke": "执行游戏操作",
+  "bgi.job.get": "查看执行结果",
   "bgi.job.cancel": "停止执行",
-  "skills.search": "检索工作方法",
-  "skills.read": "读取工作方法",
-  "plugins.list": "读取扩展目录",
-  "operation.propose": "准备领域操作",
-  "operation.get": "读取操作状态",
+  "skills.search": "查找技能",
+  "skills.read": "读取技能说明",
+  "plugins.list": "查看已装插件",
+  "operation.propose": "准备一项操作",
+  "operation.get": "查看操作状态",
 };
 const stepOutcomeLabels: Record<string, string> = {
-  active: "当前步骤",
-  verifiedSucceeded: "已验证",
-  verifiedFailed: "验证未通过",
+  active: "进行中",
+  verifiedSucceeded: "已完成并确认",
+  verifiedFailed: "完成但结果不符",
   failed: "失败",
-  unknown: "结果未知",
+  unknown: "结果未确认",
 };
+
+const EXAMPLES = ["看看游戏现在是什么情况", "有哪些路线可以跑？"];
 
 function isBusy(task?: TaskInfo): boolean {
   return Boolean(
@@ -49,39 +54,32 @@ function isBusy(task?: TaskInfo): boolean {
   );
 }
 
-function ActionMedallion({ kind }: { kind: "scan" | "route" }) {
-  return <span className="tool-mark" aria-hidden="true">{kind === "scan" ? "◎" : "✧"}</span>;
-}
-
 function ToolActivity({ message }: { message: MessageInfo }) {
   if (message.role === "assistant" && message.toolCalls?.length) {
     return (
       <div className="tool-sequence">
-        {message.toolCalls.map((call) => {
-          const stateTool = call.name === "bgi.state.get";
-          return (
-            <details className="tool-pass" key={call.id}>
-              <summary>
-                <ActionMedallion kind={stateTool ? "scan" : "route"} />
-                <span>
-                  <strong>{toolNames[call.name] ?? "执行工具"}</strong>
-                  <em>展开证据</em>
-                </span>
-              </summary>
-              <div className="technical-evidence">
-                <code>{call.name}</code>
-                <pre>{JSON.stringify(call.arguments, null, 2)}</pre>
-              </div>
-            </details>
-          );
-        })}
+        {message.toolCalls.map((call) => (
+          <details className="tool-pass" key={call.id}>
+            <summary>
+              <span>
+                <strong>{toolNames[call.name] ?? call.name}</strong>
+                <em>查看详情</em>
+              </span>
+            </summary>
+            <div className="technical-evidence">
+              <p className="evidence-note">这一步发出的原始请求：</p>
+              <code>{call.name}</code>
+              <pre>{JSON.stringify(call.arguments, null, 2)}</pre>
+            </div>
+          </details>
+        ))}
       </div>
     );
   }
   if (message.role === "tool") {
     return (
       <details className="tool-result">
-        <summary>查看返回内容</summary>
+        <summary>查看这一步的返回内容</summary>
         <pre>{message.content}</pre>
       </details>
     );
@@ -124,10 +122,13 @@ export function ChatPage({
   const followTail = useRef(true);
   const busy = isBusy(task);
   const strategySaved = Boolean(
-    task && (
-      bootstrap.strategies.some(
-        (strategy) => strategy.sourceRunId === task.id,
-      ) || bootstrap.workflows.some((workflow) => workflow.verifiedFromRun === task.id)),
+    task &&
+    (bootstrap.strategies.some(
+      (strategy) => strategy.sourceRunId === task.id,
+    ) ||
+      bootstrap.workflows.some(
+        (workflow) => workflow.verifiedFromRun === task.id,
+      )),
   );
   const controlCalls = new Set(
     messages.flatMap((m) =>
@@ -146,6 +147,10 @@ export function ChatPage({
         m.toolCalls.every((c) => controlCalls.has(c.id))
       ),
   );
+  const approvalExpired = Boolean(
+    approval && clock >= approval.expiresAt * 1000,
+  );
+  const canReplay = Boolean(plan?.steps.every((step) => Boolean(step.tool)));
 
   const loadConversation = useCallback(async (id: string) => {
     const current = generation.current;
@@ -178,6 +183,7 @@ export function ChatPage({
       setMessages([]);
       setTask(undefined);
       setError("");
+      setLoadingHistory(false);
     }
   }, [conversationId, loadConversation]);
 
@@ -358,10 +364,12 @@ export function ChatPage({
     }
   };
 
+  const sendError = error || connectionError;
+  const showWelcome =
+    !conversationId && messages.length === 0 && !busy && !loadingHistory;
+
   return (
-    <section
-      className={`chat-workspace ${messages.length ? "has-conversation" : "is-empty"}`}
-    >
+    <section className="chat-workspace">
       <div
         className="chat-scroll"
         ref={chatScroll}
@@ -372,9 +380,44 @@ export function ChatPage({
         }}
       >
         {loadingHistory ? (
-          <div className="history-loading">载入对话</div>
-        ) : messages.length === 0 && !busy ? (
-          <div className="history-loading">对话已就绪</div>
+          <div className="history-loading">正在载入对话…</div>
+        ) : showWelcome ? (
+          <div className="chat-welcome">
+            <img className="chat-welcome-art" src={character} alt="" />
+            <h2>你想让 Sleepy Doll 做什么？</h2>
+            <p>用一句话说清楚目标就行。它要操作游戏时，会先停下来问你。</p>
+            <div className="chat-examples">
+              {EXAMPLES.map((example) => (
+                <button
+                  key={example}
+                  type="button"
+                  onClick={() => {
+                    setPrompt(example);
+                    chatScroll.current?.scrollTo({ top: 0 });
+                  }}
+                >
+                  {example}
+                </button>
+              ))}
+            </div>
+            {bootstrap.conversations.length > 0 ? (
+              <div className="chat-resume">
+                <h3>继续之前的对话</h3>
+                <ul>
+                  {bootstrap.conversations.slice(0, 5).map((conversation) => (
+                    <li key={conversation.id}>
+                      <button
+                        type="button"
+                        onClick={() => onConversation(conversation.id)}
+                      >
+                        {conversation.title}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
         ) : (
           <div className="conversation-scene">
             <div className="conversation-flow">
@@ -398,14 +441,16 @@ export function ChatPage({
                 </div>
               ))}
               {plan ? (
-                <details className="run-plan">
-                  <summary>{plan.goal}</summary>
+                <details className="run-plan" open={busy}>
+                  <summary>
+                    {busy ? "正在执行的步骤" : "这次的执行步骤"}（{plan.goal}）
+                  </summary>
                   <ol>
                     {plan.steps.map((step) => (
                       <li key={step.id}>
                         {step.title}
                         {step.outcome
-                          ? ` · ${stepOutcomeLabels[step.outcome] ?? "待核对"}`
+                          ? ` · ${stepOutcomeLabels[step.outcome] ?? "未确认"}`
                           : ""}
                       </li>
                     ))}
@@ -425,28 +470,33 @@ export function ChatPage({
               ) : null}
               {question ? (
                 <section className="run-question">
+                  <h3>Sleepy Doll 需要你补充信息</h3>
                   <p>{question}</p>
-                  <p>在下方输入补充信息即可继续。</p>
+                  <p className="muted">
+                    在下面的输入框里回复，发送后它会继续。
+                  </p>
                 </section>
               ) : null}
               {approval ? (
                 <section className="run-approval">
-                  <h3>允许这次游戏操作？</h3>
-                  <p>
+                  <h3>这一步要操作游戏，需要你同意</h3>
+                  <p className="approval-what">
                     {approval.request.binding?.description ??
                       approval.request.methodId}
                   </p>
                   {approval.request.arguments &&
                   Object.keys(approval.request.arguments).length > 0 ? (
-                    <pre>
-                      {JSON.stringify(approval.request.arguments, null, 2)}
-                    </pre>
+                    <details>
+                      <summary>这一步会用到的参数</summary>
+                      <pre>
+                        {JSON.stringify(approval.request.arguments, null, 2)}
+                      </pre>
+                    </details>
                   ) : null}
-                  <div>
+                  <div className="approval-actions">
                     <button
-                      disabled={
-                        approvalSubmitting || clock >= approval.expiresAt * 1000
-                      }
+                      className="primary-action"
+                      disabled={approvalSubmitting || approvalExpired}
                       onClick={() => {
                         setApprovalSubmitting(true);
                         void api.approve(approval.id, true).catch((e) => {
@@ -455,12 +505,10 @@ export function ChatPage({
                         });
                       }}
                     >
-                      允许这一次
+                      {approvalSubmitting ? "正在提交…" : "同意，执行这一步"}
                     </button>
                     <button
-                      disabled={
-                        approvalSubmitting || clock >= approval.expiresAt * 1000
-                      }
+                      disabled={approvalSubmitting || approvalExpired}
                       onClick={() => {
                         setApprovalSubmitting(true);
                         void api.approve(approval.id, false).catch((e) => {
@@ -469,19 +517,25 @@ export function ChatPage({
                         });
                       }}
                     >
-                      拒绝
+                      不同意
                     </button>
                   </div>
-                  {clock >= approval.expiresAt * 1000 ? (
-                    <p>此次确认已过期。</p>
-                  ) : null}
+                  {approvalExpired ? (
+                    <p className="muted">
+                      这次确认已经超时失效了。重新发一条消息让它再来一次。
+                    </p>
+                  ) : (
+                    <p className="muted">
+                      同意只对这一次有效，下次操作还会再问你。
+                    </p>
+                  )}
                 </section>
               ) : null}
               {busy && !streamText && !question && !approval ? (
                 <div className="run-activity">
-                  <strong>
-                    {task?.state === "cancelling" ? "正在停止" : "正在处理"}
-                  </strong>
+                  {task?.state === "cancelling"
+                    ? "正在停止…"
+                    : "正在处理，请稍等…"}
                 </div>
               ) : null}
               {task &&
@@ -489,12 +543,23 @@ export function ChatPage({
                 task.state,
               ) ? (
                 <div className="run-error">
-                  {task.error ??
-                    (task.state === "needsReview"
-                      ? "结果尚未确认，请核对执行证据。"
-                      : task.state === "partial"
-                        ? "仅部分目标已完成。"
-                        : "本次运行已停止。")}
+                  <strong>
+                    {task.state === "failed"
+                      ? "这次没有成功"
+                      : task.state === "cancelled"
+                        ? "这次已停止"
+                        : task.state === "needsReview"
+                          ? "结果还没确认"
+                          : "只完成了部分目标"}
+                  </strong>
+                  <p>
+                    {task.error ??
+                      (task.state === "needsReview"
+                        ? "Sleepy Doll 不确定游戏里实际发生了什么，需要再核对一次才能继续。"
+                        : task.state === "partial"
+                          ? "有些步骤没有完成。可以看看上面的步骤列表，再决定要不要重试。"
+                          : "运行被停止了，没有继续执行。")}
+                  </p>
                   {task.state === "needsReview" ? (
                     <button
                       className="runtime-action"
@@ -505,7 +570,7 @@ export function ChatPage({
                           .catch((e) => setError(String(e)))
                       }
                     >
-                      核对并恢复
+                      重新核对并继续
                     </button>
                   ) : null}
                 </div>
@@ -515,26 +580,30 @@ export function ChatPage({
               task.source?.kind !== "savedWorkflow" &&
               plan ? (
                 <div className="strategy-save">
-                  <span>这次运行已经验证成功，可以直接复用。</span>
+                  <span>
+                    这次成功了。
+                    {canReplay
+                      ? "可以存下来，以后一键重跑，不用再问模型。"
+                      : "可以存下来，以后手动重跑。"}
+                  </span>
                   <button
                     className="runtime-action"
                     disabled={savingStrategy || strategySaved}
                     onClick={() => {
                       setSavingStrategy(true);
-                      void api
-                        [plan.steps.every((step) => Boolean(step.tool))
-                          ? "extractWorkflow"
-                          : "extractStrategy"](task.id, plan.goal)
+                      void api[
+                        canReplay ? "extractWorkflow" : "extractStrategy"
+                      ](task.id, plan.goal)
                         .then(reload)
                         .catch((e) => setError(String(e)))
                         .finally(() => setSavingStrategy(false));
                     }}
                   >
                     {savingStrategy
-                      ? "正在保存"
+                      ? "正在保存…"
                       : strategySaved
-                        ? "已保存到运行库"
-                        : "保存到运行库"}
+                        ? "已保存到运行记录"
+                        : "保存到运行记录"}
                   </button>
                 </div>
               ) : null}
@@ -544,13 +613,15 @@ export function ChatPage({
       </div>
 
       <div className="composer-dock">
-        {error || connectionError ? (
+        {sendError ? (
           <div className="inline-error" role="alert">
-            {error || connectionError}
+            <strong>出错了</strong>
+            <span>{sendError}</span>
           </div>
         ) : null}
         {queuedRuns.length ? (
-          <section className="run-input-actions" aria-label="等待执行的消息">
+          <section className="run-input-actions" aria-label="排队中的消息">
+            <p className="muted">一次只能跑一条，这些在排队：</p>
             {queuedRuns.map((run, index) => (
               <div key={run.id}>
                 <span>
@@ -564,7 +635,7 @@ export function ChatPage({
                       .catch((e) => setError(String(e)))
                   }
                 >
-                  取消排队
+                  取消这条
                 </button>
               </div>
             ))}
@@ -575,9 +646,10 @@ export function ChatPage({
             <button
               className="runtime-action"
               disabled={!prompt.trim() || sending}
+              title={prompt.trim() ? undefined : "先输入内容才能排队"}
               onClick={() => void send(true)}
             >
-              下一条排队
+              排队，等这条跑完再发
             </button>
             <button
               className="runtime-action"
@@ -589,23 +661,18 @@ export function ChatPage({
                   .catch((e) => setError(String(e)))
               }
             >
+              <StopIcon className="button-icon" />
               停止当前运行
             </button>
           </div>
         ) : null}
         <div className="command-deck">
-          <svg className="composer-quill" viewBox="0 0 36 36" aria-hidden="true">
-            <path d="M29 4C17 6 9 14 7 29c8-7 15-14 22-25Z" />
-            <path d="M7 29c6-4 11-8 16-13M7 29l-3 3" />
-          </svg>
           <textarea
-            aria-label="给 Agent 的消息"
+            aria-label="给 Sleepy Doll 的消息"
             placeholder={
               task?.state === "awaitingUser"
-                ? "输入补充信息，发送后继续"
-                : task?.state === "needsReview"
-                  ? "输入新的请求；原运行可在上方恢复"
-                  : "给 Sleepy Doll 一个目标…"
+                ? "回复它上面的问题…"
+                : "告诉 Sleepy Doll 你想做什么…"
             }
             value={prompt}
             disabled={sending}
@@ -618,12 +685,18 @@ export function ChatPage({
               }
             }}
           />
-          <SendActionButton
-            label={busy ? "发送补充" : "发送"}
+          <button
+            type="button"
+            className="primary-action send-action"
             disabled={sending || !prompt.trim()}
+            title={prompt.trim() ? undefined : "先输入内容才能发送"}
             onClick={() => void send()}
-          />
+          >
+            <SendIcon className="button-icon" />
+            {sending ? "发送中…" : busy ? "发送补充" : "发送"}
+          </button>
         </div>
+        <p className="composer-hint">按 Enter 发送，Shift + Enter 换行。</p>
       </div>
     </section>
   );

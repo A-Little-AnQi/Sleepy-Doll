@@ -1,0 +1,352 @@
+/* Application shell: a fixed sidebar, a page header, and one scrolling body.
+   The previous shell positioned every control inside a 1586×992 SVG scene, so
+   nothing could reflow and nothing was a real widget. */
+
+.app-shell {
+  --sidebar-width: 250px;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  height: 100%;
+  background: var(--lunar-paper);
+  color: var(--lunar-ink);
+  font-family:
+    "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
+  transition: grid-template-columns 160ms ease;
+}
+.app-shell[data-collapsed="true"] {
+  --sidebar-width: 68px;
+}
+
+/* ---------- 侧栏 ---------- */
+.app-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: #142f67;
+  color: #e8eaf4;
+  border-right: 1px solid #0c1f45;
+}
+
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 14px 13px;
+  border-bottom: 1px solid #ffffff1f;
+}
+.app-brand-art {
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid #ffffff2e;
+  background-color: #16336e;
+  background-image: url("../assets/moon-character-v5-feet.png");
+  background-size: 210%;
+  background-position: 50% 30%;
+  background-repeat: no-repeat;
+}
+.app-brand-text {
+  display: grid;
+  min-width: 0;
+}
+.app-brand-text strong {
+  font-size: 15px;
+  letter-spacing: 0.2px;
+}
+.app-brand-text small {
+  font-size: 12px;
+  color: #a8b3d4;
+}
+
+.app-nav {
+  display: grid;
+  gap: 2px;
+  padding: 10px 8px;
+}
+.app-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #ccd5ee;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+}
+.app-nav-item:hover {
+  background: #ffffff14;
+  color: #fff;
+}
+.app-nav-item.is-active {
+  background: #ffffff22;
+  color: #fff;
+  font-weight: 600;
+}
+.app-nav-icon {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.app-conversations {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 8px 12px;
+  border-top: 1px solid #ffffff1a;
+  margin-top: 4px;
+}
+.app-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 6px 6px;
+  font-size: 12px;
+  color: #a8b3d4;
+}
+.app-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border: 1px solid #ffffff33;
+  border-radius: 999px;
+  background: transparent;
+  color: #dfe4f5;
+  font: inherit;
+  font-size: 12px;
+}
+.app-new:hover {
+  background: #ffffff1f;
+}
+.app-new-icon {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+.app-conversations ul {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.app-conversations li button {
+  display: block;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #c6cfeb;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app-conversations li button:hover {
+  background: #ffffff14;
+  color: #fff;
+}
+.app-conversations-empty {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  color: #8d99bf;
+}
+
+.app-sidebar-foot {
+  padding: 8px;
+  border-top: 1px solid #ffffff1a;
+}
+.app-collapse {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #a8b3d4;
+  font: inherit;
+  font-size: 12.5px;
+}
+.app-collapse:hover {
+  background: #ffffff14;
+  color: #fff;
+}
+.app-collapse-icon {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 160ms ease;
+}
+.app-shell[data-collapsed="true"] .app-collapse-icon {
+  transform: rotate(180deg);
+}
+
+/* ---------- 折叠态 ---------- */
+.app-shell[data-collapsed="true"] .app-brand {
+  justify-content: center;
+  padding-inline: 0;
+}
+.app-shell[data-collapsed="true"] .app-brand-text,
+.app-shell[data-collapsed="true"] .app-conversations,
+.app-shell[data-collapsed="true"] .app-collapse span,
+.app-shell[data-collapsed="true"] .app-nav-item > span {
+  display: none;
+}
+.app-shell[data-collapsed="true"] .app-nav-item,
+.app-shell[data-collapsed="true"] .app-collapse {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+/* ---------- 主区 ---------- */
+.app-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--lunar-paper);
+}
+.app-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px 24px 15px;
+  border-bottom: 1px solid #ddd0ba;
+  background: var(--lunar-card);
+}
+.app-header-title {
+  min-width: 0;
+}
+.app-header-title h1 {
+  margin: 0;
+  font-size: 19px;
+}
+.app-header-title p {
+  max-width: 68ch;
+  margin: 5px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #6d6459;
+}
+.app-header-status {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.app-model {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: #6d6459;
+}
+.app-model select {
+  max-width: 210px;
+  padding: 6px 9px;
+  border: 1px solid #c9b695;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--lunar-ink);
+  font: inherit;
+  font-size: 13.5px;
+}
+.app-bridge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #cbbda6;
+  border-radius: 999px;
+  background: #fff;
+  color: #6d6459;
+  font: inherit;
+  font-size: 12.5px;
+}
+.app-bridge-icon {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.app-bridge.is-ok {
+  border-color: #93bb9f;
+  color: #2c6440;
+}
+.app-bridge.is-bad {
+  border-color: #d0a3a7;
+  color: #8b3540;
+}
+.app-bridge:hover {
+  background: #f4ece0;
+}
+
+.app-banner {
+  margin: 0;
+  padding: 10px 24px;
+  background: #f6e2e3;
+  color: #8a3444;
+  font-size: 13.5px;
+}
+
+.app-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* ---------- 窄窗口：强制图标栏，保证内容区宽度 ---------- */
+@media (max-width: 900px) {
+  .app-shell {
+    --sidebar-width: 68px;
+  }
+  .app-shell .app-brand {
+    justify-content: center;
+    padding-inline: 0;
+  }
+  .app-shell .app-brand-text,
+  .app-shell .app-conversations,
+  .app-shell .app-collapse span,
+  .app-shell .app-nav-item > span {
+    display: none;
+  }
+  .app-shell .app-nav-item,
+  .app-shell .app-collapse {
+    justify-content: center;
+    padding-inline: 0;
+  }
+  .app-header {
+    flex-direction: column;
+    gap: 12px;
+  }
+}

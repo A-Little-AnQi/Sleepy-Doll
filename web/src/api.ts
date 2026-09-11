@@ -62,7 +62,11 @@ async function invokeMock<T>(
       body: JSON.stringify({ id, method, params }),
     });
   } catch {
-    throw new Error("Mock Backend 未启动。运行 sleepy-doll-mock 后重试。");
+    // A dropped connection is not the same as "never started": the event stream
+    // holds a long poll open, so a restart or a sleeping machine lands here too.
+    throw new Error(
+      `连不上本地开发后端 ${MOCK_BACKEND}。确认 sleepy-doll-mock 正在运行；如果它刚重启过，重试即可。`,
+    );
   }
   const envelope = (await response.json()) as IpcEnvelope<T>;
   if (!response.ok || !envelope.ok) {
@@ -146,8 +150,6 @@ export const api = {
       id,
       clientKey: crypto.randomUUID(),
     }),
-  executeOperation: (id: string) =>
-    invoke("operation.execute", { id }),
-  rollbackOperation: (id: string) =>
-    invoke("operation.rollback", { id }),
+  executeOperation: (id: string) => invoke("operation.execute", { id }),
+  rollbackOperation: (id: string) => invoke("operation.rollback", { id }),
 };

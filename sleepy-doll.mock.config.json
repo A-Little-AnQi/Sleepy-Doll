@@ -6,9 +6,7 @@
     "maxLoadedSkills": 4,
     "maxToolCallsPerTurn": 4,
     "maxTurns": 8,
-    "skillDirectories": [
-      "./skills"
-    ],
+    "skillDirectories": ["./skills"],
     "systemPrompt": "你是 Sleepy Doll 的离线测试 Agent。只报告 Mock Backend 返回的事实。"
   },
   "bridge": {
@@ -77,9 +75,7 @@
     }
   ],
   "plugins": {
-    "directories": [
-      "./plugins"
-    ],
+    "directories": ["./plugins"],
     "enabled": []
   },
   "runtime": {

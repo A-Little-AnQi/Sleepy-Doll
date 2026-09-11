@@ -207,23 +207,44 @@ fn discover(directory: &Path, depth: usize) -> Result<Vec<PathBuf>> {
     Ok(result)
 }
 
+/// Splits a `SKILL.md` into its YAML-ish frontmatter fields and its body.
+///
+/// Line endings are normalised first. The repository stores these files with LF,
+/// but `core.autocrlf` checks them out as CRLF on Windows, and the previous
+/// implementation matched on `"\n"` literally. On any such checkout it found no
+/// frontmatter at all: the skill name fell back to its directory, the
+/// description fell back to the name, and the raw `---` block was handed to the
+/// model as if it were instructions.
 fn frontmatter(text: &str) -> (HashMap<String, String>, String) {
-    if let Some(rest) = text.strip_prefix("---\n")
-        && let Some((head, body)) = rest.split_once("\n---\n")
-    {
-        let fields = head
-            .lines()
-            .filter_map(|line| line.split_once(':'))
-            .map(|(key, value)| {
-                (
-                    key.trim().to_owned(),
-                    value.trim().trim_matches(['\'', '"']).to_owned(),
-                )
-            })
-            .collect();
-        return (fields, body.trim().to_owned());
+    let normalized = text.replace("\r\n", "\n");
+    let mut lines = normalized.lines();
+    if lines.next() != Some("---") {
+        return (HashMap::new(), text.to_owned());
     }
-    (HashMap::new(), text.to_owned())
+    let mut fields = HashMap::new();
+    let mut body = Vec::new();
+    let mut closed = false;
+    for line in lines {
+        if closed {
+            body.push(line);
+            continue;
+        }
+        if line.trim_end() == "---" {
+            closed = true;
+            continue;
+        }
+        if let Some((key, value)) = line.split_once(':') {
+            fields.insert(
+                key.trim().to_owned(),
+                value.trim().trim_matches(['\'', '"']).to_owned(),
+            );
+        }
+    }
+    if !closed {
+        // An unterminated block is not frontmatter; treat the file as all body.
+        return (HashMap::new(), text.to_owned());
+    }
+    (fields, body.join("\n").trim().to_owned())
 }
 
 fn tokens(text: &str) -> HashSet<String> {
@@ -242,4 +263,55 @@ fn tokens(text: &str) -> HashSet<String> {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LF: &str = "---\nname: bgi-operator\ndescription: 使用 BGI Bridge 查询游戏状态\ntags: BGI, 自动化\n---\n\n# 操作规范\n\n正文第一行。\n";
+
+    /// `core.autocrlf` checks the committed LF out as CRLF on Windows. Parsing
+    /// must not depend on which form is on disk.
+    #[test]
+    fn frontmatter_parses_with_either_line_ending() {
+        let crlf = LF.replace('\n', "\r\n");
+        for text in [LF, crlf.as_str()] {
+            let (fields, body) = frontmatter(text);
+            assert_eq!(fields.get("name").map(String::as_str), Some("bgi-operator"));
+            assert_eq!(
+                fields.get("description").map(String::as_str),
+                Some("使用 BGI Bridge 查询游戏状态")
+            );
+            assert_eq!(fields.get("tags").map(String::as_str), Some("BGI, 自动化"));
+            assert_eq!(body, "# 操作规范\n\n正文第一行。");
+        }
+    }
+
+    #[test]
+    fn a_file_without_frontmatter_is_all_body() {
+        let (fields, body) = frontmatter("# 标题\n\n正文。\n");
+        assert!(fields.is_empty());
+        assert_eq!(body, "# 标题\n\n正文。\n");
+
+        // An opening fence with no closing one is not frontmatter either.
+        let (fields, body) = frontmatter("---\nname: x\n");
+        assert!(fields.is_empty());
+        assert_eq!(body, "---\nname: x\n");
+    }
+
+    #[test]
+    fn the_shipped_skill_keeps_its_metadata() {
+        let text = include_str!("../skills/bgi-operator/SKILL.md");
+        let (fields, body) = frontmatter(text);
+        assert_eq!(fields.get("name").map(String::as_str), Some("bgi-operator"));
+        assert!(
+            fields
+                .get("description")
+                .is_some_and(|value| value.contains("BGI Bridge")),
+            "description should come from the frontmatter, not fall back to the name"
+        );
+        assert!(!body.contains("---"), "the fence must not reach the body");
+        assert!(body.starts_with("# BGI 操作规范"));
+    }
 }
