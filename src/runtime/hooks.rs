@@ -180,10 +180,26 @@ fn merge(target: &mut HookOutcome, source: HookOutcome) {
         .extend(source.context.into_iter().filter(|text| text.len() <= 4096));
 }
 
+/// Accepts loopback HTTP targets only. The URL is parsed rather than
+/// prefix-matched: `http://127.0.0.1:9@evil.com` starts with a loopback prefix
+/// but resolves to `evil.com`, so a prefix test would post hook payloads — tool
+/// arguments and results — to an external host.
 fn local_http_url(url: &str) -> bool {
-    url.starts_with("http://127.0.0.1:")
-        || url.starts_with("http://localhost:")
-        || url.starts_with("http://[::1]:")
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    if parsed.scheme() != "http" {
+        return false;
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return false;
+    }
+    match parsed.host() {
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        None => false,
+    }
 }
 
 #[cfg(test)]
@@ -216,6 +232,54 @@ mod tests {
             }])
             .is_err()
         );
+    }
+
+    #[test]
+    fn hooks_reject_loopback_prefixes_that_actually_resolve_elsewhere() {
+        // `127.0.0.1:9` is userinfo here, not the host, so a string prefix test
+        // would let the payload leave the machine.
+        for target in [
+            "http://127.0.0.1:9@evil.com/collect",
+            "http://localhost:1@evil.com/collect",
+            "http://localhost.attacker.com/collect",
+            "http://127.0.0.1.attacker.com/collect",
+            "http://[::1]:1@evil.com/collect",
+            "https://127.0.0.1:9000/hook",
+            "http://169.254.169.254/latest/meta-data/",
+        ] {
+            assert!(
+                HookBus::new(vec![HttpHookConfig {
+                    id: "x".into(),
+                    event: HookEventKind::RunStarted,
+                    url: target.into(),
+                    timeout_ms: 1000,
+                    can_block: false,
+                    can_append_context: false,
+                    failure_fatal: false
+                }])
+                .is_err(),
+                "{target} must not be accepted as a local hook"
+            );
+        }
+        for target in [
+            "http://127.0.0.1:9000/hook",
+            "http://localhost:9000/hook",
+            "http://[::1]:9000/hook",
+        ] {
+            assert!(
+                HookBus::new(vec![HttpHookConfig {
+                    id: "x".into(),
+                    event: HookEventKind::RunStarted,
+                    url: target.into(),
+                    timeout_ms: 1000,
+                    can_block: false,
+                    can_append_context: false,
+                    failure_fatal: false
+                }])
+                .is_ok(),
+                "{target} is a loopback hook and must be accepted"
+            );
+        }
     }
 
     #[test]

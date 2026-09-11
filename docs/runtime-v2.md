@@ -55,9 +55,13 @@ postcondition verification has finished.
 
 ## Capability and resource descriptors
 
-`runtime.catalogDirectory` defaults to the configuration directory. Its `capabilities/`
-contains JSON descriptors with `id`, `description`, `methodId`, `catalogVersion`,
-optional `aliases`, `resourceFields` (JSON pointers), and `postconditions`.
+`runtime.catalogDirectory` is resolved relative to the configuration file and defaults to the
+configuration directory itself, so set it explicitly (the shipped template uses `./catalog`)
+if the descriptors live elsewhere. Its `capabilities/` contains JSON descriptors with `id`,
+`description`, `methodId`, `catalogVersion`, optional `aliases`, `resourceFields` (JSON
+pointers), and `postconditions`. A missing `capabilities/` directory is not an error — the
+catalog simply loads empty — so check the resolved path when expected capabilities do not
+appear.
 
 Only registered semantic capabilities can be invoked. Raw Bridge method names from
 model output do not bypass this binding. The checked-in `mock.*` descriptors work

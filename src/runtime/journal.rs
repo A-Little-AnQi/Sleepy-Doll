@@ -1,11 +1,22 @@
 use super::types::*;
 use crate::error::{Error, Result};
+use crate::model::ToolCall;
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
     path::Path,
     sync::{Arc, Mutex},
 };
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationSummary {
+    pub id: String,
+    pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
 
 pub struct Journal {
     connection: Mutex<Connection>,
@@ -37,8 +48,6 @@ impl Journal {
                 CREATE TABLE runtime_inputs(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL,kind TEXT NOT NULL,content TEXT NOT NULL,consumed INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE runtime_artifacts(id TEXT PRIMARY KEY,run_id TEXT NOT NULL,content TEXT NOT NULL);
                 CREATE TABLE runtime_leases(instance_id TEXT PRIMARY KEY,attempt_id TEXT NOT NULL UNIQUE);
-                UPDATE tasks SET state='interrupted',error='Legacy execution cannot be resumed safely' WHERE state IN ('queued','running','cancelling');
-                PRAGMA user_version=2;
                 COMMIT;")?;
         }
         connection.execute_batch("CREATE TABLE IF NOT EXISTS runtime_message_owners(message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,run_id TEXT NOT NULL REFERENCES runtime_runs(id));")?;
@@ -486,6 +495,42 @@ impl Journal {
         self.touch();
         Ok(true)
     }
+    pub fn conversations(&self) -> Result<Vec<ConversationSummary>> {
+        let connection = self.connection.lock().unwrap();
+        let mut query = connection.prepare("SELECT id,title,created_at,updated_at FROM conversations ORDER BY updated_at DESC LIMIT 50")?;
+        Ok(query
+            .query_map([], |row| {
+                Ok(ConversationSummary {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    created_at: row.get(2)?,
+                    updated_at: row.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn record_tool(
+        &self,
+        conversation_id: &str,
+        call: &ToolCall,
+        result: &Value,
+    ) -> Result<()> {
+        let connection = self.connection.lock().unwrap();
+        connection.execute(
+            "INSERT INTO tool_calls (conversation_id,call_id,tool_name,arguments_json,result_json,created_at) VALUES (?1,?2,?3,?4,?5,?6)",
+            params![
+                conversation_id,
+                call.id,
+                call.name,
+                call.arguments.to_string(),
+                result.to_string(),
+                now()
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn history(&self, run: &Run) -> Result<Vec<crate::model::Message>> {
         self.messages(&run.conversation_id, run.message_boundary, true)
     }

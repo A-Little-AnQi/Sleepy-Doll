@@ -126,13 +126,22 @@ struct IpcRequest {
 fn handle_request(mut request: Request, state: &MockState) {
     let method = request.method().clone();
     let url = request.url().to_owned();
-    // Reflect the caller's Origin so both http://localhost:5173 and
-    // http://127.0.0.1:5173 (or any other dev origin) pass CORS.
     let origin = request
         .headers()
         .iter()
         .find(|header| header.field.equiv("Origin"))
         .map(|header| header.value.as_str().to_owned());
+    // The IPC route is bound to the whole `AppController`, so a page that can
+    // reach it can install and enable plugins. Browsers always send `Origin` on
+    // cross-origin requests, so refusing every origin outside the dev servers
+    // closes that path; a prefix test would not, because
+    // `http://localhost.attacker.com` shares the prefix.
+    if let Some(value) = origin.as_deref()
+        && !DEV_ORIGINS.contains(&value)
+    {
+        let _ = request.respond(Response::empty(403));
+        return;
+    }
     let mut body = String::new();
     let _ = request
         .as_reader()
@@ -232,10 +241,18 @@ impl MockRng {
         x
     }
     fn below(&mut self, bound: u64) -> u64 {
-        if bound == 0 { 0 } else { self.next_u64() % bound }
+        if bound == 0 {
+            0
+        } else {
+            self.next_u64() % bound
+        }
     }
     fn between(&mut self, min: u64, max: u64) -> u64 {
-        if max <= min { min } else { min + self.below(max - min + 1) }
+        if max <= min {
+            min
+        } else {
+            min + self.below(max - min + 1)
+        }
     }
 }
 
@@ -304,12 +321,17 @@ fn ndjson(value: Value) -> Vec<u8> {
     format!("{value}\n").into_bytes()
 }
 
+/// One streamed chunk together with the delay to serve it after.
+type StreamChunk = (Vec<u8>, u64);
+/// The content type of a streamed response and the chunks to send.
+type StreamFrames = (&'static str, VecDeque<StreamChunk>);
+
 fn stream_frames(
     url: &str,
     input: &Value,
     payload: &Value,
     state: &MockState,
-) -> Option<(&'static str, VecDeque<(Vec<u8>, u64)>)> {
+) -> Option<StreamFrames> {
     let path = url.split('?').next().unwrap_or(url);
     let streaming = input["stream"] == true || path.contains(":streamGenerateContent");
     if !streaming {
@@ -331,10 +353,18 @@ fn stream_frames(
         chunks.extend(
             stream_plan(&text, base, &mut rng)
                 .into_iter()
-                .map(|(delta, delay)| (sse(json!({"type":"response.output_text.delta","delta":delta})), delay)),
+                .map(|(delta, delay)| {
+                    (
+                        sse(json!({"type":"response.output_text.delta","delta":delta})),
+                        delay,
+                    )
+                }),
         );
         if !truncate {
-            chunks.push_back((sse(json!({"type":"response.completed","response":payload})), 0));
+            chunks.push_back((
+                sse(json!({"type":"response.completed","response":payload})),
+                0,
+            ));
         }
         return Some(("text/event-stream", chunks));
     }
@@ -352,9 +382,10 @@ fn stream_frames(
     }
     if path == "/v1/messages" {
         let text = payload["content"][0]["text"].as_str().unwrap_or_default();
-        chunks.push_back((sse(
-            json!({"type":"message_start","message":{"usage":{"input_tokens":0}}}),
-        ), 0));
+        chunks.push_back((
+            sse(json!({"type":"message_start","message":{"usage":{"input_tokens":0}}})),
+            0,
+        ));
         chunks.push_back((sse(json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})), 0));
         chunks.extend(stream_plan(text, base, &mut rng).into_iter().map(|(text, delay)| {
             (sse(json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}})), delay)
@@ -725,11 +756,24 @@ fn cancel(job_id: &str, state: &MockState) -> (u16, Value) {
     )
 }
 
+/// Browser origins served by the local Vite dev server. Matched exactly, never
+/// by prefix.
+const DEV_ORIGINS: [&str; 4] = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://[::1]:5173",
+    "http://localhost:4173",
+];
+
 fn json_header() -> Header {
     Header::from_bytes("content-type", "application/json; charset=utf-8").expect("static header")
 }
 fn cors_header(origin: Option<&str>) -> Header {
-    let value = origin.filter(|value| value.starts_with("http://127.0.0.1") || value.starts_with("http://localhost")).unwrap_or("http://localhost:5173");
+    // `handle_request` has already rejected any origin outside this list, so an
+    // exact match is safe to echo back.
+    let value = origin
+        .filter(|value| DEV_ORIGINS.contains(value))
+        .unwrap_or(DEV_ORIGINS[0]);
     Header::from_bytes("access-control-allow-origin", value).expect("static header")
 }
 fn now() -> String {

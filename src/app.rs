@@ -13,7 +13,6 @@ use crate::{
     error::{Error, Result},
     plugins::PluginManager,
     skills::SkillRegistry,
-    store::Store,
     tools::{FunctionTool, ToolExecution, ToolRegistry},
 };
 
@@ -40,7 +39,6 @@ pub struct AppController {
     config_path: PathBuf,
     config: Mutex<AppConfig>,
     extensions: RwLock<Extensions>,
-    store: Arc<Store>,
     bridge: Arc<BgiClient>,
     supervisor: Arc<crate::runtime::Supervisor>,
     operations: Arc<crate::runtime::operations::OperationEngine>,
@@ -91,7 +89,6 @@ impl AppController {
         }
         register_builtin_tools(&mut tools, skills.clone(), plugins.clone())?;
         let tools = Arc::new(tools);
-        let store = Arc::new(Store::open(&config.storage.database)?);
         let operation_store = Arc::new(crate::runtime::operations::OperationStore::open(
             &config.storage.database,
         )?);
@@ -108,7 +105,6 @@ impl AppController {
         operations.configure_verifiers(plugins.adapters());
         let supervisor = crate::runtime::Supervisor::new(
             config.clone(),
-            store.clone(),
             skills.clone(),
             tools.clone(),
             operations.clone(),
@@ -124,7 +120,6 @@ impl AppController {
                 plugins,
                 tools,
             }),
-            store,
             bridge,
             supervisor,
             operations,
@@ -588,7 +583,7 @@ impl AppController {
             json!({"enabled":false,"connected":false,"baseUrl":self.bridge.base_url()})
         };
         Ok(
-            json!({"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.store.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.operations.store.workflows()?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"bridge":bridge_status}),
+            json!({"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.operations.store.workflows()?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"bridge":bridge_status}),
         )
     }
 

@@ -36,8 +36,7 @@ pub struct AdapterClient {
     next_id: Mutex<u64>,
     timeout: Duration,
     hook_events: std::sync::RwLock<HashSet<String>>,
-    #[cfg(target_os = "windows")]
-    _job: std::os::windows::io::OwnedHandle,
+    _constraint: super::process::ProcessConstraint,
 }
 
 impl AdapterClient {
@@ -53,18 +52,11 @@ impl AdapterClient {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .env_clear();
-        for key in ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP"] {
-            if let Some(value) = std::env::var_os(key) {
-                command.env(key, value);
-            }
-        }
-        #[cfg(target_os = "windows")]
-        command.creation_flags(0x08000000);
+            .kill_on_drop(true);
+        super::process::isolate_environment(&mut command);
+        super::process::hide_console(&mut command);
         let mut child = command.spawn()?;
-        #[cfg(target_os = "windows")]
-        let job = constrain_adapter_process(&child)?;
+        let constraint = super::process::constrain_process(&child)?;
         let stdin =
             Arc::new(tokio::sync::Mutex::new(child.stdin.take().ok_or_else(
                 || Error::Tool("Adapter stdin unavailable".into()),
@@ -118,8 +110,7 @@ impl AdapterClient {
             next_id: Mutex::new(1),
             timeout: Duration::from_millis(manifest.timeout_ms.clamp(100, 300_000)),
             hook_events: std::sync::RwLock::new(HashSet::new()),
-            #[cfg(target_os = "windows")]
-            _job: job,
+            _constraint: constraint,
         });
         let initialized = client.request(
             "initialize",
@@ -331,41 +322,6 @@ impl AdapterClient {
         input.flush().await?;
         Ok(())
     }
-}
-
-#[cfg(target_os = "windows")]
-fn constrain_adapter_process(child: &Child) -> Result<std::os::windows::io::OwnedHandle> {
-    use std::os::windows::io::{FromRawHandle, RawHandle};
-    use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JOB_OBJECT_LIMIT_PROCESS_MEMORY, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JobObjectExtendedLimitInformation, SetInformationJobObject,
-    };
-
-    let process = child
-        .raw_handle()
-        .ok_or_else(|| Error::Tool("Adapter process handle unavailable".into()))?;
-    let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-    if job.is_null() {
-        return Err(std::io::Error::last_os_error().into());
-    }
-    let owned = unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(job as RawHandle) };
-    let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-    limits.BasicLimitInformation.LimitFlags =
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
-    limits.ProcessMemoryLimit = 512 * 1024 * 1024;
-    let configured = unsafe {
-        SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            std::ptr::from_ref(&limits).cast(),
-            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-        )
-    };
-    if configured == 0 || unsafe { AssignProcessToJobObject(job, process as _) } == 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
-    Ok(owned)
 }
 
 impl Drop for AdapterClient {

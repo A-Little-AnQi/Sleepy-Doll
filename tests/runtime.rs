@@ -5,14 +5,14 @@ use sleepy_doll::{
     mock::MockBackend,
     model::Role,
     runtime::{context, gateway::Decoder, journal::Journal, types::*},
-    store::Store,
 };
 use std::{fs, sync::Arc, thread, time::Duration};
 
 fn journal() -> (tempfile::TempDir, Journal) {
     let d = tempfile::tempdir().unwrap();
     let path = d.path().join("test.db");
-    let _ = Store::open(&path).unwrap();
+    // The journal owns the whole schema, including conversation storage, so it
+    // no longer needs another store to be opened first.
     let j = Journal::open(&path).unwrap();
     (d, j)
 }
@@ -664,7 +664,6 @@ fn restart_reconciles_existing_job_without_repeating_action() {
     backend.set_responses(vec![answer()]);
     let d = tempfile::tempdir().unwrap();
     let db = d.path().join("test.db");
-    let _ = Store::open(&db).unwrap();
     let journal = Journal::open(&db).unwrap();
     let mut run = journal
         .create("recover existing action", "c", "key", 1800)

@@ -2,7 +2,7 @@
 
 Sleepy Doll 是一个面向 BetterGI（BGI）的本地桌面 Agent。它借鉴 Codex 的 Agent 运行方式，但把能力发现、状态观测、Job 恢复和结果验证优先对齐 BGI 场景。
 
-当前仓库只实现外部 Agent，不修改 BetterGI 本体。BGI 侧需要按根目录的 [实施总览](./BGI-Agent-Implementation-Plan.md) 提供 `/bridge/v1` HTTP/JSON 接口。
+当前仓库只实现外部 Agent，不修改 BetterGI 本体。BGI 侧需要按 [实施总览](./docs/bgi-implementation-plan.md) 提供 `/bridge/v1` HTTP/JSON 接口。
 Agent Framework 契约见 [Agent Kernel](./docs/agent-kernel.md)；当前 BetterGI 源码静态观察记录见 [BGI source observations](./docs/bgi-source-observations.md)。
 
 ## 当前能力
@@ -30,7 +30,7 @@ React UI ── Wry IPC ── Rust AppController
                          ├─ Skill registry
                          ├─ Plugin manager ── HTTP tools / MCP stdio
                          ├─ BGI execution / verification ── reqwest ── BGI Bridge
-                         └─ SQLite store
+                         └─ SQLite journal (single schema owner)
 ```
 
 Tokio 负责可取消网络请求、模型流、Job 等待、事件订阅和 MCP 进程。HTTP 插件保留兼容适配器；无法确认其停止时记录未知结果。
@@ -51,13 +51,25 @@ npm run check
 
 ### 配置与数据存放
 
-用户配置和数据固定存放在**安装目录下的 `user/`**：首次启动会把
+用户配置和数据固定存放**在可执行文件旁边的 `user/`**：首次启动会把
 `sleepy-doll.config.example.json` 作为模板写入 `user/config.json`，并创建
 `user/skills`、`user/plugins`、`user/catalog`、`user/.sleepy-doll`。模型密钥、
-会话数据库、运行事件都只写在这里，不会写进源码目录、工作目录或构建产物。
+会话数据库、运行事件都只写在这里。
 
-解析顺序：命令行第一个参数 → `SLEEPY_DOLL_CONFIG` → `<可执行文件目录>/user/config.json`。
-安装目录不可写时（例如系统级安装）才退回 `%APPDATA%\Sleepy Doll\user`。
+解析顺序：
+
+1. 命令行第一个参数（**相对路径相对于可执行文件目录，不是工作目录**）
+2. 环境变量 `SLEEPY_DOLL_CONFIG`
+3. `<可执行文件目录>/user/config.json`
+4. 安装目录不可写时（例如系统级安装）退回 `%APPDATA%\Sleepy Doll\user\config.json`
+
+工作目录**从不**参与解析：既不能通过参数把数据树引到当前目录，也没有工作目录回退路径
+（找不到可写位置时直接报错并提示设置 `SLEEPY_DOLL_CONFIG`）。因此 `--help`、`--version`
+以及任何不像路径的参数都会被明确拒绝，而不是被当成配置文件名。
+
+注意 `cargo run` 的可执行文件在 `target/<profile>/` 下，所以开发时的 `user/` 也落在那里
+（`target/` 已被忽略，`cargo clean` 会一并清掉）；debug、release 与 mock 各自使用独立的
+`user/` 目录。
 
 构建并运行：
 
@@ -65,19 +77,18 @@ npm run check
 npm ci
 npm run check
 
-cargo test --lib --no-default-features
+cargo test --lib --no-default-features --features mock
 cargo run --release                                  # 使用 <exe>/user/config.json
-cargo run --release -- sleepy-doll.dev.config.json   # 使用仓库内的本地副本
 ```
 
-要在仓库里调试本地 Mock 模型，先把 fixture 复制成不受版本控制的本地副本：
+要用仓库里的本地副本作为配置，用绝对路径（相对路径是相对可执行文件目录解析的）：
 
 ```bash
-cp sleepy-doll.mock.config.json sleepy-doll.dev.config.json
+SLEEPY_DOLL_CONFIG="$PWD/sleepy-doll.dev.config.json" cargo run --release
 ```
 
 `sleepy-doll.mock.config.json` 是纯离线 fixture：不含任何密钥，全部端点指向
-`127.0.0.1`，既供 Mock 进程读取，也作为上面本地副本的来源。
+`127.0.0.1`。它只被 Mock 进程读取（见下节）。
 
 桌面打包前必须先执行 `npm run build`，因为 release 二进制会通过 `rust-embed`
 编译进 `ui-dist/` 的静态资源。
@@ -86,6 +97,11 @@ cp sleepy-doll.mock.config.json sleepy-doll.dev.config.json
 
 Mock Backend 是独立 Rust 进程，模拟模型 API、BGI Bridge 和浏览器开发模式下的 IPC 网关。
 它只监听 `127.0.0.1`，不访问外网，模型用量固定为 0。
+
+Mock 属于**开发工具，不在发布版中**：它由非默认的 `mock` feature 门控，默认构建与
+release 二进制既不编译 `src/mock.rs`，也不链接其 HTTP 依赖。它固定读取仓库根的
+`sleepy-doll.mock.config.json`（编译期路径），不接受命令行参数，因此开发数据不会因为
+启动位置不同而散落。
 
 ```bash
 npm run mock
@@ -101,6 +117,9 @@ Mock 进程启动时会打印实际读取的配置路径与当前 `activeModel`�
 `SLEEPY_DOLL_MOCK_CHUNK_DELAY_MS` 调整两个基准值，设为 `0` 可完全关闭对应延迟与抖动。
 
 浏览器开发模式会自动连接 `http://127.0.0.1:47124/ipc`；Wry 桌面模式仍使用原生 IPC，不受影响。
+该端点绑定整个 `AppController`，所以它只接受 `http://localhost:5173`、`http://127.0.0.1:5173`、
+`http://[::1]:5173` 和 `http://localhost:4173` 这几个开发来源（精确匹配）；带其他 `Origin`
+的浏览器请求会被 403 拒绝。
 
 内置交流场景：
 
@@ -113,8 +132,11 @@ Mock 进程启动时会打印实际读取的配置路径与当前 `activeModel`�
 运行全部离线测试：
 
 ```bash
-cargo test --no-default-features
+cargo test --no-default-features --features mock
 ```
+
+`--features mock` 是必需的：驱动 `AppController` 的测试套件都通过 Mock Backend 运行，
+该 feature 不在默认集合里。
 
 ## 模型配置
 
@@ -138,7 +160,9 @@ cargo test --no-default-features
 }
 ```
 
-OpenAI-compatible、代理网关和私有部署可通过 `baseUrl` 与 `headers` 配置。密钥字段支持完整的 `${ENV:VARIABLE_NAME}` 引用；IPC 的 bootstrap 响应不会返回密钥或自定义请求头。界面中填写的密钥写入 `user/config.json`，该文件不在源码仓库内，也不会随构建产物分发，因此长期使用建议只保留 `${ENV:...}` 引用，不落盘明文密钥。
+OpenAI-compatible、代理网关和私有部署可通过 `baseUrl` 与 `headers` 配置。密钥字段支持完整的 `${ENV:VARIABLE_NAME}` 引用；IPC 的 bootstrap 响应不会返回密钥或自定义请求头。界面中填写的密钥会明文写入 `user/config.json`，因此长期使用建议只保留 `${ENV:...}` 引用，不落盘明文密钥。
+
+`${ENV:...}` 由进程环境提供，而插件拉起的 MCP 子进程只继承 `PATH`、`SystemRoot`、`WINDIR`、`TEMP`、`TMP`，读不到这些密钥。注意配置文件本身没有做权限加固（不会自动设成 `0600`），便携目录或共享目录下的 `user/config.json` 与 `user/.sleepy-doll/*.db` 会沿用所在目录的权限，请自行确认该目录不对其他账户开放。
 
 `options.timeoutMs` 是空闲超时：连接建立、以及流式响应中相邻数据块之间的最长间隔。整轮总时长由
 任务时限（`runtime.durationSec`）约束，因此长回复不会被请求级超时截断。
@@ -222,7 +246,7 @@ Agent 内置工具只访问以下稳定端点：
 ## 已知边界
 
 - 本仓库没有 BGI 本体，因此无法进行实机键鼠、截图或路线验收。
-- 用户配置、模型密钥与数据只存放在安装目录的 `user/` 下，不写入源码目录或工作目录；
+- 用户配置、模型密钥与数据只存放在可执行文件目录的 `user/` 下，不写入工作目录；
   界面里填写的明文密钥也会落在该文件中，长期使用建议改用 `${ENV:...}` 引用。
 - 插件自述的 `readOnly` 被当作可信输入：它会跳过授权询问，自动放行的调用记录为
   `plugin.readOnly` 事件。不要启用来源不明的插件。

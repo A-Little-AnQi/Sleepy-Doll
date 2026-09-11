@@ -4,9 +4,9 @@
 
 ## 自动化验证
 
-- Rust：43 项测试通过，包括配置、Schema、五种模型协议、运行状态机、
+- Rust：43 项集成测试 + 31 项单元测试通过，包括配置、Schema、五种模型协议、运行状态机、
   授权、幂等、取消、恢复、消息归属、排队、计划执行、资源与 Skills、插件安装和 MCP。
-- `cargo clippy --all-targets --no-default-features -- -D warnings` 通过。
+- `cargo clippy --all-targets --no-default-features --features mock -- -D warnings` 通过。
 - `cargo check --target x86_64-pc-windows-gnu` 通过，覆盖 Windows 托盘和 Wry 编译路径。
 - TypeScript 类型检查、Vite 生产构建通过。
 - 已修改前端文件的 Prettier 检查和 Git 空白检查通过。

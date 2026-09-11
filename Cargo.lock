@@ -2871,6 +2871,7 @@ dependencies = [
  "tokio-util",
  "tray-icon",
  "ureq",
+ "url",
  "uuid",
  "windows-sys 0.61.2",
  "wry",

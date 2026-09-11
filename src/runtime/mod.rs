@@ -13,6 +13,7 @@ pub mod migrations;
 pub mod operations;
 pub mod permissions;
 pub mod policy;
+pub mod process;
 pub mod types;
 pub mod verifier;
 pub mod workflow;
@@ -22,7 +23,6 @@ use crate::{
     error::{Error, Result},
     model::{Message, Role, ToolCall},
     skills::SkillRegistry,
-    store::Store,
     tools::{ToolDefinition, ToolEffect, ToolExecution, ToolRegistry},
 };
 use context::message;
@@ -56,7 +56,6 @@ pub struct Supervisor {
     shutting_down: std::sync::atomic::AtomicBool,
     pub journal: Arc<Journal>,
     config: RwLock<AppConfig>,
-    store: Arc<Store>,
     extensions: RwLock<RuntimeExtensions>,
     active: Mutex<HashMap<String, CancellationToken>>,
     model_gate: tokio::sync::RwLock<()>,
@@ -151,7 +150,6 @@ impl Supervisor {
 
     pub fn new(
         config: AppConfig,
-        store: Arc<Store>,
         skills: Arc<SkillRegistry>,
         tools: Arc<ToolRegistry>,
         operations: Arc<operations::OperationEngine>,
@@ -164,7 +162,6 @@ impl Supervisor {
             shutting_down: std::sync::atomic::AtomicBool::new(false),
             journal,
             config: RwLock::new(config),
-            store,
             extensions: RwLock::new(RuntimeExtensions {
                 skills,
                 tools,
@@ -1077,7 +1074,8 @@ impl Supervisor {
             Err(Error::Conflict(e)) => return Err(Error::Conflict(e)),
             Err(e) => json!({"ok":false,"error":e.to_string()}),
         };
-        self.store.record_tool(&run.conversation_id, call, &value)?;
+        self.journal
+            .record_tool(&run.conversation_id, call, &value)?;
         let full = value.to_string();
         let content = if full.chars().count() > result_limit {
             let artifact = self.operations.artifacts.put(full.as_bytes())?;

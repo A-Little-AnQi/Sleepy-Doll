@@ -1,9 +1,15 @@
-use std::{env, sync::Arc, thread};
+use std::{env, path::PathBuf, sync::Arc, thread};
 
 use sleepy_doll::{
     app::AppController,
     mock::{MockBackend, MockFaults},
 };
+
+/// The development fixture at the repository root. The mock is a development-only
+/// tool excluded from release builds, so baking the manifest directory in is safe
+/// and keeps its data next to the fixture that describes it instead of wherever
+/// the process happened to be started from.
+const CONFIG: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/sleepy-doll.mock.config.json");
 
 fn main() {
     if let Err(error) = run() {
@@ -13,7 +19,25 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let config = sleepy_doll::config::resolve_path();
+    if let Some(argument) = env::args_os().nth(1) {
+        match argument.to_string_lossy().as_ref() {
+            "-h" | "--help" => {
+                println!("{}", sleepy_doll::config::USAGE);
+                return Ok(());
+            }
+            "-V" | "--version" => {
+                println!("{}", sleepy_doll::config::VERSION);
+                return Ok(());
+            }
+            other => {
+                return Err(format!(
+                    "sleepy-doll-mock 不接受命令行参数（收到 {other}）；它固定读取 {CONFIG}"
+                )
+                .into());
+            }
+        }
+    }
+    let config = PathBuf::from(CONFIG);
     sleepy_doll::config::seed(&config)?;
     let settings = sleepy_doll::config::AppConfig::load(&config)?;
     let model = settings.active().clone();

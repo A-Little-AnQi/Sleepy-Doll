@@ -11,7 +11,7 @@
     "format:check": "prettier --check \"web/**/*.{ts,tsx,css,html}\" \"*.{json,ts}\"",
     "dev": "vite",
     "desktop": "npm run build && cargo run --release",
-    "mock": "cargo run --no-default-features --bin sleepy-doll-mock -- sleepy-doll.mock.config.json"
+    "mock": "cargo run --no-default-features --features mock --bin sleepy-doll-mock"
   },
   "engines": {
     "node": ">=22.13"

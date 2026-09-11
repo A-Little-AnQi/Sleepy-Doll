@@ -163,9 +163,7 @@ fn parse_arguments(text: &str) -> Result<Value> {
     }
     let value: Value = serde_json::from_str(text)?;
     match value {
-        Value::String(inner) if !inner.trim().is_empty() => {
-            Ok(serde_json::from_str(&inner)?)
-        }
+        Value::String(inner) if !inner.trim().is_empty() => Ok(serde_json::from_str(&inner)?),
         other => Ok(other),
     }
 }

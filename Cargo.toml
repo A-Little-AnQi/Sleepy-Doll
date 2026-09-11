@@ -8,6 +8,9 @@ license = "MIT"
 [features]
 default = ["desktop"]
 desktop = ["dep:tao", "dep:wry", "dep:rust-embed", "dep:mime_guess"]
+# Development-only offline backend. Deliberately absent from `default` so neither
+# the mock server nor its HTTP dependency is linked into a release build.
+mock = ["dep:tiny_http"]
 
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
@@ -20,11 +23,12 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"
 tokio-util = { version = "0.7", features = ["rt"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 sha2 = "0.10"
+url = "2.5"
 base64 = "0.22"
 futures-util = "0.3"
 jsonschema = { version = "0.33", default-features = false }
 time = { version = "0.3.44", features = ["formatting", "parsing"] }
-tiny_http = "0.12.0"
+tiny_http = { version = "0.12.0", optional = true }
 tao = { version = "0.37.0", optional = true }
 wry = { version = "0.56.1", optional = true }
 rust-embed = { version = "8.12.0", optional = true }
@@ -46,3 +50,20 @@ codegen-units = 1
 name = "sleepy-doll"
 path = "src/main.rs"
 required-features = ["desktop"]
+
+[[bin]]
+name = "sleepy-doll-mock"
+path = "src/bin/sleepy-doll-mock.rs"
+required-features = ["mock"]
+
+# These suites drive `AppController` against the mock backend, so they only
+# build when the `mock` feature is on.
+[[test]]
+name = "runtime"
+path = "tests/runtime.rs"
+required-features = ["mock"]
+
+[[test]]
+name = "mock_backend"
+path = "tests/mock_backend.rs"
+required-features = ["mock"]

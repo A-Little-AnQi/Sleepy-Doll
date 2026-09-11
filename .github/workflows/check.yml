@@ -19,5 +19,8 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: cargo fmt --all -- --check
-      - run: cargo test --no-default-features
+      # `mock` is a non-default feature, so the tests that exercise it must ask
+      # for it explicitly; the helper crates below still build without desktop.
+      - run: cargo test --no-default-features --features mock
       - run: cargo check
+      - run: cargo check --no-default-features

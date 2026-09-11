@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{path::PathBuf, sync::Arc, thread};
+use std::{sync::Arc, thread};
 
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
@@ -55,7 +55,17 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = config_path();
+    let config_path = match sleepy_doll::config::resolve_path()? {
+        sleepy_doll::config::Resolved::Config(path) => path,
+        sleepy_doll::config::Resolved::Help => {
+            println!("{}", sleepy_doll::config::USAGE);
+            return Ok(());
+        }
+        sleepy_doll::config::Resolved::Version => {
+            println!("{}", sleepy_doll::config::VERSION);
+            return Ok(());
+        }
+    };
     sleepy_doll::config::seed(&config_path)?;
     let controller = Arc::new(AppController::load(&config_path)?);
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
@@ -169,10 +179,6 @@ fn create_tray(
         .with_icon(Icon::from_rgba(rgba, 32, 32)?)
         .with_menu(Box::new(menu))
         .build()?)
-}
-
-fn config_path() -> PathBuf {
-    sleepy_doll::config::resolve_path()
 }
 
 fn dispatch_ipc(

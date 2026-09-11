@@ -23,6 +23,7 @@ pub struct McpClient {
     pending: PendingReplies,
     child: Mutex<Child>,
     next_id: Mutex<u64>,
+    _constraint: crate::runtime::process::ProcessConstraint,
 }
 impl McpClient {
     pub fn start(manifest: &McpServerManifest) -> Result<Arc<Self>> {
@@ -34,9 +35,13 @@ impl McpClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
-        #[cfg(target_os = "windows")]
-        command.creation_flags(0x08000000);
+        // An MCP server is a plugin-supplied binary. Without this it would
+        // inherit the whole environment, including any `${ENV:...}` model API
+        // key or bridge token the configuration keeps there.
+        crate::runtime::process::isolate_environment(&mut command);
+        crate::runtime::process::hide_console(&mut command);
         let mut child = command.spawn()?;
+        let constraint = crate::runtime::process::constrain_process(&child)?;
         let stdin = Arc::new(tokio::sync::Mutex::new(
             child
                 .stdin
@@ -80,6 +85,7 @@ impl McpClient {
             pending,
             child: Mutex::new(child),
             next_id: Mutex::new(1),
+            _constraint: constraint,
         });
         let response=client.request("initialize",json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"sleepy-doll","version":"0.2.0"}}))?;
         if !matches!(

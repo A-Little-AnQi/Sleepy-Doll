@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub const LATEST_SCHEMA_VERSION: i64 = 8;
+pub const LATEST_SCHEMA_VERSION: i64 = 9;
 
 pub fn migrate(connection: &mut Connection) -> Result<()> {
     connection.execute_batch(
@@ -180,6 +180,42 @@ const MIGRATIONS: &[(i64, &str)] = &[
         CREATE INDEX IF NOT EXISTS runtime_artifact_refs_owner ON runtime_artifact_refs(owner_kind,owner_id);
     "#,
     ),
+    // Conversation storage used to live in a separate module that had to be
+    // opened before the journal, because the journal reads and writes these
+    // tables (and declares a foreign key to `messages`) but did not own them.
+    // Owning them here removes that ordering requirement. `tasks` and its index
+    // are dropped: no code path ever read them back.
+    (
+        9,
+        r#"
+        CREATE TABLE IF NOT EXISTS conversations(
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS messages(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            tool_call_id TEXT,
+            tool_calls_json TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS messages_by_conversation ON messages(conversation_id, id);
+        CREATE TABLE IF NOT EXISTS tool_calls(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            call_id TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            arguments_json TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        DROP TABLE IF EXISTS tasks;
+    "#,
+    ),
 ];
 
 #[cfg(test)]
@@ -204,5 +240,64 @@ mod tests {
             .unwrap();
         assert_eq!(latest, LATEST_SCHEMA_VERSION);
         assert_eq!(distinct, MIGRATIONS.len() as i64);
+    }
+
+    /// A database written by the previous release already has the conversation
+    /// tables (created by the removed `store` module) and the never-read `tasks`
+    /// table. Upgrading must adopt the data and retire the dead table without
+    /// touching conversations or messages.
+    #[test]
+    fn legacy_conversation_storage_is_adopted_and_the_dead_task_table_is_dropped() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut connection = Connection::open(directory.path().join("test.db")).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);",
+            )
+            .unwrap();
+        for &(version, sql) in MIGRATIONS.iter().filter(|(version, _)| *version <= 8) {
+            connection.execute_batch(sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations(version,applied_at) VALUES(?1,'now')",
+                    [version],
+                )
+                .unwrap();
+        }
+        connection
+            .execute_batch(
+                "CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+                 CREATE TABLE messages(id INTEGER PRIMARY KEY AUTOINCREMENT,conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,role TEXT NOT NULL,content TEXT NOT NULL,tool_call_id TEXT,tool_calls_json TEXT,created_at TEXT NOT NULL);
+                 CREATE TABLE tasks(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,prompt TEXT NOT NULL,state TEXT NOT NULL,result TEXT,error TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+                 CREATE TABLE tool_calls(id INTEGER PRIMARY KEY AUTOINCREMENT,conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,call_id TEXT NOT NULL,tool_name TEXT NOT NULL,arguments_json TEXT NOT NULL,result_json TEXT NOT NULL,created_at TEXT NOT NULL);
+                 INSERT INTO conversations VALUES('c','kept','t','t');
+                 INSERT INTO messages(conversation_id,role,content,created_at) VALUES('c','user','hello','t');
+                 INSERT INTO tasks(id,conversation_id,prompt,state,created_at,updated_at) VALUES('t1','c','stale','queued','t','t');",
+            )
+            .unwrap();
+
+        migrate(&mut connection).unwrap();
+        migrate(&mut connection).unwrap();
+
+        let conversations: i64 = connection
+            .query_row("SELECT COUNT(*) FROM conversations", [], |row| row.get(0))
+            .unwrap();
+        let messages: i64 = connection
+            .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
+            .unwrap();
+        let tasks: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='tasks'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!((conversations, messages, tasks), (1, 1, 0));
+        let version: i64 = connection
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(version, LATEST_SCHEMA_VERSION);
     }
 }

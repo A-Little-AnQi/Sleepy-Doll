@@ -1,6 +1,8 @@
 use std::{
     collections::HashMap,
-    env, fs,
+    env,
+    ffi::OsStr,
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -323,51 +325,146 @@ impl AppConfig {
     }
 }
 
-/// Resolves the configuration file. An explicit argument or `SLEEPY_DOLL_CONFIG`
-/// always wins; otherwise the file lives in the `user/` directory of the
-/// installation. User configuration is never read from, or written to, the
-/// working directory or the source tree.
-pub fn resolve_path() -> PathBuf {
-    env::args_os()
-        .nth(1)
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("SLEEPY_DOLL_CONFIG").map(PathBuf::from))
-        .unwrap_or_else(default_path)
+pub const USAGE: &str = "\
+Sleepy Doll — 面向 BetterGI 的本地桌面 Agent
+
+用法:
+  sleepy-doll [配置文件]
+
+配置解析顺序:
+  1. 命令行第一个参数（相对路径相对于可执行文件所在目录）
+  2. 环境变量 SLEEPY_DOLL_CONFIG
+  3. <可执行文件目录>/user/config.json
+  4. 安装目录不可写时退回 %APPDATA%\\Sleepy Doll\\user\\config.json
+
+选项:
+  -h, --help       显示本帮助
+  -V, --version    显示版本";
+
+/// Outcome of resolving the configuration path from process arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resolved {
+    /// The configuration file to load or seed.
+    Config(PathBuf),
+    /// `--help` was requested; the caller prints [`USAGE`].
+    Help,
+    /// `--version` was requested; the caller prints [`VERSION`].
+    Version,
 }
 
-pub fn default_path() -> PathBuf {
-    if let Some(root) = env::current_exe()
+pub const VERSION: &str = concat!("Sleepy Doll ", env!("CARGO_PKG_VERSION"));
+
+/// Resolves the configuration file. An explicit argument or `SLEEPY_DOLL_CONFIG`
+/// always wins; otherwise the file lives in the `user/` directory of the
+/// installation. Relative paths are resolved against the executable's own
+/// directory, and the working directory is never used, so a stray command line
+/// argument can no longer redirect user data into wherever the process happened
+/// to start.
+pub fn resolve_path() -> Result<Resolved> {
+    let exe_dir = env::current_exe()
         .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-    {
-        let directory = root.join("user");
-        if writable_directory(&directory) {
-            return directory.join("config.json");
-        }
-    }
-    // Read-only installation locations fall back to the per-user data root
-    // rather than refusing to start.
-    let fallback = env::var_os("APPDATA")
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    let explicit = env::args_os().nth(1);
+    resolve_from(
+        explicit.as_deref(),
+        env::var_os("SLEEPY_DOLL_CONFIG").as_deref(),
+        exe_dir.as_deref(),
+        user_data_root(),
+        &writable_directory,
+    )
+}
+
+/// The per-user data root used when the installation directory is read-only.
+fn user_data_root() -> Option<PathBuf> {
+    env::var_os("APPDATA")
         .map(PathBuf::from)
         .or_else(|| env::var_os("XDG_DATA_HOME").map(PathBuf::from))
         .or_else(|| {
             env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("share"))
         })
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("Sleepy Doll")
-        .join("user");
-    if writable_directory(&fallback) {
-        return fallback.join("config.json");
-    }
-    PathBuf::from("user").join("config.json")
 }
 
-fn writable_directory(directory: &Path) -> bool {
-    if fs::create_dir_all(directory).is_err() {
-        return false;
+/// Pure resolution: no environment access, no filesystem writes. `is_writable`
+/// is injected so the ordering rules can be tested without touching either.
+fn resolve_from(
+    explicit: Option<&OsStr>,
+    env_config: Option<&OsStr>,
+    exe_dir: Option<&Path>,
+    data_root: Option<PathBuf>,
+    is_writable: &dyn Fn(&Path) -> bool,
+) -> Result<Resolved> {
+    if let Some(raw) = explicit {
+        let text = raw.to_string_lossy();
+        match text.as_ref() {
+            "-h" | "--help" => return Ok(Resolved::Help),
+            "-V" | "--version" => return Ok(Resolved::Version),
+            _ if text.starts_with('-') => {
+                return Err(Error::Config(format!("未知选项: {text}\n\n{USAGE}")));
+            }
+            _ => {}
+        }
+        return Ok(Resolved::Config(explicit_config(raw, exe_dir)?));
     }
-    let probe = directory.join(".write-probe");
-    match fs::File::create(&probe) {
+    if let Some(raw) = env_config {
+        return Ok(Resolved::Config(explicit_config(raw, exe_dir)?));
+    }
+    if let Some(directory) = exe_dir.map(|dir| dir.join("user"))
+        && is_writable(&directory)
+    {
+        return Ok(Resolved::Config(directory.join("config.json")));
+    }
+    // Read-only installation locations fall back to the per-user data root
+    // rather than refusing to start.
+    if let Some(directory) = data_root.map(|root| root.join("Sleepy Doll").join("user"))
+        && is_writable(&directory)
+    {
+        return Ok(Resolved::Config(directory.join("config.json")));
+    }
+    // No working-directory fallback: silently writing user data next to whatever
+    // directory the process started in is exactly the behaviour this module
+    // promises to avoid.
+    Err(Error::Config(
+        "找不到可写的配置目录。请把 Sleepy Doll 安装到可写位置，或设置 SLEEPY_DOLL_CONFIG 指向一个可写的 .json 文件。".into(),
+    ))
+}
+
+fn explicit_config(raw: &OsStr, exe_dir: Option<&Path>) -> Result<PathBuf> {
+    let path = PathBuf::from(raw);
+    let is_json = path
+        .extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"));
+    if !is_json && !path.exists() {
+        return Err(Error::Config(format!(
+            "配置文件必须是 .json 文件: {}",
+            path.display()
+        )));
+    }
+    if path.is_absolute() {
+        return Ok(path);
+    }
+    let base = exe_dir
+        .ok_or_else(|| Error::Config("无法解析相对配置路径：拿不到可执行文件所在目录。".into()))?;
+    Ok(base.join(path))
+}
+
+/// Reports whether `directory` can hold user data, without creating anything.
+/// A missing directory is acceptable as long as its nearest existing ancestor
+/// is writable, because `seed` creates the directory afterwards.
+fn writable_directory(directory: &Path) -> bool {
+    let mut ancestor = directory;
+    while !ancestor.exists() {
+        match ancestor.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => ancestor = parent,
+            _ => return false,
+        }
+    }
+    let probe = ancestor.join(format!(".sleepy-doll-write-probe-{}", std::process::id()));
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
         Ok(file) => {
             drop(file);
             let _ = fs::remove_file(&probe);
@@ -414,7 +511,13 @@ fn update_raw(
 
 fn atomic_write(path: &Path, value: &serde_json::Value) -> Result<()> {
     use std::io::Write;
-    let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+    // The suffix is appended rather than substituted so the name still ends in
+    // `.json.<id>.tmp`, which is what the ignore rules match on.
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let temporary = path.with_file_name(format!("{name}.{}.tmp", uuid::Uuid::new_v4()));
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -465,6 +568,161 @@ fn expand_env(value: &mut serde_json::Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Resolution rules are exercised through the pure `resolve_from`, so these
+    /// tests never read the process environment, the executable path or the
+    /// working directory.
+    fn resolve(
+        explicit: Option<&str>,
+        env_config: Option<&str>,
+        exe_dir: Option<&str>,
+        data_root: Option<&str>,
+        writable: &[&str],
+    ) -> Result<Resolved> {
+        let writable = writable.iter().map(PathBuf::from).collect::<Vec<_>>();
+        resolve_from(
+            explicit.map(OsStr::new),
+            env_config.map(OsStr::new),
+            exe_dir.map(Path::new),
+            data_root.map(PathBuf::from),
+            &|directory| writable.iter().any(|allowed| allowed == directory),
+        )
+    }
+
+    fn config_path(result: Result<Resolved>) -> PathBuf {
+        match result.unwrap() {
+            Resolved::Config(path) => path,
+            other => panic!("expected a configuration path, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn argument_wins_over_environment_and_joins_the_executable_directory() {
+        // A relative argument must never be anchored to the working directory:
+        // that is what let a stray argument create a `--help` file plus an
+        // entire data tree wherever the process happened to start.
+        let path = config_path(resolve(
+            Some("dev.json"),
+            Some("/env/config.json"),
+            Some("/opt/sleepy-doll"),
+            Some("/home/user/.local/share"),
+            &[],
+        ));
+        assert_eq!(path, PathBuf::from("/opt/sleepy-doll").join("dev.json"));
+    }
+
+    #[test]
+    fn absolute_arguments_are_taken_verbatim() {
+        let path = config_path(resolve(
+            Some("/etc/sleepy-doll/config.json"),
+            None,
+            Some("/opt/sleepy-doll"),
+            None,
+            &[],
+        ));
+        assert_eq!(path, PathBuf::from("/etc/sleepy-doll/config.json"));
+    }
+
+    #[test]
+    fn environment_is_the_second_choice() {
+        let path = config_path(resolve(
+            None,
+            Some("/env/config.json"),
+            Some("/opt/sleepy-doll"),
+            None,
+            &[],
+        ));
+        assert_eq!(path, PathBuf::from("/env/config.json"));
+    }
+
+    #[test]
+    fn help_and_version_are_reported_instead_of_treated_as_paths() {
+        for flag in ["-h", "--help"] {
+            assert_eq!(
+                resolve(Some(flag), None, None, None, &[]).unwrap(),
+                Resolved::Help
+            );
+        }
+        for flag in ["-V", "--version"] {
+            assert_eq!(
+                resolve(Some(flag), None, None, None, &[]).unwrap(),
+                Resolved::Version
+            );
+        }
+        assert!(resolve(Some("--unknown"), None, None, None, &[]).is_err());
+    }
+
+    #[test]
+    fn arguments_that_cannot_be_configuration_files_are_rejected() {
+        // Not a `.json` and not an existing file.
+        assert!(resolve(Some("notes.txt"), None, None, None, &[]).is_err());
+        // A `.json` name that does not exist yet is still a usable target,
+        // because the first run seeds it.
+        let path = config_path(resolve(
+            Some("fresh.json"),
+            None,
+            Some("/opt/sleepy-doll"),
+            None,
+            &[],
+        ));
+        assert_eq!(path, PathBuf::from("/opt/sleepy-doll").join("fresh.json"));
+    }
+
+    #[test]
+    fn installation_directory_is_preferred_then_the_per_user_root() {
+        let exe = "/opt/sleepy-doll".to_string();
+        let install_user = PathBuf::from(&exe).join("user");
+        let data_user = PathBuf::from("/home/user/.local/share")
+            .join("Sleepy Doll")
+            .join("user");
+
+        let path = config_path(resolve(
+            None,
+            None,
+            Some(&exe),
+            Some("/home/user/.local/share"),
+            &[install_user.to_str().unwrap(), data_user.to_str().unwrap()],
+        ));
+        assert_eq!(path, install_user.join("config.json"));
+
+        // A read-only installation directory falls through to the data root.
+        let path = config_path(resolve(
+            None,
+            None,
+            Some(&exe),
+            Some("/home/user/.local/share"),
+            &[data_user.to_str().unwrap()],
+        ));
+        assert_eq!(path, data_user.join("config.json"));
+    }
+
+    #[test]
+    fn resolution_fails_rather_than_falling_back_to_the_working_directory() {
+        // Nothing is writable and no per-user root exists: the old code returned
+        // the relative path `user/config.json`, silently writing user data into
+        // whatever directory the process was started from.
+        assert!(resolve(None, None, Some("/opt/sleepy-doll"), None, &[]).is_err());
+        assert!(
+            resolve(
+                None,
+                None,
+                Some("/opt/sleepy-doll"),
+                Some("/home/user/.local/share"),
+                &[]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn writable_directory_does_not_create_the_candidate() {
+        let directory = tempfile::tempdir().unwrap();
+        let candidate = directory.path().join("user");
+        assert!(writable_directory(&candidate));
+        // Resolution may not have side effects; `seed` creates the directory.
+        assert!(!candidate.exists());
+        assert!(directory.path().read_dir().unwrap().next().is_none());
+    }
 
     #[test]
     fn shipped_template_is_seedable_and_valid() {
