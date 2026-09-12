@@ -4,6 +4,9 @@ import type {
   RunEvent,
   SavedStrategy,
   TaskInfo,
+  BridgeCatalog,
+  BridgeMethodDetail,
+  RecoveryRecord,
 } from "./types";
 
 declare global {
@@ -53,19 +56,24 @@ async function invokeMock<T>(
   id: string,
   method: string,
   params: Record<string, unknown>,
+  timeoutMs: number,
 ) {
   let response: Response;
   try {
     response = await fetch(MOCK_BACKEND, {
+      signal: AbortSignal.timeout(timeoutMs),
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id, method, params }),
     });
-  } catch {
+  } catch (error) {
     // A dropped connection is not the same as "never started": the event stream
     // holds a long poll open, so a restart or a sleeping machine lands here too.
     throw new Error(
-      `连不上本地开发后端 ${MOCK_BACKEND}。确认 sleepy-doll-mock 正在运行；如果它刚重启过，重试即可。`,
+      error instanceof DOMException &&
+        ["TimeoutError", "AbortError"].includes(error.name)
+        ? "请求超时。后台任务可能仍在运行。"
+        : "无法连接本地服务。",
     );
   }
   const envelope = (await response.json()) as IpcEnvelope<T>;
@@ -82,30 +90,50 @@ function invoke<T>(
   params: Record<string, unknown> = {},
 ): Promise<T> {
   const id = crypto.randomUUID();
+  const timeoutMs =
+    method === "bridge.setEnabled"
+      ? 100_000
+      : method === "events.read"
+        ? 30_000
+        : 15_000;
   const ipc = window.ipc;
-  if (!ipc) return invokeMock<T>(id, method, params);
+  if (!ipc) return invokeMock<T>(id, method, params, timeoutMs);
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
       pending.delete(id);
-      reject(new Error("原生请求超时"));
-    }, 130_000);
+      reject(new Error("请求超时。后台任务可能仍在运行，请刷新状态后重试。"));
+    }, timeoutMs);
     pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
-    ipc.postMessage(JSON.stringify({ id, method, params }));
+    try {
+      ipc.postMessage(JSON.stringify({ id, method, params }));
+    } catch (error) {
+      window.clearTimeout(timer);
+      pending.delete(id);
+      reject(error);
+    }
   });
 }
 
 export const api = {
   bootstrap: () => invoke<Bootstrap>("bootstrap"),
-  submitTask: (prompt: string, conversationId?: string) =>
+  submitTask: (
+    prompt: string,
+    conversationId?: string,
+    clientKey: string = crypto.randomUUID(),
+  ) =>
     invoke<TaskInfo>("task.submit", {
       prompt,
-      clientKey: crypto.randomUUID(),
+      clientKey,
       ...(conversationId ? { conversationId } : {}),
     }),
   task: (id: string) => invoke<TaskInfo>("task.get", { id }),
+  tasks: () => invoke<TaskInfo[]>("task.list"),
   resume: (id: string) => invoke<TaskInfo>("run.resume", { id }),
-  supplement: (id: string, content: string) =>
-    invoke("run.input", { id, content }),
+  supplement: (
+    id: string,
+    content: string,
+    clientKey: string = crypto.randomUUID(),
+  ) => invoke("run.input", { id, content, clientKey }),
   approve: (id: string, approved: boolean) =>
     invoke("approval.respond", { id, approved }),
   events: (conversationId: string, after: number) =>
@@ -126,12 +154,31 @@ export const api = {
     model: string;
     baseUrl: string;
     apiKey: string;
+    timeoutMs?: number;
   }) => invoke<{ saved: boolean }>("model.save", { model }),
   setSkillEnabled: (name: string, enabled: boolean) =>
     invoke<{ enabled: boolean }>("skill.setEnabled", { name, enabled }),
   setPluginEnabled: (id: string, enabled: boolean) =>
     invoke<{ restartRequired: boolean }>("plugin.setEnabled", { id, enabled }),
   bridgeState: () => invoke<unknown>("bridge.state"),
+  bridgeRecovery: () =>
+    invoke<{ hostRunning: boolean; records: RecoveryRecord[] }>(
+      "bridge.recoveryList",
+    ),
+  restoreBridgeConfig: (record: RecoveryRecord) =>
+    invoke<{ restored: boolean; recoveryChangeId: string }>("bridge.restore", {
+      changeId: record.changeId,
+      recordVersion: record.recordVersion,
+      currentVersion: record.currentVersion,
+    }),
+  bridgeCatalog: (query = "", group = "", offset = 0) =>
+    invoke<BridgeCatalog>("bridge.catalog", { query, group, offset }),
+  bridgeDescribe: (methodId: string) =>
+    invoke<BridgeMethodDetail>("bridge.describe", { methodId }),
+  setBridgeEnabled: (enabled: boolean) =>
+    invoke<{ enabled: boolean; warning?: string }>("bridge.setEnabled", {
+      enabled,
+    }),
   installPlugin: (path: string) =>
     invoke<{ id: string }>("plugin.install", { path }),
   removePlugin: (id: string) => invoke("plugin.remove", { id }),

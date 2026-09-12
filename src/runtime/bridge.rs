@@ -188,20 +188,24 @@ impl Bridge {
             ));
         }
         if let Some(plan) = &plan {
+            let completed_reads = journal.completed_read_steps(&run.id, plan)?;
             let done = |step: &str| {
-                attempts
-                    .iter()
-                    .any(|a| a.request["stepId"] == step && a.outcome == "verifiedSucceeded")
+                completed_reads.contains(step)
+                    || attempts
+                        .iter()
+                        .any(|a| a.request["stepId"] == step && a.outcome == "verifiedSucceeded")
             };
             let next = plan
                 .steps
                 .iter()
                 .find(|s| !done(&s.id))
                 .ok_or_else(|| Error::Tool("计划已执行完成，请先修订计划".into()))?;
-            if next.capability_id.as_deref() != Some(binding.id.as_str())
-                || next.arguments != *args
-                || !next.depends_on.iter().all(|id| done(id))
-            {
+            let matches_step = (next.capability_id.as_deref() == Some(binding.id.as_str())
+                && next.arguments == *args)
+                || (next.tool.as_deref() == Some("bgi.api.invoke")
+                    && next.arguments["methodId"] == binding.id
+                    && next.arguments["arguments"] == *args);
+            if !matches_step || !next.depends_on.iter().all(|id| done(id)) {
                 return Err(Error::Tool(
                     "调用不匹配当前可执行步骤或前序结果未验证".into(),
                 ));
@@ -264,7 +268,13 @@ impl Bridge {
             return Err(Error::Tool("资源绑定已变化".into()));
         }
         let snapshot = self.get("/bridge/v1/state", cancel).await?;
-        if snapshot["instanceId"] != instance || snapshot["runtime"]["captureReady"] != true {
+        let requires_capture = !matches!(
+            descriptor["effect"].as_str(),
+            Some("configurationWrite" | "hostCommand")
+        );
+        if snapshot["instanceId"] != instance
+            || (requires_capture && snapshot["runtime"]["captureReady"] != true)
+        {
             return Err(Error::Tool("游戏尚未就绪".into()));
         }
         request["preconditionSnapshot"] = snapshot["snapshotId"].clone();
@@ -313,7 +323,9 @@ impl Bridge {
                 return Err(Error::Tool("排队期间资源变化".into()));
             }
             let fresh = self.get("/bridge/v1/state", cancel).await?;
-            if fresh["instanceId"] != instance || fresh["runtime"]["captureReady"] != true {
+            if fresh["instanceId"] != instance
+                || (requires_capture && fresh["runtime"]["captureReady"] != true)
+            {
                 return Err(Error::Tool("游戏状态不再满足前置条件".into()));
             }
             let stamp = fresh["observedAt"]

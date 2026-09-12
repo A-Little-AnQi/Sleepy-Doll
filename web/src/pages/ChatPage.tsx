@@ -1,702 +1,418 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-
-import character from "../assets/moon-character-v5-feet.png";
+import { useEffect, useRef, useState } from "react";
+import mascot from "../assets/moon-character.png";
+import "./ChatPage.css";
+import { Transcript } from "../components/Transcript";
 import { api } from "../api";
-import { SendIcon, StopIcon } from "../components/icons";
-import type { Bootstrap, MessageInfo, TaskInfo, RunApproval } from "../types";
+import { CheckIcon, SendIcon, StopIcon } from "../components/icons";
+import { isRunning, session, taskLabels, useSession } from "../session";
+import type { Bootstrap } from "../types";
 
-interface ChatPageProps {
+interface Props {
   bootstrap: Bootstrap;
   conversationId?: string | undefined;
   onConversation(id: string): void;
   reload(): Promise<void>;
 }
-
-/** Tool identifiers are machine names. These are what each one actually does,
- * in the words a user would use. */
-const toolNames: Record<string, string> = {
-  "plan.update": "更新执行计划",
-  "user.ask": "向你确认信息",
-  "resource.search": "查找可用的资源",
-  "bgi.state.get": "读取游戏状态",
-  "bgi.capability.search": "查找能做的操作",
-  "bgi.capability.describe": "确认操作的用法",
-  "bgi.capability.invoke": "执行游戏操作",
-  "bgi.job.get": "查看执行结果",
-  "bgi.job.cancel": "停止执行",
-  "skills.search": "查找技能",
-  "skills.read": "读取技能说明",
-  "plugins.list": "查看已装插件",
-  "operation.propose": "准备一项操作",
-  "operation.get": "查看操作状态",
-};
-const stepOutcomeLabels: Record<string, string> = {
-  active: "进行中",
-  verifiedSucceeded: "已完成并确认",
-  verifiedFailed: "完成但结果不符",
-  failed: "失败",
-  unknown: "结果未确认",
-};
-
-const EXAMPLES = ["看看游戏现在是什么情况", "有哪些路线可以跑？"];
-
-function isBusy(task?: TaskInfo): boolean {
-  return Boolean(
-    task &&
-    ![
-      "answered",
-      "succeeded",
-      "partial",
-      "needsReview",
-      "failed",
-      "cancelled",
-    ].includes(task.state),
-  );
-}
-
-function ToolActivity({ message }: { message: MessageInfo }) {
-  if (message.role === "assistant" && message.toolCalls?.length) {
-    return (
-      <div className="tool-sequence">
-        {message.toolCalls.map((call) => (
-          <details className="tool-pass" key={call.id}>
-            <summary>
-              <span>
-                <strong>{toolNames[call.name] ?? call.name}</strong>
-                <em>查看详情</em>
-              </span>
-            </summary>
-            <div className="technical-evidence">
-              <p className="evidence-note">这一步发出的原始请求：</p>
-              <code>{call.name}</code>
-              <pre>{JSON.stringify(call.arguments, null, 2)}</pre>
-            </div>
-          </details>
-        ))}
-      </div>
-    );
-  }
-  if (message.role === "tool") {
-    return (
-      <details className="tool-result">
-        <summary>查看这一步的返回内容</summary>
-        <pre>{message.content}</pre>
-      </details>
-    );
-  }
-  return null;
-}
-
 export function ChatPage({
   bootstrap,
   conversationId,
   onConversation,
   reload,
-}: ChatPageProps) {
-  const [messages, setMessages] = useState<MessageInfo[]>([]);
-  const [prompt, setPrompt] = useState("");
-  const [task, setTask] = useState<TaskInfo>();
-  const [streamText, setStreamText] = useState("");
-  const [question, setQuestion] = useState("");
-  const [approval, setApproval] = useState<RunApproval>();
-  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
-  const [clock, setClock] = useState(Date.now());
-  const [queuedRuns, setQueuedRuns] = useState<TaskInfo[]>([]);
-  const [connectionError, setConnectionError] = useState("");
-  const [plan, setPlan] = useState<{
-    goal: string;
-    steps: Array<{
-      id: string;
-      title: string;
-      tool?: string;
-      capabilityId?: string;
-      outcome?: string;
-    }>;
-  }>();
+}: Props) {
+  const data = useSession(conversationId);
+  const { messages, task, stream, question, approval, plan, loading } = data;
+  const busy = isRunning(task);
+  const draftKey = `sleepy-doll-draft:${conversationId ?? "new"}`;
+  const [prompt, setPrompt] = useState(
+    () => localStorage.getItem(draftKey) ?? "",
+  );
   const [sending, setSending] = useState(false);
-  const generation = useRef(0);
   const [error, setError] = useState("");
-  const [savingStrategy, setSavingStrategy] = useState(false);
-  const [loadingHistory, setLoadingHistory] = useState(Boolean(conversationId));
-  const chatScroll = useRef<HTMLDivElement>(null);
-  const followTail = useRef(true);
-  const busy = isBusy(task);
-  const strategySaved = Boolean(
-    task &&
-    (bootstrap.strategies.some(
-      (strategy) => strategy.sourceRunId === task.id,
-    ) ||
-      bootstrap.workflows.some(
-        (workflow) => workflow.verifiedFromRun === task.id,
-      )),
-  );
-  const controlCalls = new Set(
-    messages.flatMap((m) =>
-      (m.toolCalls ?? [])
-        .filter((c) => c.name === "user.ask" || c.name === "plan.update")
-        .map((c) => c.id),
-    ),
-  );
-  const visibleMessages = messages.filter(
-    (m) =>
-      !(m.role === "tool" && controlCalls.has(m.toolCallId ?? "")) &&
-      !(
-        m.role === "assistant" &&
-        !m.content &&
-        m.toolCalls?.length &&
-        m.toolCalls.every((c) => controlCalls.has(c.id))
-      ),
-  );
-  const approvalExpired = Boolean(
-    approval && clock >= approval.expiresAt * 1000,
-  );
-  const canReplay = Boolean(plan?.steps.every((step) => Boolean(step.tool)));
-
-  const loadConversation = useCallback(async (id: string) => {
-    const current = generation.current;
-    try {
-      const result = await api.conversation(id);
-      if (current === generation.current) setMessages(result.messages);
-    } catch (reason) {
-      if (current === generation.current)
-        setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      if (current === generation.current) setLoadingHistory(false);
-    }
+  const [confirming, setConfirming] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const current = useRef(conversationId);
+  current.current = conversationId;
+  const alive = useRef(true);
+  const scroll = useRef<HTMLDivElement>(null);
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  const follow = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
   }, []);
-
   useEffect(() => {
-    generation.current++;
-    followTail.current = true;
-    setQueuedRuns([]);
-    setConnectionError("");
+    setPrompt(localStorage.getItem(draftKey) ?? "");
     setError("");
-    setStreamText("");
-    setQuestion("");
-    setApproval(undefined);
-    setPlan(undefined);
-    setTask(undefined);
-    if (conversationId) {
-      setLoadingHistory(true);
-      void loadConversation(conversationId);
-    } else {
-      setMessages([]);
-      setTask(undefined);
-      setError("");
-      setLoadingHistory(false);
-    }
-  }, [conversationId, loadConversation]);
-
+    setSending(false);
+    follow.current = true;
+  }, [draftKey]);
   useEffect(() => {
-    const scroll = () => {
-      if (!chatScroll.current) return;
-      if (!messages.length && !busy) {
-        chatScroll.current.scrollTo({ top: 0, behavior: "auto" });
-      } else if (followTail.current) {
-        chatScroll.current.scrollTo({
-          top: chatScroll.current.scrollHeight,
-          behavior: "auto",
-        });
-      }
-    };
-    const frame = requestAnimationFrame(scroll);
-    const settle = window.setTimeout(scroll, 120);
-    return () => {
-      cancelAnimationFrame(frame);
-      window.clearTimeout(settle);
-    };
-  }, [messages, busy, task, streamText, question, approval, plan]);
-
-  useEffect(() => {
-    setApprovalSubmitting(false);
-    setClock(Date.now());
-    if (!approval) return;
-    const timer = setInterval(() => setClock(Date.now()), 1000);
-    return () => clearInterval(timer);
+    setConfirming(false);
   }, [approval?.id]);
-
   useEffect(() => {
-    if (!conversationId) return;
-    let stopped = false;
-    let cursor = 0;
-    const runs = new Map<string, TaskInfo>();
-    const streams = new Map<string, string>();
-    const approvals = new Map<string, RunApproval>();
-    const questions = new Map<string, string>();
-    const plans = new Map<string, NonNullable<typeof plan>>();
-    const consume = async () => {
-      while (!stopped) {
-        try {
-          const batch = await api.events(conversationId, cursor);
-          if (stopped) return;
-          setConnectionError("");
-          let refresh = false;
-          for (const event of batch.events) {
-            if (event.sequence <= cursor) continue;
-            cursor = event.sequence;
-            if (event.kind === "input.received") refresh = true;
-            if (event.kind === "run.created" || event.kind === "run.changed") {
-              const run = event.data as unknown as TaskInfo;
-              runs.set(run.id, run);
-              if (event.kind === "run.created" || run.state === "deciding")
-                refresh = true;
-              if (!isBusy(run)) {
-                streams.delete(run.id);
-                approvals.delete(run.id);
-                questions.delete(run.id);
-                refresh = true;
-              }
-            }
-            if (event.kind === "assistant.delta")
-              streams.set(
-                event.runId,
-                (streams.get(event.runId) ?? "") +
-                  String(event.data.text ?? ""),
-              );
-            if (event.kind === "assistant.completed") {
-              streams.delete(event.runId);
-              refresh = true;
-            }
-            if (event.kind === "tool.completed") {
-              refresh = true;
-              approvals.delete(event.runId);
-              questions.delete(event.runId);
-            }
-            if (event.kind === "approval.requested")
-              approvals.set(event.runId, event.data as unknown as RunApproval);
-            if (event.kind === "question")
-              questions.set(event.runId, String(event.data.question ?? ""));
-            if (
-              event.kind === "step.started" ||
-              event.kind === "step.finished"
-            ) {
-              const current = plans.get(event.runId);
-              if (current)
-                plans.set(event.runId, {
-                  ...current,
-                  steps: current.steps.map((step) =>
-                    step.id === event.data.id
-                      ? {
-                          ...step,
-                          outcome:
-                            event.kind === "step.started"
-                              ? "active"
-                              : String(event.data.outcome),
-                        }
-                      : step,
-                  ),
-                });
-            }
-            if (event.kind === "plan.changed")
-              plans.set(
-                event.runId,
-                event.data as unknown as {
-                  goal: string;
-                  steps: Array<{ id: string; title: string }>;
-                },
-              );
-          }
-          const list = [...runs.values()];
-          const active =
-            list.find((r) => isBusy(r) && r.state !== "queued") ??
-            list.find(isBusy) ??
-            list.at(-1);
-          if (refresh) {
-            const persisted = await api.conversation(conversationId);
-            if (stopped) return;
-            setMessages(persisted.messages);
-          }
-          setPlan(active ? plans.get(active.id) : undefined);
-          setQueuedRuns(list.filter((run) => run.state === "queued"));
-          setTask(active);
-          setStreamText(
-            active && isBusy(active) ? (streams.get(active.id) ?? "") : "",
-          );
-          setApproval(
-            active?.state === "awaitingApproval"
-              ? approvals.get(active.id)
-              : undefined,
-          );
-          setQuestion(
-            active?.state === "awaitingUser"
-              ? (questions.get(active.id) ?? "")
-              : "",
-          );
-          if (refresh) {
-            if (!stopped) void reload();
-          }
-        } catch (reason) {
-          if (stopped) return;
-          setConnectionError(
-            reason instanceof Error ? reason.message : String(reason),
-          );
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-        }
-      }
-    };
-    void consume();
-    return () => {
-      stopped = true;
-    };
-  }, [conversationId, loadConversation, reload]);
-
-  const send = async (queued = false) => {
+    if (!busy && !approval) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [busy, approval]);
+  useEffect(() => {
+    if (follow.current)
+      scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
+  }, [messages, stream, plan, task]);
+  useEffect(() => {
+    if (textarea.current) {
+      textarea.current.style.height = "auto";
+      textarea.current.style.height =
+        Math.min(textarea.current.scrollHeight, 180) + "px";
+    }
+  }, [prompt]);
+  const setDraft = (value: string) => {
+    setPrompt(value);
+    localStorage.setItem(draftKey, value);
+  };
+  const send = async (queue = false) => {
     const value = prompt.trim();
     if (!value || sending) return;
-    setSending(true);
-    followTail.current = true;
-    setError("");
-    setPrompt("");
+    const origin = conversationId;
+    const retryKey = `${draftKey}:pending`;
+    let pending: { key: string; prompt: string; runId?: string } | undefined;
     try {
-      if (busy && task && !queued) {
-        await api.supplement(task.id, value);
-        return;
+      pending =
+        JSON.parse(sessionStorage.getItem(retryKey) ?? "null") ?? undefined;
+    } catch {
+      /* invalid saved state */
+    }
+    const clientKey =
+      pending?.prompt === value ? pending.key : crypto.randomUUID();
+    const supplementRun =
+      pending?.prompt === value
+        ? pending.runId
+        : busy && task && !queue
+          ? task.id
+          : undefined;
+    sessionStorage.setItem(
+      retryKey,
+      JSON.stringify({ key: clientKey, prompt: value, runId: supplementRun }),
+    );
+    setSending(true);
+    follow.current = true;
+    setError("");
+    setDraft("");
+    try {
+      if (supplementRun) await api.supplement(supplementRun, value, clientKey);
+      else {
+        const run = await api.submitTask(value, origin, clientKey);
+        session(run.conversationId).start();
+        if (alive.current && current.current === origin)
+          onConversation(run.conversationId);
       }
-      const created = await api.submitTask(value, conversationId);
-      if (!busy) setTask(created);
-      onConversation(created.conversationId);
+      sessionStorage.removeItem(retryKey);
       await reload();
     } catch (reason) {
-      setPrompt(value);
-      setError(reason instanceof Error ? reason.message : String(reason));
+      localStorage.setItem(draftKey, value);
+      if (alive.current && current.current === origin) {
+        setPrompt(value);
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
     } finally {
-      setSending(false);
+      if (alive.current && current.current === origin) setSending(false);
     }
   };
-
-  const sendError = error || connectionError;
-  const showWelcome =
-    !conversationId && messages.length === 0 && !busy && !loadingHistory;
-
+  const act = async (action: () => Promise<unknown>) => {
+    setError("");
+    try {
+      await action();
+      await reload();
+    } catch (reason) {
+      setError(String(reason));
+    }
+  };
+  const welcome = !conversationId && !messages.length;
+  const elapsed = task
+    ? Math.max(0, Math.floor((now - new Date(task.createdAt).getTime()) / 1000))
+    : 0;
+  const phase =
+    busy && !question && !approval
+      ? task?.state === "cancelling"
+        ? "正在停止"
+        : task?.state === "queued"
+          ? "排队中"
+          : task?.state === "waitingJob"
+            ? "等待执行结果"
+            : task?.state === "verifying"
+              ? "核对结果"
+              : "等待响应"
+      : undefined;
   return (
-    <section className="chat-workspace">
+    <section className={`chat-workspace${welcome ? " is-welcome" : ""}`}>
       <div
+        ref={scroll}
         className="chat-scroll"
-        ref={chatScroll}
         onScroll={(event) => {
-          const e = event.currentTarget;
-          followTail.current =
-            e.scrollHeight - e.scrollTop - e.clientHeight < 120;
+          const target = event.currentTarget;
+          follow.current =
+            target.scrollHeight - target.scrollTop - target.clientHeight < 100;
         }}
       >
-        {loadingHistory ? (
-          <div className="history-loading">正在载入对话…</div>
-        ) : showWelcome ? (
+        {welcome ? (
           <div className="chat-welcome">
-            <img className="chat-welcome-art" src={character} alt="" />
-            <h2>你想让 Sleepy Doll 做什么？</h2>
-            <p>用一句话说清楚目标就行。它要操作游戏时，会先停下来问你。</p>
-            <div className="chat-examples">
-              {EXAMPLES.map((example) => (
-                <button
-                  key={example}
-                  type="button"
-                  onClick={() => {
-                    setPrompt(example);
-                    chatScroll.current?.scrollTo({ top: 0 });
-                  }}
-                >
-                  {example}
-                </button>
-              ))}
-            </div>
-            {bootstrap.conversations.length > 0 ? (
-              <div className="chat-resume">
-                <h3>继续之前的对话</h3>
-                <ul>
-                  {bootstrap.conversations.slice(0, 5).map((conversation) => (
-                    <li key={conversation.id}>
-                      <button
-                        type="button"
-                        onClick={() => onConversation(conversation.id)}
-                      >
-                        {conversation.title}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+            <img
+              className="welcome-mascot"
+              src={mascot}
+              alt="蜷坐在月亮上熟睡的木偶"
+            />
+            <h2>开始一项新任务</h2>
           </div>
         ) : (
           <div className="conversation-scene">
+            {loading && !messages.length && <p className="muted">载入中…</p>}
             <div className="conversation-flow">
-              {visibleMessages.map((message, index) => (
-                <div
-                  className={`timeline-entry ${message.role}`}
-                  key={`${index}-${message.content}`}
-                >
-                  {message.role === "user" ? (
-                    <blockquote>{message.content}</blockquote>
-                  ) : message.role === "assistant" ? (
-                    <article className="agent-turn">
-                      <div>
-                        {message.content ? <p>{message.content}</p> : null}
-                        <ToolActivity message={message} />
-                      </div>
-                    </article>
-                  ) : (
-                    <ToolActivity message={message} />
-                  )}
-                </div>
-              ))}
-              {plan ? (
-                <details className="run-plan" open={busy}>
-                  <summary>
-                    {busy ? "正在执行的步骤" : "这次的执行步骤"}（{plan.goal}）
-                  </summary>
+              <Transcript
+                messages={messages}
+                stream={stream}
+                phase={phase}
+                seconds={elapsed}
+              />
+              {plan && (
+                <details className="run-plan">
+                  <summary>执行计划 · {plan.steps.length} 步</summary>
                   <ol>
                     {plan.steps.map((step) => (
                       <li key={step.id}>
                         {step.title}
-                        {step.outcome
-                          ? ` · ${stepOutcomeLabels[step.outcome] ?? "未确认"}`
-                          : ""}
+                        {step.outcome && (
+                          <span className="muted">
+                            {" "}
+                            ·{" "}
+                            {step.outcome === "active"
+                              ? "进行中"
+                              : step.outcome === "verifiedSucceeded"
+                                ? "已完成"
+                                : step.outcome}
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ol>
                 </details>
-              ) : null}
-              {(task?.source?.kind === "savedStrategy" ||
-                task?.source?.kind === "savedWorkflow") &&
-              !busy &&
-              task.result ? (
-                <div className="manual-run-result">{task.result}</div>
-              ) : null}
-              {streamText ? (
-                <article className="agent-turn">
-                  <p>{streamText}</p>
-                </article>
-              ) : null}
-              {question ? (
+              )}
+              {question && (
                 <section className="run-question">
-                  <h3>Sleepy Doll 需要你补充信息</h3>
+                  <h3>需要补充信息</h3>
                   <p>{question}</p>
-                  <p className="muted">
-                    在下面的输入框里回复，发送后它会继续。
-                  </p>
                 </section>
-              ) : null}
-              {approval ? (
+              )}
+              {approval && (
                 <section className="run-approval">
-                  <h3>这一步要操作游戏，需要你同意</h3>
-                  <p className="approval-what">
+                  <h3>确认执行</h3>
+                  <p>
                     {approval.request.binding?.description ??
                       approval.request.methodId}
                   </p>
-                  {approval.request.arguments &&
-                  Object.keys(approval.request.arguments).length > 0 ? (
-                    <details>
-                      <summary>这一步会用到的参数</summary>
-                      <pre>
-                        {JSON.stringify(approval.request.arguments, null, 2)}
-                      </pre>
-                    </details>
-                  ) : null}
-                  <div className="approval-actions">
+                  <details>
+                    <summary>操作参数</summary>
+                    <pre>
+                      {JSON.stringify(approval.request.arguments, null, 2)}
+                    </pre>
+                  </details>
+                  <div className="detail-actions">
                     <button
                       className="primary-action"
-                      disabled={approvalSubmitting || approvalExpired}
+                      disabled={confirming || now >= approval.expiresAt * 1000}
                       onClick={() => {
-                        setApprovalSubmitting(true);
-                        void api.approve(approval.id, true).catch((e) => {
-                          setError(String(e));
-                          setApprovalSubmitting(false);
-                        });
+                        setConfirming(true);
+                        void act(() => api.approve(approval.id, true)).finally(
+                          () => setConfirming(false),
+                        );
                       }}
                     >
-                      {approvalSubmitting ? "正在提交…" : "同意，执行这一步"}
+                      允许
                     </button>
                     <button
-                      disabled={approvalSubmitting || approvalExpired}
+                      className="secondary-action"
+                      disabled={confirming || now >= approval.expiresAt * 1000}
                       onClick={() => {
-                        setApprovalSubmitting(true);
-                        void api.approve(approval.id, false).catch((e) => {
-                          setError(String(e));
-                          setApprovalSubmitting(false);
-                        });
+                        setConfirming(true);
+                        void act(() => api.approve(approval.id, false)).finally(
+                          () => setConfirming(false),
+                        );
                       }}
                     >
-                      不同意
+                      拒绝
                     </button>
                   </div>
-                  {approvalExpired ? (
-                    <p className="muted">
-                      这次确认已经超时失效了。重新发一条消息让它再来一次。
-                    </p>
-                  ) : (
-                    <p className="muted">
-                      同意只对这一次有效，下次操作还会再问你。
-                    </p>
+                  {now >= approval.expiresAt * 1000 && (
+                    <p className="muted">确认已过期</p>
                   )}
                 </section>
-              ) : null}
-              {busy && !streamText && !question && !approval ? (
-                <div className="run-activity">
-                  {task?.state === "cancelling"
-                    ? "正在停止…"
-                    : "正在处理，请稍等…"}
-                </div>
-              ) : null}
+              )}
               {task &&
-              ["failed", "cancelled", "needsReview", "partial"].includes(
-                task.state,
-              ) ? (
-                <div className="run-error">
-                  <strong>
-                    {task.state === "failed"
-                      ? "这次没有成功"
-                      : task.state === "cancelled"
-                        ? "这次已停止"
-                        : task.state === "needsReview"
-                          ? "结果还没确认"
-                          : "只完成了部分目标"}
-                  </strong>
-                  <p>
-                    {task.error ??
-                      (task.state === "needsReview"
-                        ? "Sleepy Doll 不确定游戏里实际发生了什么，需要再核对一次才能继续。"
-                        : task.state === "partial"
-                          ? "有些步骤没有完成。可以看看上面的步骤列表，再决定要不要重试。"
-                          : "运行被停止了，没有继续执行。")}
-                  </p>
-                  {task.state === "needsReview" ? (
-                    <button
-                      className="runtime-action"
-                      onClick={() =>
-                        void api
-                          .resume(task.id)
-                          .then(setTask)
-                          .catch((e) => setError(String(e)))
-                      }
-                    >
-                      重新核对并继续
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-              {task?.state === "succeeded" &&
-              task.source?.kind !== "savedStrategy" &&
-              task.source?.kind !== "savedWorkflow" &&
-              plan ? (
-                <div className="strategy-save">
-                  <span>
-                    这次成功了。
-                    {canReplay
-                      ? "可以存下来，以后一键重跑，不用再问模型。"
-                      : "可以存下来，以后手动重跑。"}
-                  </span>
-                  <button
-                    className="runtime-action"
-                    disabled={savingStrategy || strategySaved}
-                    onClick={() => {
-                      setSavingStrategy(true);
-                      void api[
-                        canReplay ? "extractWorkflow" : "extractStrategy"
-                      ](task.id, plan.goal)
-                        .then(reload)
-                        .catch((e) => setError(String(e)))
-                        .finally(() => setSavingStrategy(false));
-                    }}
-                  >
-                    {savingStrategy
-                      ? "正在保存…"
-                      : strategySaved
-                        ? "已保存到运行记录"
-                        : "保存到运行记录"}
-                  </button>
-                </div>
-              ) : null}
+                !busy &&
+                ["failed", "cancelled", "needsReview", "partial"].includes(
+                  task.state,
+                ) && (
+                  <section className="run-error">
+                    <h3>{taskLabels[task.state]}</h3>
+                    <p>{task.error || task.result}</p>
+                    {task.state === "needsReview" && (
+                      <button
+                        className="secondary-action"
+                        onClick={() => void act(() => api.resume(task.id))}
+                      >
+                        重新核对
+                      </button>
+                    )}
+                  </section>
+                )}
+              {task?.state === "succeeded" && plan && (
+                <button
+                  className="subtle-action"
+                  disabled={
+                    saving ||
+                    bootstrap.workflows.some(
+                      (flow) => flow.verifiedFromRun === task.id,
+                    ) ||
+                    bootstrap.strategies.some(
+                      (flow) => flow.sourceRunId === task.id,
+                    )
+                  }
+                  onClick={() => {
+                    setSaving(true);
+                    void act(() =>
+                      plan.steps.every((step) => !!step.tool)
+                        ? api.extractWorkflow(task.id, plan.goal)
+                        : api.extractStrategy(task.id, plan.goal),
+                    ).finally(() => setSaving(false));
+                  }}
+                >
+                  <CheckIcon className="button-icon" />
+                  保存为流程
+                </button>
+              )}
             </div>
           </div>
         )}
       </div>
-
       <div className="composer-dock">
-        {sendError ? (
+        {(error || data.error) && (
           <div className="inline-error" role="alert">
-            <strong>出错了</strong>
-            <span>{sendError}</span>
+            {error || data.error}
+            <button
+              className="subtle-action"
+              onClick={() => {
+                if (conversationId) session(conversationId).start();
+                void reload();
+              }}
+            >
+              刷新状态
+            </button>
           </div>
-        ) : null}
-        {queuedRuns.length ? (
-          <section className="run-input-actions" aria-label="排队中的消息">
-            <p className="muted">一次只能跑一条，这些在排队：</p>
-            {queuedRuns.map((run, index) => (
+        )}
+        {data.queued.length > 0 && (
+          <div className="queued-list">
+            {data.queued.map((run) => (
               <div key={run.id}>
-                <span>
-                  {index + 1}. {run.prompt}
-                </span>
+                <span>排队中 · {run.prompt}</span>
                 <button
-                  className="runtime-action"
-                  onClick={() =>
-                    void api
-                      .cancelTask(run.id)
-                      .catch((e) => setError(String(e)))
-                  }
+                  className="subtle-action"
+                  onClick={() => void act(() => api.cancelTask(run.id))}
                 >
-                  取消这条
+                  取消
                 </button>
               </div>
             ))}
-          </section>
-        ) : null}
-        {busy ? (
-          <div className="run-input-actions">
-            <button
-              className="runtime-action"
-              disabled={!prompt.trim() || sending}
-              title={prompt.trim() ? undefined : "先输入内容才能排队"}
-              onClick={() => void send(true)}
-            >
-              排队，等这条跑完再发
-            </button>
-            <button
-              className="runtime-action"
-              onClick={() =>
-                task &&
-                void api
-                  .cancelTask(task.id)
-                  .then(setTask)
-                  .catch((e) => setError(String(e)))
-              }
-            >
-              <StopIcon className="button-icon" />
-              停止当前运行
-            </button>
           </div>
-        ) : null}
+        )}
         <div className="command-deck">
           <textarea
-            aria-label="给 Sleepy Doll 的消息"
+            ref={textarea}
+            rows={2}
+            aria-label="消息"
             placeholder={
-              task?.state === "awaitingUser"
-                ? "回复它上面的问题…"
-                : "告诉 Sleepy Doll 你想做什么…"
+              question
+                ? "回复…"
+                : busy
+                  ? "补充说明…"
+                  : "输入任务，或使用 $ 调用技能"
             }
             value={prompt}
             disabled={sending}
-            onChange={(event) => setPrompt(event.target.value)}
+            onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return;
-              if (event.key === "Enter" && !event.shiftKey) {
+              const modified =
+                localStorage.getItem("sleepy-doll-send-key") === "modifier";
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                (modified
+                  ? event.ctrlKey || event.metaKey
+                  : !event.ctrlKey && !event.metaKey)
+              ) {
                 event.preventDefault();
                 void send();
               }
             }}
           />
-          <button
-            type="button"
-            className="primary-action send-action"
-            disabled={sending || !prompt.trim()}
-            title={prompt.trim() ? undefined : "先输入内容才能发送"}
-            onClick={() => void send()}
-          >
-            <SendIcon className="button-icon" />
-            {sending ? "发送中…" : busy ? "发送补充" : "发送"}
-          </button>
+          <div className="composer-actions">
+            <span>
+              {busy && (
+                <button
+                  className="subtle-action"
+                  disabled={!prompt.trim() || sending}
+                  onClick={() => void send(true)}
+                >
+                  加入队列
+                </button>
+              )}
+            </span>
+            <div className="composer-submit">
+              {busy && (
+                <button
+                  type="button"
+                  className="send-action"
+                  aria-label="停止生成"
+                  title="停止生成"
+                  disabled={task?.state === "cancelling"}
+                  onClick={() =>
+                    task && void act(() => api.cancelTask(task.id))
+                  }
+                >
+                  <StopIcon className="button-icon" />
+                </button>
+              )}
+              {(!busy || prompt.trim()) && (
+                <button
+                  type="button"
+                  className="send-action"
+                  aria-label={busy ? "发送补充" : "发送"}
+                  title={busy ? "发送补充" : "发送"}
+                  disabled={sending || !prompt.trim()}
+                  onClick={() => void send()}
+                >
+                  <SendIcon className="button-icon" />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
-        <p className="composer-hint">按 Enter 发送，Shift + Enter 换行。</p>
+        {welcome && (
+          <div className="chat-examples">
+            {["查看游戏状态", "查找可用路线"].map((example) => (
+              <button
+                key={example}
+                onClick={() => {
+                  setDraft(example);
+                  textarea.current?.focus();
+                }}
+              >
+                {example}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

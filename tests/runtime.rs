@@ -28,6 +28,38 @@ fn durable_submission_is_idempotent_and_conflicts_are_rejected() {
 }
 
 #[test]
+fn repeated_supplement_is_recorded_once_even_after_run_completion() {
+    let (_directory, journal) = journal();
+    let mut run = journal
+        .create("first", "conversation", "run-key", 1800)
+        .unwrap();
+    journal.save(&mut run, RunState::Deciding).unwrap();
+    journal
+        .input_once(&run.id, "supplement", "second", Some("input-key"))
+        .unwrap();
+    journal
+        .input_once(&run.id, "supplement", "second", Some("input-key"))
+        .unwrap();
+    assert!(
+        journal
+            .input_once(&run.id, "supplement", "different", Some("input-key"))
+            .is_err()
+    );
+    assert_eq!(
+        journal.conversation_messages("conversation").unwrap().len(),
+        2
+    );
+    journal.save(&mut run, RunState::Cancelled).unwrap();
+    journal
+        .input_once(&run.id, "supplement", "second", Some("input-key"))
+        .unwrap();
+    assert_eq!(
+        journal.conversation_messages("conversation").unwrap().len(),
+        2
+    );
+}
+
+#[test]
 fn structured_checkpoint_tracks_run_revision_and_pending_step() {
     let (_d, j) = journal();
     let mut run = j.create("goal", "c", "checkpoint", 1800).unwrap();
@@ -241,6 +273,97 @@ fn call(name: &str, args: Value) -> Value {
 }
 fn answer() -> Value {
     json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}],"usage":{"input_tokens":0,"output_tokens":0}})
+}
+
+#[test]
+fn agent_reads_a_live_api_only_after_loading_its_contract() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    backend.set_responses(vec![
+        call("bgi.api.describe", json!({"methodId":"bgi.ping"})),
+        call(
+            "bgi.api.read",
+            json!({"methodId":"bgi.ping","arguments":{}}),
+        ),
+        answer(),
+    ]);
+    let directory = tempfile::tempdir().unwrap();
+    let app = controller(&backend, &directory);
+    let run = ipc(
+        &app,
+        "run.submit",
+        json!({"prompt":"check bridge","clientKey":"api-read"}),
+    );
+    let terminal = wait(
+        &app,
+        run["id"].as_str().unwrap(),
+        &["answered", "failed", "needsReview"],
+    );
+    assert_eq!(terminal["state"], "answered");
+    let events = ipc(
+        &app,
+        "events.read",
+        json!({"conversationId":run["conversationId"],"after":0}),
+    );
+    assert!(events.to_string().contains("simulated"));
+    assert_eq!(backend.job_count(), 0);
+    app.shutdown();
+}
+
+#[test]
+fn agent_dynamic_api_write_requires_approval_and_tracks_a_job() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    backend.set_responses(vec![
+        call("bgi.api.describe", json!({"methodId":"mock.config"})),
+        call(
+            "bgi.api.invoke",
+            json!({"methodId":"mock.config","arguments":{}}),
+        ),
+        answer(),
+    ]);
+    let directory = tempfile::tempdir().unwrap();
+    let app = controller(&backend, &directory);
+    let run = ipc(
+        &app,
+        "run.submit",
+        json!({"prompt":"change test configuration","clientKey":"api-write"}),
+    );
+    approve_pending(&app, &run);
+    let terminal = wait(
+        &app,
+        run["id"].as_str().unwrap(),
+        &["succeeded", "failed", "needsReview"],
+    );
+    assert_eq!(terminal["state"], "succeeded");
+    assert_eq!(backend.job_count(), 1);
+    app.shutdown();
+}
+
+#[test]
+fn agent_plan_can_read_contract_then_submit_a_dependent_api_write() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    backend.set_responses(vec![
+        call("plan.update", json!({"goal":"update","steps":[
+            {"id":"describe","title":"read contract","tool":"bgi.api.describe","arguments":{"methodId":"mock.config"}},
+            {"id":"write","title":"apply change","tool":"bgi.api.invoke","arguments":{"methodId":"mock.config","arguments":{}},"dependsOn":["describe"]}
+        ]})),
+        answer(),
+    ]);
+    let directory = tempfile::tempdir().unwrap();
+    let app = controller(&backend, &directory);
+    let run = ipc(
+        &app,
+        "run.submit",
+        json!({"prompt":"change test configuration","clientKey":"api-plan"}),
+    );
+    approve_pending(&app, &run);
+    let terminal = wait(
+        &app,
+        run["id"].as_str().unwrap(),
+        &["succeeded", "failed", "needsReview"],
+    );
+    assert_eq!(terminal["state"], "succeeded");
+    assert_eq!(backend.job_count(), 1);
+    app.shutdown();
 }
 fn controller(backend: &MockBackend, d: &tempfile::TempDir) -> Arc<AppController> {
     fs::create_dir_all(d.path().join("capabilities")).unwrap();
@@ -507,6 +630,27 @@ fn cancelled_model_request_returns_promptly() {
     wait(&c, id, &["cancelled"]);
     assert!(start.elapsed() < Duration::from_millis(1000));
 }
+
+#[test]
+fn run_deadline_bounds_a_model_that_never_sends_headers() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    backend.set_faults(sleepy_doll::mock::MockFaults {
+        model_delay_ms: 5000,
+        ..Default::default()
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let controller = controller(&backend, &directory);
+    let started = std::time::Instant::now();
+    let run = ipc(
+        &controller,
+        "run.submit",
+        json!({"prompt":"test","clientKey":"deadline","durationSec":1}),
+    );
+    let finished = wait(&controller, run["id"].as_str().unwrap(), &["failed"]);
+    assert!(started.elapsed() < Duration::from_secs(4));
+    assert!(finished["error"].as_str().unwrap().contains("时限"));
+    controller.shutdown();
+}
 #[test]
 fn cancelled_job_is_confirmed_before_releasing_lease() {
     let backend = MockBackend::start("127.0.0.1:0").unwrap();
@@ -611,6 +755,85 @@ fn same_conversation_queue_waits_for_active_run() {
     assert_eq!(ipc(&c, "run.get", json!({"id":b["id"]}))["state"], "queued");
     ipc(&c, "run.cancel", json!({"id":id}));
     wait(&c, b["id"].as_str().unwrap(), &["answered"]);
+}
+
+#[test]
+fn event_long_poll_on_ipc_thread_times_out_without_panicking() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let controller = controller(&backend, &directory);
+    let worker = thread::spawn(move || {
+        let start = std::time::Instant::now();
+        let result = ipc(
+            &controller,
+            "events.read",
+            json!({"conversationId":"empty","after":0,"waitMs":40}),
+        );
+        assert!(start.elapsed() >= Duration::from_millis(30));
+        assert!(result["events"].as_array().unwrap().is_empty());
+        controller.shutdown();
+    });
+    worker
+        .join()
+        .expect("IPC long polling must not require a caller-owned Tokio runtime");
+}
+
+#[test]
+fn another_conversation_and_absent_event_subscriber_do_not_stop_a_run() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    backend.set_responses(vec![
+        call("user.ask", json!({"question":"continue?"})),
+        answer(),
+        answer(),
+    ]);
+    let directory = tempfile::tempdir().unwrap();
+    let controller = controller(&backend, &directory);
+    let first = ipc(
+        &controller,
+        "run.submit",
+        json!({"prompt":"first","conversationId":"first","clientKey":"background-one"}),
+    );
+    wait(
+        &controller,
+        first["id"].as_str().unwrap(),
+        &["awaitingUser"],
+    );
+    let second = ipc(
+        &controller,
+        "run.submit",
+        json!({"prompt":"second","conversationId":"second","clientKey":"background-two"}),
+    );
+    wait(&controller, second["id"].as_str().unwrap(), &["answered"]);
+    assert_eq!(
+        ipc(&controller, "run.get", json!({"id":first["id"]}))["state"],
+        "awaitingUser"
+    );
+    ipc(
+        &controller,
+        "run.input",
+        json!({"id":first["id"],"content":"continue"}),
+    );
+    wait(&controller, first["id"].as_str().unwrap(), &["answered"]);
+    let events = ipc(
+        &controller,
+        "events.read",
+        json!({"conversationId":"first","after":0}),
+    );
+    assert!(
+        events["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["kind"] == "assistant.completed")
+    );
+    assert_eq!(
+        ipc(&controller, "task.list", json!({}))
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    controller.shutdown();
 }
 #[test]
 fn resource_changes_invalidate_binding() {

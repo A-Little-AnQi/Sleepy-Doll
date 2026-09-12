@@ -40,15 +40,27 @@ impl BgiClient {
         self.request("GET", "/bridge/v1/state", None, None)
     }
     pub fn catalog(&self, query: &str) -> Result<Value> {
-        self.request("GET", &format!("/bridge/v1/catalog?q={query}"), None, None)
+        self.catalog_page(query, None, 0)
     }
-    pub fn describe(&self, method_id: &str) -> Result<Value> {
+    pub fn catalog_page(&self, query: &str, group: Option<&str>, offset: u64) -> Result<Value> {
+        let mut params = url::form_urlencoded::Serializer::new(String::new());
+        params
+            .append_pair("q", query)
+            .append_pair("limit", "50")
+            .append_pair("offset", &offset.to_string());
+        if let Some(group) = group.filter(|group| !group.is_empty()) {
+            params.append_pair("group", group);
+        }
         self.request(
             "GET",
-            &format!("/bridge/v1/catalog/{method_id}"),
+            &format!("/bridge/v1/catalog?{}", params.finish()),
             None,
             None,
         )
+    }
+    pub fn describe(&self, method_id: &str) -> Result<Value> {
+        let encoded: String = url::form_urlencoded::byte_serialize(method_id.as_bytes()).collect();
+        self.request("GET", &format!("/bridge/v1/catalog/{encoded}"), None, None)
     }
     pub fn job(&self, job_id: &str) -> Result<Value> {
         self.request("GET", &format!("/bridge/v1/jobs/{job_id}"), None, None)
@@ -63,7 +75,8 @@ impl BgiClient {
     }
     pub fn invoke(&self, method_id: &str, arguments: &Value) -> Result<Value> {
         let key = Uuid::new_v4().to_string();
-        self.request("POST", "/bridge/v1/invoke", Some(&json!({"requestId":key,"instanceId":self.config.instance_id,"methodId":method_id,"arguments":arguments,"execution":{"onDisconnect":"continue"}})), Some(&key))
+        let info = self.info()?;
+        self.request("POST", "/bridge/v1/invoke", Some(&json!({"requestId":key,"instanceId":info["instanceId"],"catalogVersion":info["catalogVersion"],"methodId":method_id,"arguments":arguments,"execution":{"onDisconnect":"continue"}})), Some(&key))
     }
 
     fn request(
@@ -98,7 +111,7 @@ impl BgiClient {
 }
 
 pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Result<()> {
-    let definitions: Vec<BridgeToolDefinition<'_>> = vec![
+    let mut definitions: Vec<BridgeToolDefinition<'_>> = vec![
         (
             "bgi.state.get",
             "读取 BGI 当前状态快照；只观测，不执行游戏动作。",
@@ -156,8 +169,27 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             },
         ),
     ];
+    definitions.extend([
+        ("bgi.api.search", "检索当前 BetterGI 全量接口的用途摘要。按任务关键词发现配置、状态与命令接口；结果包含可调用状态。选中接口后必须用 bgi.api.describe 阅读完整契约。", json!({"type":"object","properties":{"query":{"type":"string"},"group":{"type":"string"},"offset":{"type":"integer","minimum":0}},"required":["query"],"additionalProperties":false}), {
+            let client = client.clone();
+            Arc::new(move |a: &Value| client.catalog_page(a["query"].as_str().unwrap_or(""),a["group"].as_str(),a["offset"].as_u64().unwrap_or(0))) as BridgeToolFn
+        }),
+        ("bgi.api.describe", "读取某个已发现接口的完整 Agent 调用说明：用途、何时调用、前置条件、参数和返回结构、副作用、结果判定、回退方法及示例。不可调用项也有明确原因。", json!({"type":"object","properties":{"methodId":{"type":"string"}},"required":["methodId"],"additionalProperties":false}), {
+            let client = client.clone();
+            Arc::new(move |a: &Value| client.describe(a["methodId"].as_str().unwrap_or(""))) as BridgeToolFn
+        }),
+        ("bgi.api.read", "调用已阅读契约的只读接口，例如读取设置、检索命令或预览配置差异。拒绝写接口；参数必须符合接口 inputSchema，返回接口 result 对象。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object"}},"required":["methodId","arguments"],"additionalProperties":false}), {
+            Arc::new(move |_: &Value| Err(Error::Tool("该接口必须通过运行时的契约检查调用".into()))) as BridgeToolFn
+        }),
+        ("bgi.api.invoke", "调用已阅读契约的写接口，执行前绑定用户授权，使用幂等 Job 跟踪结果。配置修改应先 get_setting 和 preview_settings，再提交 planId；保存 changeId 用于回退。不得把命令返回视为游戏目标成功。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object"}},"required":["methodId","arguments"],"additionalProperties":false}), {
+            Arc::new(move |_: &Value| Err(Error::Tool("该接口必须通过运行时的授权与 Job 跟踪调用".into()))) as BridgeToolFn
+        }),
+    ]);
     for (name, description, schema, function) in definitions {
-        let execution = if matches!(name, "bgi.capability.invoke" | "bgi.job.cancel") {
+        let execution = if matches!(
+            name,
+            "bgi.capability.invoke" | "bgi.job.cancel" | "bgi.api.invoke"
+        ) {
             ToolExecution {
                 effect: ToolEffect::GameWrite,
                 concurrency: crate::tools::ConcurrencyMode::GameExclusive,

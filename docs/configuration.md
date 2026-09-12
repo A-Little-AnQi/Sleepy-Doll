@@ -45,6 +45,18 @@ SLEEPY_DOLL_CONFIG="$PWD/sleepy-doll.dev.config.json" cargo run --release
 `agent.skillDirectories`、`plugins.directories`、`storage.database`、`runtime.catalogDirectory`
 的相对路径都相对于配置文件所在目录解析。
 
+## BetterGI 连接
+
+BetterGI 连接可直接在 BetterGI 页面开关，改变后立即生效。开启时会准备注入桥，
+自动生成或复用 token，确认桥服务就绪后再注册 BGI 工具。保存为开启的连接在桌面启动时
+尝试恢复；BetterGI 重启或连接失败后可点击「重新连接」。注入地址仅支持本机 HTTP
+`127.0.0.1` 或 `localhost`。多实例时应先关闭多余实例。
+
+桥自己的 `bridge.config.json` 位于组件目录（发布版与 EXE 在同一目录），
+其中保存监听地址、token、方法分组和禁用列表。开关保留分组设置。
+关闭会禁用业务端点，但保留鉴权的状态/控制入口供再次开启，DLL 随 BetterGI 退出卸载；
+它不会停止已经启动的 BetterGI 任务。如果宿主不可达，界面会说明停用未获确认。
+
 ## 模型配置
 
 `models` 是可选模型列表，`activeModel` 是唯一入口。例如：
@@ -87,3 +99,25 @@ SLEEPY_DOLL_CONFIG="$PWD/sleepy-doll.dev.config.json" cargo run --release
 - `${ENV:...}` 由进程环境提供。插件拉起的 MCP 子进程只继承 `PATH`、`SystemRoot`、
   `WINDIR`、`TEMP`、`TMP`，读不到这些密钥。
 - 变量不存在时 `${ENV:X}` 会展开成空串，运行时才会以认证失败的形式暴露出来。
+
+## BetterGI 接口说明与配置恢复
+
+设置 → BetterGI → **接口目录**，直接读取桥的当前接口目录；页面与 Agent 使用同一份契约。
+第一层包含用途、调用时机、主要参数、执行方式、副作用、可用状态。详情提供完整 JSON Schema、
+示例、前置条件、返回值判定与回退边界。分组关闭或宿主空实现的接口仍可查阅，但不允许执行。
+目录只代表当前宿主发现的接口，不是源码中所有公开 C# 方法。
+
+Agent 使用 bgi.api.search 分页发现，bgi.api.describe 阅读当前版本说明，再通过 bgi.api.read
+或 bgi.api.invoke 调用。修改配置采用读取旧版本 → 预览差异 → 授权提交 → 回读核验；
+事务记录中的 changeId 可用于字段级回退。目标字段若已被用户再次修改，回退会拒绝覆盖。
+没有安全 JSON 契约的复合对象、只读属性及尚未适配联动处理器的属性只开放读取，并说明原因。
+
+配置事务在桥组件所在目录保存 config-change-*.json 恢复记录，包含原配置备份，使用当前
+Windows 用户的专有 ACL。记录含有敏感信息，不应上传、提交到 Git 或粘贴给模型。
+公开的接口结果仅显示脱敏差异。宿主命令执行前也保存配置检查点，但不能撤销外部通知、
+脚本文件修改或游戏进度。
+
+如果 BetterGI 因配置问题无法启动：完全退出所有 BetterGI 进程，在设置 → BetterGI →
+**恢复记录**中选择并确认备份。独立恢复组件核对安装位置、备份摘要和当前文件版本，
+先备份当前文件，再恢复所选记录；不会在宿主运行时覆盖配置。自定义配置目录不符合
+自动恢复范围时会明确拒绝，需要用户人工核对。恢复整个文件会恢复该时点的全部配置。

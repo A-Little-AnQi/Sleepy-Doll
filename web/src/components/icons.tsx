@@ -3,6 +3,49 @@
  * tells a first-time user nothing. */
 type IconProps = { className?: string };
 
+export function BrandIcon({ className }: IconProps) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 32 32"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M23.8 21.7A11.4 11.4 0 0 1 10.3 8.2 11.5 11.5 0 1 0 23.8 21.7Z"
+        fill="currentColor"
+      />
+      <path
+        d="m23 5 .9 3.1L27 9l-3.1.9L23 13l-.9-3.1L19 9l3.1-.9Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+export function SidebarIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="3" y="4" width="18" height="16" rx="3" />
+      <path d="M9 4v16" />
+    </Svg>
+  );
+}
+export function CloseIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="m6 6 12 12M18 6 6 18" />
+    </Svg>
+  );
+}
+export function SearchIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d="m16 16 4 4" />
+    </Svg>
+  );
+}
+
 function Svg({
   className,
   children,

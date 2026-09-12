@@ -285,6 +285,9 @@ impl Supervisor {
                 if let Err(e) = result
                     && !run.state.terminal()
                 {
+                    if let Error::Storage(storage) = &e {
+                        eprintln!("Run {} storage failure: {storage}", run.id);
+                    }
                     let unknown = s
                         .journal
                         .attempts(&run.id)
@@ -682,7 +685,7 @@ impl Supervisor {
                     Err(error)
                         if !emitted
                             && index + 1 < model_config.agent.fallback_models.len() + 1
-                            && matches!(error, Error::Http(_)) =>
+                            && matches!(error, Error::Http(_) | Error::Timeout(_)) =>
                     {
                         self.journal.emit(
                             run,
@@ -1312,6 +1315,120 @@ impl Supervisor {
                 )
             }
             "bgi.state.get" => bridge.get("/bridge/v1/state", cancel).await,
+            "bgi.api.search" => {
+                let query = {
+                    let mut query = url::form_urlencoded::Serializer::new(String::new());
+                    query
+                        .append_pair("q", a["query"].as_str().unwrap_or(""))
+                        .append_pair("limit", "30")
+                        .append_pair("offset", &a["offset"].as_u64().unwrap_or(0).to_string());
+                    if let Some(group) = a["group"].as_str() {
+                        query.append_pair("group", group);
+                    }
+                    query.finish()
+                };
+                bridge
+                    .get(&format!("/bridge/v1/catalog?{query}"), cancel)
+                    .await
+            }
+            "bgi.api.describe" => {
+                let id = a["methodId"].as_str().unwrap_or("");
+                let contract = bridge.describe(id, cancel).await?;
+                let version = contract["catalogVersion"]
+                    .as_str()
+                    .ok_or_else(|| Error::Tool("当前桥缺少版本化调用契约，请更新桥组件".into()))?;
+                if !contract["guide"].is_object() {
+                    return Err(Error::Tool(
+                        "当前桥没有完整 Agent 调用说明，请更新桥组件".into(),
+                    ));
+                }
+                exposed.insert(format!("bridge-api:{id}:{version}"));
+                Ok(contract)
+            }
+            "bgi.api.read" | "bgi.api.invoke" => {
+                let id = a["methodId"].as_str().unwrap_or("");
+                let contract = bridge.describe(id, cancel).await?;
+                let version = contract["catalogVersion"]
+                    .as_str()
+                    .ok_or_else(|| Error::Tool("桥接口缺少契约版本".into()))?;
+                if !exposed.contains(&format!("bridge-api:{id}:{version}")) {
+                    return Err(Error::Tool(
+                        "请先用 bgi.api.describe 阅读当前版本的完整调用说明".into(),
+                    ));
+                }
+                if contract["callable"] != true {
+                    return Err(Error::Tool(
+                        contract["unavailableReason"]
+                            .as_str()
+                            .unwrap_or("接口当前不可调用")
+                            .into(),
+                    ));
+                }
+                let arguments = &a["arguments"];
+                let issues = crate::tools::validate(arguments, &contract["inputSchema"], "$");
+                if !issues.is_empty() {
+                    return Err(Error::Tool(format!(
+                        "参数不符合接口契约：{}",
+                        json!(issues)
+                    )));
+                }
+                if call.name == "bgi.api.read" {
+                    if contract["effect"] != "readOnly" {
+                        return Err(Error::Tool(
+                            "只读入口拒绝写接口；请使用需要授权的 bgi.api.invoke".into(),
+                        ));
+                    }
+                    let info = bridge.get("/bridge/v1/info", cancel).await?;
+                    if info["catalogVersion"] != contract["catalogVersion"]
+                        || info["instanceId"] != contract["instanceId"]
+                    {
+                        return Err(Error::Tool("桥实例或接口契约已变化，请重新读取".into()));
+                    }
+                    let result = bridge.request("POST", "/bridge/v1/invoke", Some(&json!({
+                        "methodId":id,"arguments":arguments,"instanceId":info["instanceId"],"catalogVersion":version
+                    })), cancel).await?;
+                    Ok(result["result"].clone())
+                } else {
+                    if contract["effect"] == "readOnly" {
+                        return Err(Error::Tool("此接口只读，请使用 bgi.api.read".into()));
+                    }
+                    if current.runtime.permission_mode == permissions::PermissionMode::PlanOnly {
+                        return Err(Error::Tool(
+                            "当前为只读规划模式，不能修改配置或执行命令".into(),
+                        ));
+                    }
+                    let mut catalog = self.catalog.clone();
+                    catalog.capabilities.insert(
+                        id.into(),
+                        catalog::Capability {
+                            id: id.into(),
+                            method_id: id.into(),
+                            description: contract["summary"].as_str().unwrap_or(id).into(),
+                            catalog_version: version.into(),
+                            aliases: vec![],
+                            resource_fields: vec![],
+                            postconditions: vec![],
+                        },
+                    );
+                    let (binding, resources) = catalog.resolve(id, arguments)?;
+                    bridge
+                        .invoke(
+                            &self.journal,
+                            run,
+                            bridge::Invocation {
+                                authorization: &self.config,
+                                call_id: &call.id,
+                                binding: &binding,
+                                arguments,
+                                resources,
+                                catalog: &catalog,
+                            },
+                            policy,
+                            cancel,
+                        )
+                        .await
+                }
+            }
             "bgi.capability.search" => Ok(self.catalog.search(a["query"].as_str().unwrap_or(""))),
             "bgi.capability.describe" => {
                 let id = a["methodId"].as_str().unwrap_or("");
@@ -1566,7 +1683,7 @@ impl Supervisor {
                     self.journal.emit(
                         run,
                         "step.finished",
-                        json!({"id":step.id,"outcome":outcome}),
+                        json!({"id":step.id,"outcome":outcome,"planRevision":plan.revision}),
                     )?;
                     if matches!(outcome, "verifiedFailed" | "unknown") {
                         break;

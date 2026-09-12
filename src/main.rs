@@ -68,6 +68,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     sleepy_doll::config::seed(&config_path)?;
     let controller = Arc::new(AppController::load(&config_path)?);
+    if sleepy_doll::AppConfig::load(&config_path)?.bridge.enabled {
+        let startup = controller.clone();
+        thread::spawn(move || {
+            let _ = startup.handle(
+                "bridge.setEnabled",
+                json!({"enabled":true}),
+                Arc::new(|_, _| {}),
+            );
+        });
+    }
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     #[cfg(target_os = "windows")]
@@ -91,6 +101,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             dispatch_ipc(request, ipc_controller.clone(), ipc_proxy.clone())
         })
         .with_initialization_script("window.__SLEEPY_DOLL_DESKTOP__ = true;")
+        .with_navigation_handler(|destination| {
+            if is_application_url(&destination) {
+                return true;
+            }
+            // Markdown links open outside the privileged application WebView.
+            if url::Url::parse(&destination)
+                .is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
+            {
+                #[cfg(target_os = "windows")]
+                let _ = std::process::Command::new("explorer.exe")
+                    .arg(&destination)
+                    .spawn();
+                #[cfg(target_os = "linux")]
+                let _ = std::process::Command::new("xdg-open")
+                    .arg(&destination)
+                    .spawn();
+                #[cfg(target_os = "macos")]
+                let _ = std::process::Command::new("open").arg(&destination).spawn();
+            }
+            false
+        })
         .with_url("sleepy://localhost/")
         .with_devtools(cfg!(debug_assertions))
         .build(&window)?;
@@ -163,12 +194,8 @@ fn create_tray(
     for y in 0..32i32 {
         for x in 0..32i32 {
             let radius = (x - 16).pow(2) + (y - 16).pow(2);
-            if radius < 196 {
-                let color = if (x - 20).pow(2) + (y - 12).pow(2) > 100 {
-                    [240, 234, 220, 255]
-                } else {
-                    [48, 71, 62, 255]
-                };
+            if radius < 196 && (x - 20).pow(2) + (y - 12).pow(2) > 100 {
+                let color = [128, 128, 128, 255];
                 rgba[((y * 32 + x) * 4) as usize..((y * 32 + x) * 4 + 4) as usize]
                     .copy_from_slice(&color);
             }
@@ -186,6 +213,9 @@ fn dispatch_ipc(
     controller: Arc<AppController>,
     proxy: EventLoopProxy<UserEvent>,
 ) {
+    if !is_application_url(&request.uri().to_string()) {
+        return;
+    }
     let parsed = serde_json::from_str::<IpcRequest>(request.body());
     thread::spawn(move || match parsed {
         Ok(request) => {
@@ -208,6 +238,17 @@ fn dispatch_ipc(
             let _ = proxy.send_event(UserEvent::ToWeb(json!({"kind":"response","id":"unknown","ok":false,"error":{"code":"INVALID_IPC","message":error.to_string()}})));
         }
     });
+}
+
+fn is_application_url(value: &str) -> bool {
+    url::Url::parse(value).is_ok_and(|url| {
+        matches!(
+            (url.scheme(), url.host_str()),
+            ("sleepy", Some("localhost")) | ("http", Some("sleepy.localhost"))
+        ) && url.port().is_none()
+            && url.username().is_empty()
+            && url.password().is_none()
+    })
 }
 
 fn asset_response(request: Request<Vec<u8>>) -> Response<Vec<u8>> {

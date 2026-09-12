@@ -1,68 +1,78 @@
-/* Application shell: a fixed sidebar, a page header, and one scrolling body.
-   The previous shell positioned every control inside a 1586×992 SVG scene, so
-   nothing could reflow and nothing was a real widget. */
-
 .app-shell {
-  --sidebar-width: 250px;
+  --sidebar-width: 240px;
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   height: 100%;
-  background: var(--lunar-paper);
-  color: var(--lunar-ink);
-  font-family:
-    "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
-  transition: grid-template-columns 160ms ease;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--surface);
+  transition: grid-template-columns 0.18s ease;
 }
 .app-shell[data-collapsed="true"] {
-  --sidebar-width: 68px;
+  --sidebar-width: 0px;
 }
-
-/* ---------- 侧栏 ---------- */
 .app-sidebar {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: #142f67;
-  color: #e8eaf4;
-  border-right: 1px solid #0c1f45;
+  overflow: hidden;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+  transform: translateX(0);
+  opacity: 1;
+  transition:
+    transform var(--motion-base) var(--ease-enter),
+    opacity var(--motion-fast) var(--ease-standard);
 }
-
+.app-shell[data-collapsed="true"] .app-sidebar {
+  border: 0;
+  opacity: 0;
+  transform: translateX(-10px);
+  pointer-events: none;
+}
 .app-brand {
+  height: 68px;
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 14px 14px 13px;
-  border-bottom: 1px solid #ffffff1f;
+  gap: 9px;
+  padding: 0 16px;
+  flex-shrink: 0;
 }
-.app-brand-art {
-  flex: 0 0 42px;
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  border: 1px solid #ffffff2e;
-  background-color: #16336e;
-  background-image: url("../assets/moon-character-v5-feet.png");
-  background-size: 210%;
-  background-position: 50% 30%;
-  background-repeat: no-repeat;
+.brand-mark {
+  width: 27px;
+  height: 27px;
+  flex-shrink: 0;
 }
-.app-brand-text {
-  display: grid;
-  min-width: 0;
-}
-.app-brand-text strong {
+.app-brand strong {
   font-size: 15px;
-  letter-spacing: 0.2px;
+  letter-spacing: -0.4px;
+  font-weight: 650;
 }
-.app-brand-text small {
-  font-size: 12px;
-  color: #a8b3d4;
+.app-brand .icon-button {
+  margin-left: auto;
+  color: var(--muted);
 }
-
+.app-new {
+  margin: 6px 12px 16px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 8px;
+  text-align: left;
+  font-size: 13px;
+  box-shadow: 0 1px 2px #00000004;
+}
+.app-new:hover {
+  border-color: var(--border-strong);
+}
 .app-nav {
   display: grid;
-  gap: 2px;
-  padding: 10px 8px;
+  gap: 3px;
+  padding: 0 12px 18px;
 }
 .app-nav-item {
   display: flex;
@@ -71,282 +81,176 @@
   width: 100%;
   padding: 9px 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
-  color: #ccd5ee;
-  font: inherit;
-  font-size: 14px;
+  color: var(--secondary);
   text-align: left;
+  font-size: 13px;
 }
-.app-nav-item:hover {
-  background: #ffffff14;
-  color: #fff;
+.app-nav-item:hover,
+.app-conversations li button:hover {
+  background: var(--hover);
+  color: var(--text);
 }
 .app-nav-item.is-active {
-  background: #ffffff22;
-  color: #fff;
+  background: var(--selected);
+  color: var(--text);
   font-weight: 600;
 }
 .app-nav-icon {
-  flex: 0 0 20px;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.7;
+  stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
+  flex-shrink: 0;
 }
-
 .app-conversations {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  padding: 4px 8px 12px;
-  border-top: 1px solid #ffffff1a;
-  margin-top: 4px;
+  overflow: auto;
+  padding: 0 12px;
 }
 .app-section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 6px 6px;
-  font-size: 12px;
-  color: #a8b3d4;
-}
-.app-new {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 7px;
-  border: 1px solid #ffffff33;
-  border-radius: 999px;
-  background: transparent;
-  color: #dfe4f5;
-  font: inherit;
-  font-size: 12px;
-}
-.app-new:hover {
-  background: #ffffff1f;
-}
-.app-new-icon {
-  width: 13px;
-  height: 13px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.2;
-  stroke-linecap: round;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 12px 10px;
 }
 .app-conversations ul {
-  display: grid;
-  gap: 1px;
+  list-style: none;
   margin: 0;
   padding: 0;
-  list-style: none;
-}
-.app-conversations li button {
-  display: block;
-  width: 100%;
-  padding: 7px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #c6cfeb;
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.app-conversations li button:hover {
-  background: #ffffff14;
-  color: #fff;
-}
-.app-conversations-empty {
-  margin: 0;
-  padding: 6px 8px;
-  font-size: 12.5px;
-  color: #8d99bf;
 }
 
-.app-sidebar-foot {
-  padding: 8px;
-  border-top: 1px solid #ffffff1a;
+.app-conversations li button.is-current {
+  background: var(--selected);
+  color: var(--text);
 }
-.app-collapse {
+.app-conversations li button {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 7px 10px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 6px;
+  text-align: left;
+  background: transparent;
+  font-size: 12px;
+  color: var(--secondary);
+}
+.app-conversations li button > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.conversation-status {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text);
+  flex-shrink: 0;
+}
+.conversation-status.running {
+  animation: pulse 1.5s ease infinite;
+}
+.app-sidebar-foot {
+  display: grid;
+  gap: 4px;
+  margin: 12px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--border);
+}
+.app-connection {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: #a8b3d4;
-  font: inherit;
-  font-size: 12.5px;
+  font-size: 12px;
+  color: var(--secondary);
 }
-.app-collapse:hover {
-  background: #ffffff14;
-  color: #fff;
+.app-connection:hover {
+  background: var(--hover);
 }
-.app-collapse-icon {
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: transform 160ms ease;
+.app-connection small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
 }
-.app-shell[data-collapsed="true"] .app-collapse-icon {
-  transform: rotate(180deg);
-}
-
-/* ---------- 折叠态 ---------- */
-.app-shell[data-collapsed="true"] .app-brand {
-  justify-content: center;
-  padding-inline: 0;
-}
-.app-shell[data-collapsed="true"] .app-brand-text,
-.app-shell[data-collapsed="true"] .app-conversations,
-.app-shell[data-collapsed="true"] .app-collapse span,
-.app-shell[data-collapsed="true"] .app-nav-item > span {
-  display: none;
-}
-.app-shell[data-collapsed="true"] .app-nav-item,
-.app-shell[data-collapsed="true"] .app-collapse {
-  justify-content: center;
-  padding-inline: 0;
-}
-
-/* ---------- 主区 ---------- */
 .app-main {
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  min-width: 0;
-  background: var(--lunar-paper);
+  overflow: hidden;
 }
 .app-header {
+  height: 64px;
+  flex-shrink: 0;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 16px 24px 15px;
-  border-bottom: 1px solid #ddd0ba;
-  background: var(--lunar-card);
+  padding: 0 30px;
+  border-bottom: 1px solid var(--border);
 }
 .app-header-title {
-  min-width: 0;
-}
-.app-header-title h1 {
-  margin: 0;
-  font-size: 19px;
-}
-.app-header-title p {
-  max-width: 68ch;
-  margin: 5px 0 0;
-  font-size: 13px;
-  line-height: 1.6;
-  color: #6d6459;
-}
-.app-header-status {
   display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+}
+.app-header h1 {
+  font-size: 13px;
+  font-weight: 550;
+  margin: 0;
 }
 .app-model {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  color: #6d6459;
+  width: 220px;
 }
-.app-model select {
-  max-width: 210px;
-  padding: 6px 9px;
-  border: 1px solid #c9b695;
-  border-radius: 7px;
-  background: #fff;
-  color: var(--lunar-ink);
-  font: inherit;
-  font-size: 13.5px;
+.app-model [data-ui="select-trigger"] {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  font-size: 12px;
 }
-.app-bridge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid #cbbda6;
-  border-radius: 999px;
-  background: #fff;
-  color: #6d6459;
-  font: inherit;
-  font-size: 12.5px;
+.app-model [data-ui="select-trigger"]:hover {
+  background: var(--hover);
 }
-.app-bridge-icon {
-  width: 15px;
-  height: 15px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.app-bridge.is-ok {
-  border-color: #93bb9f;
-  color: #2c6440;
-}
-.app-bridge.is-bad {
-  border-color: #d0a3a7;
-  color: #8b3540;
-}
-.app-bridge:hover {
-  background: #f4ece0;
-}
-
 .app-banner {
   margin: 0;
-  padding: 10px 24px;
-  background: #f6e2e3;
-  color: #8a3444;
-  font-size: 13.5px;
+  padding: 10px 30px;
+  background: var(--subtle);
+  font-size: 13px;
 }
-
 .app-body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
 }
-
-/* ---------- 窄窗口：强制图标栏，保证内容区宽度 ---------- */
-@media (max-width: 900px) {
+.app-view {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.app-view > .page-sheet {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+@media (max-width: 1000px) {
   .app-shell {
-    --sidebar-width: 68px;
-  }
-  .app-shell .app-brand {
-    justify-content: center;
-    padding-inline: 0;
-  }
-  .app-shell .app-brand-text,
-  .app-shell .app-conversations,
-  .app-shell .app-collapse span,
-  .app-shell .app-nav-item > span {
-    display: none;
-  }
-  .app-shell .app-nav-item,
-  .app-shell .app-collapse {
-    justify-content: center;
-    padding-inline: 0;
+    --sidebar-width: 210px;
   }
   .app-header {
-    flex-direction: column;
-    gap: 12px;
+    padding: 0 22px;
   }
 }

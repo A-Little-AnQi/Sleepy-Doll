@@ -16,8 +16,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
       - run: npm ci
       - run: npm run check
+      - run: npm test
+      - run: dotnet run --project bgi-bridge/ContractTests.csproj
       - run: cargo fmt --all -- --check
       # `mock` is a non-default feature, so the tests that exercise it must ask
       # for it explicitly; the helper crates below still build without desktop.

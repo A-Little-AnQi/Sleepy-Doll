@@ -10,6 +10,8 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("HTTP error: {0}")]
     Http(String),
+    #[error("request timed out: {0}")]
+    Timeout(String),
     #[error("model protocol error: {0}")]
     ModelProtocol(String),
     #[error("tool error: {0}")]
@@ -24,7 +26,11 @@ pub enum Error {
 
 impl From<reqwest::Error> for Error {
     fn from(value: reqwest::Error) -> Self {
-        Self::Http(value.without_url().to_string())
+        if value.is_timeout() {
+            Self::Timeout("等待服务响应超时，请检查连接或调整响应超时设置。".into())
+        } else {
+            Self::Http(value.without_url().to_string())
+        }
     }
 }
 
@@ -40,7 +46,9 @@ impl Error {
     pub fn user_message(&self) -> String {
         match self {
             Self::ModelProtocol(_) => "模型响应没有完整结束，未执行这轮工具调用。".into(),
+            Self::Http(message) if message.starts_with("模型") => message.clone(),
             Self::Http(_) => "连接中断或服务未响应，请稍后核对运行结果。".into(),
+            Self::Timeout(message) => message.clone(),
             Self::Storage(_) => "本地记录保存失败，已停止派发新动作。".into(),
             Self::Cancelled => "已停止。".into(),
             Self::Io(_) => "本地文件或插件进程无法访问，请检查路径与权限。".into(),

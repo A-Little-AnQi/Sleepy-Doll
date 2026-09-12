@@ -1,0 +1,333 @@
+import { useEffect, useRef, useState } from "react";
+import { api } from "../api";
+import { Select } from "./Select";
+import { ChevronIcon, SearchIcon } from "./icons";
+import type { BridgeCatalog, BridgeMethod, BridgeMethodDetail } from "../types";
+import "./BridgeApiExplorer.css";
+
+const groups: Record<string, string> = {
+  lifecycle: "状态与诊断",
+  settings: "配置",
+  setting: "配置项",
+  command: "宿主命令",
+  catalog: "目录",
+};
+export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
+  const [query, setQuery] = useState("");
+  const [group, setGroup] = useState("");
+  const [catalog, setCatalog] = useState<BridgeCatalog>();
+  const [items, setItems] = useState<BridgeMethod[]>([]);
+  const [selected, setSelected] = useState<BridgeMethodDetail>();
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(true);
+  const generation = useRef(0);
+  const selectionGeneration = useRef(0);
+  const root = useRef<HTMLDivElement>(null);
+  const listScroll = useRef(0);
+  useEffect(() => {
+    const revision = ++generation.current;
+    const timer = setTimeout(() => {
+      setBusy(true);
+      setError("");
+      void api
+        .bridgeCatalog(query, group)
+        .then((result) => {
+          if (revision !== generation.current) return;
+          setCatalog(result);
+          setItems(result.items ?? result.methods ?? []);
+        })
+        .catch((reason) => {
+          if (revision === generation.current) setError(String(reason));
+        })
+        .finally(() => {
+          if (revision === generation.current) setBusy(false);
+        });
+    }, 200);
+    return () => {
+      clearTimeout(timer);
+      generation.current++;
+    };
+  }, [query, group]);
+  const inspect = async (methodId: string) => {
+    const revision = ++selectionGeneration.current;
+    const scroller = root.current?.closest<HTMLElement>(".settings-content");
+    listScroll.current = scroller?.scrollTop ?? 0;
+    setError("");
+    try {
+      const detail = await api.bridgeDescribe(methodId);
+      if (revision === selectionGeneration.current) {
+        setSelected(detail);
+        requestAnimationFrame(() =>
+          scroller?.scrollTo({ top: 0, behavior: "smooth" }),
+        );
+      }
+    } catch (reason) {
+      if (revision === selectionGeneration.current) setError(String(reason));
+    }
+  };
+  const more = async () => {
+    const revision = generation.current;
+    if (catalog?.nextOffset == null) return;
+    setBusy(true);
+    try {
+      const result = await api.bridgeCatalog(query, group, catalog.nextOffset);
+      if (revision !== generation.current) return;
+      setCatalog(result);
+      setItems((current) => [
+        ...current,
+        ...(result.items ?? result.methods ?? []),
+      ]);
+    } catch (reason) {
+      if (revision === generation.current) setError(String(reason));
+    } finally {
+      if (revision === generation.current) setBusy(false);
+    }
+  };
+  const guide = selected?.guide;
+  return (
+    <div className="bridge-api-explorer" ref={root}>
+      <div className="bridge-api-heading">
+        <button
+          className="subtle-action"
+          onClick={() => {
+            if (selected) {
+              setSelected(undefined);
+              selectionGeneration.current++;
+              requestAnimationFrame(() =>
+                root.current
+                  ?.closest<HTMLElement>(".settings-content")
+                  ?.scrollTo({ top: listScroll.current, behavior: "smooth" }),
+              );
+            } else onBack();
+          }}
+        >
+          <ChevronIcon className="button-icon" />
+          {selected ? "接口目录" : "BetterGI"}
+        </button>
+        <span className="muted">
+          {catalog && Number.isFinite(catalog.total)
+            ? catalog.total + " 个匹配接口"
+            : "当前宿主接口"}
+        </span>
+      </div>
+      {error && (
+        <div className="inline-error" role="alert">
+          {error}
+        </div>
+      )}
+      {selected ? (
+        <article className="bridge-api-detail">
+          <header>
+            <h2>{selected.displayName}</h2>
+            <code>{selected.methodId}</code>
+            <p>{guide?.purpose ?? selected.summary}</p>
+            <span className="tag">
+              {selected.callable ? "可调用" : "当前不可调用"}
+            </span>
+            {selected.unavailableReason && (
+              <p className="muted">{selected.unavailableReason}</p>
+            )}
+          </header>
+          {guide ? (
+            <>
+              <section>
+                <h3>何时调用</h3>
+                <ul>
+                  {guide.whenToUse.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </section>
+              <section>
+                <h3>前置条件</h3>
+                <ul>
+                  {guide.preconditions.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </section>
+            </>
+          ) : (
+            <p className="notice">此桥版本尚未提供完整 Agent 调用说明。</p>
+          )}
+          <section>
+            <h3>参数</h3>
+            {Object.keys(selected.inputSchema?.properties ?? {}).length ? (
+              <div className="bridge-api-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>参数</th>
+                      <th>类型</th>
+                      <th>必填</th>
+                      <th>作用</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(selected.inputSchema.properties ?? {}).map(
+                      ([name, schema]) => (
+                        <tr key={name}>
+                          <td>
+                            <code>{name}</code>
+                          </td>
+                          <td>{schema.type ?? "见约束"}</td>
+                          <td>
+                            {selected.inputSchema.required?.includes(name)
+                              ? "是"
+                              : "否"}
+                          </td>
+                          <td>{schema.description ?? "见完整参数约束"}</td>
+                        </tr>
+                      ),
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p>无需参数，传入空对象。</p>
+            )}
+            <details>
+              <summary>完整参数约束</summary>
+              <pre>{JSON.stringify(selected.inputSchema, null, 2)}</pre>
+            </details>
+          </section>
+          {guide && (
+            <>
+              <section>
+                <h3>返回值与结果判定</h3>
+                <p>{guide.resultMeaning}</p>
+                <p>{guide.verification}</p>
+                <details>
+                  <summary>返回结构</summary>
+                  <pre>{JSON.stringify(selected.outputSchema, null, 2)}</pre>
+                </details>
+              </section>
+              <section>
+                <h3>副作用与回退</h3>
+                <ul>
+                  {guide.sideEffects.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+                <p>{guide.rollback}</p>
+              </section>
+              <section>
+                <h3>调用示例</h3>
+                {guide.examples.map((example, index) => (
+                  <pre key={index}>
+                    {JSON.stringify(
+                      { methodId: selected.methodId, arguments: example },
+                      null,
+                      2,
+                    )}
+                  </pre>
+                ))}
+              </section>
+              <footer className="muted">
+                说明来源：{guide.documentationSource}
+                {guide.sourceReference ? " · " + guide.sourceReference : ""}
+              </footer>
+            </>
+          )}
+          {selected.errors?.length ? (
+            <details>
+              <summary>错误码</summary>
+              <p>{selected.errors.join(" · ")}</p>
+            </details>
+          ) : null}
+        </article>
+      ) : (
+        <>
+          <div className="page-title">
+            <h2>接口目录</h2>
+          </div>
+          <div className="list-toolbar">
+            <label className="search-field">
+              <SearchIcon />
+              <input
+                aria-label="搜索接口"
+                placeholder="按用途、关键词或接口名搜索"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </label>
+            <div className="bridge-api-group">
+              <Select
+                label="接口分类"
+                value={group}
+                onChange={setGroup}
+                options={[
+                  { value: "", label: "全部分类" },
+                  ...(catalog?.groups ?? []).map((entry) => ({
+                    value: entry.id,
+                    label: (groups[entry.id] ?? entry.id) + " · " + entry.count,
+                  })),
+                ]}
+              />
+            </div>
+          </div>
+          <div className="bridge-api-list">
+            {items.map((item) => (
+              <button
+                key={item.methodId}
+                className="bridge-api-row"
+                onClick={() => void inspect(item.methodId)}
+              >
+                <span>
+                  <strong>{item.displayName ?? item.methodId}</strong>
+                  <code>{item.methodId}</code>
+                  <p>{item.summary}</p>
+                  {item.whenToUse?.[0] && (
+                    <small className="bridge-api-use">
+                      适用：{item.whenToUse[0]}
+                    </small>
+                  )}
+                  {!!item.parameters?.length && (
+                    <small>
+                      参数：
+                      {item.parameters
+                        .map(
+                          (parameter) =>
+                            parameter.name +
+                            (parameter.required ? "（必填）" : "（可选）") +
+                            " — " +
+                            parameter.description,
+                        )
+                        .join("；")}
+                    </small>
+                  )}
+                </span>
+                <span className="tag">
+                  {item.callable
+                    ? item.effect === "readOnly"
+                      ? "只读"
+                      : "有副作用"
+                    : "不可调用"}
+                </span>
+              </button>
+            ))}
+          </div>
+          {!busy && !items.length && (
+            <p className="empty-note">
+              未找到接口。需要已加载的桥才能读取当前宿主目录。
+            </p>
+          )}
+          {busy && (
+            <p className="muted" role="status">
+              读取目录中…
+            </p>
+          )}
+          {catalog?.nextOffset != null && (
+            <button
+              className="secondary-action"
+              disabled={busy}
+              onClick={() => void more()}
+            >
+              加载更多
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,43 @@
+.bridge-recovery {
+  display: grid;
+  gap: 22px;
+}
+
+.recovery-list {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.recovery-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.recovery-row:last-child {
+  border-bottom: 0;
+}
+
+.recovery-row > div {
+  min-width: 0;
+}
+
+.recovery-row strong {
+  font-size: 13px;
+}
+
+.recovery-row p {
+  margin: 8px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  color: var(--secondary);
+}
+
+.recovery-row small {
+  color: var(--muted);
+  font-size: 11px;
+}

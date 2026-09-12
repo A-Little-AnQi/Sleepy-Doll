@@ -3,8 +3,8 @@
 面向 BetterGI（BGI）的本地桌面 Agent。借鉴 Codex 的运行方式，把能力发现、状态观测、任务恢复
 和结果验证对齐 BGI 场景。
 
-本仓库只实现外部 Agent，不修改 BetterGI 本体。BGI 侧需要按
-[实施总览](./docs/bgi-implementation-plan.md) 提供 `/bridge/v1` HTTP/JSON 接口。
+通过随附的注入桥连接原版 BetterGI，无需分发改版宿主。桥提供本机 `/bridge/v1`
+接口，连接开关位于界面的 BetterGI 页面。
 
 ## 能做什么
 
@@ -18,18 +18,21 @@
 
 ## 快速开始
 
-需要 Rust stable（edition 2024）与 Node.js 22+。
+需要 Rust stable（edition 2024）、Node.js 22+、.NET 8 SDK 和 Visual Studio 2022 C++ Build Tools。
 
 ```bash
 npm ci
-npm run check
-
-cargo run --release          # 使用 <可执行文件目录>/user/config.json
+build-desktop.cmd            # 构建界面、桌面程序与注入桥
 ```
 
 首次启动会把 `sleepy-doll.config.example.json` 写成 `user/config.json`，模型密钥、会话
 数据库和运行事件都只写在这个目录下。解析顺序、字段说明和密钥处理见
 [配置与数据存放](./docs/configuration.md)。
+
+运行 `target/release/sleepy-doll.exe`，接受启动时的 Windows 管理员权限提示。
+先启动 BetterGI，再到 BetterGI 页面打开「连接 BetterGI」。地址默认 `127.0.0.1:3499`，
+凭据自动配置。关闭后桥拒绝新操作；已启动的 BetterGI 任务可能继续运行。
+BetterGI 重启后点击「重新连接」。分发时保留 EXE 同目录中的桥组件文件。
 
 要在浏览器里离线调试，用 Mock Backend：
 

@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod app;
 pub mod bgi;
+pub mod bridge_control;
 pub mod config;
 pub mod error;
 pub mod mcp;

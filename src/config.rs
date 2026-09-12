@@ -289,6 +289,19 @@ impl AppConfig {
         })
     }
 
+    pub fn set_bridge(path: &Path, bridge: &BridgeConfig) -> Result<()> {
+        update_raw(path, |value| {
+            let raw_token = value["bridge"]["token"].clone();
+            let mut resolved_token = raw_token.clone();
+            expand_env(&mut resolved_token)?;
+            value["bridge"] = serde_json::to_value(bridge)?;
+            if resolved_token == value["bridge"]["token"] {
+                value["bridge"]["token"] = raw_token;
+            }
+            Ok(())
+        })
+    }
+
     pub fn save_model(path: impl AsRef<Path>, input: &serde_json::Value) -> Result<()> {
         update_raw(path.as_ref(), |value| {
             let id = input["id"]
@@ -301,7 +314,19 @@ impl AppConfig {
             let existing = models
                 .iter_mut()
                 .find(|model| model["id"].as_str() == Some(id));
+            let timeout = input
+                .get("timeoutMs")
+                .map(|value| {
+                    value
+                        .as_u64()
+                        .filter(|value| (1000..=600_000).contains(value))
+                        .ok_or_else(|| Error::Config("响应超时必须在 1 到 600 秒之间".into()))
+                })
+                .transpose()?;
             if let Some(model) = existing {
+                if let Some(timeout) = timeout {
+                    model["options"]["timeoutMs"] = serde_json::json!(timeout);
+                }
                 for field in ["name", "protocol", "model", "baseUrl"] {
                     model[field] = input[field].clone();
                 }
@@ -317,7 +342,7 @@ impl AppConfig {
                     "baseUrl": input["baseUrl"],
                     "apiKey": input["apiKey"],
                     "headers": {},
-                    "options": {}
+                    "options": {"timeoutMs":timeout.unwrap_or(120_000)}
                 }));
             }
             Ok(())
@@ -509,7 +534,7 @@ fn update_raw(
     Ok(())
 }
 
-fn atomic_write(path: &Path, value: &serde_json::Value) -> Result<()> {
+pub(crate) fn atomic_write(path: &Path, value: &serde_json::Value) -> Result<()> {
     use std::io::Write;
     // The suffix is appended rather than substituted so the name still ends in
     // `.json.<id>.tmp`, which is what the ignore rules match on.

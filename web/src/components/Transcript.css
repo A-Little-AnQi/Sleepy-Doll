@@ -1,0 +1,247 @@
+.message-turn {
+  min-width: 0;
+}
+
+.message-turn.user {
+  align-self: flex-end;
+  max-width: 82%;
+}
+
+.message-turn.assistant {
+  display: grid;
+  gap: 12px;
+}
+
+.message-identity {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.assistant-avatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--subtle);
+}
+
+.assistant-avatar svg {
+  width: 19px;
+  height: 19px;
+}
+
+.message-content {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.reply-copy {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  opacity: 0;
+}
+
+.message-turn:hover .reply-copy,
+.reply-copy:focus-visible {
+  opacity: 1;
+}
+
+.activity-group {
+  width: fit-content;
+  max-width: 100%;
+  color: var(--secondary);
+}
+
+.activity-group > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 3px 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.activity-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.activity-check,
+.activity-expand {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+}
+
+.activity-expand {
+  transform: rotate(-90deg);
+  color: var(--muted);
+}
+
+.activity-group[open] .activity-expand {
+  transform: rotate(90deg);
+}
+
+.activity-outcome {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.activity-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-message img,
+.user-message img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 8px;
+}
+
+.activity-detail {
+  margin: 6px 0 8px 20px;
+  padding: 12px;
+  width: min(620px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--subtle);
+}
+
+.activity-item + .activity-item {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.activity-item strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.activity-item details + details {
+  margin-top: 8px;
+}
+
+.activity-item pre {
+  max-height: 240px;
+  overflow: auto;
+}
+
+.activity-spinner {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border: 1.5px solid var(--border-strong);
+  border-top-color: var(--secondary);
+  border-radius: 50%;
+  animation: activity-spin 0.9s linear infinite;
+}
+
+.response-phase {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.response-phase time {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+@keyframes activity-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.user-message {
+  padding: 11px 17px;
+  background: var(--hover);
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.assistant-message {
+  font-size: 14px;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+
+.assistant-message > p:first-child,
+.user-message > p:first-child {
+  margin-top: 0;
+}
+
+.assistant-message > p:last-child,
+.user-message > p:last-child {
+  margin-bottom: 0;
+}
+
+.assistant-message h1,
+.assistant-message h2 {
+  font-size: 20px;
+}
+
+.assistant-message h3 {
+  font-size: 16px;
+}
+
+.assistant-message code {
+  font-size: 12px;
+  background: var(--hover);
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+
+.assistant-message pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.assistant-message table {
+  display: block;
+  overflow: auto;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.assistant-message th,
+.assistant-message td {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.assistant-message blockquote {
+  border: 1px solid var(--border);
+  margin: 16px 0;
+  padding: 0 18px;
+  border-radius: 8px;
+}
+
+.assistant-message:hover .message-copy,
+.message-copy:focus-visible {
+  opacity: 1;
+}

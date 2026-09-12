@@ -1,31 +1,15 @@
-import { useState } from "react";
-
+import { useEffect, useState } from "react";
 import { api } from "../api";
-import { AlertIcon, CheckIcon, RefreshIcon } from "../components/icons";
+import {
+  BridgeIcon,
+  ChevronIcon,
+  HistoryIcon,
+  RefreshIcon,
+} from "../components/icons";
 import type { Bootstrap } from "../types";
-
-function summarize(value: unknown) {
-  const root =
-    value && typeof value === "object"
-      ? (value as Record<string, unknown>)
-      : {};
-  const position =
-    root.position && typeof root.position === "object"
-      ? (root.position as Record<string, unknown>)
-      : {};
-  const runtime =
-    root.runtime && typeof root.runtime === "object"
-      ? (root.runtime as Record<string, unknown>)
-      : {};
-  return {
-    position:
-      typeof position.value === "string" && position.value.trim()
-        ? position.value
-        : "",
-    busy: Boolean(runtime.activeJobId),
-  };
-}
-
+import { BridgeApiExplorer } from "../components/BridgeApiExplorer";
+import { BridgeRecovery } from "../components/BridgeRecovery";
+import "./BridgePage.css";
 export function BridgePage({
   bootstrap,
   reload,
@@ -33,116 +17,173 @@ export function BridgePage({
   bootstrap: Bootstrap;
   reload(): Promise<void>;
 }) {
-  const [state, setState] = useState<unknown>();
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [state, setState] = useState<unknown>();
+  const [showCatalog, setShowCatalog] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
   const bridge = bootstrap.bridge;
-  const summary = state ? summarize(state) : undefined;
-
-  const inspect = async () => {
-    setLoading(true);
+  useEffect(() => {
+    if (!bridge.enabled || busy) return;
+    const timer = setInterval(() => void reload(), 5000);
+    return () => clearInterval(timer);
+  }, [bridge.enabled, busy, reload]);
+  const toggle = async (enabled: boolean) => {
+    setBusy(true);
     setError("");
+    setNotice("");
+    setState(undefined);
     try {
-      const result = await api.bridgeState();
-      setState(result);
-      await reload();
+      const result = await api.setBridgeEnabled(enabled);
+      if (result.warning) setNotice(result.warning);
     } catch (reason) {
-      setState(undefined);
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(String(reason));
     } finally {
-      setLoading(false);
+      await reload();
+      setBusy(false);
     }
   };
-
-  // Every state explains what to do next. The previous version greyed the
-  // button out and left the reason in `bridge.error`, unread.
-  const status = !bridge.enabled
-    ? {
-        tone: "is-off",
-        title: "还没有开启 BetterGI 连接",
-        body: `Sleepy Doll 目前不会读取游戏，也不会执行任何操作。要开启它，在配置文件里把 bridge 段的 enabled 改成 true，并填上 BetterGI 那边的地址（当前填的是 ${bridge.baseUrl}）。`,
-      }
-    : bridge.connected
-      ? {
-          tone: "is-ok",
-          title: "已经连上 BetterGI",
-          body: "可以读取游戏状态，也可以在征得你同意后执行操作。",
-        }
-      : {
-          tone: "is-bad",
-          title: "配置里开了，但连不上 BetterGI",
-          body: `Sleepy Doll 正在往 ${bridge.baseUrl} 发请求。请确认 BetterGI 已经启动、并且开启了对应的远程接口。`,
-        };
-
+  if (showCatalog)
+    return <BridgeApiExplorer onBack={() => setShowCatalog(false)} />;
+  if (showRecovery)
+    return <BridgeRecovery onBack={() => setShowRecovery(false)} />;
+  const connectionLabel = busy
+    ? "连接中"
+    : bridge.enabled && bridge.connected
+      ? "已连接"
+      : bridge.enabled
+        ? "连接断开"
+        : "未启用";
   return (
     <div className="page-sheet bridge-page">
-      <section className={`status-card ${status.tone}`}>
-        <div className="status-card-head">
-          {status.tone === "is-ok" ? (
-            <CheckIcon className="status-icon" />
-          ) : (
-            <AlertIcon className="status-icon" />
-          )}
-          <h2>{status.title}</h2>
+      <header className="bridge-overview" data-motion="panel">
+        <div>
+          <span className="bridge-eyebrow">本地连接</span>
+          <h2>BetterGI</h2>
+          <p>管理宿主连接、接口契约和可恢复的配置变更。</p>
         </div>
-        <p>{status.body}</p>
-        {bridge.error ? (
-          <p className="status-detail">
-            BetterGI 返回的错误：<code>{bridge.error}</code>
-          </p>
-        ) : null}
-      </section>
-
-      <section className="page-block">
-        <div className="block-head">
-          <h2>读取当前画面</h2>
+        <span
+          className={
+            "bridge-connection-state" +
+            (bridge.connected ? " is-connected" : "")
+          }
+        >
+          <i aria-hidden="true" />
+          {connectionLabel}
+        </span>
+      </header>
+      {bridge.simulated && (
+        <p className="notice">当前显示模拟数据，不代表真实 BetterGI 状态。</p>
+      )}
+      <section className="bridge-connection-card" data-motion="panel">
+        <div className="bridge-connection-row">
+          <div>
+            <strong>连接 BetterGI</strong>
+            <span>启动宿主后加载本地桥；关闭时拒绝新的操作。</span>
+          </div>
           <button
-            type="button"
-            className="primary-action"
-            disabled={!bridge.enabled || loading}
-            title={
-              bridge.enabled ? undefined : "BetterGI 连接未开启，先在配置里启用"
-            }
-            onClick={() => void inspect()}
+            className={`switch ${bridge.enabled ? "on" : ""}`}
+            role="switch"
+            aria-label="启用 BetterGI 连接"
+            aria-checked={bridge.enabled}
+            disabled={busy}
+            onClick={() => void toggle(!bridge.enabled)}
+          />
+        </div>
+        <div className="bridge-endpoint">
+          <span>本地端点</span>
+          <code>{bridge.baseUrl}</code>
+        </div>
+      </section>
+      <div className="bridge-feature-grid" data-motion="panel">
+        <button className="bridge-feature" onClick={() => setShowCatalog(true)}>
+          <BridgeIcon />
+          <span>
+            <strong>接口目录</strong>
+            <small>按用途查阅参数、影响、验证与回退说明</small>
+          </span>
+          <ChevronIcon />
+        </button>
+        <button
+          className="bridge-feature"
+          onClick={() => setShowRecovery(true)}
+        >
+          <HistoryIcon />
+          <span>
+            <strong>配置恢复</strong>
+            <small>查看事务记录，在宿主退出后恢复备份</small>
+          </span>
+          <ChevronIcon />
+        </button>
+      </div>
+      {(error || notice) && (
+        <div className="inline-error" role="alert">
+          {error || notice}
+        </div>
+      )}
+      {bridge.enabled && !bridge.connected && !busy && (
+        <section className="page-block">
+          <p className="muted">启动 BetterGI 后重新连接。</p>
+          {bridge.error && (
+            <details>
+              <summary>连接详情</summary>
+              <pre>{bridge.error}</pre>
+            </details>
+          )}
+          <div>
+            <button
+              className="secondary-action"
+              onClick={() => void toggle(true)}
+            >
+              <RefreshIcon className="button-icon" />
+              重新连接
+            </button>
+          </div>
+        </section>
+      )}
+      <section className="bridge-status-section" data-motion="panel">
+        <div className="block-head">
+          <div>
+            <h2>运行状态</h2>
+            <p>按需读取一次，不在后台持续打扰宿主。</p>
+          </div>
+          <button
+            className="secondary-action"
+            disabled={busy || !bridge.connected}
+            onClick={() => {
+              setBusy(true);
+              setError("");
+              void api
+                .bridgeState()
+                .then(setState)
+                .catch((reason) => setError(String(reason)))
+                .finally(() => {
+                  setBusy(false);
+                  void reload();
+                });
+            }}
           >
             <RefreshIcon className="button-icon" />
-            {loading ? "正在读取…" : "读取当前画面"}
+            刷新
           </button>
         </div>
-        <p className="muted">
-          向 BetterGI 要一次当前游戏状态。它不会做任何操作。
-        </p>
-
-        {error ? (
-          <div className="inline-error" role="alert">
-            <strong>读取失败</strong>
-            <span>{error}</span>
-            <span className="muted">
-              确认游戏在前台、BetterGI 正在运行，然后重试。
-            </span>
+        {state ? (
+          <pre>{JSON.stringify(state, null, 2)}</pre>
+        ) : (
+          <div className="bridge-state-empty">
+            <BridgeIcon />
+            <span>{bridge.connected ? "尚未读取" : "当前未连接"}</span>
           </div>
-        ) : null}
-
-        {summary ? (
-          <div className="state-view" aria-live="polite">
-            <h3>读到的内容</h3>
-            <p>
-              {summary.position
-                ? `当前位置：${summary.position}`
-                : "没能识别出当前位置。"}
-            </p>
-            <p>
-              {summary.busy
-                ? "BetterGI 那边有一项操作正在运行。"
-                : "当前没有正在运行的操作。"}
-            </p>
-            <details>
-              <summary>查看完整返回</summary>
-              <pre>{JSON.stringify(state, null, 2)}</pre>
-            </details>
-          </div>
-        ) : null}
+        )}
       </section>
+      <details className="bridge-lifecycle">
+        <summary>组件生命周期</summary>
+        <p className="field-help">
+          关闭连接后拒绝新操作，已启动的 BetterGI 任务可能继续运行。组件随
+          BetterGI 退出卸载。
+        </p>
+      </details>
     </div>
   );
 }

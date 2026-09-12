@@ -25,6 +25,7 @@ struct ModelView<'a> {
     model: &'a str,
     base_url: &'a str,
     active: bool,
+    timeout_ms: u64,
 }
 
 struct Extensions {
@@ -39,7 +40,6 @@ pub struct AppController {
     config_path: PathBuf,
     config: Mutex<AppConfig>,
     extensions: RwLock<Extensions>,
-    bridge: Arc<BgiClient>,
     supervisor: Arc<crate::runtime::Supervisor>,
     operations: Arc<crate::runtime::operations::OperationEngine>,
 }
@@ -120,7 +120,6 @@ impl AppController {
                 plugins,
                 tools,
             }),
-            bridge,
             supervisor,
             operations,
         })
@@ -135,6 +134,8 @@ impl AppController {
         let _edit = if matches!(
             method,
             "model.use"
+                | "bridge.setEnabled"
+                | "bridge.restore"
                 | "model.save"
                 | "skill.setEnabled"
                 | "plugin.setEnabled"
@@ -195,10 +196,11 @@ impl AppController {
                 &self.supervisor.cancel(required(&params, "id")?)?,
             )),
             "run.input" => {
-                self.supervisor.journal.input(
+                self.supervisor.journal.input_once(
                     required(&params, "id")?,
                     "supplement",
                     required(&params, "content")?,
+                    params["clientKey"].as_str(),
                 )?;
                 Ok(json!({"accepted":true}))
             }
@@ -223,19 +225,30 @@ impl AppController {
                 let notifier = self.supervisor.journal.notifier();
                 let deadline = std::time::Instant::now() + std::time::Duration::from_millis(wait);
                 loop {
+                    let changed = notifier.notified();
+                    tokio::pin!(changed);
+                    changed.as_mut().enable();
                     let events = self.supervisor.journal.events(conversation, after)?;
                     let remaining = deadline.saturating_duration_since(std::time::Instant::now());
                     if !events.is_empty() || remaining.is_zero() {
                         return Ok(json!({"events":events}));
                     }
                     let _ = crate::runtime::executor()
-                        .block_on(tokio::time::timeout(remaining, notifier.notified()));
+                        .block_on(async { tokio::time::timeout(remaining, changed).await });
                 }
             }
             "conversation.get" => {
                 let id = required(&params, "id")?;
                 Ok(json!({"id":id,"messages":self.supervisor.journal.conversation_messages(id)?}))
             }
+            "task.list" => Ok(json!(
+                self.supervisor
+                    .journal
+                    .list()?
+                    .iter()
+                    .map(crate::runtime::types::public_run)
+                    .collect::<Vec<_>>()
+            )),
             "conversation.fork" => Ok(json!({"id":self.supervisor.journal.fork_conversation(
                 required(&params,"id")?,params["title"].as_str()
             )?})),
@@ -519,7 +532,56 @@ impl AppController {
                 self.reload_extensions()?;
                 Ok(json!({"restartRequired":false}))
             }
-            "bridge.state" => self.bridge.state(),
+            "bridge.state" => BgiClient::new(self.config.lock().unwrap().bridge.clone()).state(),
+            "bridge.recoveryList" => crate::bridge_control::recovery("list", &[]),
+            "bridge.restore" => crate::bridge_control::recovery(
+                "restore",
+                &[
+                    required(&params, "changeId")?,
+                    required(&params, "recordVersion")?,
+                    required(&params, "currentVersion")?,
+                ],
+            ),
+            "bridge.catalog" | "bridge.describe" => {
+                let mut config = self.config.lock().unwrap().bridge.clone();
+                config.enabled = true;
+                let client = BgiClient::new(config);
+                if method == "bridge.describe" {
+                    client.describe(required(&params, "methodId")?)
+                } else {
+                    client.catalog_page(
+                        params["query"].as_str().unwrap_or(""),
+                        params["group"].as_str(),
+                        params["offset"].as_u64().unwrap_or(0),
+                    )
+                }
+            }
+            "bridge.setEnabled" => {
+                let enabled = params["enabled"]
+                    .as_bool()
+                    .ok_or_else(|| Error::Config("enabled 必须是布尔值".into()))?;
+                let mut config = self.config.lock().unwrap().bridge.clone();
+                if enabled {
+                    crate::bridge_control::prepare(&mut config)?;
+                    // Save credentials before starting a possibly delayed bridge.
+                    AppConfig::set_bridge(&self.config_path, &config)?;
+                    self.reload_runtime()?;
+                    crate::bridge_control::enable(&config)?;
+                    config.enabled = true;
+                    config.instance_id = None;
+                    AppConfig::set_bridge(&self.config_path, &config)?;
+                    self.reload_runtime()?;
+                    self.reload_extensions()?;
+                    Ok(json!({"enabled":true}))
+                } else {
+                    config.enabled = false;
+                    AppConfig::set_bridge(&self.config_path, &config)?;
+                    self.reload_runtime()?;
+                    self.reload_extensions()?;
+                    let warning = crate::bridge_control::disable(&config);
+                    Ok(json!({"enabled":false,"warning":warning}))
+                }
+            }
             _ => Err(Error::Config(format!("unknown IPC method: {method}"))),
         }
     }
@@ -537,6 +599,7 @@ impl AppController {
                 model: &model.model,
                 base_url: &model.base_url,
                 active: model.id == config.active_model,
+                timeout_ms: model.options.timeout_ms,
             })
             .collect::<Vec<_>>();
         let skills = extensions
@@ -572,18 +635,20 @@ impl AppController {
                 })
             })
             .collect::<Vec<_>>();
-        let bridge_status = if self.bridge.enabled() {
-            match self.bridge.info() {
-                Ok(_) => json!({"enabled":true,"connected":true,"baseUrl":self.bridge.base_url()}),
+        let bridge_status = if config.bridge.enabled {
+            match crate::bridge_control::info(&config.bridge) {
+                Ok(info) => {
+                    json!({"enabled":true,"connected":info["enabled"] != false,"baseUrl":config.bridge.base_url,"simulated":info["simulated"] == true})
+                }
                 Err(error) => {
-                    json!({"enabled":true,"connected":false,"baseUrl":self.bridge.base_url(),"error":error.to_string()})
+                    json!({"enabled":true,"connected":false,"baseUrl":config.bridge.base_url,"error":error.to_string()})
                 }
             }
         } else {
-            json!({"enabled":false,"connected":false,"baseUrl":self.bridge.base_url()})
+            json!({"enabled":false,"connected":false,"baseUrl":config.bridge.base_url})
         };
         Ok(
-            json!({"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.operations.store.workflows()?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"bridge":bridge_status}),
+            json!({"preview":cfg!(feature="mock"),"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.operations.store.workflows()?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"bridge":bridge_status}),
         )
     }
 
@@ -609,7 +674,7 @@ impl AppController {
         let skills = Arc::new(skills);
         let plugins = Arc::new(plugins);
         if config.bridge.enabled {
-            register_tools(&mut tools, self.bridge.clone())?;
+            register_tools(&mut tools, Arc::new(BgiClient::new(config.bridge.clone())))?;
         }
         register_builtin_tools(&mut tools, skills.clone(), plugins.clone())?;
         let tools = Arc::new(tools);

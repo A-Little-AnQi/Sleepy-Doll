@@ -1,0 +1,74 @@
+.model-settings {
+  align-content: start;
+  gap: 28px;
+}
+
+.model-picker {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.model-picker h2,
+.model-picker p {
+  margin: 0;
+}
+
+.model-picker h2 {
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.model-picker p {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.model-picker-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(100%, 360px);
+}
+
+.model-picker-actions > [data-ui="select-root"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-form {
+  width: min(100%, 720px);
+  gap: 22px;
+}
+
+.model-form .form-section {
+  gap: 16px;
+}
+
+.model-form .form-grid {
+  gap: 16px;
+}
+
+.model-form .detail-actions {
+  padding-top: 4px;
+}
+
+@media (max-width: 700px) {
+  .model-picker {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .model-picker-actions {
+    width: 100%;
+  }
+
+  .model-form .form-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,243 @@
+.bridge-page {
+  width: min(100%, 780px);
+  align-content: start;
+  gap: 22px;
+}
+
+.bridge-overview {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.bridge-overview h2,
+.bridge-overview p {
+  margin: 0;
+}
+
+.bridge-overview h2 {
+  margin-top: 5px;
+  font-size: 24px;
+  font-weight: 680;
+  letter-spacing: -0.6px;
+}
+
+.bridge-overview p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.bridge-eyebrow {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.bridge-connection-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--secondary);
+  background: var(--subtle);
+  font-size: 11px;
+  font-weight: 550;
+}
+
+.bridge-connection-state i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform var(--motion-base) var(--ease-enter);
+}
+
+.bridge-connection-state.is-connected i {
+  background: var(--text);
+  transform: scale(1.08);
+}
+
+.bridge-connection-card {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.bridge-connection-row,
+.bridge-endpoint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 17px 18px;
+}
+
+.bridge-connection-row > div {
+  display: grid;
+  gap: 5px;
+}
+
+.bridge-connection-row strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bridge-connection-row span,
+.bridge-endpoint span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.bridge-endpoint {
+  border-top: 1px solid var(--border);
+  background: var(--subtle);
+}
+
+.bridge-endpoint code {
+  color: var(--secondary);
+  font:
+    11px/1.6 "Cascadia Code",
+    Consolas,
+    monospace;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.bridge-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.bridge-feature {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 17px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  text-align: left;
+}
+
+.bridge-feature:hover {
+  border-color: var(--border-strong);
+  background: var(--subtle);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px #00000008;
+}
+
+.bridge-feature > svg:first-child {
+  width: 21px;
+  height: 21px;
+  margin-left: 5px;
+  fill: none;
+  stroke: var(--secondary);
+  stroke-width: 1.5;
+}
+
+.bridge-feature > svg:last-child {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.6;
+  transform: rotate(180deg);
+}
+
+.bridge-feature > span {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.bridge-feature strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bridge-feature small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.bridge-status-section {
+  display: grid;
+  gap: 15px;
+  padding-top: 4px;
+}
+
+.bridge-status-section .block-head > div {
+  display: grid;
+  gap: 5px;
+}
+
+.bridge-status-section h2,
+.bridge-status-section p {
+  margin: 0;
+}
+
+.bridge-status-section h2 {
+  font-size: 14px;
+  font-weight: 620;
+}
+
+.bridge-status-section p {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.bridge-status-section pre {
+  max-height: 340px;
+}
+
+.bridge-state-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 96px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 11px;
+  color: var(--muted);
+  background: var(--subtle);
+  font-size: 12px;
+}
+
+.bridge-state-empty svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.bridge-lifecycle {
+  padding-top: 2px;
+}
+
+@media (max-width: 700px) {
+  .bridge-feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bridge-overview {
+    gap: 16px;
+  }
+
+  .bridge-connection-row,
+  .bridge-endpoint {
+    gap: 16px;
+    padding: 15px;
+  }
+}

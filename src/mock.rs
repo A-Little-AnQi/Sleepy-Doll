@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
-    io::Read,
+    io::{Read, Write},
     net::ToSocketAddrs,
     sync::{
         Arc, Mutex, RwLock,
@@ -157,21 +157,7 @@ fn handle_request(mut request: Request, state: &MockState) {
     if status == 200
         && let Some((content_type, chunks)) = stream_frames(&url, &input, &payload, state)
     {
-        let stream = MockStream {
-            chunks,
-            current: std::io::Cursor::new(Vec::new()),
-        };
-        let response = Response::new(
-            StatusCode(200),
-            vec![
-                Header::from_bytes("content-type", content_type).unwrap(),
-                cors_header(origin.as_deref()),
-            ],
-            stream,
-            None,
-            None,
-        );
-        let _ = request.respond(response);
+        let _ = write_stream(request, content_type, chunks, origin.as_deref());
         return;
     }
     if url == "/bridge/v1/invoke" && status == 202 {
@@ -200,24 +186,35 @@ fn handle_request(mut request: Request, state: &MockState) {
     let _ = request.respond(response);
 }
 
-struct MockStream {
-    chunks: VecDeque<(Vec<u8>, u64)>,
-    current: std::io::Cursor<Vec<u8>>,
-}
-impl Read for MockStream {
-    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-        if self.current.position() as usize >= self.current.get_ref().len() {
-            let Some((chunk, delay_ms)) = self.chunks.pop_front() else {
-                return Ok(0);
-            };
-            if delay_ms > 0 {
-                thread::sleep(Duration::from_millis(delay_ms));
-            }
-            self.current = std::io::Cursor::new(chunk);
+/// tiny_http's normal response path buffers the chunked body. Flush each SSE
+/// frame explicitly; a Read implementation returning small buffers is not enough.
+fn write_stream(
+    request: Request,
+    content_type: &str,
+    chunks: StreamFramesChunks,
+    origin: Option<&str>,
+) -> std::io::Result<()> {
+    let mut writer = request.into_writer();
+    write!(
+        writer,
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nTransfer-Encoding: chunked\r\nCache-Control: no-cache\r\nConnection: close\r\n{}\r\n\r\n",
+        cors_header(origin)
+    )?;
+    writer.flush()?;
+    for (chunk, delay_ms) in chunks {
+        if delay_ms > 0 {
+            thread::sleep(Duration::from_millis(delay_ms));
         }
-        self.current.read(buffer)
+        write!(writer, "{:X}\r\n", chunk.len())?;
+        writer.write_all(&chunk)?;
+        writer.write_all(b"\r\n")?;
+        writer.flush()?;
     }
+    writer.write_all(b"0\r\n\r\n")?;
+    writer.flush()
 }
+
+type StreamFramesChunks = VecDeque<(Vec<u8>, u64)>;
 
 /// Tiny xorshift PRNG so jitter works without adding a rand dependency.
 struct MockRng(u64);
@@ -369,6 +366,18 @@ fn stream_frames(
         return Some(("text/event-stream", chunks));
     }
     if path == "/v1/chat/completions" {
+        if let Some(calls) = payload["choices"][0]["message"]["tool_calls"].as_array() {
+            let calls = calls
+                .iter()
+                .enumerate()
+                .map(|(index, call)| {
+                    let mut call = call.clone();
+                    call["index"] = json!(index);
+                    call
+                })
+                .collect::<Vec<_>>();
+            chunks.push_back((sse(json!({"choices":[{"index":0,"delta":{"tool_calls":calls},"finish_reason":null}]})),0));
+        }
         let text = payload["choices"][0]["message"]["content"]
             .as_str()
             .unwrap_or_default();
@@ -376,11 +385,25 @@ fn stream_frames(
             (sse(json!({"choices":[{"index":0,"delta":{"content":content},"finish_reason":null}]})), delay)
         }));
         if !truncate {
-            chunks.push_back((sse(json!({"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0}})), 0));
+            chunks.push_back((sse(json!({"choices":[{"index":0,"delta":{},"finish_reason":payload["choices"][0]["finish_reason"]}],"usage":{"prompt_tokens":0,"completion_tokens":0}})), 0));
         }
         return Some(("text/event-stream", chunks));
     }
     if path == "/v1/messages" {
+        if payload["content"][0]["type"] == "tool_use" {
+            let block = &payload["content"][0];
+            chunks.push_back((
+                sse(json!({"type":"message_start","message":{"usage":{"input_tokens":0}}})),
+                0,
+            ));
+            chunks.push_back((sse(json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":block["id"],"name":block["name"],"input":{}}})),0));
+            chunks.push_back((sse(json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":block["input"].to_string()}})),0));
+            if !truncate {
+                chunks.push_back((sse(json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":0}})),0));
+                chunks.push_back((sse(json!({"type":"message_stop"})), 0));
+            }
+            return Some(("text/event-stream", chunks));
+        }
         let text = payload["content"][0]["text"].as_str().unwrap_or_default();
         chunks.push_back((
             sse(json!({"type":"message_start","message":{"usage":{"input_tokens":0}}})),
@@ -397,6 +420,17 @@ fn stream_frames(
         return Some(("text/event-stream", chunks));
     }
     if path.contains(":streamGenerateContent") {
+        if !payload["candidates"][0]["content"]["parts"][0]["functionCall"].is_null() {
+            let mut frame = payload.clone();
+            if truncate {
+                frame["candidates"][0]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("finishReason");
+            }
+            chunks.push_back((sse(frame), 0));
+            return Some(("text/event-stream", chunks));
+        }
         let text = payload["candidates"][0]["content"]["parts"][0]["text"]
             .as_str()
             .unwrap_or_default();
@@ -409,6 +443,12 @@ fn stream_frames(
         return Some(("text/event-stream", chunks));
     }
     if path == "/api/chat" {
+        if payload["message"]["tool_calls"].is_array() {
+            let mut frame = payload.clone();
+            frame["done"] = json!(!truncate);
+            chunks.push_back((ndjson(frame), 0));
+            return Some(("application/x-ndjson", chunks));
+        }
         let text = payload["message"]["content"].as_str().unwrap_or_default();
         chunks.extend(stream_plan(text, base, &mut rng).into_iter().map(|(content, delay)| {
             (ndjson(json!({"model":"mock","message":{"role":"assistant","content":content},"done":false})), delay)
@@ -450,7 +490,7 @@ fn route(method: &Method, url: &str, input: &Value, state: &MockState) -> (u16, 
     if *method == Method::Get && path == "/bridge/v1/info" {
         return (
             200,
-            json!({"protocolVersion":"1","instanceId":"mock-bgi","features":["catalog","jobs","state","idempotency"]}),
+            json!({"protocolVersion":"1","instanceId":"mock-bgi","catalogVersion":"mock-v1","simulated":true,"features":["catalog","jobs","state","idempotency","agentGuides"]}),
         );
     }
     if *method == Method::Get && path == "/bridge/v1/state" {
@@ -460,7 +500,7 @@ fn route(method: &Method, url: &str, input: &Value, state: &MockState) -> (u16, 
         );
     }
     if *method == Method::Get && path == "/bridge/v1/catalog" {
-        return (200, catalog());
+        return (200, catalog(url));
     }
     if *method == Method::Get && path.starts_with("/bridge/v1/catalog/") {
         return (
@@ -581,8 +621,31 @@ fn responses(input: &Value) -> Value {
         .find(|item| item["type"] == "function_call_output");
     if let Some(output) = tool_output {
         let text = output["output"].as_str().unwrap_or_default();
+        let parsed: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+        if parsed["ok"] == false {
+            return response_text("Mock 工具调用失败，未取得可用状态。请查看工具返回的错误。");
+        }
+        let result = parsed
+            .get("value")
+            .or_else(|| parsed.get("result"))
+            .unwrap_or(&parsed);
+        if let Some(runtime) = result.get("runtime") {
+            let capture = match runtime["captureReady"].as_bool() {
+                Some(true) => "截图可用",
+                Some(false) => "截图未就绪",
+                None => "截图状态未知",
+            };
+            let window = match runtime["windowActive"].as_bool() {
+                Some(true) => "游戏窗口在前台",
+                Some(false) => "游戏窗口不在前台",
+                None => "窗口状态未知",
+            };
+            return response_text(&format!(
+                "Mock BGI 状态已读取：{capture}，{window}。没有执行任何游戏写操作。"
+            ));
+        }
         let message = if text.contains("captureReady") {
-            "Mock BGI 已连接，截图可用，当前位于主界面；位置在此场景中刻意设为未知。没有执行任何游戏写操作。"
+            "Mock 工具返回了状态数据，请展开工具结果查看。没有执行任何游戏写操作。"
         } else if text.contains("methodId") {
             "Mock 返回了可用能力目录。"
         } else {
@@ -625,39 +688,155 @@ fn response_text(text: &str) -> Value {
     json!({"id":"mock-response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":text}]}],"usage":{"input_tokens":0,"output_tokens":0}})
 }
 
-fn chat(input: &Value) -> Value {
-    let has_tool = input["messages"]
-        .as_array()
-        .is_some_and(|messages| messages.iter().any(|message| message["role"] == "tool"));
-    if has_tool {
-        json!({"choices":[{"message":{"role":"assistant","content":"Mock Chat Completions 工具结果已处理。"},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0}})
-    } else {
-        json!({"choices":[{"message":{"role":"assistant","content":"Mock Chat Completions 文本响应。"},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0}})
+/// Adapt all model protocols to the same deterministic scenario engine.
+fn scenario(input: &Value) -> Value {
+    let mut items = Vec::new();
+    for message in input["messages"].as_array().into_iter().flatten() {
+        if message["role"] == "tool" {
+            items.push(json!({"type":"function_call_output","output":message["content"]}));
+        } else if let Some(text) = message["content"].as_str() {
+            items.push(json!({"role":message["role"],"content":text}));
+        } else {
+            for block in message["content"].as_array().into_iter().flatten() {
+                match block["type"].as_str() {
+                    Some("tool_result") => {
+                        items.push(json!({"type":"function_call_output","output":block["content"]}))
+                    }
+                    Some("text") => {
+                        items.push(json!({"role":message["role"],"content":block["text"]}))
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
+    for message in input["contents"].as_array().into_iter().flatten() {
+        for part in message["parts"].as_array().into_iter().flatten() {
+            if let Some(reply) = part.get("functionResponse") {
+                items.push(
+                    json!({"type":"function_call_output","output":reply["response"]["output"]}),
+                );
+            } else if let Some(text) = part.get("text") {
+                items.push(json!({"role":if message["role"] == "model" {"assistant"} else {"user"},"content":text}));
+            }
+        }
+    }
+    responses(&json!({"input":items}))["output"][0].clone()
 }
 
-fn anthropic(_input: &Value) -> Value {
-    json!({"id":"mock-anthropic","content":[{"type":"text","text":"Mock Anthropic Messages 文本响应。"}],"stop_reason":"end_turn","usage":{"input_tokens":0,"output_tokens":0}})
+fn chat(input: &Value) -> Value {
+    let item = scenario(input);
+    let message = if item["type"] == "function_call" {
+        json!({"role":"assistant","content":null,"tool_calls":[{"id":item["call_id"],"type":"function","function":{"name":item["name"],"arguments":item["arguments"]}}]})
+    } else {
+        json!({"role":"assistant","content":item["content"][0]["text"]})
+    };
+    json!({"choices":[{"message":message,"finish_reason":if item["type"] == "function_call" {"tool_calls"} else {"stop"}}],"usage":{"prompt_tokens":0,"completion_tokens":0}})
 }
 
-fn gemini(_input: &Value) -> Value {
-    json!({"candidates":[{"content":{"role":"model","parts":[{"text":"Mock Gemini 文本响应。"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":0,"candidatesTokenCount":0}})
+fn anthropic(input: &Value) -> Value {
+    let item = scenario(input);
+    let block = if item["type"] == "function_call" {
+        json!({"type":"tool_use","id":item["call_id"],"name":item["name"],"input":serde_json::from_str::<Value>(item["arguments"].as_str().unwrap_or("{}")).unwrap_or(json!({}))})
+    } else {
+        json!({"type":"text","text":item["content"][0]["text"]})
+    };
+    json!({"id":"mock-anthropic","content":[block],"stop_reason":if item["type"] == "function_call" {"tool_use"} else {"end_turn"},"usage":{"input_tokens":0,"output_tokens":0}})
 }
 
-fn ollama(_input: &Value) -> Value {
-    json!({"model":"mock","message":{"role":"assistant","content":"Mock Ollama 文本响应。"},"done":true,"done_reason":"stop","prompt_eval_count":0,"eval_count":0})
+fn gemini(input: &Value) -> Value {
+    let item = scenario(input);
+    let part = if item["type"] == "function_call" {
+        json!({"functionCall":{"name":item["name"],"args":serde_json::from_str::<Value>(item["arguments"].as_str().unwrap_or("{}")).unwrap_or(json!({}))}})
+    } else {
+        json!({"text":item["content"][0]["text"]})
+    };
+    json!({"candidates":[{"content":{"role":"model","parts":[part]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":0,"candidatesTokenCount":0}})
 }
 
-fn catalog() -> Value {
-    json!({"catalogVersion":"mock-v1","items":[capability("mock.success"),capability("mock.unknown"),capability("mock.failure"),capability("mock.busy"),capability("mock.denied")]})
+fn ollama(input: &Value) -> Value {
+    let mut message = chat(input)["choices"][0]["message"].clone();
+    if let Some(calls) = message["tool_calls"].as_array_mut() {
+        for call in calls {
+            call["function"]["arguments"] = serde_json::from_str::<Value>(
+                call["function"]["arguments"].as_str().unwrap_or("{}"),
+            )
+            .unwrap_or(json!({}));
+        }
+    }
+    json!({"model":"mock","message":message,"done":true,"done_reason":"stop","prompt_eval_count":0,"eval_count":0})
+}
+
+fn catalog(url: &str) -> Value {
+    let parameters: HashMap<_, _> = url::form_urlencoded::parse(
+        url.split_once('?')
+            .map(|(_, query)| query)
+            .unwrap_or("")
+            .as_bytes(),
+    )
+    .into_owned()
+    .collect();
+    let query = parameters
+        .get("q")
+        .map(|value| value.to_lowercase())
+        .unwrap_or_default();
+    let offset = parameters
+        .get("offset")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let limit = parameters
+        .get("limit")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(50)
+        .clamp(1, 100);
+    let group = parameters.get("group").map(String::as_str).unwrap_or("");
+    let items: Vec<_> = [
+        "mock.success",
+        "mock.unknown",
+        "mock.failure",
+        "mock.busy",
+        "mock.denied",
+        "bgi.ping",
+    ]
+    .into_iter()
+    .map(capability)
+    .filter(|item| {
+        (group.is_empty() || group == "mock")
+            && format!("{} {}", item["methodId"], item["summary"])
+                .to_lowercase()
+                .contains(&query)
+    })
+    .collect();
+    let total = items.len();
+    let page: Vec<_> = items.into_iter().skip(offset).take(limit).collect();
+    let next = offset.saturating_add(page.len());
+    json!({"catalogVersion":"mock-v1","total":total,"offset":offset,"nextOffset":if next<total {Some(next)}else{None},"groups":[{"id":"mock","count":6}],"items":page})
 }
 
 fn capability(method_id: &str) -> Value {
-    json!({"methodId":method_id,"displayName":method_id,"providerId":"mock","catalogVersion":"mock-v1","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"executionMode":"job","effect":"gameWrite","callable":true})
+    let readonly = method_id == "bgi.ping";
+    let summary = if readonly {
+        "读取模拟桥连通状态；不连接真实 BetterGI。"
+    } else {
+        "提交模拟任务以验证审批、任务状态和结果处理；不操作真实游戏。"
+    };
+    json!({"methodId":method_id,"displayName":method_id,"providerId":"mock","group":"mock","instanceId":"mock-bgi","catalogVersion":"mock-v1",
+        "summary":summary,"whenToUse":["仅用于开发环境的接口调用验证。"],"parameters":[],"sideEffects":["仅改变内存中的模拟任务记录。"],
+        "guide":{"title":method_id,"purpose":summary,"whenToUse":["测试接口契约时"],"preconditions":["当前为 Mock 环境"],"sideEffects":["不操作真实配置或游戏"],
+            "resultMeaning":"只证明模拟场景结果，不是真实游戏状态。","verification":"核对 simulated 标志及模拟 Job。","rollback":"模拟记录只存在于当前测试进程。",
+            "examples":[{}],"documentationSource":"mock-fixture"},
+        "inputSchema":{"type":"object","properties":{},"additionalProperties":false},
+        "executionMode":if readonly {"inline"} else {"job"},"effect":if readonly {"readOnly"} else if method_id=="mock.config" {"configurationWrite"} else {"gameWrite"},"callable":true})
 }
 
 fn invoke(input: &Value, state: &MockState) -> (u16, Value) {
     let method_id = input["methodId"].as_str().unwrap_or("mock.success");
+    if method_id == "bgi.ping" {
+        return (
+            200,
+            json!({"methodId":method_id,"result":{"ok":true,"simulated":true}}),
+        );
+    }
     if method_id == "mock.busy" {
         return (
             503,

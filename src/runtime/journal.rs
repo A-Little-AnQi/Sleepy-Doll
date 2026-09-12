@@ -1,7 +1,7 @@
 use super::types::*;
 use crate::error::{Error, Result};
 use crate::model::ToolCall;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
@@ -22,6 +22,9 @@ pub struct Journal {
     connection: Mutex<Connection>,
     notify: Arc<tokio::sync::Notify>,
 }
+// Every transaction below writes. Acquire the writer reservation before reading:
+// a deferred WAL read transaction cannot upgrade after another connection commits,
+// and SQLITE_BUSY_SNAPSHOT bypasses busy_timeout (notably when two chats run).
 impl Journal {
     pub fn open(path: &Path) -> Result<Self> {
         let mut connection = Connection::open(path)?;
@@ -56,6 +59,7 @@ impl Journal {
              CREATE UNIQUE INDEX IF NOT EXISTS saved_strategy_source ON saved_strategies(source_run_id);",
         )?;
         super::migrations::migrate(&mut connection)?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS runtime_input_keys(run_id TEXT NOT NULL REFERENCES runtime_runs(id) ON DELETE CASCADE,client_key TEXT NOT NULL,kind TEXT NOT NULL,content TEXT NOT NULL,PRIMARY KEY(run_id,client_key));")?;
         connection.execute_batch(
             "CREATE INDEX IF NOT EXISTS runtime_events_run ON runtime_events(run_id,sequence);",
         )?;
@@ -73,6 +77,7 @@ impl Journal {
     }
 
     fn touch(&self) {
+        self.notify.notify_waiters();
         self.notify.notify_one();
     }
 
@@ -100,7 +105,7 @@ impl Journal {
         duration: i64,
     ) -> Result<Run> {
         let mut db = self.connection.lock().unwrap();
-        let tx = db.transaction()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous: Option<String> = tx
             .query_row(
                 "SELECT payload FROM runtime_runs WHERE client_key=?1",
@@ -204,7 +209,7 @@ impl Journal {
         run.state = RunState::Recovering;
         run.error = None;
         let mut db = self.connection.lock().unwrap();
-        let tx = db.transaction()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if tx.execute(
             "UPDATE runtime_runs SET state=?1,revision=?2,payload=?3 WHERE id=?4 AND revision=?5",
             params![
@@ -252,7 +257,7 @@ impl Journal {
         candidate.revision += 1;
         candidate.updated_at = now();
         let mut db = self.connection.lock().unwrap();
-        let tx = db.transaction()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if tx.execute(
             "UPDATE runtime_runs SET state=?1,revision=?2,payload=?3 WHERE id=?4 AND revision=?5",
             params![
@@ -389,7 +394,7 @@ impl Journal {
     }
     pub fn decide(&self, id: &str, approved: bool) -> Result<Approval> {
         let mut db = self.connection.lock().unwrap();
-        let tx = db.transaction()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let s: String = tx.query_row(
             "SELECT payload FROM runtime_approvals WHERE id=?1",
             [id],
@@ -427,11 +432,37 @@ impl Journal {
         Ok(serde_json::from_str(&s)?)
     }
     pub fn input(&self, run: &str, kind: &str, content: &str) -> Result<()> {
+        self.input_once(run, kind, content, None)
+    }
+
+    pub fn input_once(
+        &self,
+        run: &str,
+        kind: &str,
+        content: &str,
+        key: Option<&str>,
+    ) -> Result<()> {
         if content.trim().is_empty() || content.len() > 128 * 1024 {
             return Err(Error::Config("补充内容为空或过长".into()));
         }
         let mut db = self.connection.lock().unwrap();
-        let tx = db.transaction()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(key) = key {
+            let existing: Option<(String, String)> = tx
+                .query_row(
+                    "SELECT kind,content FROM runtime_input_keys WHERE run_id=?1 AND client_key=?2",
+                    params![run, key],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            if let Some((saved_kind, saved_content)) = existing {
+                return if saved_kind == kind && saved_content == content {
+                    Ok(())
+                } else {
+                    Err(Error::Conflict("同一请求标识不能提交不同的补充内容".into()))
+                };
+            }
+        }
         let payload: String =
             tx.query_row("SELECT payload FROM runtime_runs WHERE id=?1", [run], |r| {
                 r.get(0)
@@ -453,6 +484,9 @@ impl Journal {
             params![tx.last_insert_rowid(), run],
         )?;
         Self::insert_event(&tx, &current, "input.received", &json!({"content":content}))?;
+        if let Some(key) = key {
+            tx.execute("INSERT INTO runtime_input_keys(run_id,client_key,kind,content) VALUES(?1,?2,?3,?4)", params![run,key,kind,content])?;
+        }
         tx.commit()?;
         self.touch();
         Ok(())
@@ -462,7 +496,7 @@ impl Journal {
             return Err(Error::Conflict("invalid finish transition".into()));
         }
         let mut db = self.connection.lock().unwrap();
-        let tx = db.transaction()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let pending: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM runtime_inputs WHERE run_id=?1 AND consumed=0)",
             [&run.id],
@@ -540,7 +574,7 @@ impl Journal {
     pub fn fork_conversation(&self, conversation: &str, title: Option<&str>) -> Result<String> {
         let id = format!("conversation-{}", uuid::Uuid::new_v4());
         let mut db = self.connection.lock().unwrap();
-        let tx = db.transaction()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let source_title: String = tx.query_row(
             "SELECT title FROM conversations WHERE id=?1",
             [conversation],
@@ -569,7 +603,7 @@ impl Journal {
     }
     pub fn append_message(&self, run: &Run, message: &crate::model::Message) -> Result<()> {
         let mut db = self.connection.lock().unwrap();
-        let tx = db.transaction()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("INSERT INTO messages(conversation_id,role,content,tool_call_id,tool_calls_json,created_at) VALUES(?1,?2,?3,?4,?5,?6)",params![run.conversation_id,serde_json::to_value(message.role)?.as_str().unwrap(),message.content,message.tool_call_id,serde_json::to_string(&message.tool_calls)?,now()])?;
         tx.execute(
             "INSERT INTO runtime_message_owners VALUES(?1,?2)",
@@ -613,7 +647,7 @@ impl Journal {
     }
     pub fn drain_inputs(&self, run: &str) -> Result<Vec<String>> {
         let mut db = self.connection.lock().unwrap();
-        let tx = db.transaction()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let rows = {
             let mut q = tx.prepare(
                 "SELECT content FROM runtime_inputs WHERE run_id=?1 AND consumed=0 ORDER BY id",
@@ -634,6 +668,41 @@ impl Journal {
             [run],
             |r| r.get(0),
         )?)
+    }
+    pub fn completed_read_steps(
+        &self,
+        run: &str,
+        plan: &PlanRevision,
+    ) -> Result<std::collections::HashSet<String>> {
+        let db = self.connection.lock().unwrap();
+        Self::completed_read_steps_in(&db, run, plan)
+    }
+    fn completed_read_steps_in(
+        db: &Connection,
+        run: &str,
+        plan: &PlanRevision,
+    ) -> Result<std::collections::HashSet<String>> {
+        let mut query =
+            db.prepare("SELECT data FROM runtime_events WHERE run_id=?1 AND kind='step.finished'")?;
+        let events = query
+            .query_map([run], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut completed = std::collections::HashSet::new();
+        for event in events {
+            let event: Value = serde_json::from_str(&event)?;
+            if event["planRevision"] != plan.revision || event["outcome"] != "completed" {
+                continue;
+            }
+            if let Some(step) = plan.steps.iter().find(|step| event["id"] == step.id)
+                && step
+                    .execution
+                    .as_ref()
+                    .is_some_and(|execution| execution.effect == crate::tools::ToolEffect::ReadOnly)
+            {
+                completed.insert(step.id.clone());
+            }
+        }
+        Ok(completed)
     }
     pub fn artifact(&self, run: &Run, content: &str) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
@@ -666,7 +735,7 @@ impl Journal {
     }
     pub fn save_plan(&self, run: &Run, plan: &PlanRevision) -> Result<()> {
         let mut db = self.connection.lock().unwrap();
-        let tx = db.transaction()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
             "INSERT INTO runtime_plans VALUES(?1,?2,?3)",
             params![run.id, plan.revision, serde_json::to_string(plan)?],
@@ -715,16 +784,22 @@ impl Journal {
             .and_then(|payload| serde_json::from_str::<Approval>(&payload).ok())
             .filter(|approval| approval.decision.is_none() && approval.expires_at >= unix_now())
             .map(|approval| approval.id);
+        let completed_reads = plan
+            .as_ref()
+            .map(|plan| Self::completed_read_steps_in(db, &run.id, plan))
+            .transpose()?
+            .unwrap_or_default();
         let completed_steps = plan
             .as_ref()
             .map(|plan| {
                 plan.steps
                     .iter()
                     .filter(|step| {
-                        attempts.iter().any(|attempt| {
-                            attempt.request["stepId"] == step.id
-                                && attempt.outcome == "verifiedSucceeded"
-                        })
+                        completed_reads.contains(&step.id)
+                            || attempts.iter().any(|attempt| {
+                                attempt.request["stepId"] == step.id
+                                    && attempt.outcome == "verifiedSucceeded"
+                            })
                     })
                     .map(|step| step.id.clone())
                     .collect::<Vec<_>>()

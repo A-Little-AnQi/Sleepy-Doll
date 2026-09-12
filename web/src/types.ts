@@ -5,6 +5,7 @@ export interface ModelInfo {
   model: string;
   baseUrl: string;
   active: boolean;
+  timeoutMs?: number;
 }
 
 export interface SkillInfo {
@@ -154,6 +155,7 @@ export interface RunApproval {
   expiresAt: number;
 }
 export interface Bootstrap {
+  preview?: boolean;
   /** Absolute path of the configuration file, so the interface can point at it
    * instead of telling the user to "edit the configuration". */
   configPath: string;
@@ -170,9 +172,79 @@ export interface Bootstrap {
   diagnostics: DiagnosticInfo[];
   notifications: NotificationInfo[];
   bridge: {
+    simulated?: boolean;
     enabled: boolean;
     connected: boolean;
     baseUrl: string;
     error?: string;
   };
+}
+
+export interface BridgeMethod {
+  methodId: string;
+  displayName: string;
+  group: string;
+  summary: string;
+  effect: string;
+  callable: boolean;
+  unavailableReason?: string;
+  catalogVersion?: string;
+  executionMode?: string;
+  requiresConfirmation?: boolean;
+  whenToUse?: string[];
+  sideEffects?: string[];
+  parameters?: Array<{
+    name: string;
+    type: string;
+    required: boolean;
+    description: string;
+  }>;
+}
+export interface BridgeGuide {
+  title: string;
+  purpose: string;
+  whenToUse: string[];
+  preconditions: string[];
+  sideEffects: string[];
+  resultMeaning: string;
+  verification: string;
+  rollback: string;
+  examples: unknown[];
+  documentationSource: string;
+  sourceReference?: string;
+}
+export interface BridgeMethodDetail extends BridgeMethod {
+  guide?: BridgeGuide;
+  inputSchema: {
+    type?: string;
+    properties?: Record<
+      string,
+      { type?: string; description?: string; enum?: unknown[] }
+    >;
+    required?: string[];
+  };
+  outputSchema?: unknown;
+  errors?: string[];
+}
+export interface BridgeCatalog {
+  total: number;
+  items?: BridgeMethod[];
+  methods?: BridgeMethod[];
+  offset?: number;
+  nextOffset?: number | null;
+  groups?: Array<{ id: string; count: number }>;
+  catalogVersion?: string;
+}
+
+export interface RecoveryRecord {
+  changeId: string;
+  recordVersion?: string;
+  currentVersion?: string;
+  state?: string;
+  createdAt?: string;
+  operation?: string;
+  configPath?: string;
+  paths: string[];
+  canRestore: boolean;
+  reason?: string;
 }

@@ -2,6 +2,7 @@ import { Component, StrictMode, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./product.css";
+import "./motion.css";
 
 class ErrorBoundary extends Component<
   { children: ReactNode },

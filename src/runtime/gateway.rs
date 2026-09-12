@@ -62,13 +62,47 @@ pub async fn complete(
     for (key, value) in model.headers() {
         req = req.header(key, value);
     }
-    let response =
-        tokio::select! {_ = cancel.cancelled()=>return Err(Error::Cancelled),r=req.send()=>r?};
+    // Retry only before receiving a response body. Never replay a partial
+    // stream: its tool arguments and public text may already have been observed.
+    let mut attempt = 0;
+    let response = loop {
+        let request = req
+            .try_clone()
+            .ok_or_else(|| Error::Config("模型请求无法重试".into()))?;
+        let result = tokio::select! {
+            _ = cancel.cancelled() => return Err(Error::Cancelled),
+            result = request.send() => result,
+        };
+        let retry = match &result {
+            Ok(response) => matches!(
+                response.status().as_u16(),
+                429 | 500 | 502 | 503 | 504 | 529
+            ),
+            Err(error) => error.is_connect() || error.is_timeout(),
+        };
+        if !retry || attempt >= 2 {
+            break result?;
+        }
+        let delay = result
+            .as_ref()
+            .ok()
+            .and_then(|response| response.headers().get("retry-after"))
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(|seconds| Duration::from_secs(seconds.clamp(1, 5)))
+            .unwrap_or(Duration::from_millis(500 * (1 << attempt)));
+        attempt += 1;
+        tokio::select! { _ = cancel.cancelled() => return Err(Error::Cancelled), _ = tokio::time::sleep(delay) => {} }
+    };
     if !response.status().is_success() {
-        return Err(Error::Http(format!(
-            "model returned HTTP {}",
-            response.status().as_u16()
-        )));
+        let status = response.status().as_u16();
+        let message = match status {
+            401 | 403 => "模型服务拒绝鉴权，请检查 API Key 和访问权限",
+            429 => "模型服务限流，重试后仍不可用",
+            404 => "模型或 API 地址不存在，请检查模型配置",
+            _ => "模型服务返回错误",
+        };
+        return Err(Error::Http(format!("{message}（HTTP {status}）")));
     }
     let content_type = response
         .headers()

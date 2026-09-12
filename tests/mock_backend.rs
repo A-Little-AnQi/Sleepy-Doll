@@ -55,6 +55,51 @@ fn every_model_protocol_returns_without_tokens() {
 }
 
 #[test]
+fn mock_summaries_do_not_turn_unready_capture_into_success() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    let messages = vec![
+        Message {
+            role: Role::User,
+            content: "查看游戏状态".into(),
+            tool_call_id: None,
+            tool_calls: vec![],
+        },
+        Message {
+            role: Role::Assistant,
+            content: String::new(),
+            tool_call_id: None,
+            tool_calls: vec![sleepy_doll::model::ToolCall {
+                id: "state".into(),
+                name: "bgi.state.get".into(),
+                arguments: json!({}),
+            }],
+        },
+        Message {
+            role: Role::Tool,
+            content:
+                json!({"ok":true,"value":{"runtime":{"captureReady":false,"windowActive":false}}})
+                    .to_string(),
+            tool_call_id: Some("state".into()),
+            tool_calls: vec![],
+        },
+    ];
+    for protocol in [
+        ModelProtocol::OpenaiResponses,
+        ModelProtocol::OpenaiChat,
+        ModelProtocol::AnthropicMessages,
+        ModelProtocol::Gemini,
+        ModelProtocol::OllamaChat,
+    ] {
+        let response = model(&backend.base_url(), protocol)
+            .complete(&messages, &[])
+            .unwrap();
+        assert!(response.text.contains("截图未就绪"), "{}", response.text);
+        assert!(!response.text.contains("截图可用"));
+        assert!(response.text.contains("游戏窗口不在前台"));
+    }
+}
+
+#[test]
 fn responses_protocol_exposes_short_and_long_layout_scenarios() {
     let backend = MockBackend::start("127.0.0.1:0").unwrap();
     let protocol = model(&backend.base_url(), ModelProtocol::OpenaiResponses);
@@ -70,6 +115,58 @@ fn responses_protocol_exposes_short_and_long_layout_scenarios() {
     assert!(long.text.chars().count() > 300);
     assert!(long.text.contains("只滚动对话区域"));
     assert_eq!(long.usage.output_tokens.unwrap_or(0), 0);
+}
+
+#[test]
+fn streaming_delivers_early_incremental_chunks_not_a_buffered_final_body() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    backend.set_faults(sleepy_doll::mock::MockFaults {
+        stream_chunk_delay_ms: 25,
+        ..Default::default()
+    });
+    let text = "流式测试必须在响应结束前持续显示新的文字。".repeat(6);
+    backend.set_responses(vec![json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":text}]}]})]);
+    let config = serde_json::from_value(json!({"id":"mock","name":"Mock","protocol":"openai-responses","model":"mock-model","baseUrl":format!("{}/v1",backend.base_url()),"options":{"timeoutMs":5000}})).unwrap();
+    let message = Message {
+        role: Role::User,
+        content: "stream".into(),
+        tool_call_id: None,
+        tool_calls: vec![],
+    };
+    let started = std::time::Instant::now();
+    let mut deltas = Vec::new();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let response = runtime
+        .block_on(sleepy_doll::runtime::gateway::complete(
+            config,
+            &[message],
+            &[],
+            &tokio_util::sync::CancellationToken::new(),
+            |text| {
+                deltas.push((started.elapsed(), text.to_owned()));
+                Ok(())
+            },
+        ))
+        .unwrap();
+    assert_eq!(response.text, text);
+    assert!(
+        deltas.len() > 10,
+        "expected token-sized chunks, got {}",
+        deltas.len()
+    );
+    assert!(
+        deltas[0].0 < Duration::from_millis(1000),
+        "first delta arrived after {:?}",
+        deltas[0].0
+    );
+    assert!(deltas.last().unwrap().0 - deltas[0].0 > Duration::from_millis(500));
+    assert_eq!(
+        deltas
+            .iter()
+            .map(|(_, text)| text.as_str())
+            .collect::<String>(),
+        text
+    );
 }
 
 #[test]
@@ -125,6 +222,67 @@ fn full_agent_conversation_uses_mock_model_and_bridge() {
     let envelope: Value = response.body_mut().read_json().unwrap();
     assert_eq!(envelope["ok"], true);
     assert_eq!(envelope["result"]["bridge"]["connected"], true);
+}
+
+#[test]
+fn all_protocols_stream_real_tool_calls_in_the_mock_scenario() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    for protocol in [
+        "openai-responses",
+        "openai-chat",
+        "anthropic-messages",
+        "gemini",
+        "ollama-chat",
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.json");
+        let base = if protocol == "ollama-chat" {
+            backend.base_url()
+        } else {
+            format!("{}/v1", backend.base_url())
+        };
+        let config = json!({"version":1,"activeModel":"mock","models":[{"id":"mock","name":"Mock","protocol":protocol,"model":"mock-model","baseUrl":base,"options":{"timeoutMs":5000}}],"agent":{"systemPrompt":"test"},"bridge":{"enabled":true,"baseUrl":backend.base_url(),"token":"mock","instanceId":"mock-bgi","timeoutMs":5000},"storage":{"database":directory.path().join("test.db")}});
+        fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+        let controller = Arc::new(AppController::load(&path).unwrap());
+        let call = |method: &str, params: Value| {
+            controller
+                .handle(method, params, Arc::new(|_, _| {}))
+                .unwrap()
+        };
+        let run = call("task.submit", json!({"prompt":"查看游戏状态"}));
+        let mut completed = Value::Null;
+        for _ in 0..150 {
+            completed = call("task.get", json!({"id":run["id"]}));
+            if ["answered", "failed", "needsReview"]
+                .contains(&completed["state"].as_str().unwrap_or(""))
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(completed["state"], "answered", "{protocol}: {completed}");
+        let history = call("conversation.get", json!({"id":run["conversationId"]}));
+        assert!(
+            history["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|message| message["role"] == "tool"
+                    && message["content"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains("captureReady")),
+            "{protocol} did not invoke a tool"
+        );
+        assert!(
+            completed["result"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Mock BGI"),
+            "{protocol}: {completed}"
+        );
+        controller.shutdown();
+    }
 }
 
 #[test]
