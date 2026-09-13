@@ -5,7 +5,7 @@ use std::{sync::Arc, thread};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sleepy_doll::{agent::AgentEvent, app::AppController};
+use sleepy_doll::{app::AppController, runtime::types::Event as AgentEvent};
 use tao::{
     dpi::{LogicalSize, Size},
     event::{Event, WindowEvent},

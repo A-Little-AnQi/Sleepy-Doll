@@ -25,13 +25,13 @@ public static class CatalogTools
         {
             var path = setting.Path;
             var guide = new AgentGuide(
-                $"读取 {path}", $"读取配置 {path} 的当前值和写入契约。用途：{setting.Description}",
-                [$"用户需要查询或修改 {setting.Section} 中与此设置相关的行为时，先读取本接口。"],
-                ["配置对象已初始化。", "此接口不接受参数；修改使用 bgi.preview_settings / bgi.commit_settings。"],
-                ["只读；敏感值会遮蔽。"],
-                "返回 path、currentValue、valueType、valueSchema、valueVersion、writable、writeRestriction 和可用的默认值来源。",
-                "使用 valueVersion 做后续并发校验；defaultValueKnown=false 时不能将 null 当成默认值。",
-                "只读，无需回退。", [ArgumentSchema.Parse("{}")], setting.DescriptionSource, setting.SourceReference);
+                $"{setting.Section} · {path}", setting.Description,
+                ["查询此设置，或准备修改此设置时。"],
+                ["桥已连接；arguments 为空对象。"],
+                ["无写入副作用；敏感值返回遮蔽标记。"],
+                "返回当前值、值类型、写入 Schema、valueVersion、可写状态及限制原因。",
+                "修改时使用刚返回的 valueVersion；defaultValueKnown=false 表示目录没有可靠默认值。",
+                "只读。", [ArgumentSchema.Parse("{}")], setting.DescriptionSource, setting.SourceReference);
             registry.Register($"setting.{path}", "settings", guide.Purpose,
                 (_, _) => Ui.InvokeAsync<object?>(() => DescribeOne(Find(path))),
                 inputSchema: ArgumentSchema.Empty, guide: guide);
@@ -57,6 +57,8 @@ public static class CatalogTools
 
     public static void Register(MethodRegistry registry)
     {
+        ScriptGroupTools.Register(registry);
+        ScriptRepositoryTools.Register(registry);
         registry.Register("bgi.list_setting_sections", "settings", "",
             (_, _) => Ui.InvokeAsync<object?>(() => new { sections = SettingsCatalog.BuildSections() }));
         registry.Register("bgi.search_settings", "settings", "", (arguments, _) => Ui.InvokeAsync<object?>(() =>

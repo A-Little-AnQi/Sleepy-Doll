@@ -72,3 +72,61 @@ it("keeps the same assistant turn while streaming grows", () => {
   );
   expect(container.querySelector(".response-phase")).toBeNull();
 });
+
+it("shows reasoning collapsed above the answer", () => {
+  const withReasoning: MessageInfo[] = [
+    { role: "user", content: "看看状态" },
+    {
+      role: "assistant",
+      content: "状态正常。",
+      reasoning: {
+        protocol: "anthropic-messages",
+        blocks: [{ type: "thinking", thinking: "先读取状态", signature: "s" }],
+        text: "先读取状态",
+      },
+    },
+  ];
+  const parts = buildTurns(withReasoning, "")[1]?.parts ?? [];
+  expect(parts.map((part) => part.kind)).toEqual(["reasoning", "text"]);
+
+  const { container } = render(
+    <Transcript messages={withReasoning} stream="" seconds={0} />,
+  );
+  const group = container.querySelector(".reasoning-group");
+  expect(container.querySelectorAll(".reasoning-group")).toHaveLength(1);
+  expect(group?.hasAttribute("open")).toBe(false);
+  expect(group?.querySelector("summary")?.textContent).toContain("思考过程");
+  expect(group?.textContent).toContain("先读取状态");
+});
+
+it("drops reasoning that has no displayable text", () => {
+  const empty: MessageInfo[] = [
+    { role: "user", content: "看看状态" },
+    {
+      role: "assistant",
+      content: "状态正常。",
+      reasoning: { protocol: "anthropic-messages", blocks: [], text: "" },
+    },
+  ];
+  expect(buildTurns(empty, "")[1]?.parts.map((part) => part.kind)).toEqual([
+    "text",
+  ]);
+  const { container } = render(
+    <Transcript messages={empty} stream="" seconds={0} />,
+  );
+  expect(container.querySelectorAll(".reasoning-group")).toHaveLength(0);
+});
+
+it("keeps a turn that produced only reasoning", () => {
+  const onlyReasoning: MessageInfo[] = [
+    { role: "user", content: "看看状态" },
+    {
+      role: "assistant",
+      content: "",
+      reasoning: { protocol: "anthropic-messages", blocks: [], text: "在想" },
+    },
+  ];
+  expect(buildTurns(onlyReasoning, "")[1]?.parts.map((part) => part.kind)).toEqual(
+    ["reasoning"],
+  );
+});

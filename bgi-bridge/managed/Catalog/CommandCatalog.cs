@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Windows.Input;
 using BgiBridge.Bgi;
@@ -86,26 +87,30 @@ public static partial class CommandCatalog
                     var name = $"{ToSnakeCase(viewModelName)}.{ToSnakeCase(commandName)}";
                     if (!seen.Add(name)) continue;  // 重名保留第一个，后面的同义命令没差别
                     var parameterType = FindParameterType(property.PropertyType);
-                    var parameterSchema = parameterType is null ? (JsonElement?)null : ValueContract.Schema(parameterType);
                     var source = SourceDocumentation.Find("C", type, property.Name);
                     var purpose = CommandDocumentation.Purpose(type.Name, property.Name, source);
+                    var title = CommandDocumentation.Title(type.Name, property.Name, source);
+                    var parameterSchema = parameterType is null
+                        ? (JsonElement?)null
+                        : DescribeParameter(ValueContract.Schema(parameterType), title, parameterType);
                     var unavailable = source?.HasImplementation == false ? "宿主当前版本该命令为空实现。"
+                        : purpose.Contains("不安排自动调用", StringComparison.Ordinal) ? "宿主没有提供足以确定目标、副作用和结果的业务说明。"
                         : parameterType is not null && parameterSchema is null ? $"需要宿主 {parameterType.Name} 对象，不能从任意 JSON 重建；应在宿主界面完成该交互。"
                         : CommandDocumentation.UnavailableReason(type.Name, property.Name);
                     var guide = new AgentGuide(
-                        CommandDocumentation.Title(type.Name, property.Name, source), purpose,
+                        title, purpose,
                         unavailable is null
-                            ? [$"用户明确要求该操作，且专用接口不能覆盖时。目标上下文：{viewModelName}。"]
+                            ? [$"需要执行“{title}”，且目标就是 {viewModelName} 当前界面上下文时。"]
                             : ["仅用于审计宿主行为或理解相关界面；当前接口不安排直接调用。"],
                         unavailable is null
-                            ? ["命令分组已开启，命令未在禁用列表内。", "宿主界面状态满足 CanExecute。", parameterType is null ? "不传 argument。" : $"argument 必须满足 parameterSchema，CLR 参数类型为 {parameterType.FullName}。"]
+                            ? ["命令可调用且 CanExecute=true。", "用途依赖当前选择时，已确认 BetterGI 界面选择就是目标对象。", parameterType is null ? "arguments 为空对象。" : $"argument 满足 parameterSchema（{parameterType.FullName}）。"]
                             : [$"不可调用：{unavailable}"],
-                        ["可能改变界面、配置、文件、进程或游戏；具体范围以用途说明和源码引用为准。", "调用前建立配置恢复检查点；此检查点不覆盖脚本文件和游戏进度。"],
+                        CommandDocumentation.SideEffects(type.Name, property.Name),
                         unavailable is null
-                            ? "executed=true 只表示处理器已返回；configurationCheckpoint 给出受保护的配置备份。异步命令会等到其 Task 返回。"
+                            ? "executed=true 表示命令处理器已返回；异步命令已等待其 Task。configurationCheckpoint 是执行前配置备份。"
                             : "当前版本不会执行此接口；callable=false 与 unavailableReason 是权威结果。",
-                        "读取相关状态或资源核对目标。出现对话框时需要用户在宿主完成交互；不得因网络断开自动重试。",
-                        "配置优先使用事务接口。此类命令的外部副作用不可自动撤销；必要时退出 BetterGI 后从 configurationCheckpoint 离线恢复配置。",
+                        CommandDocumentation.Verification(type.Name, property.Name),
+                        CommandDocumentation.Rollback(type.Name, property.Name),
                         unavailable is not null ? []
                             : parameterType is not null && parameterSchema is null ? []
                             : [parameterType is null ? ArgumentSchema.Parse("{}") : JsonSerializer.SerializeToElement(new { argument = Example(parameterSchema) })],
@@ -225,6 +230,14 @@ public static partial class CommandCatalog
             "string" => JsonSerializer.SerializeToElement("依据接口说明替换为实际值"),
             _ => ArgumentSchema.Parse("null"),
         };
+    }
+
+    private static JsonElement? DescribeParameter(JsonElement? schema, string title, Type parameterType)
+    {
+        if (schema is null) return null;
+        var node = JsonNode.Parse(schema.Value.GetRawText())!.AsObject();
+        node["description"] = $"“{title}”的 {parameterType.Name} 参数。取值业务含义见用途说明。";
+        return JsonSerializer.SerializeToElement(node);
     }
 
     /// <summary>按接口名探测，不引用 CommunityToolkit 类型。</summary>

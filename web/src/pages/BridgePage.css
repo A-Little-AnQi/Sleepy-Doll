@@ -36,33 +36,6 @@
   font-weight: 600;
 }
 
-.bridge-connection-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  flex: 0 0 auto;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--secondary);
-  background: var(--subtle);
-  font-size: 11px;
-  font-weight: 550;
-}
-
-.bridge-connection-state i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--muted);
-  transition: transform var(--motion-base) var(--ease-enter);
-}
-
-.bridge-connection-state.is-connected i {
-  background: var(--text);
-  transform: scale(1.08);
-}
-
 .bridge-connection-card {
   overflow: hidden;
   border: 1px solid var(--border);

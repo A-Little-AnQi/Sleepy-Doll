@@ -9,6 +9,7 @@ import {
 import type { Bootstrap } from "../types";
 import { BridgeApiExplorer } from "../components/BridgeApiExplorer";
 import { BridgeRecovery } from "../components/BridgeRecovery";
+import { Toast } from "../components/Toast";
 import "./BridgePage.css";
 export function BridgePage({
   bootstrap,
@@ -48,13 +49,19 @@ export function BridgePage({
     return <BridgeApiExplorer onBack={() => setShowCatalog(false)} />;
   if (showRecovery)
     return <BridgeRecovery onBack={() => setShowRecovery(false)} />;
-  const connectionLabel = busy
-    ? "连接中"
-    : bridge.enabled && bridge.connected
-      ? "已连接"
-      : bridge.enabled
-        ? "连接断开"
-        : "未启用";
+  // 状态和失败原因写在同一个地方。这里不暴露配置里的 enabled 开关 ——
+  // 它默认就是开的，拿它当连接状态会让「没连接」显示成「已启用」。
+  const connection = busy
+    ? { title: "正在连接", detail: "正在注入本地桥并等待握手。" }
+    : bridge.connected
+      ? {
+          title: "已连接",
+          detail: "桥在 BetterGI 进程内提供接口；关掉 BetterGI 后桥就没了，重新打开后点一次连接。",
+        }
+      : {
+          title: "未连接",
+          detail: "启动 BetterGI 后点「连接 BetterGI」。桥只在本机回环上监听。",
+        };
   return (
     <div className="page-sheet bridge-page">
       <header className="bridge-overview" data-motion="panel">
@@ -63,33 +70,37 @@ export function BridgePage({
           <h2>BetterGI</h2>
           <p>管理宿主连接、接口契约和可恢复的配置变更。</p>
         </div>
-        <span
-          className={
-            "bridge-connection-state" +
-            (bridge.connected ? " is-connected" : "")
-          }
-        >
-          <i aria-hidden="true" />
-          {connectionLabel}
-        </span>
       </header>
       {bridge.simulated && (
         <p className="notice">当前显示模拟数据，不代表真实 BetterGI 状态。</p>
       )}
+      {(error || notice) && (
+        <Toast
+          message={error || notice}
+          onDismiss={() => {
+            setError("");
+            setNotice("");
+          }}
+        />
+      )}
       <section className="bridge-connection-card" data-motion="panel">
         <div className="bridge-connection-row">
           <div>
-            <strong>连接 BetterGI</strong>
-            <span>启动宿主后加载本地桥；关闭时拒绝新的操作。</span>
+            <strong
+              className={bridge.connected ? "is-connected" : undefined}
+            >
+              {connection.title}
+            </strong>
+            <span>{connection.detail}</span>
           </div>
           <button
-            className={`switch ${bridge.enabled ? "on" : ""}`}
-            role="switch"
-            aria-label="启用 BetterGI 连接"
-            aria-checked={bridge.enabled}
+            className="primary-action"
             disabled={busy}
-            onClick={() => void toggle(!bridge.enabled)}
-          />
+            onClick={() => void toggle(true)}
+          >
+            <RefreshIcon className="button-icon" />
+            {busy ? "连接中…" : bridge.connected ? "重新连接" : "连接 BetterGI"}
+          </button>
         </div>
         <div className="bridge-endpoint">
           <span>本地端点</span>
@@ -117,31 +128,6 @@ export function BridgePage({
           <ChevronIcon />
         </button>
       </div>
-      {(error || notice) && (
-        <div className="inline-error" role="alert">
-          {error || notice}
-        </div>
-      )}
-      {bridge.enabled && !bridge.connected && !busy && (
-        <section className="page-block">
-          <p className="muted">启动 BetterGI 后重新连接。</p>
-          {bridge.error && (
-            <details>
-              <summary>连接详情</summary>
-              <pre>{bridge.error}</pre>
-            </details>
-          )}
-          <div>
-            <button
-              className="secondary-action"
-              onClick={() => void toggle(true)}
-            >
-              <RefreshIcon className="button-icon" />
-              重新连接
-            </button>
-          </div>
-        </section>
-      )}
       <section className="bridge-status-section" data-motion="panel">
         <div className="block-head">
           <div>

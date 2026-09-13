@@ -12,25 +12,29 @@
 
 ```bash
 npm ci
-npm run check          # tsc --noEmit && vite build
-
-build-desktop.cmd      # Windows：桥 + UI + release EXE，组件复制到 EXE 旁
+build-desktop.cmd      # 桥 + 界面 + release EXE，组装到 dist\Sleepy-Doll\
 ```
 
-桌面打包前必须先执行 `npm run build`，因为 release 二进制会通过 `rust-embed` 编译进
-`ui-dist/` 的静态资源。
+`build-desktop.cmd` 是唯一的发布构建入口，每次重建整个 `dist\`（含 `dist\Sleepy-Doll\user\`），
+产物只落在 `dist\Sleepy-Doll\`。它内部依次执行
+`bgi-bridge/build.cmd`、`npm run check`（含 `vite build`，release 二进制靠 `rust-embed`
+把 `ui-dist/` 编进去）和 `cargo build --release`，最后把 EXE 与桥组件组装到一起。
 
-可执行文件在 `target/<profile>/` 下，所以开发时的 `user/` 也落在那里；debug、release 与
-mock 各自使用独立的 `user/` 目录。配置解析规则见 [配置与数据存放](./configuration.md)。
+`target\` 是 Cargo 的中间目录，`bgi-bridge\.build\` 是桥各 .NET 项目的中间目录，都不参与分发。
 
-桌面 EXE 通过标准 Windows manifest 在启动时请求管理员权限，开关不单独提权。
-调试版本可使用仓库 `bgi-bridge/dist`；release 查找 EXE 同目录中的桥组件。
-单独构建桥运行 `bgi-bridge/build.cmd`。桥已加载时需要先退出测试 BetterGI 再更新 DLL。
-构建保留现有 `dist/bridge.config.json`，打包不复制开发凭据。
+单独构建桥执行 `bgi-bridge/build.cmd`。桥组件被宿主加载时会锁定文件，重新构建前必须先退出
+BetterGI；`bgi-bridge/dev/dev-rebuild.cmd` 已包含该步骤。
+
+开发时 `cargo run` 的可执行文件在 `target/<profile>/` 下，找不到旁边的桥组件，会自动回退到
+仓库的 `bgi-bridge/dist`。debug、release、mock 各自使用独立的 `user/` 目录，配置解析规则见
+[配置与数据存放](./configuration.md)。
+
+桌面 EXE 通过 Windows manifest 在启动时请求管理员权限，桥的开关不另外提权。
+打包使用 `bridge.config.example.json`，不带开发凭据。
 
 实际连接测试：先运行 `cargo test --no-default-features --test bridge_control --no-run`，
 然后以管理员权限执行输出的测试 EXE，参数为 `--ignored --exact real_bridge_switch_round_trip`。
-可用 `bgi-bridge/test-desktop.ps1` 指定测试 EXE、BetterGI 成品路径和已有结果目录。
+可用 `bgi-bridge/dev/test-desktop.ps1` 指定测试 EXE、BetterGI 成品路径和已有结果目录。
 测试覆盖宿主识别、状态读取、错误 token、关闭后拒绝旧客户端、工具目录热更新和反复开关，
 不执行游戏操作。默认测试套件会跳过这项实机测试。
 
@@ -68,8 +72,8 @@ feature 不在默认集合里。CI 还会跑 `cargo fmt --all -- --check`、`car
 
 修改桥或宿主版本后，重新生成源码文档索引并运行契约测试：
 
-    dotnet run --project bgi-bridge/MetadataBuilder.csproj -- E:/BetterGIProject/better-genshin-impact E:/BetterGIProject/Sleepy-Doll/bgi-bridge/managed/Catalog/host-documentation.json
-    dotnet run --project bgi-bridge/ContractTests.csproj
+    dotnet run --project bgi-bridge/dev/MetadataBuilder.csproj -- E:/BetterGIProject/better-genshin-impact E:/BetterGIProject/Sleepy-Doll/bgi-bridge/managed/Catalog/host-documentation.json
+    dotnet run --project bgi-bridge/dev/ContractTests.csproj
 
 索引识别嵌套类型、RelayCommand 命名转换、源码注释、实际 XAML 绑定、快捷键及样式设置说明。
 人工补充说明位于 SettingDocumentation.cs / CommandDocumentation.cs；新增接口没有业务说明时，

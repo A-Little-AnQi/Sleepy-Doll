@@ -184,6 +184,45 @@ public static class CommandDocumentation
         };
     }
 
+    public static string[] SideEffects(string viewModel, string command)
+    {
+        var name = Normalize(command);
+        if (RequiresGameReady(viewModel, command))
+            return ["可能启动任务或向游戏窗口发送输入；范围由用途说明限定。"];
+        if (name.Contains("Notification", StringComparison.Ordinal)
+            || name is "TestWebhook" or "SubmitWebImageUrl" or "CheckUpdate")
+            return ["可能访问网络或向已配置接收方发送数据。"];
+        if (new[] { "Delete", "Remove", "Clear", "Reset", "Restore", "Save", "Import", "Export", "Rename" }
+            .Any(verb => name.StartsWith(verb, StringComparison.Ordinal)))
+            return ["可能修改用途说明所指的配置、集合或文件。"];
+        if (new[] { "Open", "GoTo", "Show", "Hide", "Close" }
+            .Any(verb => name.StartsWith(verb, StringComparison.Ordinal)))
+            return ["改变 BetterGI 界面或打开本地/网页目标。"];
+        return ["改变该 ViewModel 的当前选择或界面状态；具体变化以用途说明为准。"];
+    }
+
+    public static string Verification(string viewModel, string command)
+    {
+        var name = Normalize(command);
+        if (RequiresGameReady(viewModel, command))
+            return "查询 Job 终态，再读取运行状态或任务产物；executed=true 不是游戏目标完成。";
+        if (new[] { "Delete", "Remove", "Clear", "Reset", "Restore", "Save", "Import", "Export", "Rename" }
+            .Any(verb => name.StartsWith(verb, StringComparison.Ordinal)))
+            return "重新读取用途说明所指的配置、集合或文件，确认目标变化。";
+        return "核对用途说明所指的界面状态；没有可观测结果时只报告处理器已返回。";
+    }
+
+    public static string Rollback(string viewModel, string command)
+    {
+        var name = Normalize(command);
+        if (RequiresGameReady(viewModel, command))
+            return "游戏输入和任务进度不能由配置检查点撤销；需要时使用对应停止命令并核验终态。";
+        if (new[] { "Save", "Delete", "Remove", "Clear", "Import", "Export", "Rename" }
+            .Any(verb => name.StartsWith(verb, StringComparison.Ordinal)))
+            return "配置检查点不覆盖脚本及其他资源文件；只能按目标资源自己的备份或重新写入恢复。";
+        return "仅配置字段可使用 configurationCheckpoint 离线恢复；普通界面状态通常无需回退。";
+    }
+
     public static string Purpose(string viewModel, string command, SourceEntry? source)
     {
         if (source?.HasImplementation == false) return "此命令在当前宿主源码中为空实现，不执行任何业务操作；仅保留目录记录，不应安排调用。";
@@ -239,7 +278,7 @@ public static class CommandDocumentation
                 var targetLabel = nouns.GetValueOrDefault(target, Regex.Replace(target, "([a-z])([A-Z])", "$1 $2"));
                 return $"在{scope}中{translated}{targetLabel}。依赖该页面当前选择；如出现文件或输入对话框，需要用户在宿主完成交互。";
             }
-        return $"执行{scope}的 {name} 交互处理。参数来自下方契约，结果只证明处理器返回；调用前应核对当前页面状态和源码说明。";
+        return $"{scope}中的 {Humanize(name)} 命令。当前宿主没有提供足以确定目标、副作用和结果的业务说明；目录保留该真实命令供审计，不安排自动调用。";
     }
 
     private static string Normalize(string command)

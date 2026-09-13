@@ -57,6 +57,37 @@ public static class Reflect
         return null;
     }
 
+    /// <summary>
+    /// 按公开行为而不是页面类的完整名称定位宿主类型。稳定桥操作用它降低
+    /// BetterGI 重构命名空间或移动 ViewModel 时的耦合；方法本身消失时才视为不兼容。
+    /// </summary>
+    public static Type? FindHostTypeWithMethod(
+        string method,
+        params Type[] parameterTypes)
+    {
+        var assembly = FindAssembly(HostAssembly);
+        if (assembly is null) return null;
+        Type[] types;
+        try
+        {
+            types = assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            types = ex.Types.Where(type => type is not null).Cast<Type>().ToArray();
+        }
+
+        const BindingFlags Flags = BindingFlags.Public | BindingFlags.Instance;
+        return types.FirstOrDefault(type => type.GetMethods(Flags).Any(candidate =>
+        {
+            if (!string.Equals(candidate.Name, method, StringComparison.Ordinal)) return false;
+            var parameters = candidate.GetParameters();
+            return parameters.Length == parameterTypes.Length
+                   && parameters.Select(parameter => parameter.ParameterType)
+                       .SequenceEqual(parameterTypes);
+        }));
+    }
+
     /// <summary>取宿主类型；缺失时给出版本不匹配的明确提示，而不是 NullReference。</summary>
     public static Type RequireType(string fullName) =>
         FindType(fullName) ?? throw BridgeException.Missing(
@@ -69,7 +100,8 @@ public static class Reflect
         {
             var (t, n) = key;
             const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic
-                                     | BindingFlags.Instance | BindingFlags.Static;
+                                     | BindingFlags.Instance | BindingFlags.Static
+                                     | BindingFlags.FlattenHierarchy;
             const BindingFlags Loose = Flags | BindingFlags.IgnoreCase;
 
             // 顺序：属性优先于字段，精确大小写优先于忽略大小写。
@@ -114,7 +146,8 @@ public static class Reflect
         {
             var (t, n, count) = key;
             const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic
-                                     | BindingFlags.Instance | BindingFlags.Static;
+                                     | BindingFlags.Instance | BindingFlags.Static
+                                     | BindingFlags.FlattenHierarchy;
             return t.GetMethods(Flags)
                 .FirstOrDefault(m => string.Equals(m.Name, n, StringComparison.Ordinal)
                                      && m.GetParameters().Length == count)
@@ -168,7 +201,12 @@ public static class Reflect
     public static object? Singleton(string typeFullName)
     {
         var type = FindType(typeFullName);
-        if (type is null) return null;
+        return type is null ? null : Singleton(type);
+    }
+
+    /// <summary>按已发现的宿主类型取得静态 Instance 属性或 Instance() 方法。</summary>
+    public static object? Singleton(Type type)
+    {
 
         var property = FindMember(type, "Instance");
         if (property is not null)
@@ -214,7 +252,7 @@ public static class Reflect
     private static object? Invoke(Type type, object? target, string method, object?[] args)
     {
         var info = FindMethod(type, method, args.Length)
-            ?? type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
+            ?? type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.FlattenHierarchy)
                    .FirstOrDefault(m => string.Equals(m.Name, method, StringComparison.OrdinalIgnoreCase)
                                         && m.GetParameters().Length == args.Length)
             ?? throw BridgeException.Missing(

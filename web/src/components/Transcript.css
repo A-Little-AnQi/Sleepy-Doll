@@ -124,6 +124,13 @@
   background: var(--subtle);
 }
 
+/* 推理文本通常很长，限高后内部滚动，并弱化颜色以免与回答争夺注意力。 */
+.reasoning-text {
+  max-height: 240px;
+  overflow: auto;
+  color: var(--muted);
+}
+
 .activity-item + .activity-item {
   margin-top: 14px;
   padding-top: 12px;

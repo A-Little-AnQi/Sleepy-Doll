@@ -14,6 +14,7 @@ export interface SkillInfo {
   source: string;
   tags: string[];
   enabled?: boolean;
+  alwaysLoad?: boolean;
   instructions?: string;
 }
 export interface PluginInfo {
@@ -38,6 +39,15 @@ export interface MessageInfo {
   content: string;
   toolCallId?: string;
   toolCalls?: Array<{ id: string; name: string; arguments: unknown }>;
+  /**
+   * 模型的推理内容。只有推理类模型会返回，且 `text` 可能为空 ——
+   * `blocks` 是回传给提供方的原样载荷，界面不解析它。
+   */
+  reasoning?: {
+    protocol: string;
+    blocks?: unknown[];
+    text?: string;
+  };
 }
 export interface TaskInfo {
   id: string;

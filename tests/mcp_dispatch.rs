@@ -1,5 +1,5 @@
 use serde_json::json;
-use sleepy_doll::{mcp::McpClient, plugins::McpServerManifest};
+use sleepy_doll::{extension::mcp::McpClient, extension::plugins::McpServerManifest};
 use std::{sync::Arc, thread};
 
 #[test]

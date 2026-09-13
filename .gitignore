@@ -1,6 +1,8 @@
 node_modules/
 target/
 ui-dist/
+# Shipping output assembled by build-desktop.cmd
+/dist/
 .sleepy-doll/
 .retired/
 .staging-*/

@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>../.build/recovery-obj/</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>../.build/recovery-obj/</MSBuildProjectExtensionsPath>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>BgiBridge.Recovery</AssemblyName>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OutputPath>../.build/recovery/</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="RecoveryProgram.cs" />
+    <ProjectReference Include="../managed/BgiBridge.csproj" />
+  </ItemGroup>
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+</Project>

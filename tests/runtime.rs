@@ -2,9 +2,9 @@ use serde_json::{Value, json};
 use sleepy_doll::{
     app::AppController,
     config::ModelProtocol,
-    mock::MockBackend,
-    model::Role,
-    runtime::{context, gateway::Decoder, journal::Journal, types::*},
+    model::mock::MockBackend,
+    model::{Message, Reasoning, Role},
+    runtime::{context, gateway::Decoder, store::journal::Journal, types::*},
 };
 use std::{fs, sync::Arc, thread, time::Duration};
 
@@ -212,13 +212,20 @@ fn five_protocols_decode_public_text_only() {
         let frames = match p {
             ModelProtocol::OpenaiResponses => vec![
                 json!({"type":"response.output_text.delta","delta":"ok"}),
-                json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}}),
+                json!({"type":"response.completed","response":{"status":"completed","output":[
+                    {"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"private"}]},
+                    {"type":"message","content":[{"type":"output_text","text":"ok"}]}
+                ]}}),
             ],
-            ModelProtocol::OpenaiChat => {
-                vec![json!({"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]})]
-            }
+            ModelProtocol::OpenaiChat => vec![
+                json!({"choices":[{"delta":{"reasoning_content":"private"},"finish_reason":null}]}),
+                json!({"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}),
+            ],
             ModelProtocol::AnthropicMessages => vec![
-                json!({"type":"content_block_delta","delta":{"text":"ok"}}),
+                json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}),
+                json!({"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"private"}}),
+                json!({"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}),
+                json!({"type":"content_block_delta","index":1,"delta":{"text":"ok"}}),
                 json!({"type":"message_delta","delta":{"stop_reason":"end_turn"}}),
                 json!({"type":"message_stop"}),
             ],
@@ -232,8 +239,126 @@ fn five_protocols_decode_public_text_only() {
         for v in frames {
             d.push(v).unwrap();
         }
-        assert_eq!(d.finish().unwrap().text, "ok");
+        let response = d.finish().unwrap();
+        assert_eq!(response.text, "ok", "{p:?}");
+        // 推理内容必须被收集，且不得混进公开文本。
+        let reasoning = response.reasoning.expect("推理内容未收集");
+        assert_eq!(reasoning.text, "private", "{p:?}");
+        assert!(reasoning.matches(p), "{p:?}");
+        assert!(!response.text.contains("private"), "{p:?}");
     }
+}
+
+/// 推理帧不能经 `push` 的返回值流进 assistant.delta —— 那是逐字上屏的通路。
+#[test]
+fn anthropic_reasoning_frames_never_return_a_public_delta() {
+    let mut d = Decoder::new(ModelProtocol::AnthropicMessages);
+    for v in [
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"私密推理"}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"message_delta","delta":{"stop_reason":"end_turn"}}),
+        json!({"type":"message_stop"}),
+    ] {
+        assert!(d.push(v).unwrap().is_none());
+    }
+    // 整轮只产出了思考，没有可见回复：拒绝该轮，并说明原因。
+    let error = d.finish().unwrap_err().to_string();
+    assert!(error.contains("思考内容"), "{error}");
+}
+
+/// 只产生思考、没有可见回复的轮次要给出可操作的原因，而不是笼统的
+/// "empty model response"。
+#[test]
+fn thinking_only_turn_reports_a_specific_error() {
+    let reasoning = Some(Reasoning {
+        protocol: ModelProtocol::AnthropicMessages,
+        blocks: vec![json!({"type":"thinking","thinking":"想了很久","signature":"s"})],
+        text: "想了很久".into(),
+    });
+    let empty = sleepy_doll::model::ModelResponse {
+        text: String::new(),
+        tool_calls: vec![],
+        finish_reason: Some("end_turn".into()),
+        usage: Default::default(),
+        reasoning: reasoning.clone(),
+    };
+    let error = sleepy_doll::runtime::gateway::validate(&empty)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("思考内容"), "{error}");
+
+    let truncated = sleepy_doll::model::ModelResponse {
+        text: String::new(),
+        tool_calls: vec![],
+        finish_reason: Some("max_tokens".into()),
+        usage: Default::default(),
+        reasoning,
+    };
+    let error = sleepy_doll::runtime::gateway::validate(&truncated)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("输出预算"), "{error}");
+}
+
+/// 估算结果与 `max_tokens` 同单位：中文按字计，不按字节。
+#[test]
+fn token_estimation_counts_characters_not_bytes() {
+    // 非 ASCII 按 1 token/字，ASCII 按 4 字符 1 token。
+    assert_eq!(context::estimate_tokens("中文字符"), 4);
+    assert_eq!(context::estimate_tokens("abcdefgh"), 2);
+
+    // 满额上下文：48000 个中文字。按字节算约 144000，必然超预算；按 token 算
+    // 只有 48000，落在 100000 之内。
+    let full = vec![context::message(Role::User, "中".repeat(48_000))];
+    let estimated = context::estimate_messages_tokens(&full);
+    assert_eq!(estimated, 48_008);
+    assert!(estimated < 100_000, "满额中文上下文估算为 {estimated}");
+
+    // 结构化字段按实际长度算，不把 JSON 的括号引号当内容长度。
+    let tool = Message {
+        role: Role::Tool,
+        content: r#"{"ok":true}"#.into(),
+        tool_call_id: Some("c".into()),
+        tool_calls: vec![],
+        reasoning: None,
+    };
+    assert_eq!(context::estimate_messages_tokens(&[tool]), 11);
+}
+
+/// 分叉会话漏拷推理列，会在首个后续请求上静默 400。
+#[test]
+fn fork_conversation_preserves_thinking_blocks() {
+    let (_d, j) = journal();
+    let mut run = j.create("go", "c", "fork", 1800).unwrap();
+    j.save(&mut run, RunState::Deciding).unwrap();
+    let reasoning = Reasoning {
+        protocol: ModelProtocol::AnthropicMessages,
+        blocks: vec![json!({"type":"thinking","thinking":"先看看","signature":"sig-abc"})],
+        text: "先看看".into(),
+    };
+    j.append_message(
+        &run,
+        &Message {
+            role: Role::Assistant,
+            content: "好的".into(),
+            tool_call_id: None,
+            tool_calls: vec![],
+            reasoning: Some(reasoning.clone()),
+        },
+    )
+    .unwrap();
+    // 分叉只拷贝终态运行的轮次。
+    j.save(&mut run, RunState::Succeeded).unwrap();
+
+    let forked = j.fork_conversation("c", None).unwrap();
+    let copied = j.conversation_messages(&forked).unwrap();
+    let stored = copied
+        .iter()
+        .find(|m| m.role == Role::Assistant)
+        .expect("分叉后缺少 assistant 轮次");
+    assert_eq!(stored.reasoning.as_ref(), Some(&reasoning));
 }
 #[test]
 fn context_refuses_oversized_recent_messages() {
@@ -307,6 +432,42 @@ fn agent_reads_a_live_api_only_after_loading_its_contract() {
     assert!(events.to_string().contains("simulated"));
     assert_eq!(backend.job_count(), 0);
     app.shutdown();
+}
+
+#[test]
+fn core_job_lookup_is_not_misrouted_as_a_plugin() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    backend.set_responses(vec![
+        call("bgi.job.get", json!({"jobId":"missing-job"})),
+        answer(),
+    ]);
+    let directory = tempfile::tempdir().unwrap();
+    let app = controller(&backend, &directory);
+    let run = ipc(
+        &app,
+        "run.submit",
+        json!({"prompt":"recover job","clientKey":"job-get-routing"}),
+    );
+    let terminal = wait(
+        &app,
+        run["id"].as_str().unwrap(),
+        &["answered", "failed", "needsReview"],
+    );
+    assert_eq!(terminal["state"], "answered");
+    let history = ipc(
+        &app,
+        "conversation.get",
+        json!({"id":run["conversationId"]}),
+    );
+    let tool_result = history["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["role"] == "tool")
+        .and_then(|message| message["content"].as_str())
+        .unwrap();
+    assert!(tool_result.contains("HTTP error"), "{tool_result}");
+    assert!(!tool_result.contains("插件已停用"), "{tool_result}");
 }
 
 #[test]
@@ -580,7 +741,7 @@ fn approve_pending(c: &Arc<AppController>, run: &Value) {
 #[test]
 fn acceptance_response_loss_reuses_original_job() {
     let backend = MockBackend::start("127.0.0.1:0").unwrap();
-    backend.set_faults(sleepy_doll::mock::MockFaults {
+    backend.set_faults(sleepy_doll::model::mock::MockFaults {
         lose_next_acceptance: true,
         ..Default::default()
     });
@@ -616,7 +777,7 @@ fn acceptance_response_loss_reuses_original_job() {
 #[test]
 fn cancelled_model_request_returns_promptly() {
     let backend = MockBackend::start("127.0.0.1:0").unwrap();
-    backend.set_faults(sleepy_doll::mock::MockFaults {
+    backend.set_faults(sleepy_doll::model::mock::MockFaults {
         model_delay_ms: 2000,
         ..Default::default()
     });
@@ -634,7 +795,7 @@ fn cancelled_model_request_returns_promptly() {
 #[test]
 fn run_deadline_bounds_a_model_that_never_sends_headers() {
     let backend = MockBackend::start("127.0.0.1:0").unwrap();
-    backend.set_faults(sleepy_doll::mock::MockFaults {
+    backend.set_faults(sleepy_doll::model::mock::MockFaults {
         model_delay_ms: 5000,
         ..Default::default()
     });
@@ -654,7 +815,7 @@ fn run_deadline_bounds_a_model_that_never_sends_headers() {
 #[test]
 fn cancelled_job_is_confirmed_before_releasing_lease() {
     let backend = MockBackend::start("127.0.0.1:0").unwrap();
-    backend.set_faults(sleepy_doll::mock::MockFaults {
+    backend.set_faults(sleepy_doll::model::mock::MockFaults {
         job_delay_ms: 4000,
         ..Default::default()
     });
@@ -688,7 +849,7 @@ fn cancelled_job_is_confirmed_before_releasing_lease() {
 #[test]
 fn expired_observation_prevents_game_submission() {
     let backend = MockBackend::start("127.0.0.1:0").unwrap();
-    backend.set_faults(sleepy_doll::mock::MockFaults {
+    backend.set_faults(sleepy_doll::model::mock::MockFaults {
         stale_state: true,
         ..Default::default()
     });
@@ -718,7 +879,7 @@ fn expired_observation_prevents_game_submission() {
 #[test]
 fn truncated_stream_never_succeeds() {
     let backend = MockBackend::start("127.0.0.1:0").unwrap();
-    backend.set_faults(sleepy_doll::mock::MockFaults {
+    backend.set_faults(sleepy_doll::model::mock::MockFaults {
         truncate_model_stream: true,
         ..Default::default()
     });
@@ -850,14 +1011,14 @@ fn resource_changes_invalidate_binding() {
     )
     .unwrap();
     fs::write(d.path().join("capabilities/c.json"),json!({"id":"c","description":"采矿","methodId":"run","catalogVersion":"1","resourceFields":["/routeId"]}).to_string()).unwrap();
-    let catalog = sleepy_doll::runtime::catalog::Catalog::load(d.path()).unwrap();
+    let catalog = sleepy_doll::runtime::host::catalog::Catalog::load(d.path()).unwrap();
     assert!(catalog.resolve("c", &json!({"routeId":"r"})).is_ok());
     fs::write(d.path().join("route.json"), "changed").unwrap();
     assert!(catalog.resolve("c", &json!({"routeId":"r"})).is_err());
 }
 #[test]
 fn verifier_will_not_promote_stale_or_missing_evidence() {
-    use sleepy_doll::runtime::{catalog::Predicate, verifier::verify};
+    use sleepy_doll::runtime::{host::catalog::Predicate, operation::verifier::verify};
     let p = vec![Predicate::Equals {
         pointer: "/ui/value".into(),
         value: json!("main"),

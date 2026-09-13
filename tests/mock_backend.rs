@@ -1,10 +1,10 @@
-use std::{collections::HashMap, fs, sync::Arc, thread, time::Duration};
+use std::{collections::HashMap, fs, path::Path, sync::Arc, thread, time::Duration};
 
 use serde_json::{Value, json};
 use sleepy_doll::{
     app::AppController,
     config::{ModelConfig, ModelOptions, ModelProtocol},
-    mock::MockBackend,
+    model::mock::MockBackend,
     model::{Message, Model, ProtocolModel, Role},
 };
 
@@ -37,6 +37,7 @@ fn every_model_protocol_returns_without_tokens() {
         content: "普通文本".into(),
         tool_call_id: None,
         tool_calls: vec![],
+        reasoning: None,
     }];
     for protocol in [
         ModelProtocol::OpenaiResponses,
@@ -63,6 +64,7 @@ fn mock_summaries_do_not_turn_unready_capture_into_success() {
             content: "查看游戏状态".into(),
             tool_call_id: None,
             tool_calls: vec![],
+            reasoning: None,
         },
         Message {
             role: Role::Assistant,
@@ -73,6 +75,7 @@ fn mock_summaries_do_not_turn_unready_capture_into_success() {
                 name: "bgi.state.get".into(),
                 arguments: json!({}),
             }],
+            reasoning: None,
         },
         Message {
             role: Role::Tool,
@@ -81,6 +84,7 @@ fn mock_summaries_do_not_turn_unready_capture_into_success() {
                     .to_string(),
             tool_call_id: Some("state".into()),
             tool_calls: vec![],
+            reasoning: None,
         },
     ];
     for protocol in [
@@ -108,6 +112,7 @@ fn responses_protocol_exposes_short_and_long_layout_scenarios() {
         content: content.into(),
         tool_call_id: None,
         tool_calls: vec![],
+        reasoning: None,
     };
     let short = protocol.complete(&[request("短回复")], &[]).unwrap();
     let long = protocol.complete(&[request("长回复")], &[]).unwrap();
@@ -120,7 +125,7 @@ fn responses_protocol_exposes_short_and_long_layout_scenarios() {
 #[test]
 fn streaming_delivers_early_incremental_chunks_not_a_buffered_final_body() {
     let backend = MockBackend::start("127.0.0.1:0").unwrap();
-    backend.set_faults(sleepy_doll::mock::MockFaults {
+    backend.set_faults(sleepy_doll::model::mock::MockFaults {
         stream_chunk_delay_ms: 25,
         ..Default::default()
     });
@@ -132,6 +137,7 @@ fn streaming_delivers_early_incremental_chunks_not_a_buffered_final_body() {
         content: "stream".into(),
         tool_call_id: None,
         tool_calls: vec![],
+        reasoning: None,
     };
     let started = std::time::Instant::now();
     let mut deltas = Vec::new();
@@ -282,6 +288,36 @@ fn all_protocols_stream_real_tool_calls_in_the_mock_scenario() {
             "{protocol}: {completed}"
         );
         controller.shutdown();
+    }
+}
+
+#[test]
+fn always_loaded_bgi_manual_reaches_unrelated_user_phrasings() {
+    let directory = tempfile::tempdir().unwrap();
+    let skill_root = directory.path().join("skills/bgi-operator");
+    fs::create_dir_all(&skill_root).unwrap();
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("skills/bgi-operator/SKILL.md"),
+        skill_root.join("SKILL.md"),
+    )
+    .unwrap();
+    let mut registry = sleepy_doll::extension::skills::SkillRegistry::default();
+    registry
+        .load(&[(directory.path().join("skills"), "test".into())])
+        .unwrap();
+    let skill = registry.get("bgi-operator").unwrap();
+    assert!(skill.always_load);
+    for prompt in [
+        "有哪些调度器",
+        "跑霜仙花",
+        "新建锄地配置",
+        "修改截图间隔",
+        "看看我的脚本",
+    ] {
+        assert!(
+            skill.always_load,
+            "BGI manual must not depend on matching phrase: {prompt}"
+        );
     }
 }
 

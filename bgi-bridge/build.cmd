@@ -70,7 +70,7 @@ echo [4/4] Building managed bridge...
 rem Pin the output directory. Letting the SDK choose gives bin\<platform>\Release\...
 rem and the platform segment varies with the environment - which once made this
 rem script silently copy a stale DLL from a path the build no longer used.
-set "MROOT=%ROOT%\.build"
+set "MROOT=%ROOT%\.build\managed"
 pushd "%MANAGED%"
 dotnet build -c Release -v quiet --nologo -o "%MROOT%"
 set "RC=%errorlevel%"
@@ -89,12 +89,14 @@ copy /y "%MBIN%\BgiBridge.deps.json" "%DIST%\" >nul
 if errorlevel 1 exit /b 1
 
 echo Building offline recovery helper...
-dotnet build "%ROOT%\Recovery.csproj" -c Release -v quiet --nologo -o "%DIST%"
+dotnet build "%ROOT%\recovery\Recovery.csproj" -c Release -v quiet --nologo -o "%DIST%"
 if errorlevel 1 exit /b 1
 
+rem Intermediate and debug-only files never ship.
 del /q "%DIST%\*.obj" 2>nul
 del /q "%DIST%\*.exp" 2>nul
 del /q "%DIST%\*.lib" 2>nul
+del /q "%DIST%\*.pdb" 2>nul
 
 if not exist "%DIST%\bridge.config.json" (
   if not exist "%CFG%" copy /y "%ROOT%\bridge.config.example.json" "%CFG%" >nul

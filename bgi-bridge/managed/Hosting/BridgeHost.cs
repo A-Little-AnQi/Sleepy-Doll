@@ -146,6 +146,12 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
             return;
         }
 
+        if (path == "/bridge/v1/host" && request.HttpMethod == "GET")
+        {
+            await WriteJsonAsync(context, 200, HostPaths()).ConfigureAwait(false);
+            return;
+        }
+
         if (path == "/bridge/v1/catalog" && request.HttpMethod == "GET")
         {
             var query = request.QueryString["q"];
@@ -236,6 +242,22 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
             observedAt = DateTimeOffset.UtcNow,
             runtime = detail,
             bridgeReady = ready,
+            host = HostPaths(),
+        };
+    }
+
+    /// <summary>
+    /// 宿主安装目录与用户目录。桥跑在 BetterGI 进程内，<c>AppContext.BaseDirectory</c>
+    /// 就是安装目录，用户自己配置的内容都在 <c>User\</c> 下。
+    /// 不触碰任何宿主类型，因此不依赖游戏状态，可随时调用。
+    /// </summary>
+    private static object HostPaths()
+    {
+        var install = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+        return new
+        {
+            installPath = install,
+            userPath = Path.GetFullPath(Path.Combine(install, "User")),
         };
     }
 
@@ -253,6 +275,10 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
             .Where(method => string.IsNullOrEmpty(group) || method.Group.Equals(group, StringComparison.OrdinalIgnoreCase)).ToArray();
         var items = all.Skip(offset).Take(limit)
             .Select(method => method.Discovery(Unavailable(method) is null, Unavailable(method), _catalogVersion)).ToArray();
+        // 空结果明确要求检查证据源，避免模型连续更换同义词。
+        var hint = all.Length == 0 && !string.IsNullOrWhiteSpace(query) && string.IsNullOrEmpty(group)
+            ? "没有接口命中。先判断目标是否其实是 User 目录中的配置组、路线或脚本；若确定属于宿主接口，只用一个核心词重试一次。"
+            : null;
         return new
         {
             catalogVersion = _catalogVersion, total = all.Length, offset,
@@ -260,7 +286,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
             groups = registry.All.GroupBy(method => method.Group).OrderBy(group => group.Key)
                 .Select(group => new { id = group.Key, count = group.Count() }).ToArray(),
             items,
-            methods = items,
+            hint,
         };
     }
 
@@ -276,7 +302,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
             effect = descriptor.Effect,
             executionMode = descriptor.ReadOnly ? "inline" : "job",
             concurrency = descriptor.ReadOnly ? "parallel" : "gameExclusive",
-            cancellation = descriptor.Group == "command" ? "waitOnly" : "cooperative",
+            cancellation = !descriptor.ReadOnly && descriptor.Group != "settings" ? "waitOnly" : "cooperative",
             resultReliability = descriptor.Group == "settings" ? "readBackVerified" : descriptor.ReadOnly ? "immediate" : "completionOnly",
             requiresConfirmation = !descriptor.ReadOnly,
             callable = Unavailable(descriptor) is null, unavailableReason = Unavailable(descriptor),

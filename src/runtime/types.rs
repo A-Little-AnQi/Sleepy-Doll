@@ -166,7 +166,7 @@ pub struct PlanStep {
     #[serde(default)]
     pub tool: Option<String>,
     #[serde(default)]
-    pub execution: Option<crate::tools::ToolExecution>,
+    pub execution: Option<crate::extension::ToolExecution>,
     #[serde(default)]
     pub provider_version: Option<String>,
     #[serde(default)]

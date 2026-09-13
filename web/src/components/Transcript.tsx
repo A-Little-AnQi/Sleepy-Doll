@@ -11,6 +11,7 @@ interface Activity extends Call {
 }
 type Part =
   | { kind: "text"; text: string }
+  | { kind: "reasoning"; text: string }
   | { kind: "activities"; activities: Activity[] };
 export interface Turn {
   role: "user" | "assistant";
@@ -43,12 +44,16 @@ export function buildTurns(messages: MessageInfo[], stream: string): Turn[] {
     const calls = (message.toolCalls ?? []).filter(
       (call) => !["plan.update", "user.ask"].includes(call.name),
     );
-    if (!message.content && !calls.length) continue;
+    // 纯推理轮也要显示，否则整轮被静默丢掉。
+    const reasoning = message.reasoning?.text ?? "";
+    if (!message.content && !calls.length && !reasoning) continue;
     let turn = turns.at(-1);
     if (!turn || turn.role !== message.role || message.role === "user") {
       turn = { role: message.role, parts: [] };
       turns.push(turn);
     }
+    // 推理排在回答之前，与模型产出顺序一致。
+    if (reasoning) turn.parts.push({ kind: "reasoning", text: reasoning });
     if (message.content)
       turn.parts.push({ kind: "text", text: message.content });
     if (calls.length) {
@@ -139,6 +144,21 @@ function ActivityGroup({ activities }: { activities: Activity[] }) {
   );
 }
 
+/** 默认折叠，与工具调用明细一致。推理文本通常很长，不该占满正文。 */
+function ReasoningDisclosure({ text }: { text: string }) {
+  return (
+    <details className="activity-group reasoning-group">
+      <summary>
+        <span className="activity-label">思考过程</span>
+        <ChevronIcon className="activity-expand" />
+      </summary>
+      <div className="activity-detail">
+        <pre className="reasoning-text">{text}</pre>
+      </div>
+    </details>
+  );
+}
+
 function AssistantIdentity() {
   return (
     <div className="message-identity">
@@ -207,6 +227,8 @@ export const Transcript = memo(function Transcript({
                 >
                   <MarkdownText text={part.text} />
                 </div>
+              ) : part.kind === "reasoning" ? (
+                <ReasoningDisclosure key={partIndex} text={part.text} />
               ) : (
                 <ActivityGroup key={partIndex} activities={part.activities} />
               ),

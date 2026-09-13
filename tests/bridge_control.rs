@@ -1,7 +1,7 @@
 //! Opt-in smoke test against the user's dedicated BetterGI test installation.
 //! No game commands are executed. Requires a running BetterGI and elevation.
 use serde_json::{Value, json};
-use sleepy_doll::{AppConfig, app::AppController, bgi::BgiClient};
+use sleepy_doll::{AppConfig, app::AppController, bridge::BgiClient};
 use std::sync::Arc;
 
 #[test]
@@ -41,6 +41,8 @@ fn real_bridge_switch_round_trip() {
     let mut offset = 0;
     let mut total = 0;
     let mut readable = 0;
+    let mut run_group_contract = None;
+    let mut update_scripts_contract = None;
     let mut sources = std::collections::BTreeMap::<String, usize>::new();
     loop {
         let page = client.catalog_page("", None, offset).unwrap();
@@ -62,6 +64,12 @@ fn real_bridge_switch_round_trip() {
                 "{id} discovery parameters missing"
             );
             let detail = client.describe(id).unwrap();
+            if id == "bgi.run_script_group" {
+                run_group_contract = Some(detail.clone());
+            }
+            if id == "bgi.update_subscribed_scripts" {
+                update_scripts_contract = Some(detail.clone());
+            }
             let guide = &detail["guide"];
             assert!(
                 guide["verification"].is_string() && guide["rollback"].is_string(),
@@ -114,6 +122,17 @@ fn real_bridge_switch_round_trip() {
             }
         }
     }
+    let run_group = run_group_contract.expect("stable script-group operation is missing");
+    assert_eq!(run_group["group"], "scheduler");
+    assert_eq!(run_group["effect"], "gameWrite");
+    assert_eq!(run_group["requiresGameReady"], true);
+    assert_eq!(run_group["callable"], true);
+    let update_scripts =
+        update_scripts_contract.expect("stable script update operation is missing");
+    assert_eq!(update_scripts["group"], "repository");
+    assert_eq!(update_scripts["effect"], "hostCommand");
+    assert_eq!(update_scripts["requiresGameReady"], false);
+    assert_eq!(update_scripts["callable"], true);
     eprintln!("LIVE CONTRACT AUDIT: {total} APIs; {readable} setting reads; sources={sources:?}");
     let config_file = std::path::Path::new(r"E:\tools\test\BetterGI\User\config.json");
     let before_config: Value =

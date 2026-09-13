@@ -1,7 +1,7 @@
 use serde_json::json;
 use sleepy_doll::{
-    config::AppConfig, plugins::PluginManager, runtime::installation, skills::SkillRegistry,
-    tools::ToolRegistry,
+    config::AppConfig, extension::ToolRegistry, extension::plugins::PluginManager,
+    extension::skills::SkillRegistry,
 };
 use std::fs;
 
@@ -19,7 +19,10 @@ fn local_import_update_and_removal_preserve_retired_files() {
     )
     .unwrap();
     let config = config(d.path());
-    assert_eq!(installation::install(&config, &source).unwrap(), "sample");
+    assert_eq!(
+        sleepy_doll::runtime::host::installation::install(&config, &source).unwrap(),
+        "sample"
+    );
     assert!(
         d.path()
             .join("plugins/sample/.sleepy-doll-plugin/plugin.json")
@@ -30,14 +33,14 @@ fn local_import_update_and_removal_preserve_retired_files() {
         json!({"schemaVersion":1,"id":"sample","name":"sample","version":"2"}).to_string(),
     )
     .unwrap();
-    installation::install(&config, &source).unwrap();
+    sleepy_doll::runtime::host::installation::install(&config, &source).unwrap();
     assert_eq!(
         fs::read_dir(d.path().join("plugins/.retired"))
             .unwrap()
             .count(),
         1
     );
-    let retired = installation::remove(&config, "sample").unwrap();
+    let retired = sleepy_doll::runtime::host::installation::remove(&config, "sample").unwrap();
     assert!(retired.exists());
     assert!(!d.path().join("plugins/sample").exists());
 }
@@ -108,7 +111,7 @@ fn skill_conditions_require_available_domain_context() {
     let kinds = std::collections::HashSet::from(["profile".into()]);
     assert!(registry.eligible(
         skill,
-        &sleepy_doll::skills::SkillContext {
+        &sleepy_doll::extension::skills::SkillContext {
             plugins: &plugins,
             capabilities: &capabilities,
             resource_kinds: &kinds,
@@ -117,7 +120,7 @@ fn skill_conditions_require_available_domain_context() {
     ));
     assert!(!registry.eligible(
         skill,
-        &sleepy_doll::skills::SkillContext {
+        &sleepy_doll::extension::skills::SkillContext {
             plugins: &std::collections::HashSet::new(),
             capabilities: &capabilities,
             resource_kinds: &kinds,
@@ -222,10 +225,12 @@ for line in sys.stdin:
         tools.call("sample.adapter.inspect", &json!({"x":1}))["ok"],
         true
     );
-    let artifacts =
-        sleepy_doll::runtime::artifacts::ArtifactStore::new(d.path().join("artifacts"), 1024)
-            .unwrap();
-    let snapshot = sleepy_doll::runtime::kernel::ResourceSnapshot {
+    let artifacts = sleepy_doll::runtime::store::artifacts::ArtifactStore::new(
+        d.path().join("artifacts"),
+        1024,
+    )
+    .unwrap();
+    let snapshot = sleepy_doll::runtime::operation::kernel::ResourceSnapshot {
         id: "snapshot".into(),
         resource_id: "resource".into(),
         resource_version: "1".into(),
@@ -237,8 +242,9 @@ for line in sys.stdin:
     let plan = plugins.adapters()[0]
         .plan(&[(snapshot, b"old".to_vec())], json!({}), &artifacts)
         .unwrap();
-    let sleepy_doll::runtime::kernel::StagedOutput::ReplaceResource {
-        content_artifact, ..
+    let sleepy_doll::runtime::operation::kernel::StagedOutput::ReplaceResource {
+        content_artifact,
+        ..
     } = &plan.staged_outputs[0]
     else {
         panic!("expected replacement")

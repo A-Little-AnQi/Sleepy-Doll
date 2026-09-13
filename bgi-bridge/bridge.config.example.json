@@ -11,7 +11,7 @@
   "token": "",
 
   "//groups": "按组开关。关掉的组不出现在 catalog 里，invoke 也拒绝。未列出的组默认启用。",
-  "//command": "自动发现的 RelayCommand（含删除/卸载类）。默认关，需要时再开。",
+  "//command": "自动发现的 RelayCommand。默认开启；Sleepy Doll 对每个写调用执行审批、幂等和结果跟踪。",
   "groups": {
     "lifecycle": true,
     "runtime": true,
@@ -20,7 +20,7 @@
     "scheduler": true,
     "workflow": true,
     "repository": true,
-    "command": false,
+    "command": true,
     "setting": true
   },
 

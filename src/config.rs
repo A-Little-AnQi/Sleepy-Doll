@@ -31,6 +31,15 @@ pub struct ModelOptions {
     pub timeout_ms: u64,
     #[serde(default)]
     pub reasoning_effort: Option<String>,
+    /// 该模型的上下文窗口（token）。运行时的上下文预算由它推导，而不是写死一个
+    /// 与模型无关的常数 —— 200k 窗口的模型和 32k 窗口的模型不该共用一个上限。
+    #[serde(default = "default_context_window")]
+    pub context_window: u64,
+}
+
+/// 当前主流模型的窗口量级。配置里按实际模型改。
+const fn default_context_window() -> u64 {
+    200_000
 }
 impl Default for ModelOptions {
     fn default() -> Self {
@@ -39,6 +48,7 @@ impl Default for ModelOptions {
             max_output_tokens: None,
             timeout_ms: default_model_timeout(),
             reasoning_effort: None,
+            context_window: default_context_window(),
         }
     }
 }
@@ -86,8 +96,11 @@ pub struct AgentConfig {
 const fn default_max_turns() -> usize {
     16
 }
+/// 一轮里允许的调用数。列一个目录再逐个读文件是很自然的批次（11 个配置组
+/// 就是 11 次读），上限压得太低会把一个批次劈成两轮，模型只能重发一遍。
+/// 单次运行的总量由 `runtime.maxTools` 约束。
 const fn default_max_tools() -> usize {
-    8
+    16
 }
 const fn default_max_skills() -> usize {
     4
@@ -143,7 +156,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub runtime: crate::runtime::policy::RuntimeConfig,
     #[serde(default)]
-    pub hooks: Vec<crate::runtime::hooks::HttpHookConfig>,
+    pub hooks: Vec<crate::runtime::host::hooks::HttpHookConfig>,
 }
 
 impl AppConfig {
@@ -770,7 +783,7 @@ mod tests {
             models: vec![],
             agent: AgentConfig {
                 max_turns: 16,
-                max_tool_calls_per_turn: 8,
+                max_tool_calls_per_turn: 16,
                 system_prompt: "test".into(),
                 skill_directories: vec![],
                 auto_load_skills: true,

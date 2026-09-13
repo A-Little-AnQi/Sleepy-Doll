@@ -1,8 +1,8 @@
 use crate::{
     config::{ModelConfig, ModelProtocol},
     error::{Error, Result},
-    model::{Message, ModelResponse, ProtocolModel, ToolCall, Usage, parse_response},
-    tools::ToolDefinition,
+    extension::ToolDefinition,
+    model::{Message, ModelResponse, ProtocolModel, Reasoning, ToolCall, Usage, parse_response},
 };
 use futures_util::StreamExt;
 use serde_json::{Value, json};
@@ -102,7 +102,12 @@ pub async fn complete(
             404 => "模型或 API 地址不存在，请检查模型配置",
             _ => "模型服务返回错误",
         };
-        return Err(Error::Http(format!("{message}（HTTP {status}）")));
+        let detail = read_error_detail(response, cancel).await;
+        return Err(Error::Http(if detail.is_empty() {
+            format!("{message}（HTTP {status}）")
+        } else {
+            format!("{message}（HTTP {status}）：{detail}")
+        }));
     }
     let content_type = response
         .headers()
@@ -163,6 +168,42 @@ pub async fn complete(
     }
     Ok(result)
 }
+
+async fn read_error_detail(response: reqwest::Response, cancel: &CancellationToken) -> String {
+    const LIMIT: usize = 64 * 1024;
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while bytes.len() < LIMIT {
+        let chunk = tokio::select! {
+            _ = cancel.cancelled() => return String::new(),
+            chunk = stream.next() => chunk,
+        };
+        let Some(Ok(chunk)) = chunk else { break };
+        let remaining = LIMIT - bytes.len();
+        bytes.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+    }
+    summarize_error_body(&bytes)
+}
+
+fn summarize_error_body(bytes: &[u8]) -> String {
+    let raw = String::from_utf8_lossy(bytes);
+    let parsed = serde_json::from_slice::<Value>(bytes).ok();
+    let message = parsed
+        .as_ref()
+        .and_then(|value| {
+            ["/error/message", "/message", "/detail", "/error"]
+                .iter()
+                .find_map(|pointer| value.pointer(pointer).and_then(Value::as_str))
+        })
+        .unwrap_or(raw.as_ref());
+    message
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(800)
+        .collect()
+}
 pub(crate) async fn read_json(
     response: reqwest::Response,
     cancel: &CancellationToken,
@@ -222,12 +263,23 @@ pub fn validate(r: &ModelResponse) -> Result<()> {
         r.finish_reason.as_deref(),
         Some("stop" | "completed" | "end_turn" | "tool_use" | "tool_calls" | "STOP")
     ) {
+        // 思考占满输出预算时先落在这一支：`max_tokens` 不在允许列表里。
+        // 仍然拒绝（该轮确实没有完成），但要给出可操作的原因。
         return Err(Error::ModelProtocol(
-            "response interrupted, refused, or missing completion marker".into(),
+            if r.finish_reason.as_deref() == Some("max_tokens") && r.reasoning.is_some() {
+                "模型在思考阶段耗尽输出预算，本轮没有产生可见回复".into()
+            } else {
+                "response interrupted, refused, or missing completion marker".into()
+            },
         ));
     }
     if r.text.trim().is_empty() && r.tool_calls.is_empty() {
-        return Err(Error::ModelProtocol("empty model response".into()));
+        // 不降级为成功：调用方会据此结束该轮，界面只剩一个空气泡。
+        return Err(Error::ModelProtocol(if r.reasoning.is_some() {
+            "模型只返回了思考内容，没有可见回复".into()
+        } else {
+            "empty model response".into()
+        }));
     }
     let mut ids = std::collections::HashSet::new();
     for c in &r.tool_calls {
@@ -240,27 +292,163 @@ pub fn validate(r: &ModelResponse) -> Result<()> {
     Ok(())
 }
 
+/// 正在拼装的独立推理块（Anthropic 内容块、Responses 输出项）。
+///
+/// `block` 保留提供方起始帧的原样载荷，拼装时只补文本与签名，这样私有键
+/// （如 `redacted_thinking` 的 `data`）不会在回传时丢失。
+struct ReasoningBlock {
+    block: Value,
+    text: String,
+    signature: String,
+}
+
+impl ReasoningBlock {
+    fn new(block: Value) -> Self {
+        Self {
+            block,
+            text: String::new(),
+            signature: String::new(),
+        }
+    }
+
+    /// 提供方跳过起始帧、直接送增量帧时的占位块。
+    fn orphan() -> Self {
+        Self::new(json!({"type":"thinking","thinking":"","signature":""}))
+    }
+}
+
+/// 推理载荷的收集状态。
+///
+/// 收集形态取决于各协议把签名放在哪里：Anthropic 与 Responses 有独立的块，
+/// Gemini 的签名附着在 part 上，另外两个协议只有可读文本。
+enum Pending {
+    /// 按块下标索引。不同下标的帧会交错到达，`BTreeMap` 按提供方的块顺序还原。
+    Blocks(BTreeMap<usize, ReasoningBlock>),
+    /// 签名按 `functionCall` 在轮内的序号索引 —— 运行时会重写 call id，
+    /// 而 part 顺序稳定。`thought` part 的文本单独累计。
+    Gemini {
+        text: String,
+        signatures: BTreeMap<usize, String>,
+    },
+    /// 只有可读文本，不需要回传。
+    Text(String),
+}
+
+impl Pending {
+    fn for_protocol(protocol: ModelProtocol) -> Self {
+        match protocol {
+            ModelProtocol::AnthropicMessages | ModelProtocol::OpenaiResponses => {
+                Self::Blocks(BTreeMap::new())
+            }
+            ModelProtocol::Gemini => Self::Gemini {
+                text: String::new(),
+                signatures: BTreeMap::new(),
+            },
+            ModelProtocol::OpenaiChat | ModelProtocol::OllamaChat => Self::Text(String::new()),
+        }
+    }
+
+    /// 已收集内容的字节数，用于流式响应上限。
+    fn len(&self) -> usize {
+        match self {
+            Self::Blocks(blocks) => blocks
+                .values()
+                .map(|r| r.text.len() + r.signature.len())
+                .sum(),
+            Self::Gemini { text, signatures } => {
+                text.len() + signatures.values().map(String::len).sum::<usize>()
+            }
+            Self::Text(text) => text.len(),
+        }
+    }
+
+    /// 组装成回传载荷。没有收集到任何内容时返回 `None`。
+    fn into_reasoning(self, protocol: ModelProtocol) -> Option<Reasoning> {
+        let mut display = String::new();
+        let mut blocks = Vec::new();
+        match self {
+            Self::Blocks(collected) => {
+                for (_, r) in collected {
+                    display.push_str(&r.text);
+                    // Responses 的 reasoning 项本身就是完整载荷，原样回传。
+                    if protocol != ModelProtocol::AnthropicMessages {
+                        blocks.push(r.block);
+                        continue;
+                    }
+                    let mut block = r.block;
+                    if block["type"] == "thinking"
+                        && let Some(map) = block.as_object_mut()
+                    {
+                        // 无条件写入：提供方可能在起始帧里省略 signature，
+                        // 只经 `signature_delta` 给出。
+                        map.insert("thinking".into(), json!(r.text));
+                        map.insert("signature".into(), json!(r.signature));
+                    }
+                    // `redacted_thinking` 只有 `data`，原样回传。
+                    blocks.push(block);
+                }
+            }
+            Self::Gemini { text, signatures } => {
+                display = text;
+                blocks = signatures
+                    .into_iter()
+                    .map(|(call_index, signature)| {
+                        json!({"callIndex": call_index, "signature": signature})
+                    })
+                    .collect();
+            }
+            Self::Text(text) => display = text,
+        }
+        (!blocks.is_empty() || !display.is_empty()).then_some(Reasoning {
+            protocol,
+            blocks,
+            text: display,
+        })
+    }
+}
+
 pub struct Decoder {
     protocol: ModelProtocol,
     text: String,
     calls: BTreeMap<usize, (String, String, String)>,
+    pending: Pending,
     reason: Option<String>,
     usage: Usage,
     completed: bool,
     final_response: Option<ModelResponse>,
 }
+
 impl Decoder {
     pub fn new(protocol: ModelProtocol) -> Self {
         Self {
             protocol,
             text: String::new(),
             calls: BTreeMap::new(),
+            pending: Pending::for_protocol(protocol),
             reason: None,
             usage: Usage::default(),
             completed: false,
             final_response: None,
         }
     }
+
+    /// 独立块表。当前协议不是块形态时返回 `None`。
+    fn blocks(&mut self) -> Option<&mut BTreeMap<usize, ReasoningBlock>> {
+        match &mut self.pending {
+            Pending::Blocks(blocks) => Some(blocks),
+            _ => None,
+        }
+    }
+
+    /// 追加仅供展示的推理文本。
+    fn push_reasoning_text(&mut self, text: &str) {
+        match &mut self.pending {
+            Pending::Text(display) => display.push_str(text),
+            Pending::Gemini { text: display, .. } => display.push_str(text),
+            Pending::Blocks(_) => {}
+        }
+    }
+
     pub fn push(&mut self, v: Value) -> Result<Option<String>> {
         if !v["error"].is_null() || v["type"] == "error" {
             return Err(Error::ModelProtocol("provider stream error".into()));
@@ -281,6 +469,10 @@ impl Decoder {
             ModelProtocol::OpenaiChat => {
                 let c = &v["choices"][0];
                 delta = c["delta"]["content"].as_str().unwrap_or("").into();
+                // 只为界面：多数提供方拒绝回传该字段。
+                if let Some(thinking) = c["delta"]["reasoning_content"].as_str() {
+                    self.push_reasoning_text(thinking);
+                }
                 if !c["delta"]["refusal"].is_null() {
                     return Err(Error::ModelProtocol("model refused".into()));
                 }
@@ -314,25 +506,65 @@ impl Decoder {
                 "message_start" => {
                     self.usage.input_tokens = v["message"]["usage"]["input_tokens"].as_u64()
                 }
-                "content_block_start" if v["content_block"]["type"] == "tool_use" => {
+                // 按块类型分派，不能用 `if ... type == "tool_use"` 守卫：
+                // 那会把思考块的起始帧一起吞掉。
+                "content_block_start" => {
+                    let index = v["index"].as_u64().unwrap_or(0) as usize;
                     let b = &v["content_block"];
-                    self.calls.insert(
-                        v["index"].as_u64().unwrap_or(0) as usize,
-                        (
-                            b["id"].as_str().unwrap_or("").into(),
-                            b["name"].as_str().unwrap_or("").into(),
-                            String::new(),
-                        ),
-                    );
+                    match b["type"].as_str().unwrap_or("") {
+                        "tool_use" => {
+                            self.calls.insert(
+                                index,
+                                (
+                                    b["id"].as_str().unwrap_or("").into(),
+                                    b["name"].as_str().unwrap_or("").into(),
+                                    String::new(),
+                                ),
+                            );
+                        }
+                        // `redacted_thinking` 同样要回传，且只带 `data`。
+                        "thinking" | "redacted_thinking" => {
+                            if let Some(blocks) = self.blocks() {
+                                blocks.insert(index, ReasoningBlock::new(b.clone()));
+                            }
+                        }
+                        _ => {}
+                    }
                 }
                 "content_block_delta" => {
-                    delta = v["delta"]["text"].as_str().unwrap_or("").into();
-                    if let Some(s) = v["delta"]["partial_json"].as_str() {
-                        self.calls
-                            .entry(v["index"].as_u64().unwrap_or(0) as usize)
-                            .or_default()
-                            .2
-                            .push_str(s);
+                    let index = v["index"].as_u64().unwrap_or(0) as usize;
+                    // 提供方可能不带 `delta.type`，此分支兜底。
+                    match v["delta"]["type"].as_str().unwrap_or("") {
+                        // 推理分支不碰 `delta`，所以不会经 `push` 的返回值
+                        // 流进 assistant.delta。
+                        "thinking_delta" => {
+                            if let (Some(text), Some(blocks)) =
+                                (v["delta"]["thinking"].as_str(), self.blocks())
+                            {
+                                blocks
+                                    .entry(index)
+                                    .or_insert_with(ReasoningBlock::orphan)
+                                    .text
+                                    .push_str(text);
+                            }
+                        }
+                        "signature_delta" => {
+                            if let (Some(signature), Some(blocks)) =
+                                (v["delta"]["signature"].as_str(), self.blocks())
+                            {
+                                blocks
+                                    .entry(index)
+                                    .or_insert_with(ReasoningBlock::orphan)
+                                    .signature
+                                    .push_str(signature);
+                            }
+                        }
+                        _ => {
+                            delta = v["delta"]["text"].as_str().unwrap_or("").into();
+                            if let Some(s) = v["delta"]["partial_json"].as_str() {
+                                self.calls.entry(index).or_default().2.push_str(s);
+                            }
+                        }
                     }
                 }
                 "message_delta" => {
@@ -345,15 +577,29 @@ impl Decoder {
             ModelProtocol::Gemini => {
                 let c = &v["candidates"][0];
                 for p in c["content"]["parts"].as_array().into_iter().flatten() {
+                    // 思考文本不进 `delta`，只留给界面，不回流到 assistant.delta。
                     if p["thought"] == true {
+                        if let (Some(s), Pending::Gemini { text, .. }) =
+                            (p["text"].as_str(), &mut self.pending)
+                        {
+                            text.push_str(s);
+                        }
                         continue;
                     }
                     if let Some(s) = p["text"].as_str() {
                         delta.push_str(s);
                     }
                     if let Some(f) = p.get("functionCall") {
+                        // 签名按 functionCall 序号索引：并行调用时只有第一个
+                        // part 带签名，回传时必须附回同一个 part。
+                        let call_index = self.calls.len();
+                        if let (Some(signature), Pending::Gemini { signatures, .. }) =
+                            (p["thoughtSignature"].as_str(), &mut self.pending)
+                        {
+                            signatures.insert(call_index, signature.into());
+                        }
                         self.calls.insert(
-                            self.calls.len(),
+                            call_index,
                             (
                                 uuid::Uuid::new_v4().to_string(),
                                 f["name"].as_str().unwrap_or("").into(),
@@ -373,6 +619,10 @@ impl Decoder {
             }
             ModelProtocol::OllamaChat => {
                 delta = v["message"]["content"].as_str().unwrap_or("").into();
+                // 只为界面：Ollama 不要求回传思考内容。
+                if let Some(thinking) = v["message"]["thinking"].as_str() {
+                    self.push_reasoning_text(thinking);
+                }
                 for c in v["message"]["tool_calls"].as_array().into_iter().flatten() {
                     self.calls.insert(
                         self.calls.len(),
@@ -394,6 +644,7 @@ impl Decoder {
         self.text.push_str(&delta);
         if self.text.len() > 2 * 1024 * 1024
             || self.calls.values().map(|c| c.2.len()).sum::<usize>() > 4 * 1024 * 1024
+            || self.pending.len() > 4 * 1024 * 1024
         {
             return Err(Error::ModelProtocol("response exceeds limit".into()));
         }
@@ -419,14 +670,33 @@ impl Decoder {
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
+            let reasoning = self.pending.into_reasoning(self.protocol);
             ModelResponse {
                 text: self.text,
                 tool_calls: calls,
                 finish_reason: self.reason,
                 usage: self.usage,
+                reasoning,
             }
         };
         validate(&result)?;
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_error_uses_the_structured_message_and_bounds_it() {
+        let detail = summarize_error_body(
+            br#"{"error":{"type":"invalid_request_error","message":"tool results must follow tool use"}}"#,
+        );
+        assert_eq!(detail, "tool results must follow tool use");
+        assert_eq!(
+            summarize_error_body(&vec![b'x'; 2_000]).chars().count(),
+            800
+        );
     }
 }

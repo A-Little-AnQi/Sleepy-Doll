@@ -2,7 +2,7 @@ use std::{env, path::PathBuf, sync::Arc, thread};
 
 use sleepy_doll::{
     app::AppController,
-    mock::{MockBackend, MockFaults},
+    model::mock::{MockBackend, MockFaults},
 };
 
 /// The development fixture at the repository root. The mock is a development-only

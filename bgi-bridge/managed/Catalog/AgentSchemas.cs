@@ -39,6 +39,8 @@ public static class AgentSchemas
         }), true)),
         "bgi.commit_settings" => Object(("planId", Text("preview_settings 返回且尚未过期的计划 ID。"), true)),
         "bgi.get_setting_change" or "bgi.rollback_settings" => Object(("changeId", Text("由 commit_settings、set_setting 或变更记录返回的事务 ID。"), true)),
+        "bgi.run_script_group" => Object(("groupName", Text("从 User/ScriptGroup 配置文件读取到的精确 name。"), true)),
+        "bgi.update_subscribed_scripts" => ArgumentSchema.Parse("""{"type":"object","properties":{"mode":{"type":"string","enum":["repositoryOnly","selected","all"],"description":"repositoryOnly 只刷新中央仓库；selected 只更新 paths；all 更新全部当前订阅。"},"paths":{"type":"array","minItems":1,"maxItems":100,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":512},"description":"mode=selected 时必填；值来自 User/Subscriptions，例如 js/AutoHoeingOneDragon。"}},"required":["mode"],"additionalProperties":false}"""),
         "bgi.list_commands" => Object(("filter", Text("命令名或用途关键词。"), false), ("includeDangerous", Flag("是否同时列出有破坏性副作用的命令；不影响调用权限。"), false)),
         "bgi.invoke_command" => Object(("command", Text("来自命令目录的精确 name。"), true), ("argument", ArgumentSchema.Parse("""{"description":"必须符合该命令的 parameterSchema；无参命令省略此字段。"}"""), false)),
         _ => throw new InvalidOperationException($"接口 {id} 缺少参数契约。"),
@@ -80,6 +82,8 @@ public static class AgentSchemas
             "bgi.commit_settings" or "bgi.set_setting" or "bgi.rollback_settings" or "bgi.get_setting_change" => ResultObject(description, ("changeId", Text("变更记录 ID。"), true), ("state", Text("事务状态。"), true), ("verified", Flag("本次操作的配置核验结果，不等于未来状态保持不变。"), true), ("backupFile", Text("受保护恢复记录文件路径。", 32767), false), ("differences", ArrayOf(Any("path、before、after。"), "脱敏差异。"), false)),
             "bgi.list_setting_changes" => ResultObject(description, ("changes", ArrayOf(Any("changeId、state、createdAt、verified、backupFile、differences。"), "最近的配置变更和命令前检查点。"), true)),
             "bgi.list_commands" => ResultObject(description, ("count", ArgumentSchema.Parse("""{"type":"integer"}"""), true), ("commands", ArrayOf(Any("name、guide、parameterSchema、unavailableReason、requiresConfirmation、isDestructive。"), "宿主命令契约。"), true)),
+            "bgi.run_script_group" => ResultObject(description, ("groupName", Text("从磁盘配置解析并传给宿主的准确名称。"), true), ("resolved", Flag("是否唯一定位到目标配置组。"), true), ("executed", Flag("宿主按名称执行方法是否已返回；不是整组任务完成标记。"), true)),
+            "bgi.update_subscribed_scripts" => ResultObject(description, ("mode", Text("实际执行的更新范围。"), true), ("repositoryChanged", Any("中央仓库是否拉到新内容；all 模式可能无法单独报告。"), false), ("updatedPaths", ArrayOf(Text("交给 BetterGI 更新的精确订阅路径。", 512), "selected/all 模式涉及的订阅路径。"), true), ("completed", Flag("宿主更新函数已返回；仍需回读目标文件验证内容。"), true)),
             _ => ResultObject(description, ("command", Text("实际命令名。"), true), ("executed", Flag("命令处理器已返回；不是业务成功标记。"), true), ("configurationCheckpoint", Any("执行前的配置备份记录，可用于离线恢复。"), true)),
         };
     }

@@ -1,0 +1,40 @@
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 40;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 12px 16px;
+  transform: translateX(-50%);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 14%);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.55;
+  cursor: pointer;
+  animation: toast-enter var(--motion-base) var(--ease-enter);
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* 尊重系统的减少动态效果设置，也跟随应用内的开关。 */
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
+html[data-reduced-motion="true"] .toast {
+  animation: none;
+}
