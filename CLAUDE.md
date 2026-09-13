@@ -1,0 +1,113 @@
+# Sleepy Doll
+
+面向 BetterGI 的本地桌面 Agent。Rust（桌面壳与 Agent 运行时）+ React（界面），
+`bgi-bridge/` 是注入 BetterGI 进程的 .NET / C++ 桥。
+
+## 构建与验证
+
+```bash
+npm ci
+build-desktop.cmd          # 唯一的发布构建入口，产物在 dist\Sleepy-Doll\
+```
+
+| 命令 | 内容 |
+|---|---|
+| `npm run check` | 前端类型检查 + 生产构建 |
+| `npm test` | 前端交互回归 |
+| `dotnet run --project bgi-bridge/dev/ContractTests.csproj` | 桥的契约测试 |
+| `cargo test --no-default-features --features mock` | 全部 Rust 测试（`mock` 是非默认特性，必须显式开） |
+| `cargo check` 与 `cargo check --no-default-features` | 两种特性组合都要过 |
+| `cargo clippy --all-targets --no-default-features --features mock -- -D warnings` | **CI 不执行 clippy，本地必须执行** |
+| `cargo fmt --all -- --check` | 格式 |
+
+`tests/live.rs` 是实机测试：用本机真实模型配置与真实桥执行一次完整问答，会消耗真实额度。
+它标了 `#[ignore]`，**不要让它进 CI**。手动执行：
+
+```bash
+cargo test --no-default-features --features mock --test live -- --ignored --nocapture
+```
+
+## 约定
+
+- **`.cmd` 脚本必须保持纯 ASCII。** cmd.exe 按 OEM 代码页读取，非 ASCII 字符会打乱命令解析
+  （`build-desktop.cmd` 头部写着这条，违反过一次：中文注释让 `(` `)` 解析崩掉）。
+- **构建是覆盖写入，不先清空目录。** 桥的 DLL 被运行中的 BetterGI 加载时删不掉，先删会留下
+  半个不可用的安装目录。构建失败时逐个列出没替换成的文件，其余保持可用。
+- 产物目录不进版本库：`dist/`、`bgi-bridge/dist/`、`bgi-bridge/.build/`、`target/`、`ui-dist/`。
+- **注释只说明代码做什么、为什么必须这样，不叙述它以前是什么样。** 改动的来龙去脉属于提交信息，
+  不属于源码；一条注释写三五行的辩解同样是噪音。
+- 文档与提交信息用标准技术文体：动词用「执行」不用「跑」、产品名不译（Build Tools、token）。
+
+## 协作方式
+
+这一节约束的是我，不是项目。
+
+**说话**
+
+- 结论先行。先给结果和判断，再给依据。不写「我先看看」「搞清楚了」「找到了」这类过程叙述，
+  不用比喻和夸张（「一地散文件」「别踩的坑」），不用语气词。
+- 报告要如实：失败就写失败并附输出，跳过了就说明跳过了，不要把「应该能过」当结论。
+- **不要把能自己查到的事丢回给用户。** 进程是否在运行、某个目录里有什么、某个值是多少 ——
+  先查，确实查不到再问。
+- **不要用罗列选择题代替继续工作。** 只有两种情况值得问：目标不存在；同一句话有两种代价不可逆的
+  理解。问就一次问完。写操作本身会走审批闸门，不需要在对话里再确认一遍。
+- 长任务不中途汇报进展，做完一次性说清：改了什么、验证了什么、还剩什么。
+
+**写代码**
+
+- 注释只说明代码做什么、为什么必须这样，**不叙述它以前是什么样**。改动来历属于提交信息，
+  不属于源码；三五行的辩解同样是噪音。
+- 匹配周围代码的风格与抽象层级。**不要为一个场景写特例** —— 那通常说明缺一个模型，
+  先把它找出来（领域对象、协议要求、数据结构），而不是加分支。
+- **先量再改。** 判断「哪里慢」「为什么失败」之前先取真实数据（日志、探针、实测数字），
+  不靠推理下结论。临时探针用完删掉。
+- 交付前确认工作区干净：不留调试输出、不留临时文件。
+
+**改动收尾**
+
+- 搬文件或改路径后，**全仓扫一遍引用**（`git grep`，覆盖 `.github/`）。CI 里的路径最容易漏，
+  本地构建绿不代表 CI 绿。
+- 改了产物落地的位置，**清掉旧位置已经写进去的东西**。用户是按「打开那个目录看到什么」判断的，
+  旧残留会让他以为你根本没改。
+- 验证跑真实命令：构建、测试、实机。其中实机测试（`tests/live.rs`）用真实模型与真实桥，
+  是唯一能证明端到端可用的手段。
+
+## 代码结构
+
+```
+src/
+  app/        控制器与 IPC 方法
+  model/      五个模型协议 —— mod.rs（共享类型与 Model 抽象）/ protocol.rs（编解码）/ mock.rs
+  bridge/     BGI 接触面 —— mod.rs（客户端与 bgi.* 工具）/ control.rs（桥进程生命周期）
+  extension/  工具契约，以及技能、插件、MCP 三类扩展来源
+  runtime/    Agent 运行时
+    store/      持久化：journal、migrations、artifacts
+    operation/  事务操作：operations、kernel、verifier、workflow、permissions
+    host/       宿主与扩展接触面：bridge、adapter、hooks、process、installation、catalog
+bgi-bridge/
+  native/     C++ 注入器与引导 DLL
+  managed/    C# 桥本体，运行在 BetterGI 进程内
+  recovery/   离线恢复工具
+  dev/        开发期专用：契约测试、元数据生成器、本地脚本
+```
+
+## 领域知识
+
+BetterGI 的对象模型与操作链路写在 [`skills/bgi-operator/SKILL.md`](skills/bgi-operator/SKILL.md)，
+它随安装目录分发、每次运行都附带。那里面覆盖：配置组（调度器）与任务的字段、`User\` 目录布局、
+脚本目录（`README.md` / `manifest.json` / `settings.json`）、执行模型（单条对象可直接执行，
+多条必须建配置组）、界面命令「操作当前选中项」的语义。
+
+**不要在这里复述它的内容，也不要另写一份功能清单** —— 功能面以桥的接口目录为准
+（`setting.` 全部配置项、`cmd.` 全部界面命令，每条自带中文说明）。
+
+## 容易踩的
+
+- **BetterGI 不监听配置文件。** 改完要重启 BetterGI 才生效；运行中的 BetterGI 保存设置时会把
+  内存里的旧配置写回文件、覆盖改动。
+- **桥的 DLL 被加载时构建会失败**（`Access is denied`）。BetterGI 是提权进程，非提权会话杀不掉它，
+  要用提权方式终止。
+- **Anthropic 兼容端点要求把 `content[].thinking` 原样回传，包括 `signature`。** 丢掉这些块会让
+  下一轮请求直接 400；各协议对推理载荷的要求不同，见 `src/model/protocol.rs`。
+- **交付的是 `dist/Sleepy-Doll/`**，`bgi-bridge/dist/` 只是桥的中间产物。
+- 用户的配置与密钥在 `<安装目录>\user\` 下，构建不会碰它（但 `rmdir` 式的清空会）。
