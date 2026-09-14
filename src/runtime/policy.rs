@@ -32,7 +32,8 @@ impl Default for RuntimeConfig {
             context_chars: None,
             max_tokens: None,
             grants: vec![],
-            permission_mode: crate::runtime::operation::permissions::PermissionMode::AskEach,
+            // 默认按实际影响判定：普通写入直接执行，只有删除与大范围变更确认一次。
+            permission_mode: crate::runtime::operation::permissions::PermissionMode::Standard,
             trust_grants: vec![],
         }
     }

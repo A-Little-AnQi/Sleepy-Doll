@@ -6,6 +6,7 @@ import {
   HistoryIcon,
   RefreshIcon,
 } from "../components/icons";
+import { readError } from "../session";
 import type { Bootstrap } from "../types";
 import { BridgeApiExplorer } from "../components/BridgeApiExplorer";
 import { BridgeRecovery } from "../components/BridgeRecovery";
@@ -39,7 +40,7 @@ export function BridgePage({
       const result = await api.setBridgeEnabled(enabled);
       if (result.warning) setNotice(result.warning);
     } catch (reason) {
-      setError(String(reason));
+      setError(readError(reason));
     } finally {
       await reload();
       setBusy(false);
@@ -56,7 +57,8 @@ export function BridgePage({
     : bridge.connected
       ? {
           title: "已连接",
-          detail: "桥在 BetterGI 进程内提供接口；关掉 BetterGI 后桥就没了，重新打开后点一次连接。",
+          detail:
+            "桥在 BetterGI 进程内提供接口；关掉 BetterGI 后桥就没了，重新打开后点一次连接。",
         }
       : {
           title: "未连接",
@@ -86,9 +88,7 @@ export function BridgePage({
       <section className="bridge-connection-card" data-motion="panel">
         <div className="bridge-connection-row">
           <div>
-            <strong
-              className={bridge.connected ? "is-connected" : undefined}
-            >
+            <strong className={bridge.connected ? "is-connected" : undefined}>
               {connection.title}
             </strong>
             <span>{connection.detail}</span>
@@ -143,7 +143,7 @@ export function BridgePage({
               void api
                 .bridgeState()
                 .then(setState)
-                .catch((reason) => setError(String(reason)))
+                .catch((reason) => setError(readError(reason)))
                 .finally(() => {
                   setBusy(false);
                   void reload();

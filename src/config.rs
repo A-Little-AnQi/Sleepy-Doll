@@ -163,7 +163,10 @@ impl AppConfig {
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let mut value: serde_json::Value = serde_json::from_str(&fs::read_to_string(path)?)?;
-        if value["version"] == 1 {
+        // 按文件声明的版本判断，而不是按前一步刚改成的版本 —— 否则 v1 配置在同
+        // 一次加载里会被连续降级两次，把显式写下的选择一起冲掉。
+        let declared = value["version"].as_u64().unwrap_or(1);
+        if declared == 1 {
             let backup = path.with_extension("v1.backup.json");
             if !backup.exists() {
                 fs::copy(path, &backup)?;
@@ -173,6 +176,16 @@ impl AppConfig {
                 value["runtime"] =
                     serde_json::to_value(crate::runtime::policy::RuntimeConfig::default())?;
             }
+            let candidate: Self = serde_json::from_value(value.clone())?;
+            candidate.validate()?;
+            atomic_write(path, &value)?;
+        }
+        // 版本 2 之前默认逐项审批，那是写进文件里的旧默认值，不是用户的选择。
+        // 产品默认已经改成「按实际影响确认」，这里跟着迁移一次；显式选择逐项
+        // 审批的用户把 permissionMode 改回 askEach 即可，之后不会再被覆盖。
+        if declared == 2 && value["runtime"]["permissionMode"] == serde_json::json!("askEach") {
+            value["version"] = serde_json::json!(3);
+            value["runtime"]["permissionMode"] = serde_json::json!("standard");
             let candidate: Self = serde_json::from_value(value.clone())?;
             candidate.validate()?;
             atomic_write(path, &value)?;
@@ -198,8 +211,8 @@ impl AppConfig {
 
     pub fn validate(&self) -> Result<()> {
         self.runtime.validate()?;
-        if self.version != 1 && self.version != 2 {
-            return Err(Error::Config("version must be 1 or 2".into()));
+        if !(1..=3).contains(&self.version) {
+            return Err(Error::Config("version must be 1, 2 or 3".into()));
         }
         if self.models.is_empty() {
             return Err(Error::Config(
@@ -274,6 +287,21 @@ impl AppConfig {
         candidate.validate()?;
         atomic_write(path, &value)?;
         Ok(())
+    }
+
+    /// 写入审批级别。用户随时可改，立即生效下一轮工具调用。
+    pub fn set_permission_mode(
+        path: impl AsRef<Path>,
+        mode: crate::runtime::operation::permissions::PermissionMode,
+    ) -> Result<()> {
+        update_raw(path.as_ref(), |value| {
+            if !value["runtime"].is_object() {
+                value["runtime"] =
+                    serde_json::to_value(crate::runtime::policy::RuntimeConfig::default())?;
+            }
+            value["runtime"]["permissionMode"] = serde_json::to_value(mode)?;
+            Ok(())
+        })
     }
 
     pub fn set_skill_enabled(path: impl AsRef<Path>, name: &str, enabled: bool) -> Result<()> {

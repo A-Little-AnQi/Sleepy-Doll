@@ -682,6 +682,10 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
                 deferred: false,
                 always_load: true,
                 search_hint: Some("修改用户的 BGI 配置文件".into()),
+                // 影响按真实差异计：写整份文件不等于改了整份配置。
+                scope: crate::extension::ScopeKind::Fields,
+                scope_target: Some("path".into()),
+                scope_reader: Some("bgi.user.read".into()),
                 ..ToolExecution::default()
             }
         } else if matches!(

@@ -1,4 +1,5 @@
 .chat-workspace {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -238,4 +239,51 @@
   .composer-dock {
     padding-bottom: 18px;
   }
+}
+
+.composer-mode {
+  display: flex;
+  gap: 4px;
+}
+.composer-mode .subtle-action[aria-pressed="true"] {
+  border-color: var(--border-strong);
+  background: var(--selected);
+  color: var(--text);
+}
+.composer-notice,
+.composer-hint {
+  margin: 0;
+  padding: 0 4px 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--secondary);
+}
+.chat-unread {
+  position: absolute;
+  left: 50%;
+  bottom: 132px;
+  transform: translateX(-50%);
+  z-index: 20;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  box-shadow: var(--shadow);
+}
+
+.composer-approval {
+  width: 132px;
+  flex-shrink: 0;
+}
+.composer-approval [data-ui="select-trigger"] {
+  min-height: 30px;
+  padding: 4px 9px;
+  border-color: var(--border);
+  background: transparent;
+  font-size: 12px;
+}
+.composer-approval [data-ui="select-trigger"]:hover {
+  background: var(--hover);
 }

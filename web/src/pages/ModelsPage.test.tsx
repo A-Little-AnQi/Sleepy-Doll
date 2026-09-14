@@ -44,14 +44,12 @@ it("keeps unsaved drafts when switching between models", () => {
   fireEvent.click(selector);
   fireEvent.click(screen.getByRole("option", { name: /Model B/ }));
   expect(
-    (screen.getByRole("textbox", { name: "名称" }) as HTMLInputElement)
-      .value,
+    (screen.getByRole("textbox", { name: "名称" }) as HTMLInputElement).value,
   ).toBe("Model B");
 
   fireEvent.click(screen.getByRole("combobox", { name: "选择模型" }));
   fireEvent.click(screen.getByRole("option", { name: /Model A/ }));
   expect(
-    (screen.getByRole("textbox", { name: "名称" }) as HTMLInputElement)
-      .value,
+    (screen.getByRole("textbox", { name: "名称" }) as HTMLInputElement).value,
   ).toBe("Unsaved A");
 });

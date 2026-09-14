@@ -1,0 +1,193 @@
+import { useEffect, useRef, useState } from "react";
+import type { TaskSummary } from "../types";
+import { MoreIcon, PinIcon } from "./icons";
+import "./task-card.css";
+
+export interface TaskActions {
+  run(task: TaskSummary): void;
+  rename?(task: TaskSummary): void;
+  pin?(task: TaskSummary, pinned: boolean): void;
+  archive?(task: TaskSummary, archived: boolean): void;
+  copy?(task: TaskSummary): void;
+  remove?(task: TaskSummary): void;
+  openSource?(task: TaskSummary): void;
+  askAi?(task: TaskSummary): void;
+  open?(task: TaskSummary): void;
+}
+
+/**
+ * 快捷任务卡：名称、一两句具体描述、就绪状态、一个主按钮。
+ *
+ * 普通用户不看参数表和节点图 —— 任务要什么输入由生成阶段问清楚并绑定，
+ * 运行时直接用。技术细节只在详情里按需展开。
+ */
+export function TaskCard({
+  task,
+  busy,
+  actions,
+  showSource,
+}: {
+  task: TaskSummary;
+  busy?: boolean;
+  actions: TaskActions;
+  showSource?: boolean;
+}) {
+  const [menu, setMenu] = useState(false);
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const close = (event: MouseEvent) => {
+      if (!container.current?.contains(event.target as Node)) setMenu(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenu(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [menu]);
+  const primary = task.runnable
+    ? () => actions.run(task)
+    : task.state === "archived"
+      ? () => actions.archive?.(task, false)
+      : task.state === "unavailable"
+        ? () => actions.askAi?.(task)
+        : () => actions.open?.(task);
+  return (
+    <article className="task-card" data-state={task.state}>
+      <div className="task-card-head">
+        <button className="task-card-name" onClick={() => actions.open?.(task)}>
+          {task.name}
+        </button>
+        {task.pinned && (
+          <span className="task-card-pinned" title="已置顶">
+            <PinIcon />
+          </span>
+        )}
+        <div className="task-card-menu" ref={container}>
+          <button
+            className="icon-button"
+            aria-label={`${task.name} 的更多操作`}
+            aria-expanded={menu}
+            aria-haspopup="menu"
+            onClick={() => setMenu(!menu)}
+          >
+            <MoreIcon className="button-icon" />
+          </button>
+          {menu && (
+            <div className="task-menu" role="menu">
+              {actions.rename && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    actions.rename?.(task);
+                  }}
+                >
+                  重命名
+                </button>
+              )}
+              {actions.pin && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    actions.pin?.(task, !task.pinned);
+                  }}
+                >
+                  {task.pinned ? "取消置顶" : "置顶"}
+                </button>
+              )}
+              {actions.copy && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    actions.copy?.(task);
+                  }}
+                >
+                  复制
+                </button>
+              )}
+              {actions.askAi && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    actions.askAi?.(task);
+                  }}
+                >
+                  让 AI 修改
+                </button>
+              )}
+              {showSource &&
+                actions.openSource &&
+                task.sourceConversationId && (
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setMenu(false);
+                      actions.openSource?.(task);
+                    }}
+                  >
+                    查看来源对话
+                  </button>
+                )}
+              {actions.archive && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    actions.archive?.(task, task.state !== "archived");
+                  }}
+                >
+                  {task.state === "archived" ? "恢复" : "归档"}
+                </button>
+              )}
+              {actions.remove && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    actions.remove?.(task);
+                  }}
+                >
+                  删除任务
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      <p className="task-card-description">
+        {task.description || "还没有写说明"}
+      </p>
+      <div className="task-card-foot">
+        <span className="task-card-state" data-state={task.state}>
+          {task.stateLabel}
+        </span>
+        {task.zeroToken && task.runnable && (
+          <span className="task-card-note" title="运行时不会向模型发送请求">
+            运行不调用模型
+          </span>
+        )}
+        {task.sourceDeleted && showSource && (
+          <span className="task-card-note">来源对话已删除</span>
+        )}
+        <button
+          className="primary-action"
+          disabled={busy || task.state === "deleted"}
+          onClick={primary}
+        >
+          {busy ? "运行中" : task.actionLabel || "打开"}
+        </button>
+      </div>
+      {task.issue && task.state !== "archived" && (
+        <p className="task-card-issue">{task.issue}</p>
+      )}
+    </article>
+  );
+}

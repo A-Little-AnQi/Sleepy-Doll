@@ -126,3 +126,8 @@ dialog::backdrop {
 .dialog-body pre {
   max-height: none;
 }
+
+.extension-flag {
+  color: var(--muted);
+  font-size: 12px;
+}

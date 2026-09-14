@@ -15,6 +15,14 @@ export interface SkillInfo {
   tags: string[];
   enabled?: boolean;
   alwaysLoad?: boolean;
+  /** 需要哪些领域提供方在线，例如 `bgi`。 */
+  requiresProviders?: string[];
+  /**
+   * 用户开关是开的、依赖也在线，这份说明才会真的进入模型上下文。
+   * `enabled` 只表示用户没有关掉它。
+   */
+  available?: boolean;
+  unavailableReason?: string;
   instructions?: string;
 }
 export interface PluginInfo {
@@ -28,6 +36,11 @@ export interface ConversationInfo {
   title: string;
   createdAt: string;
   updatedAt: string;
+  pinned?: boolean;
+  archived?: boolean;
+  /** 会话自己的模型选择；为空表示跟随默认模型。 */
+  modelId?: string | null;
+  taskCount?: number;
 }
 export interface ToolInfo {
   name: string;
@@ -56,6 +69,8 @@ export interface TaskInfo {
   state:
     | "answered"
     | "queued"
+    | "preflighting"
+    | "blocked"
     | "running"
     | "deciding"
     | "executing"
@@ -74,10 +89,81 @@ export interface TaskInfo {
   error?: string;
   createdAt: string;
   updatedAt: string;
+  modelId?: string | null;
+  chatOnly?: boolean;
   source?:
     | { kind: "agent" }
     | { kind: "savedStrategy"; strategyId: string }
     | { kind: "savedWorkflow"; workflowId: string; workflowRevision: number };
+}
+
+/** 快捷任务的可见状态。文案与主按钮由后端给出，界面不另立一套。 */
+export type DefinitionState =
+  | "draft"
+  | "invalid"
+  | "readyUnverified"
+  | "readyVerified"
+  | "unavailable"
+  | "archived"
+  | "deleted";
+
+export interface TaskSummary {
+  id: string;
+  name: string;
+  description: string;
+  state: DefinitionState;
+  stateLabel: string;
+  actionLabel: string;
+  runnable: boolean;
+  pinned: boolean;
+  sourceConversationId?: string | null;
+  sourceTitleSnapshot: string;
+  sourceDeleted: boolean;
+  publishedRevision?: number | null;
+  revision?: number | null;
+  modelUsage: "none" | "possible" | "unknown";
+  /** 运行不调用模型。只有全部依赖都声明为确定性工具时才为真。 */
+  zeroToken: boolean;
+  nodeCount: number;
+  updatedAt: string;
+  lastRunId?: string | null;
+  issue?: string | null;
+}
+
+export interface TaskIssue {
+  nodeId: string;
+  message: string;
+}
+
+export interface TaskValidation {
+  modelUsage: "none" | "possible" | "unknown";
+  nodeCount: number;
+  maxExpansion: number;
+  issues: TaskIssue[];
+  missingBindings: string[];
+}
+
+export interface WorkflowDetail {
+  summary: TaskSummary;
+  definition: {
+    id: string;
+    name: string;
+    description: string;
+    sourceConversationId?: string | null;
+    sourceTitleSnapshot: string;
+    publishedRevision?: number | null;
+    draftRevision?: number | null;
+    pinned: boolean;
+    lastRunId?: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  revision?: {
+    revision: number;
+    modelUsage: string;
+    validation: TaskValidation;
+  } | null;
+  runs: string[];
 }
 export interface StrategyStep {
   id: string;
@@ -124,6 +210,14 @@ export interface WorkflowInfo {
   verifiedAt: string;
   verifiedFromRun: string;
 }
+
+/** 一次运行的步骤结果，供「运行记录」详情展开。 */
+export interface StepRecord {
+  id: string;
+  title: string;
+  outcome: string;
+  detail?: string;
+}
 export interface DiagnosticInfo {
   id: string;
   providerId: string;
@@ -164,6 +258,19 @@ export interface RunApproval {
   };
   expiresAt: number;
 }
+/** 审批级别。文案由运行时给出，界面不另写一套。 */
+export interface PermissionLevel {
+  value: string;
+  label: string;
+  description: string;
+}
+export interface PermissionState {
+  mode: string;
+  label: string;
+  description: string;
+  levels: PermissionLevel[];
+}
+
 export interface Bootstrap {
   preview?: boolean;
   /** Absolute path of the configuration file, so the interface can point at it
@@ -176,11 +283,12 @@ export interface Bootstrap {
   conversations: ConversationInfo[];
   tasks: TaskInfo[];
   strategies: SavedStrategy[];
-  workflows: WorkflowInfo[];
+  workflows: TaskSummary[];
   operations: OperationInfo[];
   resources: ResourceInfo[];
   diagnostics: DiagnosticInfo[];
   notifications: NotificationInfo[];
+  permission: PermissionState;
   bridge: {
     simulated?: boolean;
     enabled: boolean;

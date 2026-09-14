@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub const LATEST_SCHEMA_VERSION: i64 = 10;
+pub const LATEST_SCHEMA_VERSION: i64 = 12;
 
 pub fn migrate(connection: &mut Connection) -> Result<()> {
     connection.execute_batch(
@@ -225,6 +225,51 @@ const MIGRATIONS: &[(i64, &str)] = &[
         10,
         r#"
         ALTER TABLE messages ADD COLUMN reasoning_json TEXT;
+    "#,
+    ),
+    // 快捷任务：定义与不可变修订分表。发布只改定义的指针，修订本体的行一旦写入
+    // 就不再更新，这样正在运行的旧版本始终有完整快照可读。
+    (
+        11,
+        r#"
+        CREATE TABLE IF NOT EXISTS task_definitions(
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            source_conversation_id TEXT,
+            published_revision INTEGER,
+            draft_revision INTEGER,
+            archived INTEGER NOT NULL DEFAULT 0,
+            deleted INTEGER NOT NULL DEFAULT 0,
+            payload TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS task_definitions_source
+            ON task_definitions(source_conversation_id, updated_at);
+        CREATE TABLE IF NOT EXISTS task_revisions(
+            task_id TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            payload TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(task_id, revision)
+        );
+        CREATE TABLE IF NOT EXISTS task_runs(
+            task_id TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            run_id TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS task_runs_task ON task_runs(task_id, created_at);
+    "#,
+    ),
+    // 会话列表要支持置顶、归档、搜索，以及「每个会话选择模型」。归档是可撤销的
+    // 可见性变化，不是删除；删除会话另走确认后的明确动作。
+    (
+        12,
+        r#"
+        ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE conversations ADD COLUMN archived_at TEXT;
+        ALTER TABLE conversations ADD COLUMN model_id TEXT;
     "#,
     ),
 ];

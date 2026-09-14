@@ -76,21 +76,21 @@ if not exist "%OUT%\bridge.config.json" (
   if errorlevel 1 set "FAILED=%FAILED% bridge.config.json"
 )
 
-if defined FAILED (
-  echo.
-  echo    Could not replace:%FAILED%
-  echo    Usually the bridge is still loaded in a running BetterGI. Exit BetterGI and
-  echo    build again. BetterGI runs elevated, so an unelevated shell cannot stop it.
-  echo    Everything else in the folder is up to date.
-  exit /b 1
-)
-
 rem Skills that ship with the product. They live in the install folder, not under
 rem user\ - user\ is the user's own data and is not touched by a rebuild.
 if not exist "%OUT%\skills" mkdir "%OUT%\skills"
 xcopy /e /i /y "skills" "%OUT%\skills" >nul
 if errorlevel 1 (
   echo    could not copy skills\
+  exit /b 1
+)
+
+if defined FAILED (
+  echo.
+  echo    Could not replace:%FAILED%
+  echo    Usually the bridge is still loaded in a running BetterGI. Exit BetterGI and
+  echo    build again. BetterGI runs elevated, so an unelevated shell cannot stop it.
+  echo    Everything else in the folder is up to date.
   exit /b 1
 )
 

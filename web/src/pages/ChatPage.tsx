@@ -4,18 +4,30 @@ import "./ChatPage.css";
 import { Transcript } from "../components/Transcript";
 import { api } from "../api";
 import { CheckIcon, SendIcon, StopIcon } from "../components/icons";
-import { isRunning, session, taskLabels, useSession } from "../session";
+import { Select } from "../components/Select";
+import {
+  isRunning,
+  phaseLabel,
+  readError,
+  session,
+  taskLabels,
+  useSession,
+} from "../session";
+import { Toast } from "../components/Toast";
 import type { Bootstrap } from "../types";
 
 interface Props {
   bootstrap: Bootstrap;
   conversationId?: string | undefined;
+  /** 新对话里先挑好的模型，随第一条消息生效。 */
+  modelId?: string | null | undefined;
   onConversation(id: string): void;
   reload(): Promise<void>;
 }
 export function ChatPage({
   bootstrap,
   conversationId,
+  modelId,
   onConversation,
   reload,
 }: Props) {
@@ -23,9 +35,15 @@ export function ChatPage({
   const { messages, task, stream, question, approval, plan, loading } = data;
   const busy = isRunning(task);
   const draftKey = `sleepy-doll-draft:${conversationId ?? "new"}`;
+  const modeKey = `sleepy-doll-mode:${conversationId ?? "new"}`;
+  const [mode, setMode] = useState<"agent" | "chatOnly">(() =>
+    localStorage.getItem(modeKey) === "chatOnly" ? "chatOnly" : "agent",
+  );
   const [prompt, setPrompt] = useState(
     () => localStorage.getItem(draftKey) ?? "",
   );
+  const [notice, setNotice] = useState("");
+  const [unread, setUnread] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [confirming, setConfirming] = useState(false);
@@ -45,10 +63,14 @@ export function ChatPage({
   }, []);
   useEffect(() => {
     setPrompt(localStorage.getItem(draftKey) ?? "");
+    setMode(
+      localStorage.getItem(modeKey) === "chatOnly" ? "chatOnly" : "agent",
+    );
     setError("");
+    setNotice("");
     setSending(false);
     follow.current = true;
-  }, [draftKey]);
+  }, [draftKey, modeKey]);
   useEffect(() => {
     setConfirming(false);
   }, [approval?.id]);
@@ -58,8 +80,12 @@ export function ChatPage({
     return () => clearInterval(timer);
   }, [busy, approval]);
   useEffect(() => {
-    if (follow.current)
+    if (follow.current) {
       scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
+      setUnread(false);
+    } else {
+      setUnread(true);
+    }
   }, [messages, stream, plan, task]);
   useEffect(() => {
     if (textarea.current) {
@@ -99,14 +125,25 @@ export function ChatPage({
     setSending(true);
     follow.current = true;
     setError("");
+    setNotice("");
     setDraft("");
     try {
-      if (supplementRun) await api.supplement(supplementRun, value, clientKey);
-      else {
-        const run = await api.submitTask(value, origin, clientKey);
+      if (supplementRun) {
+        await api.supplement(supplementRun, value, clientKey);
+        // 已经提交出去的外部动作不会因为这句话被撤销，只能等到下一个边界。
+        setNotice("已收到，将在当前步骤结束后处理。");
+      } else {
+        const run = await api.submitTask(
+          value,
+          origin,
+          clientKey,
+          mode,
+          origin ? undefined : modelId,
+        );
         session(run.conversationId).start();
         if (alive.current && current.current === origin)
           onConversation(run.conversationId);
+        if (queue) setNotice("已加入队列，会在当前运行结束后开始。");
       }
       sessionStorage.removeItem(retryKey);
       await reload();
@@ -114,7 +151,7 @@ export function ChatPage({
       localStorage.setItem(draftKey, value);
       if (alive.current && current.current === origin) {
         setPrompt(value);
-        setError(reason instanceof Error ? reason.message : String(reason));
+        setError(readError(reason));
       }
     } finally {
       if (alive.current && current.current === origin) setSending(false);
@@ -126,25 +163,14 @@ export function ChatPage({
       await action();
       await reload();
     } catch (reason) {
-      setError(String(reason));
+      setError(readError(reason));
     }
   };
   const welcome = !conversationId && !messages.length;
   const elapsed = task
     ? Math.max(0, Math.floor((now - new Date(task.createdAt).getTime()) / 1000))
     : 0;
-  const phase =
-    busy && !question && !approval
-      ? task?.state === "cancelling"
-        ? "正在停止"
-        : task?.state === "queued"
-          ? "排队中"
-          : task?.state === "waitingJob"
-            ? "等待执行结果"
-            : task?.state === "verifying"
-              ? "核对结果"
-              : "等待响应"
-      : undefined;
+  const phase = question || approval ? undefined : phaseLabel(task);
   return (
     <section className={`chat-workspace${welcome ? " is-welcome" : ""}`}>
       <div
@@ -154,6 +180,7 @@ export function ChatPage({
           const target = event.currentTarget;
           follow.current =
             target.scrollHeight - target.scrollTop - target.clientHeight < 100;
+          if (follow.current) setUnread(false);
         }}
       >
         {welcome ? (
@@ -272,10 +299,9 @@ export function ChatPage({
                   disabled={
                     saving ||
                     bootstrap.workflows.some(
-                      (flow) => flow.verifiedFromRun === task.id,
-                    ) ||
-                    bootstrap.strategies.some(
-                      (flow) => flow.sourceRunId === task.id,
+                      (flow) =>
+                        flow.lastRunId === task.id ||
+                        flow.sourceConversationId === task.conversationId,
                     )
                   }
                   onClick={() => {
@@ -288,27 +314,48 @@ export function ChatPage({
                   }}
                 >
                   <CheckIcon className="button-icon" />
-                  保存为流程
+                  保存为快捷任务
                 </button>
               )}
             </div>
           </div>
         )}
       </div>
+      {unread && busy && (
+        <button
+          className="chat-unread"
+          onClick={() => {
+            follow.current = true;
+            setUnread(false);
+            scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
+          }}
+        >
+          有新内容 · 回到最新
+        </button>
+      )}
       <div className="composer-dock">
+        {notice && <Toast message={notice} onDismiss={() => setNotice("")} />}
         {(error || data.error) && (
-          <div className="inline-error" role="alert">
-            {error || data.error}
-            <button
-              className="subtle-action"
-              onClick={() => {
+          <Toast
+            message={error || data.error}
+            // 连接断了是个持续状态，不自动消失，免得用户还没看清就没了。
+            duration={data.error ? 0 : 4000}
+            action={{
+              label: "刷新状态",
+              onAction: () => {
+                setError("");
                 if (conversationId) session(conversationId).start();
                 void reload();
-              }}
-            >
-              刷新状态
-            </button>
-          </div>
+              },
+            }}
+            onDismiss={() => setError("")}
+          />
+        )}
+        {busy && (
+          <p className="composer-hint">
+            当前运行保持它开始时的模式（{task?.chatOnly ? "仅聊天" : "Agent"}
+            ）； 切换只影响之后的发送，要立刻停下来请点停止。
+          </p>
         )}
         {data.queued.length > 0 && (
           <div className="queued-list">
@@ -334,8 +381,8 @@ export function ChatPage({
               question
                 ? "回复…"
                 : busy
-                  ? "补充说明…"
-                  : "输入任务，或使用 $ 调用技能"
+                  ? "补充说明…（Enter 发送，Shift+Enter 换行）"
+                  : "告诉我你想完成什么"
             }
             value={prompt}
             disabled={sending}
@@ -357,14 +404,56 @@ export function ChatPage({
             }}
           />
           <div className="composer-actions">
+            <div className="composer-approval">
+              <Select
+                label="审批级别"
+                value={bootstrap.permission.mode}
+                options={bootstrap.permission.levels.map((level) => ({
+                  value: level.value,
+                  label: level.label,
+                  description: level.description,
+                }))}
+                onChange={(mode) =>
+                  void act(async () => {
+                    await api.setPermission(mode);
+                    await reload();
+                  })
+                }
+              />
+            </div>
+            <div className="composer-mode" role="group" aria-label="对话模式">
+              <button
+                className="subtle-action"
+                aria-pressed={mode === "agent"}
+                title="可以使用工具，真正去读文件、改配置、跑任务"
+                onClick={() => {
+                  setMode("agent");
+                  localStorage.setItem(modeKey, "agent");
+                }}
+              >
+                Agent
+              </button>
+              <button
+                className="subtle-action"
+                aria-pressed={mode === "chatOnly"}
+                title="只回答，不调用任何外部工具"
+                onClick={() => {
+                  setMode("chatOnly");
+                  localStorage.setItem(modeKey, "chatOnly");
+                }}
+              >
+                仅聊天
+              </button>
+            </div>
             <span>
               {busy && (
                 <button
                   className="subtle-action"
                   disabled={!prompt.trim() || sending}
+                  title="等当前运行结束后再开始"
                   onClick={() => void send(true)}
                 >
-                  加入队列
+                  排队发送
                 </button>
               )}
             </span>

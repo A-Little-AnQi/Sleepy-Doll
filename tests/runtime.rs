@@ -19,10 +19,10 @@ fn journal() -> (tempfile::TempDir, Journal) {
 #[test]
 fn durable_submission_is_idempotent_and_conflicts_are_rejected() {
     let (_d, j) = journal();
-    let a = j.create("go", "c", "key", 1800).unwrap();
-    let b = j.create("go", "c", "key", 1800).unwrap();
+    let a = j.create("go", "c", "key", 1800, None, false).unwrap();
+    let b = j.create("go", "c", "key", 1800, None, false).unwrap();
     assert_eq!(a.id, b.id);
-    assert!(j.create("other", "c", "key", 1800).is_err());
+    assert!(j.create("other", "c", "key", 1800, None, false).is_err());
     assert_eq!(j.history(&a).unwrap().len(), 1);
     assert_eq!(j.events("c", 0).unwrap().len(), 1);
 }
@@ -31,7 +31,7 @@ fn durable_submission_is_idempotent_and_conflicts_are_rejected() {
 fn repeated_supplement_is_recorded_once_even_after_run_completion() {
     let (_directory, journal) = journal();
     let mut run = journal
-        .create("first", "conversation", "run-key", 1800)
+        .create("first", "conversation", "run-key", 1800, None, false)
         .unwrap();
     journal.save(&mut run, RunState::Deciding).unwrap();
     journal
@@ -62,7 +62,9 @@ fn repeated_supplement_is_recorded_once_even_after_run_completion() {
 #[test]
 fn structured_checkpoint_tracks_run_revision_and_pending_step() {
     let (_d, j) = journal();
-    let mut run = j.create("goal", "c", "checkpoint", 1800).unwrap();
+    let mut run = j
+        .create("goal", "c", "checkpoint", 1800, None, false)
+        .unwrap();
     j.save(&mut run, RunState::Deciding).unwrap();
     let plan = PlanRevision {
         revision: 1,
@@ -88,7 +90,7 @@ fn structured_checkpoint_tracks_run_revision_and_pending_step() {
 #[test]
 fn stale_revision_and_terminal_transition_cannot_advance_run() {
     let (_d, j) = journal();
-    let mut a = j.create("go", "c", "key", 1800).unwrap();
+    let mut a = j.create("go", "c", "key", 1800, None, false).unwrap();
     let mut stale = a.clone();
     j.save(&mut a, RunState::Deciding).unwrap();
     assert!(j.save(&mut stale, RunState::Deciding).is_err());
@@ -99,7 +101,7 @@ fn stale_revision_and_terminal_transition_cannot_advance_run() {
 #[test]
 fn game_leases_survive_reopen_and_are_not_released_by_other_attempts() {
     let (d, j) = journal();
-    let run = j.create("go", "c", "k", 1800).unwrap();
+    let run = j.create("go", "c", "k", 1800, None, false).unwrap();
     let a = j.prepare(&run, "one", json!({}), "game").unwrap();
     let b = j.prepare(&run, "two", json!({}), "game").unwrap();
     assert!(j.acquire(&a).unwrap());
@@ -114,17 +116,17 @@ fn game_leases_survive_reopen_and_are_not_released_by_other_attempts() {
 #[test]
 fn queued_messages_do_not_enter_prior_run_context() {
     let (_d, j) = journal();
-    let a = j.create("first", "c", "1", 1800).unwrap();
-    j.create("second", "c", "2", 1800).unwrap();
+    let a = j.create("first", "c", "1", 1800, None, false).unwrap();
+    j.create("second", "c", "2", 1800, None, false).unwrap();
     assert_eq!(j.history(&a).unwrap().len(), 1);
 }
 
 #[test]
 fn queued_transcript_groups_answers_under_their_own_run() {
     let (_d, j) = journal();
-    let mut a = j.create("first", "c", "1", 1800).unwrap();
+    let mut a = j.create("first", "c", "1", 1800, None, false).unwrap();
     j.save(&mut a, RunState::Deciding).unwrap();
-    let mut b = j.create("second", "c", "2", 1800).unwrap();
+    let mut b = j.create("second", "c", "2", 1800, None, false).unwrap();
     j.append_message(&a, &context::message(Role::Assistant, "first answer"))
         .unwrap();
     assert_eq!(j.conversation_messages("c").unwrap().len(), 2);
@@ -141,12 +143,13 @@ fn queued_transcript_groups_answers_under_their_own_run() {
 #[test]
 fn conversation_fork_copies_completed_history_only() {
     let (_d, j) = journal();
-    let mut completed = j.create("first", "c", "fork-1", 1800).unwrap();
+    let mut completed = j.create("first", "c", "fork-1", 1800, None, false).unwrap();
     j.save(&mut completed, RunState::Deciding).unwrap();
     j.append_message(&completed, &context::message(Role::Assistant, "done"))
         .unwrap();
     j.finish(&mut completed, RunState::Answered).unwrap();
-    j.create("pending", "c", "fork-2", 1800).unwrap();
+    j.create("pending", "c", "fork-2", 1800, None, false)
+        .unwrap();
     let fork = j.fork_conversation("c", None).unwrap();
     let messages = j.conversation_messages(&fork).unwrap();
     assert_eq!(messages.len(), 2);
@@ -156,7 +159,7 @@ fn conversation_fork_copies_completed_history_only() {
 #[test]
 fn finish_cannot_drop_an_acknowledged_supplement() {
     let (_d, j) = journal();
-    let mut run = j.create("first", "c", "1", 1800).unwrap();
+    let mut run = j.create("first", "c", "1", 1800, None, false).unwrap();
     j.save(&mut run, RunState::Deciding).unwrap();
     j.input(&run.id, "supplement", "new constraint").unwrap();
     assert!(!j.finish(&mut run, RunState::Answered).unwrap());
@@ -167,7 +170,7 @@ fn finish_cannot_drop_an_acknowledged_supplement() {
 #[test]
 fn approval_is_single_use_and_expiring() {
     let (_d, j) = journal();
-    let mut run = j.create("approval", "c", "key", 1800).unwrap();
+    let mut run = j.create("approval", "c", "key", 1800, None, false).unwrap();
     j.save(&mut run, RunState::Deciding).unwrap();
     j.save(&mut run, RunState::Executing).unwrap();
     j.save(&mut run, RunState::AwaitingApproval).unwrap();
@@ -331,7 +334,7 @@ fn token_estimation_counts_characters_not_bytes() {
 #[test]
 fn fork_conversation_preserves_thinking_blocks() {
     let (_d, j) = journal();
-    let mut run = j.create("go", "c", "fork", 1800).unwrap();
+    let mut run = j.create("go", "c", "fork", 1800, None, false).unwrap();
     j.save(&mut run, RunState::Deciding).unwrap();
     let reasoning = Reasoning {
         protocol: ModelProtocol::AnthropicMessages,
@@ -482,7 +485,7 @@ fn agent_dynamic_api_write_requires_approval_and_tracks_a_job() {
         answer(),
     ]);
     let directory = tempfile::tempdir().unwrap();
-    let app = controller(&backend, &directory);
+    let app = approval_controller(&backend, &directory);
     let run = ipc(
         &app,
         "run.submit",
@@ -510,7 +513,7 @@ fn agent_plan_can_read_contract_then_submit_a_dependent_api_write() {
         answer(),
     ]);
     let directory = tempfile::tempdir().unwrap();
-    let app = controller(&backend, &directory);
+    let app = approval_controller(&backend, &directory);
     let run = ipc(
         &app,
         "run.submit",
@@ -527,6 +530,25 @@ fn agent_plan_can_read_contract_then_submit_a_dependent_api_write() {
     app.shutdown();
 }
 fn controller(backend: &MockBackend, d: &tempfile::TempDir) -> Arc<AppController> {
+    controller_with_mode(backend, d, "standard")
+}
+
+/// 专门验证审批流程的用例显式选「请求审批」，不依赖默认值 —— 默认值是产品决定，
+/// 拿它当测试前提会让用例在产品改默认时无声失效。
+fn approval_controller(backend: &MockBackend, d: &tempfile::TempDir) -> Arc<AppController> {
+    controller_with_mode(backend, d, "askEach")
+}
+
+/// 「完全控制」：写操作一律直接执行，不产生任何审批。
+fn full_access_controller(backend: &MockBackend, d: &tempfile::TempDir) -> Arc<AppController> {
+    controller_with_mode(backend, d, "fullAccess")
+}
+
+fn controller_with_mode(
+    backend: &MockBackend,
+    d: &tempfile::TempDir,
+    mode: &str,
+) -> Arc<AppController> {
     fs::create_dir_all(d.path().join("capabilities")).unwrap();
     for name in ["mock.success", "mock.unknown", "mock.failure"] {
         fs::write(
@@ -539,7 +561,7 @@ fn controller(backend: &MockBackend, d: &tempfile::TempDir) -> Arc<AppController
         .unwrap();
     }
     let path = d.path().join("config.json");
-    fs::write(&path,serde_json::to_vec(&json!({"version":1,"activeModel":"mock","models":[{"id":"mock","name":"Mock","protocol":"openai-responses","model":"mock-model","baseUrl":format!("{}/v1",backend.base_url()),"options":{"timeoutMs":2000}}],"agent":{"systemPrompt":"test"},"bridge":{"enabled":true,"baseUrl":backend.base_url(),"token":"mock","instanceId":"mock-bgi","timeoutMs":2000},"storage":{"database":d.path().join("test.db")}})).unwrap()).unwrap();
+    fs::write(&path,serde_json::to_vec(&json!({"version":1,"activeModel":"mock","models":[{"id":"mock","name":"Mock","protocol":"openai-responses","model":"mock-model","baseUrl":format!("{}/v1",backend.base_url()),"options":{"timeoutMs":2000}}],"agent":{"systemPrompt":"test"},"runtime":{"permissionMode":mode},"bridge":{"enabled":true,"baseUrl":backend.base_url(),"token":"mock","instanceId":"mock-bgi","timeoutMs":2000},"storage":{"database":d.path().join("test.db")}})).unwrap()).unwrap();
     Arc::new(AppController::load(path).unwrap())
 }
 
@@ -657,7 +679,8 @@ fn approval_then_unknown_job_never_becomes_success() {
         answer(),
     ]);
     let d = tempfile::tempdir().unwrap();
-    let c = controller(&backend, &d);
+    // 这个用例验证的就是审批本身，级别显式选「请求审批」。
+    let c = approval_controller(&backend, &d);
     let r = ipc(
         &c,
         "run.submit",
@@ -757,7 +780,7 @@ fn acceptance_response_loss_reuses_original_job() {
         answer(),
     ]);
     let d = tempfile::tempdir().unwrap();
-    let c = controller(&backend, &d);
+    let c = approval_controller(&backend, &d);
     let run = ipc(
         &c,
         "run.submit",
@@ -830,7 +853,7 @@ fn cancelled_job_is_confirmed_before_releasing_lease() {
         ),
     ]);
     let d = tempfile::tempdir().unwrap();
-    let c = controller(&backend, &d);
+    let c = approval_controller(&backend, &d);
     let run = ipc(&c, "run.submit", json!({"prompt":"test","clientKey":"r"}));
     approve_pending(&c, &run);
     let id = run["id"].as_str().unwrap();
@@ -865,7 +888,7 @@ fn expired_observation_prevents_game_submission() {
         answer(),
     ]);
     let d = tempfile::tempdir().unwrap();
-    let c = controller(&backend, &d);
+    let c = approval_controller(&backend, &d);
     let run = ipc(&c, "run.submit", json!({"prompt":"test","clientKey":"r"}));
     approve_pending(&c, &run);
     let end = wait(
@@ -1050,7 +1073,7 @@ fn restart_reconciles_existing_job_without_repeating_action() {
     let db = d.path().join("test.db");
     let journal = Journal::open(&db).unwrap();
     let mut run = journal
-        .create("recover existing action", "c", "key", 1800)
+        .create("recover existing action", "c", "key", 1800, None, false)
         .unwrap();
     journal.save(&mut run, RunState::Deciding).unwrap();
     journal.save(&mut run, RunState::Executing).unwrap();
@@ -1083,7 +1106,7 @@ fn deterministic_plan_executes_two_steps_with_one_planning_response() {
     let backend = MockBackend::start("127.0.0.1:0").unwrap();
     backend.set_responses(vec![call("plan.update",json!({"goal":"two actions","steps":[{"id":"a","title":"first","capabilityId":"mock.success","arguments":{}},{"id":"b","title":"second","capabilityId":"mock.success","arguments":{},"dependsOn":["a"]}]})),answer()]);
     let d = tempfile::tempdir().unwrap();
-    let c = controller(&backend, &d);
+    let c = approval_controller(&backend, &d);
     let run = ipc(
         &c,
         "run.submit",
@@ -1166,7 +1189,7 @@ fn verified_plan_can_run_again_without_a_model_decision() {
         answer(),
     ]);
     let d = tempfile::tempdir().unwrap();
-    let c = controller(&backend, &d);
+    let c = approval_controller(&backend, &d);
     let original = ipc(
         &c,
         "run.submit",
@@ -1310,4 +1333,271 @@ fn disabled_skill_cannot_be_read_by_an_existing_run() {
     wait(&c, id, &["answered"]);
     let history = ipc(&c, "conversation.get", json!({"id":run["conversationId"]}));
     assert!(!history.to_string().contains("PRIVATE_SKILL_CONTENT"));
+}
+
+/// GEN-01 / FLOW-01：模型生成并保存快捷任务，运行时一个模型请求都不发。
+///
+/// 「生成」阶段可以用模型和只读工具，「运行」阶段只解释已发布的定义。两边的
+/// 模型请求数分别计数 —— 界面上的「不调用模型」标签不能当证据。
+#[test]
+fn saved_task_runs_without_a_single_model_request() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    backend.set_responses(vec![
+        call(
+            "task.save",
+            json!({
+                "name":"观察状态",
+                "description":"读取一次 BetterGI 状态并记录耗时。",
+                "nodes":[{
+                    "kind":"sequence","id":"steps","title":"观察",
+                    "nodes":[{
+                        "kind":"tool","id":"state","title":"读取状态",
+                        "tool":"bgi.state.get","arguments":{}
+                    }]
+                }]
+            }),
+        ),
+        answer(),
+    ]);
+    let d = tempfile::tempdir().unwrap();
+    let c = controller(&backend, &d);
+    let run = ipc(
+        &c,
+        "run.submit",
+        json!({"prompt":"做一个快捷任务，以后点一下读一次状态，不要现在运行","clientKey":"gen"}),
+    );
+    let terminal = wait(
+        &c,
+        run["id"].as_str().unwrap(),
+        &["answered", "failed", "needsReview"],
+    );
+    assert_eq!(terminal["state"], "answered");
+    let list = ipc(&c, "workflow.list", json!({}));
+    let task = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| task["name"] == "观察状态")
+        .expect("任务应当已保存");
+    assert_eq!(task["state"], "readyUnverified");
+    assert_eq!(task["actionLabel"], "运行");
+    assert_eq!(task["zeroToken"], true);
+    // 生成阶段只保存，没有真的去读状态：这次运行除保存外没有任何执行证据。
+    let checkpoint = ipc(&c, "run.checkpoint", json!({"id":run["id"]}));
+    assert_eq!(
+        checkpoint["completedSteps"].as_array().unwrap().len(),
+        0,
+        "生成阶段不应产生任何已完成的执行步骤"
+    );
+    assert_eq!(checkpoint["evidenceRefs"].as_array().unwrap().len(), 0);
+
+    let generation_requests = backend.model_requests();
+    assert!(generation_requests > 0, "生成阶段本来就要用模型");
+
+    backend.reset_model_requests();
+    let first = ipc(
+        &c,
+        "workflow.run",
+        json!({"id":task["id"],"clientKey":"run-1"}),
+    );
+    let first = wait(
+        &c,
+        first["id"].as_str().unwrap(),
+        &["succeeded", "failed", "needsReview"],
+    );
+    assert_eq!(first["state"], "succeeded");
+    assert_eq!(first["decisions"], 0);
+    assert_eq!(first["inputTokens"], 0);
+    assert_eq!(first["outputTokens"], 0);
+
+    // 第二次点击是新的 Run，但仍是同一个定义版本，且依然零模型请求。
+    let second = ipc(
+        &c,
+        "workflow.run",
+        json!({"id":task["id"],"clientKey":"run-2"}),
+    );
+    assert_ne!(first["id"], second["id"]);
+    let second = wait(
+        &c,
+        second["id"].as_str().unwrap(),
+        &["succeeded", "failed", "needsReview"],
+    );
+    assert_eq!(second["state"], "succeeded");
+    assert_eq!(second["toolCalls"], 1);
+    assert_eq!(
+        backend.model_requests(),
+        0,
+        "快捷任务运行时不得向模型网关发出任何请求"
+    );
+}
+
+/// TASK-06：过期版本不暗跑。
+#[test]
+fn stale_expected_version_refuses_instead_of_running_something_else() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    backend.set_responses(vec![
+        call(
+            "task.save",
+            json!({
+                "name":"读状态",
+                "description":"读取一次状态。",
+                "nodes":[{"kind":"tool","id":"s","title":"读","tool":"bgi.state.get","arguments":{}}]
+            }),
+        ),
+        answer(),
+    ]);
+    let d = tempfile::tempdir().unwrap();
+    let c = controller(&backend, &d);
+    let run = ipc(
+        &c,
+        "run.submit",
+        json!({"prompt":"做个任务","clientKey":"g"}),
+    );
+    wait(&c, run["id"].as_str().unwrap(), &["answered"]);
+    let list = ipc(&c, "workflow.list", json!({}));
+    let id = list[0]["id"].as_str().unwrap();
+    let error = c
+        .handle(
+            "workflow.run",
+            json!({"id":id,"expectedPublishedRevision":99,"clientKey":"stale"}),
+            Arc::new(|_, _| {}),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("第 1 版"), "{error}");
+}
+
+/// GEN-11 / GEN-08：非法定义不发布、不执行，并且报出具体节点。
+#[test]
+fn invalid_task_is_rejected_with_the_offending_node() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    backend.set_responses(vec![
+        call(
+            "task.save",
+            json!({
+                "name":"缺分支",
+                "description":"条件没有 unknown 分支。",
+                "nodes":[{
+                    "kind":"condition","id":"branch","title":"判断",
+                    "condition":{"kind":"always","value":true},
+                    "then":[],"otherwise":[],"unknown":[]
+                }]
+            }),
+        ),
+        answer(),
+    ]);
+    let d = tempfile::tempdir().unwrap();
+    let c = controller(&backend, &d);
+    let run = ipc(
+        &c,
+        "run.submit",
+        json!({"prompt":"做个任务","clientKey":"bad"}),
+    );
+    wait(&c, run["id"].as_str().unwrap(), &["answered"]);
+    let list = ipc(&c, "workflow.list", json!({}));
+    let task = &list[0];
+    assert_eq!(task["state"], "draft");
+    assert_eq!(task["runnable"], false);
+    assert!(
+        task["issue"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("unknown"),
+        "{}",
+        task["issue"]
+    );
+}
+
+/// RUN-14：游标早于该会话仍保留的事件时，要求重取快照而不是静默漏掉终态。
+#[test]
+fn stale_event_cursor_asks_for_a_snapshot() {
+    let (_d, j) = journal();
+    let early = j.create("first", "a", "k1", 1800, None, false).unwrap();
+    for _ in 0..3 {
+        j.emit(&early, "noise", json!({})).unwrap();
+    }
+    let late = j.create("second", "b", "k2", 1800, None, false).unwrap();
+    assert!(late.message_boundary > 0);
+
+    // 会话 a 的事件仍在窗口里，从 0 或 1 续读都安全。
+    assert!(!j.cursor_expired("a", 0).unwrap());
+    assert!(!j.cursor_expired("a", 1).unwrap());
+    // 会话 b 最早的事件晚于游标 1：中间那段已经读不回来了。
+    let earliest = j.events("b", 0).unwrap()[0].sequence;
+    assert!(earliest > 1);
+    assert!(j.cursor_expired("b", 1).unwrap());
+    assert!(!j.cursor_expired("b", earliest).unwrap());
+    // 游标 0 表示「从头开始」，永远不需要快照。
+    assert!(!j.cursor_expired("b", 0).unwrap());
+    assert_eq!(j.events("b", 0).unwrap().len(), 1);
+    assert_eq!(j.events("a", 0).unwrap()[0].run_id, early.id);
+}
+
+/// PERM-01：普通写入不再逐项弹确认。
+#[test]
+fn ordinary_write_runs_without_an_approval_round_trip() {
+    use sleepy_doll::extension::{RiskLevel, ToolEffect, UnattendedPolicy};
+    use sleepy_doll::runtime::operation::permissions::{
+        ChangeScope, PermissionDecision, PermissionEngine, PermissionMode, PermissionRequest,
+    };
+
+    let request = PermissionRequest {
+        provider_id: "core:bgi",
+        resource_ids: &[],
+        resource_kinds: &[],
+        effect: ToolEffect::LocalWrite,
+        risk: RiskLevel::High,
+        unattended: UnattendedPolicy::Forbidden,
+        scope: Some(ChangeScope::fields(1)),
+    };
+    assert_eq!(
+        PermissionEngine::decide(PermissionMode::default(), &request, &[]),
+        PermissionDecision::Allow
+    );
+    let bulk = PermissionRequest {
+        scope: Some(ChangeScope {
+            fields: 12,
+            objects: 3,
+            ..ChangeScope::default()
+        }),
+        ..request
+    };
+    assert_eq!(
+        PermissionEngine::decide(PermissionMode::default(), &bulk, &[]),
+        PermissionDecision::Ask
+    );
+}
+
+/// 完全控制：宿主动作不再弹审批，直接执行。
+#[test]
+fn full_access_runs_host_actions_without_an_approval() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    backend.set_responses(vec![
+        call(
+            "bgi.capability.describe",
+            json!({"methodId":"mock.success"}),
+        ),
+        call(
+            "bgi.capability.invoke",
+            json!({"methodId":"mock.success","arguments":{}}),
+        ),
+        answer(),
+    ]);
+    let d = tempfile::tempdir().unwrap();
+    let c = full_access_controller(&backend, &d);
+    let run = ipc(
+        &c,
+        "run.submit",
+        json!({"prompt":"execute","clientKey":"full-access"}),
+    );
+    // 没有 approve_pending：完全控制下不该出现任何等待审批的中间状态。
+    let terminal = wait(
+        &c,
+        run["id"].as_str().unwrap(),
+        &["succeeded", "failed", "needsReview", "awaitingApproval"],
+    );
+    assert_ne!(
+        terminal["state"], "awaitingApproval",
+        "完全控制下不应要求确认"
+    );
+    assert_eq!(terminal["state"], "succeeded");
 }

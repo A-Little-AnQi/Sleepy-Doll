@@ -1,4 +1,5 @@
-use std::collections::HashSet;
+//! 旧版「已验证运行提取」的存储结构。新写入一律走 [`super::task`] 的修订模型；
+//! 这里只保留读取旧行并把它们转换成修订的能力，避免两套定义长期并存。
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -7,6 +8,8 @@ use crate::{
     error::{Error, Result},
     extension::{ToolExecution, UnattendedPolicy},
 };
+
+use super::task::{FailurePolicy, ModelUsage, SequenceNode, TaskNode, ToolNode, WorkflowRevision};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -41,6 +44,68 @@ pub struct Workflow {
 }
 
 impl Workflow {
+    /// 旧结构的依赖约束强于新结构，转换后仍是一条顺序链，语义不变。
+    pub fn to_revision(&self) -> Option<WorkflowRevision> {
+        if self.steps.is_empty() {
+            return None;
+        }
+        let mut ordered = Vec::new();
+        let mut placed = std::collections::HashSet::new();
+        let mut remaining = self.steps.clone();
+        while !remaining.is_empty() {
+            let mut progressed = false;
+            let mut next = Vec::new();
+            for step in remaining {
+                if step.depends_on.iter().all(|id| placed.contains(id)) {
+                    placed.insert(step.id.clone());
+                    ordered.push(step);
+                    progressed = true;
+                } else {
+                    next.push(step);
+                }
+            }
+            if !progressed {
+                return None;
+            }
+            remaining = next;
+        }
+        let nodes = ordered
+            .into_iter()
+            .map(|step| {
+                TaskNode::Tool(ToolNode {
+                    id: step.id,
+                    title: step.title,
+                    tool: Some(step.tool),
+                    capability_id: None,
+                    arguments: step.arguments,
+                    execution: Some(step.execution),
+                    provider_version: step.provider_version,
+                    resource_versions: step.resource_versions,
+                    on_failure: FailurePolicy::Stop,
+                    on_unverified: FailurePolicy::Stop,
+                })
+            })
+            .collect::<Vec<_>>();
+        Some(WorkflowRevision {
+            task_id: self.id.clone(),
+            revision: self.revision,
+            schema_version: super::task::SCHEMA_VERSION,
+            name: self.name.clone(),
+            description: self.description.clone(),
+            nodes: vec![TaskNode::Sequence(SequenceNode {
+                id: "steps".into(),
+                title: self.name.clone(),
+                nodes,
+            })],
+            limits: Default::default(),
+            model_usage: ModelUsage::None,
+            validation: Default::default(),
+            created_at: self.created_at.clone(),
+        })
+    }
+}
+
+impl Workflow {
     pub fn validate(&self) -> Result<()> {
         if self.id.trim().is_empty()
             || self.name.trim().is_empty()
@@ -51,37 +116,6 @@ impl Workflow {
                 "workflow id, name, revision and steps are required".into(),
             ));
         }
-        if !self.input_schema.is_null() {
-            jsonschema::validator_for(&self.input_schema)
-                .map_err(|_| Error::Config("workflow input schema is invalid".into()))?;
-        }
-        let mut seen = HashSet::new();
-        for step in &self.steps {
-            step.execution.validate()?;
-            if step.id.trim().is_empty()
-                || step.tool.trim().is_empty()
-                || !step.arguments.is_object()
-            {
-                return Err(Error::Config("workflow step is incomplete".into()));
-            }
-            if !step
-                .depends_on
-                .iter()
-                .all(|dependency| seen.contains(dependency))
-                || !seen.insert(step.id.clone())
-            {
-                return Err(Error::Config(
-                    "workflow dependencies must reference earlier unique steps".into(),
-                ));
-            }
-            if self.unattended == UnattendedPolicy::Allowed
-                && step.execution.unattended != UnattendedPolicy::Allowed
-            {
-                return Err(Error::Config(
-                    "workflow contains a step that forbids unattended execution".into(),
-                ));
-            }
-        }
         Ok(())
     }
 }
@@ -89,30 +123,69 @@ impl Workflow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn step(id: &str, depends_on: &[&str]) -> WorkflowStep {
+        WorkflowStep {
+            id: id.into(),
+            title: id.into(),
+            tool: "tool".into(),
+            arguments: json!({}),
+            depends_on: depends_on.iter().map(|id| (*id).to_owned()).collect(),
+            execution: ToolExecution::read_only(),
+            provider_version: None,
+            resource_versions: vec![],
+        }
+    }
 
     #[test]
-    fn unattended_workflow_requires_every_step_to_opt_in() {
+    fn legacy_workflow_converts_into_an_ordered_sequence() {
+        let workflow = Workflow {
+            id: "w".into(),
+            revision: 3,
+            name: "w".into(),
+            description: "".into(),
+            input_schema: Value::Null,
+            steps: vec![
+                step("a", &[]),
+                step("c", &["a"]),
+                step("b", &[]),
+                step("d", &["c"]),
+            ],
+            verified_from_run: "r".into(),
+            verified_at: "now".into(),
+            unattended: UnattendedPolicy::Forbidden,
+            created_at: "now".into(),
+        };
+        let revision = workflow.to_revision().unwrap();
+        assert_eq!(revision.revision, 3);
+        let TaskNode::Sequence(sequence) = &revision.nodes[0] else {
+            panic!("转换结果应是顺序节点");
+        };
+        let order = sequence
+            .nodes
+            .iter()
+            .map(|node| node.id().to_owned())
+            .collect::<Vec<_>>();
+        let position = |id: &str| order.iter().position(|entry| entry == id).unwrap();
+        assert!(position("a") < position("c"));
+        assert!(position("c") < position("d"));
+    }
+
+    #[test]
+    fn cyclic_legacy_workflow_refuses_to_convert() {
         let workflow = Workflow {
             id: "w".into(),
             revision: 1,
             name: "w".into(),
             description: "".into(),
             input_schema: Value::Null,
-            steps: vec![WorkflowStep {
-                id: "s".into(),
-                title: "s".into(),
-                tool: "tool".into(),
-                arguments: serde_json::json!({}),
-                depends_on: vec![],
-                execution: ToolExecution::default(),
-                provider_version: None,
-                resource_versions: vec![],
-            }],
+            steps: vec![step("a", &["b"]), step("b", &["a"])],
             verified_from_run: "r".into(),
             verified_at: "now".into(),
-            unattended: UnattendedPolicy::Allowed,
+            unattended: UnattendedPolicy::Forbidden,
             created_at: "now".into(),
         };
-        assert!(workflow.validate().is_err());
+        assert!(workflow.to_revision().is_none());
     }
 }

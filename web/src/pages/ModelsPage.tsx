@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
 import { api } from "../api";
+import { readError } from "../session";
+import { Toast } from "../components/Toast";
 import { PlusIcon } from "../components/icons";
 import { Select } from "../components/Select";
 import type { Bootstrap } from "../types";
@@ -82,7 +84,7 @@ export function ModelsPage({
       setForm(saved);
       setNotice("已保存");
     } catch (reason) {
-      setError(String(reason));
+      setError(readError(reason));
     } finally {
       setBusy(false);
     }
@@ -138,16 +140,8 @@ export function ModelsPage({
           <h2>{selected?.name ?? "添加模型"}</h2>
           {selected?.active && <span className="tag">当前模型</span>}
         </header>
-        {error && (
-          <div className="inline-error" role="alert">
-            {error}
-          </div>
-        )}
-        {notice && (
-          <p className="notice" role="status">
-            {notice}
-          </p>
-        )}
+        {error && <Toast message={error} onDismiss={() => setError("")} />}
+        {notice && <Toast message={notice} onDismiss={() => setNotice("")} />}
         <section className="form-section">
           <div className="form-grid">
             <label>
@@ -229,7 +223,7 @@ export function ModelsPage({
                 void api
                   .useModel(selected.id)
                   .then(reload)
-                  .catch((reason) => setError(String(reason)))
+                  .catch((reason) => setError(readError(reason)))
                   .finally(() => setBusy(false));
               }}
             >

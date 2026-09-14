@@ -126,7 +126,7 @@ it("keeps a turn that produced only reasoning", () => {
       reasoning: { protocol: "anthropic-messages", blocks: [], text: "在想" },
     },
   ];
-  expect(buildTurns(onlyReasoning, "")[1]?.parts.map((part) => part.kind)).toEqual(
-    ["reasoning"],
-  );
+  expect(
+    buildTurns(onlyReasoning, "")[1]?.parts.map((part) => part.kind),
+  ).toEqual(["reasoning"]);
 });

@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "activeModel": "local-mock",
   "models": [
     {
@@ -75,7 +75,7 @@
     "maxTools": 128,
     "maxReplans": 2,
     "durationSec": 1800,
-    "permissionMode": "askEach",
+    "permissionMode": "standard",
     "grants": [],
     "trustGrants": []
   }

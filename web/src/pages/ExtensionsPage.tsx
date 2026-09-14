@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import "./ExtensionsPage.css";
 import { api } from "../api";
+import { Toast } from "../components/Toast";
 import {
   CloseIcon,
   PluginIcon,
@@ -8,6 +9,7 @@ import {
   SearchIcon,
   PlusIcon,
 } from "../components/icons";
+import { readError } from "../session";
 import type { Bootstrap } from "../types";
 export function ExtensionsPage({
   bootstrap,
@@ -32,7 +34,7 @@ export function ExtensionsPage({
       await reload();
       return true;
     } catch (reason) {
-      setError(String(reason));
+      setError(readError(reason));
       return false;
     } finally {
       setBusy(false);
@@ -45,6 +47,8 @@ export function ExtensionsPage({
           name: skill.name,
           description: skill.description,
           enabled: skill.enabled !== false,
+          available: skill.available !== false,
+          unavailableReason: skill.unavailableReason ?? "",
           meta: skill.source,
           detail: skill.instructions ?? "",
           error: "",
@@ -54,6 +58,8 @@ export function ExtensionsPage({
           name: plugin.manifest.name,
           description: plugin.manifest.description ?? "",
           enabled: plugin.configuredEnabled ?? plugin.status === "enabled",
+          available: plugin.status === "enabled",
+          unavailableReason: plugin.error ?? "",
           meta: plugin.manifest.version,
           detail: bootstrap.tools
             .filter((tool) => tool.source.includes(plugin.manifest.id))
@@ -130,9 +136,7 @@ export function ExtensionsPage({
         </label>
       </div>
       {error && !dialog.current?.open && (
-        <div className="inline-error" role="alert">
-          {error}
-        </div>
+        <Toast message={error} onDismiss={() => setError("")} />
       )}
       {filtered.length ? (
         <div className="extension-list">
@@ -154,6 +158,12 @@ export function ExtensionsPage({
                 <span className="extension-meta">{item.meta}</span>
                 {item.description && <p>{item.description}</p>}
                 {item.error && <p>加载失败</p>}
+                {/* 开着但依赖不在线时，说清楚现在没生效，而不是让开关骗人。 */}
+                {item.enabled && !item.available && item.unavailableReason && (
+                  <p className="extension-flag">
+                    当前未生效：{item.unavailableReason}
+                  </p>
+                )}
               </button>
               <button
                 className={`switch ${item.enabled ? "on" : ""}`}
@@ -200,11 +210,7 @@ export function ExtensionsPage({
           </button>
         </div>
         <div className="dialog-body">
-          {error && (
-            <div className="inline-error" role="alert">
-              {error}
-            </div>
-          )}
+          {error && <Toast message={error} onDismiss={() => setError("")} />}
           {install ? (
             <form
               className="form-section"

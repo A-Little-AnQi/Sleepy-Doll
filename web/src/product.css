@@ -15,6 +15,12 @@
   --inverse: #fff;
   --solid: #202020;
   --shadow: 0 8px 30px #0000000c, 0 1px 4px #00000006;
+  /* 布局尺寸。按 CSS 像素判断，缩放后以实际 CSS 宽度决定断点。 */
+  --sidebar-width: 248px;
+  --details-width: 336px;
+  --header-height: 52px;
+  --page-padding: 24px;
+  --prose-width: 880px;
   color-scheme: light;
   font-family:
     Inter, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
@@ -160,9 +166,14 @@ a {
   border-radius: 10px;
 }
 
+/* 选中态要一眼看出来选了什么。--selected 是给背景块用的浅灰，压在正文上等于没有。 */
 ::selection {
-  background: var(--selected);
-  color: var(--text);
+  background: #b7d3f5;
+  color: #10131a;
+}
+:root[data-theme="dark"] ::selection {
+  background: #2f4f78;
+  color: #f2f5f8;
 }
 
 .icon-button {
@@ -246,6 +257,8 @@ a {
 
 .search-field {
   position: relative;
+  /* 必须是块盒：行内盒的高度来自行高而不含输入框，图标按它定位会整个偏下。 */
+  display: block;
   max-width: 300px;
   flex: 1;
 }
@@ -259,7 +272,9 @@ a {
 .search-field svg {
   position: absolute;
   left: 11px;
-  top: 11px;
+  /* 按输入框实高居中，不写死像素 —— 紧凑和常规两种高度都对齐。 */
+  top: 50%;
+  translate: 0 -50%;
   width: 15px;
   height: 15px;
   fill: none;

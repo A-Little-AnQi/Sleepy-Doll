@@ -15,10 +15,14 @@ npm ci
 build-desktop.cmd      # 桥 + 界面 + release EXE，组装到 dist\Sleepy-Doll\
 ```
 
-`build-desktop.cmd` 是唯一的发布构建入口，每次重建整个 `dist\`（含 `dist\Sleepy-Doll\user\`），
-产物只落在 `dist\Sleepy-Doll\`。它内部依次执行
+`build-desktop.cmd` 是唯一的发布构建入口，产物落在 `dist\Sleepy-Doll\`。它内部依次执行
 `bgi-bridge/build.cmd`、`npm run check`（含 `vite build`，release 二进制靠 `rust-embed`
 把 `ui-dist/` 编进去）和 `cargo build --release`，最后把 EXE 与桥组件组装到一起。
+
+组装是**原地覆盖写入，不先清空产物目录**：桥的 DLL 被运行中的 BetterGI 加载时删不掉，
+先删会留下半个不可用的安装目录。构建失败时逐个列出没替换成的文件，其余组件保持可用。
+`dist\Sleepy-Doll\user\` 是用户自己的数据，构建不碰它；只有早先误落在 `dist\` 根目录的散落
+文件会被清掉。
 
 `target\` 是 Cargo 的中间目录，`bgi-bridge\.build\` 是桥各 .NET 项目的中间目录，都不参与分发。
 
@@ -98,6 +102,45 @@ npm run dev    # 启动 Vite 开发服务器
 
 Mock 进程启动时会打印实际读取的配置路径与当前 `activeModel`。浏览器开发模式的 IPC 会把
 模型请求转发给配置里的 `activeModel`，因此要完全离线，请让 `activeModel` 指向 Mock 模型。
+
+### 用真实会话复现界面
+
+该端点绑定的是真正的 `AppController`，所以把 mock 的库换成真实数据的一致快照，调界面时
+看到的就是完全一致的会话，不必为每处调整调用真实模型：
+
+```bash
+python scripts/seed-mock-db.py        # 默认取 dist\Sleepy-Doll\user\ 下的库
+```
+
+脚本用 SQLite 的备份接口取快照（源库通常带着未合并的 WAL，直接复制文件会丢掉最近的提交），
+连同附件目录一并搬过去，最后逐表对数确认完整。两个路径都在 `.gitignore` 里。源库路径可以
+作为参数指定。
+
+### 「模拟对话」
+
+开发模式的侧栏里多一条「模拟对话」（生产构建没有）。点它会替你发出录制的开场白，之后一切
+走正常链路：mock 后端回放录制的助手轮次、工具真实执行、事件流照常推送。所以链路或后端出
+问题，在演示里就能看见 —— 一段前端动画会把问题盖过去。
+
+录制来自哪段会话由这个脚本决定，它同时产出两份：
+
+```bash
+python scripts/build-demo-conversation.py "调度器"   # 不带参数会列出可选会话
+```
+
+| 产物 | 内容 |
+|---|---|
+| `.sleepy-doll/replay.json` | 助手轮次（正文、推理、工具调用），mock 后端按序回放 |
+| `web/src/demo.ts` | 只有那句开场白，前端用它发出第一条消息 |
+
+开场白与录制不一致时不会回放，退回按关键词选场景的默认行为。工具名在库里是内部名，回放时
+由运行时同一个 `wire_name` 换算，脚本里不复刻哈希。
+
+想让演示里的文件工具读到真实内容，启动 mock 时把 BGI 的 User 目录指过去：
+
+```bash
+SLEEPY_DOLL_MOCK_BGI_USER="E:\tools\test\BetterGI\User" npm run mock
+```
 
 浏览器开发模式会自动连接 `http://127.0.0.1:47124/ipc`；Wry 桌面模式仍使用原生 IPC，不受
 影响。该端点绑定整个 `AppController`，所以它只接受 `http://localhost:5173`、

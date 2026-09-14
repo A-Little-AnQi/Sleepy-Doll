@@ -16,6 +16,35 @@ pub struct ConversationSummary {
     pub title: String,
     pub created_at: String,
     pub updated_at: String,
+    pub pinned: bool,
+    pub archived: bool,
+    /// 会话自己的模型选择。为空表示跟随默认模型。
+    pub model_id: Option<String>,
+    pub task_count: usize,
+}
+
+/// 会话列表的筛选与分页。默认不含已归档会话，也不把全部历史一次给前端。
+#[derive(Debug, Clone, Default)]
+pub struct ConversationQuery {
+    pub search: Option<String>,
+    pub include_archived: bool,
+    pub offset: usize,
+    pub limit: usize,
+}
+
+impl ConversationQuery {
+    pub fn normalized(&self) -> Self {
+        Self {
+            search: self
+                .search
+                .as_ref()
+                .map(|value| value.trim().to_lowercase())
+                .filter(|value| !value.is_empty()),
+            include_archived: self.include_archived,
+            offset: self.offset,
+            limit: self.limit.clamp(1, 200),
+        }
+    }
 }
 
 pub struct Journal {
@@ -103,6 +132,8 @@ impl Journal {
         conversation: &str,
         key: &str,
         duration: i64,
+        model_id: Option<&str>,
+        chat_only: bool,
     ) -> Result<Run> {
         let mut db = self.connection.lock().unwrap();
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -149,6 +180,8 @@ impl Journal {
             result: None,
             error: None,
             source: RunSource::Agent,
+            model_id: model_id.map(str::to_owned),
+            chat_only,
         };
         tx.execute("INSERT OR IGNORE INTO conversations(id,title,created_at,updated_at) VALUES(?1,?2,?3,?3)",params![conversation,prompt.chars().take(120).collect::<String>(),stamp])?;
         tx.execute(
@@ -283,6 +316,22 @@ impl Journal {
         self.touch();
         Ok(())
     }
+    /// 游标是否已经落在保留窗口之前。
+    ///
+    /// 事件会被清理，清理掉的终态事件再也读不回来。此时不能假装「没有新事件」，
+    /// 必须让客户端先载一致快照再续流，否则最终结果会静默丢失。
+    pub fn cursor_expired(&self, conversation: &str, after: u64) -> Result<bool> {
+        if after == 0 {
+            return Ok(false);
+        }
+        let earliest: Option<i64> = self.connection.lock().unwrap().query_row(
+            "SELECT MIN(sequence) FROM runtime_events WHERE conversation_id=?1",
+            [conversation],
+            |row| row.get(0),
+        )?;
+        Ok(earliest.is_some_and(|earliest| after < earliest as u64 - 1))
+    }
+
     pub fn events(&self, conversation: &str, after: u64) -> Result<Vec<Event>> {
         let db = self.connection.lock().unwrap();
         let mut q=db.prepare("SELECT sequence,run_id,kind,data FROM runtime_events WHERE conversation_id=?1 AND sequence>?2 ORDER BY sequence LIMIT 256")?;
@@ -360,6 +409,21 @@ impl Journal {
             params![serde_json::to_string(a)?, a.id],
         )?;
         Ok(())
+    }
+    pub fn attempt_by_call(&self, run: &str, call_id: &str) -> Result<Option<Attempt>> {
+        let payload: Option<String> = self
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT payload FROM runtime_attempts WHERE run_id=?1 AND call_id=?2",
+                params![run, call_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        payload
+            .map(|payload| serde_json::from_str(&payload).map_err(Error::from))
+            .transpose()
     }
     pub fn attempts(&self, run: &str) -> Result<Vec<Attempt>> {
         let db = self.connection.lock().unwrap();
@@ -530,18 +594,140 @@ impl Journal {
         Ok(true)
     }
     pub fn conversations(&self) -> Result<Vec<ConversationSummary>> {
+        self.conversations_matching(&ConversationQuery {
+            limit: 200,
+            include_archived: true,
+            ..ConversationQuery::default()
+        })
+    }
+
+    /// 置顶优先，然后按最近活动。归档只在显式要求时出现。
+    pub fn conversations_matching(
+        &self,
+        query: &ConversationQuery,
+    ) -> Result<Vec<ConversationSummary>> {
+        let query = query.normalized();
         let connection = self.connection.lock().unwrap();
-        let mut query = connection.prepare("SELECT id,title,created_at,updated_at FROM conversations ORDER BY updated_at DESC LIMIT 50")?;
-        Ok(query
-            .query_map([], |row| {
-                Ok(ConversationSummary {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    created_at: row.get(2)?,
-                    updated_at: row.get(3)?,
-                })
-            })?
+        let mut statement = connection.prepare(
+            "SELECT c.id,c.title,c.created_at,c.updated_at,c.pinned,c.archived_at,c.model_id,
+                    (SELECT COUNT(*) FROM task_definitions t
+                     WHERE t.source_conversation_id=c.id AND t.deleted=0)
+             FROM conversations c
+             WHERE (?1=1 OR c.archived_at IS NULL)
+               AND (?2 IS NULL OR instr(lower(c.title),?2)>0)
+             ORDER BY c.pinned DESC, c.updated_at DESC
+             LIMIT ?3 OFFSET ?4",
+        )?;
+        Ok(statement
+            .query_map(
+                params![
+                    query.include_archived as i32,
+                    query.search,
+                    query.limit as i64,
+                    query.offset as i64
+                ],
+                |row| {
+                    Ok(ConversationSummary {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        created_at: row.get(2)?,
+                        updated_at: row.get(3)?,
+                        pinned: row.get::<_, i64>(4)? != 0,
+                        archived: row.get::<_, Option<String>>(5)?.is_some(),
+                        model_id: row.get(6)?,
+                        task_count: row.get::<_, i64>(7)? as usize,
+                    })
+                },
+            )?
             .collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn conversation(&self, id: &str) -> Result<ConversationSummary> {
+        self.conversations()?
+            .into_iter()
+            .find(|conversation| conversation.id == id)
+            .ok_or_else(|| Error::Config("会话不存在".into()))
+    }
+
+    pub fn rename_conversation(&self, id: &str, title: &str) -> Result<()> {
+        let title = title.trim();
+        if title.is_empty() || title.chars().count() > 120 {
+            return Err(Error::Config("会话标题应为 1 到 120 个字符".into()));
+        }
+        let updated = self.connection.lock().unwrap().execute(
+            "UPDATE conversations SET title=?1,updated_at=?2 WHERE id=?3",
+            params![title, now(), id],
+        )?;
+        if updated == 0 {
+            return Err(Error::Config("会话不存在".into()));
+        }
+        self.touch();
+        Ok(())
+    }
+
+    pub fn set_conversation_pinned(&self, id: &str, pinned: bool) -> Result<()> {
+        self.connection.lock().unwrap().execute(
+            "UPDATE conversations SET pinned=?1 WHERE id=?2",
+            params![pinned as i32, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_conversation_model(&self, id: &str, model_id: Option<&str>) -> Result<()> {
+        self.connection.lock().unwrap().execute(
+            "UPDATE conversations SET model_id=?1 WHERE id=?2",
+            params![model_id, id],
+        )?;
+        Ok(())
+    }
+
+    /// 归档可撤销，不删除消息，也不影响来源快捷任务。
+    pub fn set_conversation_archived(&self, id: &str, archived: bool) -> Result<()> {
+        self.connection.lock().unwrap().execute(
+            "UPDATE conversations SET archived_at=?1 WHERE id=?2",
+            params![if archived { Some(now()) } else { None }, id],
+        )?;
+        self.touch();
+        Ok(())
+    }
+
+    /// 删除会话：只删这个会话的消息与运行记录。独立保存的快捷任务保留，
+    /// 来源显示为已删除，运行证据的来源快照不受影响。
+    pub fn delete_conversation(&self, id: &str) -> Result<Value> {
+        let mut db = self.connection.lock().unwrap();
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let messages: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        let runs: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM runtime_runs WHERE conversation_id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        let tasks: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM task_definitions WHERE source_conversation_id=?1 AND deleted=0",
+            [id],
+            |row| row.get(0),
+        )?;
+        tx.execute(
+            "DELETE FROM runtime_message_owners WHERE run_id IN (SELECT id FROM runtime_runs WHERE conversation_id=?1)",
+            [id],
+        )?;
+        tx.execute("DELETE FROM runtime_runs WHERE conversation_id=?1", [id])?;
+        tx.execute("DELETE FROM messages WHERE conversation_id=?1", [id])?;
+        tx.execute("DELETE FROM tool_calls WHERE conversation_id=?1", [id])?;
+        tx.execute("DELETE FROM conversations WHERE id=?1", [id])?;
+        tx.commit()?;
+        drop(db);
+        self.touch();
+        Ok(json!({
+            "deleted":true,
+            "messages":messages,
+            "runs":runs,
+            "tasksKept":tasks,
+        }))
     }
 
     pub fn record_tool(
@@ -948,6 +1134,8 @@ impl Journal {
             &conversation,
             key,
             duration,
+            None,
+            false,
         )?;
         run.source = RunSource::SavedStrategy {
             strategy_id: strategy.id.clone(),
@@ -962,20 +1150,24 @@ impl Journal {
 
     pub fn create_workflow_run(
         &self,
-        workflow: &crate::runtime::operation::workflow::Workflow,
+        task_id: &str,
+        name: &str,
+        revision: u64,
         key: &str,
         duration: i64,
     ) -> Result<Run> {
-        let conversation = format!("workflow-{}", workflow.id);
+        let conversation = format!("task-{task_id}");
         let mut run = self.create(
-            &format!("运行流程：{}", workflow.name),
+            &format!("运行快捷任务：{name}"),
             &conversation,
             key,
             duration,
+            None,
+            false,
         )?;
         run.source = RunSource::SavedWorkflow {
-            workflow_id: workflow.id.clone(),
-            workflow_revision: workflow.revision,
+            workflow_id: task_id.to_owned(),
+            workflow_revision: revision,
         };
         self.connection.lock().unwrap().execute(
             "UPDATE runtime_runs SET payload=?1 WHERE id=?2",

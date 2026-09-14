@@ -1,12 +1,17 @@
 import type {
   Bootstrap,
+  BridgeCatalog,
+  BridgeMethodDetail,
+  ConversationInfo,
   MessageInfo,
+  RecoveryRecord,
   RunEvent,
   SavedStrategy,
   TaskInfo,
-  BridgeCatalog,
-  BridgeMethodDetail,
-  RecoveryRecord,
+  PermissionState,
+  TaskSummary,
+  TaskValidation,
+  WorkflowDetail,
 } from "./types";
 
 declare global {
@@ -32,7 +37,7 @@ interface IpcEnvelope<T> {
   error?: { message: string };
 }
 
-const MOCK_BACKEND = "http://127.0.0.1:47124/ipc";
+export const MOCK_BACKEND = "http://127.0.0.1:47124/ipc";
 const pending = new Map<
   string,
   {
@@ -120,11 +125,16 @@ export const api = {
     prompt: string,
     conversationId?: string,
     clientKey: string = crypto.randomUUID(),
+    mode: "agent" | "chatOnly" = "agent",
+    modelId?: string | null,
   ) =>
     invoke<TaskInfo>("task.submit", {
       prompt,
       clientKey,
+      mode,
       ...(conversationId ? { conversationId } : {}),
+      // 新对话里先挑好的模型随第一条消息一起生效；留空表示跟随默认模型。
+      ...(modelId ? { modelId } : {}),
     }),
   task: (id: string) => invoke<TaskInfo>("task.get", { id }),
   tasks: () => invoke<TaskInfo[]>("task.list"),
@@ -147,6 +157,9 @@ export const api = {
     invoke<{ id: string; messages: MessageInfo[] }>("conversation.get", { id }),
   useModel: (id: string) =>
     invoke<{ activeModel: string }>("model.use", { id }),
+  permission: () => invoke<PermissionState>("permission.get"),
+  setPermission: (mode: string) =>
+    invoke<{ mode: string; label: string }>("permission.set", { mode }),
   saveModel: (model: {
     id: string;
     name: string;
@@ -192,11 +205,78 @@ export const api = {
       id,
       clientKey: crypto.randomUUID(),
     }),
-  runWorkflow: (id: string) =>
+  executeOperation: (id: string) => invoke("operation.execute", { id }),
+  rollbackOperation: (id: string) => invoke("operation.rollback", { id }),
+
+  conversations: (search = "", includeArchived = false) =>
+    invoke<ConversationInfo[]>("conversation.list", {
+      search,
+      includeArchived,
+      limit: 200,
+    }),
+  renameConversation: (id: string, title: string) =>
+    invoke("conversation.rename", { id, title }),
+  pinConversation: (id: string, pinned: boolean) =>
+    invoke("conversation.setPinned", { id, pinned }),
+  archiveConversation: (id: string, archived: boolean) =>
+    invoke("conversation.setArchived", { id, archived }),
+  setConversationModel: (id: string, modelId: string | null) =>
+    invoke("conversation.setModel", { id, modelId }),
+  deleteConversation: (id: string, confirmed = false) =>
+    invoke<{
+      requiresConfirmation?: boolean;
+      affects?: { title: string; taskCount: number };
+      keeps?: string;
+      deleted?: boolean;
+      messages?: number;
+      runs?: number;
+      tasksKept?: number;
+    }>("conversation.delete", { id, confirmed }),
+
+  workflowList: (conversationId?: string) =>
+    invoke<TaskSummary[]>("workflow.list", {
+      ...(conversationId ? { conversationId } : {}),
+    }),
+  workflowGet: (id: string) => invoke<WorkflowDetail>("workflow.get", { id }),
+  workflowValidate: (id: string, draftRevision?: number) =>
+    invoke<{
+      validation: TaskValidation;
+      publishable: boolean;
+      zeroToken: boolean;
+      modelUsage: string;
+    }>("workflow.validate", {
+      id,
+      ...(draftRevision ? { draftRevision } : {}),
+    }),
+  workflowPublish: (
+    id: string,
+    draftRevision: number,
+    expectedPublishedRevision?: number,
+  ) =>
+    invoke<{ publishedRevision: number; zeroToken: boolean }>(
+      "workflow.publish",
+      {
+        id,
+        draftRevision,
+        ...(expectedPublishedRevision ? { expectedPublishedRevision } : {}),
+      },
+    ),
+  runWorkflow: (id: string, expectedPublishedRevision?: number) =>
     invoke<TaskInfo>("workflow.run", {
       id,
       clientKey: crypto.randomUUID(),
+      ...(expectedPublishedRevision ? { expectedPublishedRevision } : {}),
     }),
-  executeOperation: (id: string) => invoke("operation.execute", { id }),
-  rollbackOperation: (id: string) => invoke("operation.rollback", { id }),
+  renameWorkflow: (id: string, name: string) =>
+    invoke("workflow.rename", { id, name }),
+  pinWorkflow: (id: string, pinned: boolean) =>
+    invoke("workflow.pin", { id, pinned }),
+  archiveWorkflow: (id: string, archived: boolean) =>
+    invoke(archived ? "workflow.archive" : "workflow.restore", { id }),
+  deleteWorkflow: (id: string) =>
+    invoke<{ deleted: boolean; activeRuns: string[]; historyKept: boolean }>(
+      "workflow.delete",
+      { id },
+    ),
+  copyWorkflow: (id: string) => invoke<{ id: string }>("workflow.copy", { id }),
 };

@@ -29,27 +29,24 @@ use types::*;
 const DELTA_BATCH_CHARS: usize = 240;
 const DELTA_BATCH_INTERVAL: Duration = Duration::from_millis(150);
 
-const CORE_AGENT_POLICY: &str = r#"你是 Sleepy Doll 的 BetterGI 操作 Agent。使用简体中文。完成用户已经明确要求的工作，并用实际读取和执行结果回答。
+/// 与领域无关的底座：语气、证据纪律、内部实现的边界。
+///
+/// 领域知识不写在这里。BetterGI 的行为规范与操作手册随 BGI 能力包分发，
+/// 只有该提供方在线时才注入 —— 将来接入别的软件时，它们不该被 BGI 的规则污染。
+const CORE_AGENT_POLICY: &str = r#"你是 Sleepy Doll，一个本地桌面助手。使用简体中文。
 
-先判断权威证据：
-- 用户安装或配置了什么：读取 BetterGI User 目录；不要搜索接口目录。
-- BetterGI 当前状态：读取 bgi.state.get；纯文件查询和编辑不需要状态。
-- 宿主设置或可执行动作：使用 bgi.api；不要搜索用户目录或插件代替。
-- 插件能力和登记资源：仅在任务明确涉及已安装扩展时使用 capability/resource/tools。
+"Sleepy Doll" 是产品身份，不是角色扮演。不要自称别的角色，不编造身份设定，也不需要反复介绍自己；用直接、可靠、不过度热情的语气体现"少操心、直接办事"。
 
-工作规则：
-1. 先查完本机能够取得的信息，再决定是否缺少用户输入。目录、现值、运行状态、接口可用性和脚本参数都不是用户缺项。
-2. 同类独立读取在同一轮并行发出；一次发现后复用结果。零结果先检查证据源是否选错，不连续更换同义词搜索。
-   同一服务已经返回连接或鉴权错误时，不再调用依赖该服务的其他工具；直接报告这一个阻塞项。纯 User 文件任务的读取失败后不要补调运行状态。
-3. 用户已经明确要求修改或执行时，推进到运行时审批；不要在对话里重复索要许可。只有目标或不可逆范围确实有歧义时才询问。
-4. 修改 User 资源前读取真实目标和一个必要的同类样板，验证引用后最小修改；替换时把 read 返回的 sha256 交给 write，写后回读，回退使用返回的 backup。全局 config.json 使用桥的设置事务。
-   已知 Javascript folderName 时用 bgi.user.inspect_script 一次读取脚本说明和参数，不逐文件 list/read。由现有配置组派生同类组时保留其 config，不读取 User/config.json 重建。
-5. 执行前先解析用户点名的真实对象，再取一次新鲜状态和接口契约。Job 接纳、处理器返回、业务验证是三个不同结果。
-   运行现有调度器配置组使用 bgi.run_script_group；不要搜索低层 script_control 命令或要求用户先在界面选中。
-   更新脚本仓库或已订阅脚本时直接 describe bgi.update_subscribed_scripts；不要先搜索接口。它不需要游戏状态，不搜索“打开脚本仓库”界面命令，也不把自动更新设置当成立即更新动作。
-   “更新/升级/同步某脚本”先查 User/Subscriptions；除非用户明确说配置组或一条龙流程，否则不查 OneDragon、ScriptGroup。
-6. 一个接口不可用时说明该接口的具体阻塞项，不再搜索插件、生命周期事件或无关替代品。
-7. 回复先给结果；只附必要证据、生效条件或一个无法自行解决的阻塞项。不要给用户罗列选择题来代替继续工作。"#;
+工作方式：
+1. 用实际执行和读取到的结果回答，先给结果再给依据。只陈述有可靠依据的事实；无法观测、无法核实的事情直接说明不知道，不编造，也不用无关的工具去猜。
+2. 先查完本机能够取得的信息，再判断是否真的缺少用户输入。只问无法自行取得、且不同答案会改变结果的信息，一次问完。
+3. 需要启动程序、更新内容、修改配置或执行任务时，直接去做。要不要先征求同意由运行时的审批级别决定，不要在对话里替它先问一遍；被拦下时再说明它在等什么。
+4. 一个数据源已经明确报出连接或鉴权错误时，不再调用依赖它的其他工具，直接报告这一个阻塞项。
+5. 回复先给结果；只附必要证据、生效条件，或一个无法自行解决的阻塞项。不要给用户罗列选择题来代替继续工作，也不要把自己能做到的准备步骤交回给用户。
+
+对用户说话：
+- 进程、注入、反射、程序集、服务、方法、路由、端点、RPC、schema、序列化、HTTP 状态码都是内部实现，不是用户要看的内容；把它们翻译成用户的功能和结果。
+- 只有用户明确要求开发排障时，才展开内部标识和原始错误摘要。"#;
 
 fn configured_agent_instructions(prompt: &str) -> &str {
     // Two generated defaults shipped before the domain manual became an
@@ -78,6 +75,7 @@ pub(crate) fn executor() -> &'static tokio::runtime::Runtime {
 pub struct Supervisor {
     shutting_down: std::sync::atomic::AtomicBool,
     pub journal: Arc<Journal>,
+    pub tasks: Arc<operation::task_store::TaskStore>,
     config: RwLock<AppConfig>,
     extensions: RwLock<RuntimeExtensions>,
     active: Mutex<HashMap<String, CancellationToken>>,
@@ -86,6 +84,26 @@ pub struct Supervisor {
     hooks: RwLock<Arc<host::hooks::HookBus>>,
     operations: Arc<operation::operations::OperationEngine>,
 }
+/// 技能可用性判定的输入集合。持有所有权，方便在运行循环外复用。
+pub struct SkillEnvironment {
+    plugins: HashSet<String>,
+    capabilities: HashSet<String>,
+    resource_kinds: HashSet<String>,
+    providers: HashSet<String>,
+}
+
+impl SkillEnvironment {
+    pub fn context(&self) -> crate::extension::skills::SkillContext<'_> {
+        crate::extension::skills::SkillContext {
+            plugins: &self.plugins,
+            capabilities: &self.capabilities,
+            resource_kinds: &self.resource_kinds,
+            providers: &self.providers,
+            platform: std::env::consts::OS,
+        }
+    }
+}
+
 struct RuntimeExtensions {
     skills: Arc<SkillRegistry>,
     tools: Arc<ToolRegistry>,
@@ -152,6 +170,43 @@ impl Supervisor {
                 recorded_at: types::now(),
             });
     }
+    /// 技能可用性判定的输入。运行循环与界面读的是同一份，条件不会各算一套。
+    pub fn skill_environment(&self, config: &AppConfig) -> SkillEnvironment {
+        let mut capabilities = self
+            .tools()
+            .definitions()
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect::<HashSet<_>>();
+        capabilities.extend(self.catalog.capabilities.keys().cloned());
+        let resource_kinds = self
+            .operations
+            .store
+            .resources()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|resource| resource.kind)
+            .collect::<HashSet<_>>();
+        let plugins = config
+            .plugins
+            .enabled
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
+        // 领域说明跟着提供方走：桥关掉，BGI 的行为规范与操作手册也不再出现在
+        // 提示词里，通用对话不会被它带偏。
+        let mut providers = plugins.clone();
+        if config.bridge.enabled {
+            providers.insert("bgi".into());
+        }
+        SkillEnvironment {
+            plugins,
+            capabilities,
+            resource_kinds,
+            providers,
+        }
+    }
+
     fn skills(&self) -> Arc<SkillRegistry> {
         self.extensions.read().unwrap().skills.clone()
     }
@@ -182,11 +237,15 @@ impl Supervisor {
         adapters: Vec<Arc<host::adapter::AdapterClient>>,
     ) -> Result<Arc<Self>> {
         let journal = Arc::new(Journal::open(&config.storage.database)?);
+        let tasks = Arc::new(operation::task_store::TaskStore::open(
+            &config.storage.database,
+        )?);
         let catalog = host::catalog::Catalog::load(&config.runtime.catalog_directory)?;
         let hook_bus = Arc::new(host::hooks::HookBus::new(config.hooks.clone())?);
         let supervisor = Arc::new(Self {
             shutting_down: std::sync::atomic::AtomicBool::new(false),
             journal,
+            tasks,
             config: RwLock::new(config),
             extensions: RwLock::new(RuntimeExtensions {
                 skills,
@@ -227,6 +286,8 @@ impl Supervisor {
         conversation: Option<&str>,
         key: &str,
         duration: Option<i64>,
+        chat_only: bool,
+        model: Option<&str>,
     ) -> Result<Run> {
         if self.shutting_down.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(Error::Config("应用正在退出，请重新打开后发送".into()));
@@ -257,7 +318,51 @@ impl Supervisor {
         if !(1..=86400).contains(&duration) {
             return Err(Error::Config("任务时限必须在 1 秒到 24 小时之间".into()));
         }
-        self.journal.create(prompt, &conversation, key, duration)
+        // 模型选择按优先级取：用户在界面上刚挑的那一个 → 会话自己存的 → 默认模型。
+        // 新对话还没有会话记录，第一条消息就是把它定下来的时机。
+        let requested = self.validated_model(model)?;
+        let stored = self
+            .journal
+            .conversation(&conversation)
+            .ok()
+            .and_then(|summary| summary.model_id)
+            .and_then(|id| self.validated_model(Some(&id)).ok().flatten());
+        let resolved = requested
+            .clone()
+            .or(stored)
+            .unwrap_or_else(|| self.config.read().unwrap().active().id.clone());
+        let run = self.journal.create(
+            prompt,
+            &conversation,
+            key,
+            duration,
+            Some(&resolved),
+            chat_only,
+        )?;
+        // 先把模型写回会话，卡片和顶栏下次读到的就是同一个选择。
+        if requested.is_some() {
+            self.journal
+                .set_conversation_model(&conversation, Some(&resolved))?;
+        }
+        Ok(run)
+    }
+
+    /// 请求里的模型必须真实存在，否则宁可报错也不静默换成别的模型。
+    fn validated_model(&self, model: Option<&str>) -> Result<Option<String>> {
+        let Some(id) = model.filter(|id| !id.is_empty()) else {
+            return Ok(None);
+        };
+        if !self
+            .config
+            .read()
+            .unwrap()
+            .models
+            .iter()
+            .any(|entry| entry.id == id)
+        {
+            return Err(Error::Config("选择的模型配置不存在".into()));
+        }
+        Ok(Some(id.to_owned()))
     }
     pub fn submit_strategy(&self, id: &str, key: &str, duration: Option<i64>) -> Result<Run> {
         if self.shutting_down.load(std::sync::atomic::Ordering::SeqCst) {
@@ -272,14 +377,156 @@ impl Supervisor {
         self.journal.mark_strategy_run(&mut strategy, &run.id)?;
         Ok(run)
     }
-    pub fn submit_workflow(&self, id: &str, key: &str, duration: Option<i64>) -> Result<Run> {
+    /// 运行快捷任务。只接纳已发布修订；期望版本对不上时先让卡片刷新，
+    /// 不用旧文案暗跑新目标。
+    pub fn submit_workflow(
+        &self,
+        id: &str,
+        expected: Option<u64>,
+        key: &str,
+        duration: Option<i64>,
+    ) -> Result<Run> {
+        if self.shutting_down.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Error::Config("应用正在退出，请重新打开后运行".into()));
+        }
         let duration = duration.unwrap_or(self.config.read().unwrap().runtime.duration_sec);
-        let workflow = self.operations.store.workflow(id)?;
-        let run = self.journal.create_workflow_run(&workflow, key, duration)?;
-        self.operations
-            .store
-            .record_workflow_run(&workflow.id, workflow.revision, &run.id)?;
+        let definition = self.tasks.definition(id)?;
+        if definition.deleted_at.is_some() {
+            return Err(Error::Conflict("这个快捷任务已被删除".into()));
+        }
+        if definition.archived_at.is_some() {
+            return Err(Error::Conflict("这个快捷任务已归档；恢复后才能运行".into()));
+        }
+        let Some(revision) = self.tasks.published_revision(id)? else {
+            return Err(Error::Conflict("这个快捷任务还不能运行".into()));
+        };
+        // 同一任务默认不允许重入：两处同时点击只接纳一个活动运行。
+        if let Some(active) = self.active_run_for(id)? {
+            return Ok(active);
+        }
+        if let Some(expected) = expected
+            && expected != revision.revision
+        {
+            return Err(Error::Conflict(format!(
+                "任务已更新到第 {} 版，请刷新后重试",
+                revision.revision
+            )));
+        }
+        let duration = duration.min(revision.limits.max_seconds);
+        let run = self.journal.create_workflow_run(
+            id,
+            &definition.name,
+            revision.revision,
+            key,
+            duration,
+        )?;
+        self.tasks.record_run(id, revision.revision, &run.id)?;
         Ok(run)
+    }
+
+    fn active_run_for(&self, task_id: &str) -> Result<Option<Run>> {
+        for run in self.journal.pending()? {
+            if let RunSource::SavedWorkflow { workflow_id, .. } = &run.source
+                && workflow_id == task_id
+                && run.state.holds_lease()
+            {
+                return Ok(Some(run));
+            }
+        }
+        Ok(None)
+    }
+
+    /// 会话列表。默认不含已归档，也不把全部历史一次交给前端。
+    pub fn conversations(
+        &self,
+        query: &store::journal::ConversationQuery,
+    ) -> Result<Vec<store::journal::ConversationSummary>> {
+        self.journal.conversations_matching(query)
+    }
+
+    /// 任务定义摘要。依赖可用性由运行时判定，Core 不认识具体领域工具。
+    pub fn task_summaries(
+        &self,
+        conversation: Option<&str>,
+    ) -> Result<Vec<operation::task_store::TaskSummary>> {
+        let conversations = self
+            .journal
+            .conversations()?
+            .into_iter()
+            .map(|conversation| conversation.id)
+            .collect::<HashSet<_>>();
+        let definitions = self.tasks.definitions()?;
+        let available = self.tool_names();
+        let is_available = |name: &str| available.contains(name);
+        let mut summaries = definitions
+            .iter()
+            .filter(|definition| {
+                conversation
+                    .is_none_or(|id| definition.source_conversation_id.as_deref() == Some(id))
+            })
+            .map(|definition| {
+                self.tasks
+                    .summary(definition, &is_available, &conversations)
+            })
+            .collect::<Vec<_>>();
+        summaries.sort_by(|left, right| {
+            right
+                .pinned
+                .cmp(&left.pinned)
+                .then_with(|| right.updated_at.cmp(&left.updated_at))
+        });
+        Ok(summaries)
+    }
+
+    /// 某任务仍占用互斥锁的运行，用于删除定义时如实提示活动运行。
+    pub fn task_run_ids(&self, task_id: &str) -> Result<Vec<String>> {
+        Ok(self
+            .journal
+            .pending()?
+            .into_iter()
+            .filter(|run| {
+                matches!(&run.source, RunSource::SavedWorkflow { workflow_id, .. } if workflow_id == task_id)
+                    && run.state.holds_lease()
+            })
+            .map(|run| run.id)
+            .collect())
+    }
+
+    /// 运行接纳时固定的模型配置；配置已被删除时回落到默认模型，
+    /// 但不静默换到另一个模型 —— 缺失的配置会让这一轮显式失败。
+    fn model_for(&self, run: &Run) -> crate::config::ModelConfig {
+        let config = self.config.read().unwrap();
+        run.model_id
+            .as_ref()
+            .and_then(|id| config.models.iter().find(|model| &model.id == id).cloned())
+            .unwrap_or_else(|| config.active().clone())
+    }
+
+    fn tool_names(&self) -> HashSet<String> {
+        self.definitions(&HashSet::new())
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect()
+    }
+
+    /// 编译快捷任务所需的工具契约快照。
+    pub fn tool_catalog(&self) -> operation::task::ToolCatalog {
+        let mut catalog = operation::task::ToolCatalog::new();
+        for definition in self.definitions(&HashSet::new()) {
+            catalog.insert(
+                &definition.name,
+                operation::task::ToolContract {
+                    execution: definition.execution.clone(),
+                    provider_version: definition.provider_version.clone(),
+                    input_schema: definition.input_schema.clone(),
+                },
+            );
+        }
+        catalog
+    }
+
+    pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
+        self.definitions(&HashSet::new())
     }
     fn schedule(self: &Arc<Self>) -> Result<()> {
         if self.shutting_down.load(std::sync::atomic::Ordering::SeqCst) {
@@ -497,12 +744,20 @@ impl Supervisor {
             return self.run_saved_strategy(run, &bridge, &policy, cancel).await;
         }
         if let RunSource::SavedWorkflow {
-            ref workflow_id, ..
+            ref workflow_id,
+            workflow_revision,
         } = run.source
         {
             let workflow_id = workflow_id.clone();
             return self
-                .run_saved_workflow(run, &workflow_id, &bridge, &policy, cancel)
+                .run_saved_workflow(
+                    run,
+                    &workflow_id,
+                    workflow_revision,
+                    &bridge,
+                    &policy,
+                    cancel,
+                )
                 .await;
         }
         self.journal.save(run, RunState::Deciding)?;
@@ -529,33 +784,8 @@ impl Supervisor {
                 history.push(m);
             }
             let current = self.config.read().unwrap().clone();
-            let skill_plugins = current
-                .plugins
-                .enabled
-                .iter()
-                .cloned()
-                .collect::<HashSet<_>>();
-            let mut skill_capabilities = self
-                .tools()
-                .definitions()
-                .into_iter()
-                .map(|tool| tool.name)
-                .collect::<HashSet<_>>();
-            skill_capabilities.extend(self.catalog.capabilities.keys().cloned());
-            let skill_resource_kinds = self
-                .operations
-                .store
-                .resources()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|resource| resource.kind)
-                .collect::<HashSet<_>>();
-            let skill_context = crate::extension::skills::SkillContext {
-                plugins: &skill_plugins,
-                capabilities: &skill_capabilities,
-                resource_kinds: &skill_resource_kinds,
-                platform: std::env::consts::OS,
-            };
+            let skill_environment = self.skill_environment(&current);
+            let skill_context = skill_environment.context();
             let available = skill_snapshot
                 .list()
                 .into_iter()
@@ -619,8 +849,9 @@ impl Supervisor {
                     });
                 }
             }
-            // 预算按当前模型自己的窗口推导，所以先取模型。
-            let model = self.config.read().unwrap().active().clone();
+            // 预算按当前模型自己的窗口推导，所以先取模型。运行接纳时已经固定
+            // 配置；运行途中换选择只影响之后开始的运行。
+            let model = self.model_for(run);
             let output_reserve = model.options.max_output_tokens.unwrap_or(8192);
             let (char_budget, token_budget) = policy::budget(&policy, &model);
             let attachment_text = attachments.render(char_budget / 3);
@@ -636,7 +867,12 @@ impl Supervisor {
                 attachment_text,
             );
             let plan = self.journal.plan(&run.id)?;
-            let definitions = self.definitions(&exposed);
+            // 「仅聊天」不向模型提供任何外部工具；它仍可解释对话里已有的内容。
+            let definitions = if run.chat_only {
+                Vec::new()
+            } else {
+                self.definitions(&exposed)
+            };
             let definitions_json = serde_json::to_string(&definitions)?;
             // `context::build` 的预算以字符计，工具契约也按字符扣减。
             let reserve = definitions_json.chars().count();
@@ -1040,100 +1276,65 @@ impl Supervisor {
         self.journal.finish(run, next)?;
         Ok(())
     }
+    /// 快捷任务的确定性执行：预检 → 执行 → 核验，全程不调用模型。
     async fn run_saved_workflow(
         &self,
         run: &mut Run,
-        workflow_id: &str,
+        task_id: &str,
+        revision: u64,
         bridge: &host::bridge::Bridge,
         policy: &policy::RuntimeConfig,
         cancel: &CancellationToken,
     ) -> Result<()> {
-        let workflow = self.operations.store.workflow(workflow_id)?;
-        workflow.validate()?;
-        self.journal.save(run, RunState::Deciding)?;
-        let mut exposed = self
-            .tools()
-            .definitions()
-            .into_iter()
-            .map(|tool| tool.name)
-            .collect::<HashSet<_>>();
-        let mut history = self.journal.history(run)?;
-        for step in &workflow.steps {
-            if cancel.is_cancelled() {
-                return Err(Error::Cancelled);
-            }
-            if run.tool_calls >= policy.max_tools || unix_now() > run.deadline {
-                return Err(Error::Conflict("流程执行达到预算或时限".into()));
-            }
-            let definition = self
-                .definition(&step.tool, &exposed)
-                .ok_or_else(|| Error::Conflict("流程依赖的工具当前不可用".into()))?;
-            if definition.execution != step.execution
-                || definition.provider_version != step.provider_version
-            {
-                return Err(Error::Conflict(
-                    "流程工具执行契约已变化，需要重新验证流程".into(),
-                ));
-            }
-            for binding in &step.resource_versions {
-                let (resource_id, version) = binding
-                    .split_once('@')
-                    .ok_or_else(|| Error::Conflict("流程资源版本绑定无效".into()))?;
-                if self.operations.store.resource(resource_id)?.version != version {
-                    return Err(Error::Conflict(
-                        "流程资源版本已变化，需要重新验证流程".into(),
-                    ));
-                }
-            }
-            let call = ToolCall {
-                id: format!("workflow-{}-{}", run.id, step.id),
-                name: step.tool.clone(),
-                arguments: step.arguments.clone(),
-            };
-            run.tool_calls += 1;
-            self.journal.save(run, RunState::Executing)?;
-            self.journal.emit(
-                run,
-                "step.started",
-                json!({"id":step.id,"title":step.title}),
-            )?;
-            let result_limit = definition.execution.max_result_chars;
-            let result = self
-                .tool(run, &call, bridge, policy, cancel, &mut exposed)
-                .await;
-            let succeeded = result.is_ok();
-            self.record_result(run, &call, result, result_limit, &mut history)?;
-            self.journal.emit(
-                run,
-                "step.finished",
-                json!({"id":step.id,"outcome":if succeeded {"completed"} else {"failed"}}),
-            )?;
-            if !succeeded {
-                break;
-            }
+        let revision = self.tasks.revision(task_id, revision)?;
+        // 已发布的修订是运行期唯一依据；再跑一遍静态校验，防止手工改库。
+        if !revision.validation.issues.is_empty() {
+            self.journal.save(run, RunState::Blocked)?;
+            run.error = Some(
+                revision
+                    .validation
+                    .issues
+                    .first()
+                    .map(|issue| issue.message.clone())
+                    .unwrap_or_else(|| "任务定义未通过校验".into()),
+            );
+            return Ok(());
         }
-        let attempts = self.journal.attempts(&run.id)?;
-        let unknown = attempts.iter().any(|attempt| {
-            matches!(
-                attempt.outcome.as_str(),
-                "unknown" | "running" | "submitting" | "completed"
-            )
-        });
-        let failed = attempts.iter().any(|attempt| {
-            matches!(
-                attempt.outcome.as_str(),
-                "failed" | "verifiedFailed" | "notSubmitted"
-            )
-        });
-        let next = if unknown {
-            RunState::NeedsReview
-        } else if failed {
-            RunState::Failed
-        } else {
-            RunState::Succeeded
+        self.journal.save(run, RunState::Preflighting)?;
+        let mut executor =
+            operation::executor::TaskExecutor::new(self, bridge, policy, cancel, &revision, run);
+        if let Err(error) = executor.preflight().await {
+            // 预检失败且未提交任何外部写入：直接给 blocked，修好后重新点击运行。
+            let run = executor.run_mut();
+            run.error = Some(error.user_message());
+            self.journal.save(run, RunState::Blocked)?;
+            return Ok(());
+        }
+        self.journal.save(executor.run_mut(), RunState::Executing)?;
+        let next = match executor.run().await {
+            Ok(next) => next,
+            Err(Error::Cancelled) => {
+                self.journal
+                    .finish(executor.run_mut(), RunState::Cancelled)?;
+                return Ok(());
+            }
+            Err(error) => {
+                // 执行器只把「结果未确认」的失败留给待核对，其余按已知失败收场。
+                let unknown = executor.reports_have_unknown();
+                let run = executor.run_mut();
+                run.error = Some(error.user_message());
+                self.journal.finish(
+                    run,
+                    if unknown {
+                        RunState::NeedsReview
+                    } else {
+                        RunState::Failed
+                    },
+                )?;
+                return Ok(());
+            }
         };
-        run.result = Some(format!("流程“{}”已完成确定性执行。", workflow.name));
-        self.journal.finish(run, next)?;
+        self.journal.finish(executor.run_mut(), next)?;
         Ok(())
     }
     fn record_result(
@@ -1149,7 +1350,10 @@ impl Supervisor {
             Err(Error::Cancelled) => return Err(Error::Cancelled),
             Err(Error::Storage(e)) => return Err(Error::Storage(e)),
             Err(Error::Conflict(e)) => return Err(Error::Conflict(e)),
-            Err(e) => json!({"ok":false,"error":e.to_string()}),
+            Err(e) => {
+                eprintln!("PROBE tool {} failed: {}", call.name, e);
+                json!({"ok":false,"error":e.to_string()})
+            }
         };
         self.journal
             .record_tool(&run.conversation_id, call, &value)?;
@@ -1272,11 +1476,179 @@ impl Supervisor {
                 json!(["name", "path"]),
                 ToolExecution::read_only(),
             ),
+            (
+                "task.save",
+                "把用户想反复做的一件事保存成快捷任务。只做静态校验和保存，绝不执行、也绝不产生任何外部写入；用户说「不要现在运行」时照此办理。\
+                 步骤类型：tool（固定工具与参数）、sequence（顺序子步骤，nodes）、condition（condition 三值判断，另有 then/otherwise/unknown 三个分支，unknown 必填）、\
+                 foreach（items 取值引用、itemKey、nodes、maxItems）、repeat（count 或 until、nodes、maxIterations）、wait（seconds 或 until+timeoutSeconds，可选只读 probe）、\
+                 result（受限模板 template，只允许 {{ nodes.<步骤ID>.字段 }}、{{ item }}、{{ iteration }}）。\
+                 取值引用写成 {\"kind\":\"nodeOutput\",\"node\":\"<步骤ID>\",\"path\":[\"字段\"]} 或用 {\"kind\":\"literal\",\"value\":…} 写常量。\
+                 每个 tool 步骤必须带 id、title、tool、arguments；参数里引用别的步骤输出时写成 {\"$ref\":<取值引用>}。\
+                 需要用户先确定的信息先问清楚再保存；工具契约或目标资源还没有证据时保存草稿并说明缺什么。",
+                json!({
+                    "id":{"type":"string","description":"要修改已有任务时填它的 ID；新建省略"},
+                    "name":{"type":"string","description":"任务名称，一到两句话能说明用途"},
+                    "description":{"type":"string","description":"一到两句具体说明：做什么、作用在哪个对象上"},
+                    "nodes":{"type":"array","items":{"type":"object"},"description":"顶层步骤，通常是 sequence 或 tool"},
+                    "limits":{"type":"object","description":"可选；留空用默认上限"},
+                    "publish":{"type":"boolean","description":"默认 true。静态校验通过就发布为可运行；false 只留草稿"}
+                }),
+                json!(["name", "description", "nodes"]),
+                ToolExecution {
+                    effect: ToolEffect::InternalState,
+                    deferred: false,
+                    always_load: true,
+                    ..ToolExecution::default()
+                },
+            ),
         ] {
             definitions.push(ToolDefinition{name:name.into(),description:description.into(),input_schema:json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}),output_schema:None,source:"core:runtime".into(),provider_version:Some(env!("CARGO_PKG_VERSION").into()),execution});
         }
         definitions
     }
+    /// 保存（必要时发布）一个快捷任务定义。
+    ///
+    /// 这里只做编译与落库：静态校验通过即可发布为「可运行，尚未实机验证」，
+    /// 不要求先真的改一个文件或跑一次游戏才配保存。发布本身也不产生外部写入。
+    fn save_task(&self, run: &Run, call: &ToolCall, arguments: &Value) -> Result<Value> {
+        use operation::task::{TaskLimits, TaskNode, WorkflowDefinition, compile};
+
+        let nodes: Vec<TaskNode> = serde_json::from_value(arguments["nodes"].clone())
+            .map_err(|error| Error::Tool(format!("任务定义无法解析：{error}")))?;
+        let limits: Option<TaskLimits> = match arguments.get("limits") {
+            Some(value) if !value.is_null() => Some(serde_json::from_value(value.clone())?),
+            _ => None,
+        };
+        let task_id = arguments["id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned);
+        let mut definition = match &task_id {
+            Some(id) => {
+                let mut existing = self.tasks.definition(id)?;
+                if existing.deleted_at.is_some() {
+                    return Err(Error::Tool("这个快捷任务已经被删除".into()));
+                }
+                existing.name = arguments["name"].as_str().unwrap_or(&existing.name).into();
+                existing.description = arguments["description"]
+                    .as_str()
+                    .unwrap_or(&existing.description)
+                    .into();
+                existing.updated_at = types::now();
+                existing
+            }
+            None => WorkflowDefinition {
+                id: uuid::Uuid::new_v4().to_string(),
+                name: arguments["name"].as_str().unwrap_or("新快捷任务").into(),
+                description: arguments["description"].as_str().unwrap_or("").into(),
+                source_conversation_id: Some(run.conversation_id.clone()),
+                source_message_id: Some(call.id.clone()),
+                source_title_snapshot: run.prompt.chars().take(120).collect(),
+                published_revision: None,
+                draft_revision: None,
+                archived_at: None,
+                deleted_at: None,
+                pinned: false,
+                last_run_id: None,
+                created_at: types::now(),
+                updated_at: types::now(),
+            },
+        };
+        let revision_number = self.tasks.next_revision_number(&definition.id)?;
+        let revision = compile(
+            &definition.id,
+            revision_number,
+            &definition.name,
+            &definition.description,
+            nodes,
+            limits,
+            &self.tool_catalog(),
+        )?;
+        let publish =
+            arguments["publish"].as_bool().unwrap_or(true) && revision.validation.publishable();
+        definition.draft_revision = Some(revision_number);
+        if publish {
+            definition.published_revision = Some(revision_number);
+            definition.draft_revision = None;
+        }
+        if task_id.is_some() {
+            self.tasks.save_definition(&definition)?;
+        } else {
+            self.tasks.create_definition(&definition)?;
+        }
+        self.tasks.save_revision(&revision)?;
+        let state = if publish {
+            operation::task::DefinitionState::ReadyUnverified
+        } else {
+            operation::task::DefinitionState::Draft
+        };
+        Ok(json!({
+            "taskId":definition.id,
+            "name":definition.name,
+            "revision":revision_number,
+            "state":state,
+            "stateLabel":state.label(),
+            "runnable":state.runnable(),
+            "zeroToken":revision.model_usage.is_deterministic(),
+            "modelUsage":revision.model_usage,
+            "issues":revision.validation.issues,
+            "missingBindings":revision.validation.missing_bindings,
+            "note":"已保存到当前对话的任务清单和快捷任务页；没有被执行。",
+        }))
+    }
+
+    /// 按契约声明算出本次写入的实际影响。
+    ///
+    /// 读的是目标资源的当前内容，不是工具名 —— 「改一个字段」和「整份替换」在
+    /// 参数上长得一样，差别只在真实差异。取不到差异就返回 `None`：引擎不猜，
+    /// 由上层按未界定处理，而不是笼统地把所有写入都拦下来。
+    async fn change_scope(
+        &self,
+        call: &ToolCall,
+        definition: &ToolDefinition,
+        cancel: &CancellationToken,
+    ) -> Option<operation::permissions::ChangeScope> {
+        use crate::extension::ScopeKind;
+        use operation::permissions::ChangeScope;
+        match definition.execution.scope {
+            ScopeKind::Unknown => None,
+            ScopeKind::Delete => Some(ChangeScope::delete()),
+            ScopeKind::Whole => Some(ChangeScope::whole()),
+            ScopeKind::Objects => {
+                let target = definition.execution.scope_target.as_deref()?;
+                let count = call.arguments[target].as_array()?.len();
+                Some(ChangeScope {
+                    objects: count,
+                    fields: 0,
+                    ..ChangeScope::default()
+                })
+            }
+            ScopeKind::Fields => {
+                let target = definition.execution.scope_target.as_deref()?;
+                let next = call.arguments["content"].as_str()?;
+                let reader = definition.execution.scope_reader.as_deref()?;
+                let path = call.arguments[target].as_str()?;
+                // 截断的旧内容不是差异基线，宁可不界定也不能少算改动。
+                let previous = self
+                    .tools()
+                    .call_async(reader, &json!({"path": path}), cancel.clone())
+                    .await
+                    .ok()
+                    .filter(|value| value["truncated"] != true)
+                    .and_then(|value| value["text"].as_str().map(str::to_owned));
+                match previous {
+                    Some(previous) => ChangeScope::from_contents(Some(&previous), next),
+                    // 没有版本前置条件就是新建；有前置条件却读不到旧内容，
+                    // 说明差异无法界定。
+                    None if call.arguments.get("expectedSha256").is_none() => {
+                        ChangeScope::from_contents(None, next)
+                    }
+                    None => None,
+                }
+            }
+        }
+    }
+
     async fn tool(
         &self,
         run: &mut Run,
@@ -1385,6 +1757,7 @@ impl Supervisor {
             "operation.get" => Ok(json!(
                 self.operations.store.get(a["id"].as_str().unwrap_or(""))?
             )),
+            "task.save" => self.save_task(run, call, a),
             "skills.reference" => {
                 let name = a["name"].as_str().unwrap_or("");
                 if current.agent.disabled_skills.iter().any(|n| n == name) {
@@ -1794,6 +2167,7 @@ impl Supervisor {
             }
             "bgi.user.write" | "bgi.user.restore" | "bgi.job.cancel" => {
                 let request = json!({"methodId":call.name,"arguments":a});
+                let scope = self.change_scope(call, definition, cancel).await;
                 let permission = operation::permissions::PermissionEngine::decide(
                     current.runtime.permission_mode,
                     &operation::permissions::PermissionRequest {
@@ -1803,6 +2177,7 @@ impl Supervisor {
                         effect: definition.execution.effect,
                         risk: definition.execution.risk,
                         unattended: definition.execution.unattended,
+                        scope,
                     },
                     &current.runtime.trust_grants,
                 );
@@ -1915,6 +2290,7 @@ impl Supervisor {
                     })
                     .map(|step| step.id.clone());
                 let request = json!({"methodId":call.name,"arguments":a,"catalogVersion":hash(&json!(definition)),"instanceId":instance,"stepId":step_id});
+                let scope = self.change_scope(call, definition, cancel).await;
                 let permission = operation::permissions::PermissionEngine::decide(
                     current.runtime.permission_mode,
                     &operation::permissions::PermissionRequest {
@@ -1924,6 +2300,7 @@ impl Supervisor {
                         effect: definition.execution.effect,
                         risk: definition.execution.risk,
                         unattended: definition.execution.unattended,
+                        scope,
                     },
                     &current.runtime.trust_grants,
                 );
@@ -2043,19 +2420,58 @@ impl Supervisor {
 mod prompt_tests {
     use super::*;
 
+    /// 底座提示词只放与领域无关的规则。BGI 的工具名和领域流程一旦出现
+    /// 在这里，就等于所有提供方都要背 BGI 的规则。
     #[test]
-    fn domain_policy_routes_each_kind_of_bgi_evidence_once() {
-        for required in [
-            "用户安装或配置了什么",
-            "BetterGI 当前状态",
-            "宿主设置或可执行动作",
-            "插件能力和登记资源",
-            "同类独立读取在同一轮并行发出",
-            "不要在对话里重复索要许可",
-        ] {
+    fn core_policy_stays_free_of_domain_knowledge() {
+        for leaked in ["bgi.", "BetterGI", "配置组", "调度器", "User 目录"] {
+            assert!(
+                !CORE_AGENT_POLICY.contains(leaked),
+                "领域内容混进了全局提示词：{leaked}"
+            );
+        }
+        for required in ["先给结果", "无法观测", "不是角色扮演", "内部实现"] {
             assert!(
                 CORE_AGENT_POLICY.contains(required),
                 "missing policy: {required}"
+            );
+        }
+    }
+
+    /// 领域说明绑定在提供方上：桥没开，BGI 的行为规范与操作手册都不注入。
+    #[test]
+    fn bgi_skills_are_gated_on_the_bridge_provider() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("skills");
+        let mut registry = crate::extension::skills::SkillRegistry::default();
+        registry
+            .load(&[(root, "shipped".into())])
+            .expect("shipped skills load");
+
+        let empty = std::collections::HashSet::new();
+        let kinds = std::collections::HashSet::new();
+        let with_bgi = std::collections::HashSet::from(["bgi".to_owned()]);
+        for name in ["bgi-assistant", "bgi-operator"] {
+            let skill = registry.get(name).expect(name);
+            assert!(skill.always_load, "{name} 应当随提供方在线时自动加载");
+            assert_eq!(skill.requires_providers, vec!["bgi".to_owned()]);
+            let context = crate::extension::skills::SkillContext {
+                plugins: &empty,
+                capabilities: &empty,
+                resource_kinds: &kinds,
+                providers: &empty,
+                platform: std::env::consts::OS,
+            };
+            assert!(
+                !registry.eligible(skill, &context),
+                "{name} 在桥关闭时不该注入"
+            );
+            let context = crate::extension::skills::SkillContext {
+                providers: &with_bgi,
+                ..context
+            };
+            assert!(
+                registry.eligible(skill, &context),
+                "{name} 在桥开启时应当注入"
             );
         }
     }

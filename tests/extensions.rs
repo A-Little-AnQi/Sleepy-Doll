@@ -115,6 +115,7 @@ fn skill_conditions_require_available_domain_context() {
             plugins: &plugins,
             capabilities: &capabilities,
             resource_kinds: &kinds,
+            providers: &std::collections::HashSet::new(),
             platform: "windows",
         },
     ));
@@ -124,6 +125,7 @@ fn skill_conditions_require_available_domain_context() {
             plugins: &std::collections::HashSet::new(),
             capabilities: &capabilities,
             resource_kinds: &kinds,
+            providers: &std::collections::HashSet::new(),
             platform: "windows",
         },
     ));

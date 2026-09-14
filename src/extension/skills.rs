@@ -17,6 +17,9 @@ pub struct Skill {
     pub tags: Vec<String>,
     pub requires_plugins: Vec<String>,
     pub requires_capabilities: Vec<String>,
+    /// 需要哪些领域提供方在线。领域知识随提供方走 —— 提供方关掉，它的说明也
+    /// 不该继续出现在提示词里。
+    pub requires_providers: Vec<String>,
     pub resource_kinds: Vec<String>,
     pub platforms: Vec<String>,
     pub allowed_tools: Vec<String>,
@@ -34,6 +37,8 @@ pub struct SkillContext<'a> {
     pub plugins: &'a HashSet<String>,
     pub capabilities: &'a HashSet<String>,
     pub resource_kinds: &'a HashSet<String>,
+    /// 当前可用的领域提供方标识，例如 `bgi`。
+    pub providers: &'a HashSet<String>,
     pub platform: &'a str,
 }
 
@@ -77,6 +82,7 @@ impl SkillRegistry {
                         tags,
                         requires_plugins: list_field(&fields, "requiresPlugins"),
                         requires_capabilities: list_field(&fields, "requiresCapabilities"),
+                        requires_providers: list_field(&fields, "requiresProviders"),
                         resource_kinds: list_field(&fields, "resourceKinds"),
                         platforms: list_field(&fields, "platforms"),
                         allowed_tools: list_field(&fields, "allowedTools"),
@@ -169,6 +175,10 @@ impl SkillRegistry {
                 .requires_capabilities
                 .iter()
                 .all(|item| context.capabilities.contains(item))
+            && skill
+                .requires_providers
+                .iter()
+                .all(|item| context.providers.contains(item))
             && skill
                 .resource_kinds
                 .iter()

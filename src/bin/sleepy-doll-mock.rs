@@ -55,6 +55,65 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         stream_chunk_delay_ms,
         ..MockFaults::default()
     });
+    // 录制的对话由 scripts/build-demo-conversation.py 与前端脚本一起生成。
+    // 有就按序回放，没有就退回按关键词选场景的默认行为。
+    let replay_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".sleepy-doll/replay.json");
+    match std::fs::read_to_string(&replay_path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+    {
+        Some(fixture) => {
+            let prompt = fixture["prompt"].as_str().unwrap_or_default().to_owned();
+            let turns = fixture["turns"].as_array().cloned().unwrap_or_default();
+            println!("Replay: {} 轮 ← {}", turns.len(), replay_path.display());
+            backend.set_replay(prompt, turns);
+        }
+        None => println!("Replay: 无（{} 不存在）", replay_path.display()),
+    }
+    // 文件类工具直接读磁盘，让回放里的文件读取与录制时一致。
+    if let Ok(host) = env::var("SLEEPY_DOLL_MOCK_BGI_USER") {
+        println!("BGI User: {host}");
+        backend.set_bgi_user_path(host);
+    }
+
+    // 「模拟对话」开演前清掉上一次的会话：每次演都新建一条会把侧栏堆满。
+    let database = settings.storage.database.clone();
+    backend.set_demo_reset(move |conversation| {
+        let connection = rusqlite::Connection::open(&database)?;
+        // 先清引用方再清被引用方：runtime_input_keys 引用 runtime_runs，
+        // runtime_message_owners 同时引用 runs 与 messages。
+        connection.execute(
+            "DELETE FROM runtime_input_keys WHERE run_id IN \
+             (SELECT id FROM runtime_runs WHERE conversation_id=?1)",
+            [conversation],
+        )?;
+        connection.execute(
+            "DELETE FROM runtime_events WHERE conversation_id=?1",
+            [conversation],
+        )?;
+        connection.execute(
+            "DELETE FROM runtime_message_owners WHERE message_id IN \
+             (SELECT id FROM messages WHERE conversation_id=?1) OR run_id IN \
+             (SELECT id FROM runtime_runs WHERE conversation_id=?1)",
+            [conversation],
+        )?;
+        connection.execute(
+            "DELETE FROM runtime_runs WHERE conversation_id=?1",
+            [conversation],
+        )?;
+        // tool_calls 对 conversations 有外键，漏掉它会 FOREIGN KEY constraint failed。
+        connection.execute(
+            "DELETE FROM tool_calls WHERE conversation_id=?1",
+            [conversation],
+        )?;
+        connection.execute(
+            "DELETE FROM messages WHERE conversation_id=?1",
+            [conversation],
+        )?;
+        connection.execute("DELETE FROM conversations WHERE id=?1", [conversation])?;
+        Ok(())
+    });
+
     let controller = Arc::new(AppController::load(&config)?);
     backend.set_ipc_handler(move |method, params| {
         controller.handle(method, params, Arc::new(|_, _| {}))

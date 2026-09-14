@@ -2,15 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 
 import { api } from "./api";
 import { AppShell } from "./components/AppShell";
+import { DetailsPanel } from "./components/DetailsPanel";
 import { ChatPage } from "./pages/ChatPage";
 import { ExtensionsPage } from "./pages/ExtensionsPage";
-import { watchTasks } from "./session";
-import { RunLibraryPage } from "./pages/RunLibraryPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import type { Bootstrap } from "./types";
+import { TasksPage } from "./pages/TasksPage";
+import { readError, watchTasks } from "./session";
+import type { Bootstrap, TaskSummary } from "./types";
 
 export type Page =
-  "chat" | "library" | "models" | "extensions" | "bridge" | "settings";
+  "chat" | "tasks" | "models" | "extensions" | "bridge" | "settings";
 
 export default function App() {
   const [page, setPage] = useState<Page>("chat");
@@ -18,6 +19,12 @@ export default function App() {
     () => localStorage.getItem("sleepy-doll-active-conversation") ?? undefined,
   );
   const [bootstrap, setBootstrap] = useState<Bootstrap>();
+  const [detailsOpen, setDetailsOpen] = useState(
+    () => localStorage.getItem("sleepy-doll-details-open") !== "false",
+  );
+  const [selectedTask, setSelectedTask] = useState<string>();
+  /** 新对话尚未落库时先记住用户挑的模型，发第一条消息时写进会话。 */
+  const [pendingModel, setPendingModel] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -26,12 +33,16 @@ export default function App() {
     else localStorage.removeItem("sleepy-doll-active-conversation");
   }, [conversation]);
 
+  useEffect(() => {
+    localStorage.setItem("sleepy-doll-details-open", String(detailsOpen));
+  }, [detailsOpen]);
+
   const reload = useCallback(async () => {
     try {
       setBootstrap(await api.bootstrap());
       setError("");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(reason instanceof Error ? reason.message : readError(reason));
     }
   }, []);
 
@@ -50,6 +61,7 @@ export default function App() {
       try {
         const tasks = await api.tasks();
         if (stopped) return;
+        // 后台会话的运行由订阅自己推进，切页不取消，也不抢当前焦点。
         watchTasks(tasks);
         setBootstrap((previous) =>
           previous ? { ...previous, tasks } : previous,
@@ -81,7 +93,10 @@ export default function App() {
   }
 
   const openConversation = (id: string) => {
-    setConversation(id);
+    setConversation(id || undefined);
+    setSelectedTask(undefined);
+    // 换会话就该丢掉上一个新对话的暂存选择。
+    setPendingModel(null);
     setPage("chat");
   };
 
@@ -90,29 +105,58 @@ export default function App() {
       bootstrap={bootstrap}
       page={page}
       conversationId={conversation}
-      onPage={setPage}
+      detailsOpen={detailsOpen}
+      details={
+        <DetailsPanel
+          bootstrap={bootstrap}
+          conversationId={conversation}
+          selectedTask={selectedTask}
+          onSelectTask={setSelectedTask}
+          onOpenConversation={openConversation}
+          reload={reload}
+          onClose={() => setDetailsOpen(false)}
+        />
+      }
+      onPage={(next) => {
+        setPage(next);
+        if (next !== "chat") setSelectedTask(undefined);
+      }}
       onNew={() => {
         setConversation(undefined);
+        setSelectedTask(undefined);
+        setPendingModel(null);
         setPage("chat");
       }}
       onConversation={openConversation}
       onModel={async (id) => {
-        await api.useModel(id);
+        if (!conversation) {
+          setPendingModel(id);
+          return;
+        }
+        await api.setConversationModel(conversation, id);
         await reload();
       }}
+      pendingModel={pendingModel ?? undefined}
+      onToggleDetails={() => setDetailsOpen(!detailsOpen)}
+      reload={reload}
     >
       {page === "chat" ? (
         <ChatPage
           bootstrap={bootstrap}
           conversationId={conversation}
+          modelId={pendingModel}
           onConversation={openConversation}
           reload={reload}
         />
-      ) : page === "library" ? (
-        <RunLibraryPage
+      ) : page === "tasks" ? (
+        <TasksPage
           bootstrap={bootstrap}
           reload={reload}
-          onRun={openConversation}
+          onOpenConversation={openConversation}
+          onOpenTask={(task: TaskSummary) => {
+            setSelectedTask(task.id);
+            setDetailsOpen(true);
+          }}
         />
       ) : page === "extensions" ? (
         <ExtensionsPage bootstrap={bootstrap} reload={reload} />

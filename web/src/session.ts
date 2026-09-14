@@ -2,24 +2,47 @@ import { useEffect, useSyncExternalStore } from "react";
 import { api } from "./api";
 import type { MessageInfo, RunApproval, TaskInfo } from "./types";
 
+/**
+ * 把任意抛出物变成给人看的一句话。
+ *
+ * `String(error)` 会带上 `Error: ` 前缀，那不是给用户读的内容。
+ */
+export function readError(reason: unknown): string {
+  if (reason instanceof Error) return reason.message;
+  return String(reason);
+}
+
+/**
+ * 删除这类动作要不要先问一句。用户选了「完全控制」就不再拦第二遍 —— 后端已经
+ * 按同一级别放行，界面再弹一次只会让人觉得设置没生效。
+ */
+export function needsConfirmation(mode?: string): boolean {
+  return mode !== "fullAccess";
+}
+
+/** 运行状态文案。与运行时 `RunState::label` 一一对应，界面不另立一套。 */
 export const taskLabels: Record<string, string> = {
   queued: "排队中",
-  deciding: "响应中",
+  preflighting: "检查运行条件",
+  deciding: "正在处理请求",
   running: "运行中",
-  executing: "执行中",
-  awaitingUser: "待回复",
-  awaitingApproval: "待确认",
-  waitingJob: "执行中",
-  verifying: "验证中",
-  recovering: "恢复中",
-  cancelling: "停止中",
+  executing: "正在执行",
+  awaitingUser: "等待你补充信息",
+  awaitingApproval: "等待你确认更改",
+  waitingJob: "等待工具完成",
+  verifying: "正在核对结果",
+  recovering: "正在恢复运行状态",
+  cancelling: "正在请求停止",
+  blocked: "暂时无法运行",
   cancelled: "已停止",
-  answered: "已完成",
-  succeeded: "已完成",
-  failed: "失败",
-  needsReview: "待核对",
+  answered: "已回答",
+  succeeded: "已完成并核对",
+  failed: "执行失败",
+  needsReview: "结果待核对",
   partial: "部分完成",
 };
+
+/** 仍在推进的运行。`needsReview` 不是「运行中」，但它仍占着互斥锁。 */
 export const isRunning = (task?: TaskInfo) =>
   !!task &&
   ![
@@ -29,12 +52,36 @@ export const isRunning = (task?: TaskInfo) =>
     "cancelled",
     "needsReview",
     "partial",
+    "blocked",
   ].includes(task.state);
+
+/** 阶段文案：让等待显示具体在哪一步，而不是一律「思考中」。 */
+export function phaseLabel(task?: TaskInfo): string | undefined {
+  if (!isRunning(task) || !task) return undefined;
+  switch (task.state) {
+    case "queued":
+      return "排队中";
+    case "preflighting":
+      return "检查运行条件";
+    case "cancelling":
+      return "正在停止";
+    case "waitingJob":
+      return "等待工具完成";
+    case "verifying":
+      return "正在核对结果";
+    case "recovering":
+      return "正在恢复运行状态";
+    case "executing":
+      return "正在执行";
+    default:
+      return "等待响应";
+  }
+}
 export interface Plan {
   goal: string;
   steps: Array<{ id: string; title: string; tool?: string; outcome?: string }>;
 }
-interface Snapshot {
+export interface Snapshot {
   messages: MessageInfo[];
   task: TaskInfo | undefined;
   queued: TaskInfo[];

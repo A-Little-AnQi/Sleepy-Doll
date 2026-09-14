@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { readError } from "../session";
+import { Toast } from "./Toast";
 import type { RecoveryRecord } from "../types";
 import { ChevronIcon, CloseIcon, RefreshIcon } from "./icons";
 import "./BridgeRecovery.css";
@@ -20,7 +22,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
       setRecords(result.records);
       setRunning(result.hostRunning);
     } catch (reason) {
-      setError(String(reason));
+      setError(readError(reason));
     } finally {
       setBusy(false);
     }
@@ -41,7 +43,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
       dialog.current?.close();
       await refresh();
     } catch (reason) {
-      setError(String(reason));
+      setError(readError(reason));
     } finally {
       setBusy(false);
     }
@@ -85,16 +87,8 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
           BetterGI 仍在运行。请完全退出宿主后，再恢复整个配置。
         </p>
       )}
-      {notice && (
-        <p className="notice" role="status">
-          {notice}
-        </p>
-      )}
-      {error && (
-        <p className="inline-error" role="alert">
-          {error}
-        </p>
-      )}
+      {notice && <Toast message={notice} onDismiss={() => setNotice("")} />}
+      {error && <Toast message={error} onDismiss={() => setError("")} />}
       <div className="recovery-list">
         {records.map((record) => (
           <article className="recovery-row" key={record.changeId}>
@@ -146,7 +140,6 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
             将恢复这条记录之前的完整配置。当前文件会先另存一份；如果配置在确认后变化，恢复会被拒绝。
           </p>
           <pre>{selected?.configPath}</pre>
-          {error && <p className="inline-error">{error}</p>}
           <div className="detail-actions">
             <button
               className="primary-action"

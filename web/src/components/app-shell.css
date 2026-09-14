@@ -1,5 +1,5 @@
 .app-shell {
-  --sidebar-width: 240px;
+  --sidebar-width: 248px;
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   height: 100%;
@@ -10,6 +10,25 @@
 }
 .app-shell[data-collapsed="true"] {
   --sidebar-width: 0px;
+}
+/* 窄窗口下侧栏是覆盖抽屉，不占布局列。 */
+.app-shell[data-drawer="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.app-shell[data-drawer="true"] .app-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: min(280px, 88vw);
+  z-index: 50;
+  box-shadow: var(--shadow);
+}
+.app-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  padding: 0;
+  border: 0;
+  background: #0005;
 }
 .app-sidebar {
   display: flex;
@@ -87,8 +106,7 @@
   text-align: left;
   font-size: 13px;
 }
-.app-nav-item:hover,
-.app-conversations li button:hover {
+.app-nav-item:hover {
   background: var(--hover);
   color: var(--text);
 }
@@ -125,28 +143,31 @@
   padding: 0;
 }
 
-.app-conversations li button.is-current {
-  background: var(--selected);
-  color: var(--text);
-}
+/* 行背景由 li 统一给出，按钮和浮层用同一个变量，hover 与选中态不会脱节。 */
 .app-conversations li button {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-width: 0;
   padding: 9px 10px;
   border: 0;
   border-radius: 6px;
   text-align: left;
-  background: transparent;
+  background: var(--row-bg);
   font-size: 12px;
   color: var(--secondary);
 }
-.app-conversations li button > span:first-child {
+.app-conversations li:hover button,
+.app-conversations li.is-current button {
+  color: var(--text);
+}
+.app-conversation-title {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
 }
 .conversation-status {
   width: 6px;
@@ -192,23 +213,35 @@
   overflow: hidden;
 }
 .app-header {
-  height: 64px;
+  height: var(--header-height);
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 30px;
+  gap: 12px;
+  padding: 0 var(--page-padding);
   border-bottom: 1px solid var(--border);
+}
+.app-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 .app-header-title {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 .app-header h1 {
   font-size: 13px;
   font-weight: 550;
   margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .app-model {
   width: 220px;
@@ -231,7 +264,12 @@
 .app-body {
   flex: 1;
   min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
+}
+.app-shell[data-details="true"] .app-body {
+  grid-template-columns: minmax(0, 1fr) var(--details-width);
 }
 .app-view {
   width: 100%;
@@ -245,6 +283,103 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  /* 页面本身是网格容器。默认的 align-content: stretch 会把剩余高度摊到每一行上，
+     块与块之间被撑出上百像素的空隙 —— 按内容排，多余的留在底部。 */
+  align-content: start;
+}
+/* 侧栏列表滚自己的，正文与详情各自独立滚动。 */
+.app-conversations .search-field.is-compact {
+  margin: 0 0 8px;
+}
+.app-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.app-section-head .icon-button[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--selected);
+}
+.app-nav-badge {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--solid);
+  color: var(--inverse);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+.app-conversations li {
+  position: relative;
+  --row-bg: transparent;
+}
+.app-conversations li:hover {
+  --row-bg: var(--hover);
+}
+.app-conversations li.is-current,
+.app-conversations li.is-current:hover {
+  --row-bg: var(--selected);
+}
+/* 操作按钮浮在标题之上，不占布局宽度 —— 否则 hover 会把整行撑宽，
+   在固定宽度的侧栏里变成横向溢出。 */
+.app-conversation-actions {
+  position: absolute;
+  inset-inline-end: 2px;
+  top: 50%;
+  translate: 0 -50%;
+  display: none;
+  align-items: center;
+  gap: 1px;
+  padding-inline-start: 14px;
+  border-radius: 0 6px 6px 0;
+  background: linear-gradient(90deg, transparent, var(--row-bg) 14px);
+}
+.app-conversations li:hover .app-conversation-actions,
+.app-conversations li:focus-within .app-conversation-actions {
+  display: flex;
+}
+.app-conversation-actions .icon-button {
+  width: 24px;
+  height: 24px;
+}
+.app-conversation-actions .button-icon {
+  width: 14px;
+  height: 14px;
+}
+.app-conversation-pin {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.app-conversation-flag {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--muted);
+}
+.app-conversation-empty {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.app-conversation-rename {
+  width: 100%;
+}
+.app-conversation-rename input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
 }
 @media (max-width: 1000px) {
   .app-shell {

@@ -1,0 +1,16 @@
+.tasks-page .filter-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.tasks-page .filter-row .subtle-action[aria-pressed="true"] {
+  border-color: var(--border-strong);
+  background: var(--selected);
+  color: var(--text);
+}
+.task-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  align-content: start;
+}

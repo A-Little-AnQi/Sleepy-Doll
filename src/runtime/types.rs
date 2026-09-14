@@ -6,6 +6,7 @@ use serde_json::Value;
 pub enum RunState {
     Answered,
     Queued,
+    Preflighting,
     Deciding,
     AwaitingUser,
     AwaitingApproval,
@@ -14,6 +15,7 @@ pub enum RunState {
     Verifying,
     Recovering,
     Cancelling,
+    Blocked,
     Succeeded,
     Partial,
     Failed,
@@ -32,6 +34,44 @@ impl RunState {
                 | Self::NeedsReview
         )
     }
+    /// 是否仍在推进。`needsReview` 不主动执行，但也不是终态的对账结果。
+    pub fn active(self) -> bool {
+        !self.terminal()
+    }
+    /// 是否仍占用互斥资源。待核对可以停止推进，但在人工处置前不释放锁，
+    /// 否则通用「非运行即放行」逻辑会让另一个运行重复写入未知的外部效果。
+    pub fn holds_lease(self) -> bool {
+        !matches!(
+            self,
+            Self::Answered
+                | Self::Succeeded
+                | Self::Partial
+                | Self::Failed
+                | Self::Cancelled
+                | Self::Blocked
+        )
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Queued => "排队中",
+            Self::Preflighting => "检查运行条件",
+            Self::Deciding => "正在处理请求",
+            Self::AwaitingUser => "等待你补充信息",
+            Self::AwaitingApproval => "等待你确认更改",
+            Self::Executing => "正在执行",
+            Self::WaitingJob => "等待工具完成",
+            Self::Verifying => "正在核对结果",
+            Self::Recovering => "正在恢复运行状态",
+            Self::Cancelling => "正在请求停止",
+            Self::Blocked => "暂时无法运行",
+            Self::Answered => "已回答",
+            Self::Succeeded => "已完成并核对",
+            Self::Partial => "部分完成",
+            Self::Failed => "执行失败",
+            Self::NeedsReview => "结果待核对",
+            Self::Cancelled => "已停止",
+        }
+    }
     pub fn permits(self, next: Self) -> bool {
         if self.terminal() {
             return false;
@@ -40,7 +80,12 @@ impl RunState {
             return true;
         }
         match self {
-            Self::Queued => matches!(next, Self::Deciding | Self::Recovering),
+            Self::Queued => matches!(next, Self::Preflighting | Self::Deciding | Self::Blocked),
+            // 预检失败且未提交任何外部写入时才进 blocked。
+            Self::Preflighting => matches!(
+                next,
+                Self::Deciding | Self::Executing | Self::AwaitingApproval | Self::Blocked
+            ),
             Self::Deciding => {
                 matches!(next, Self::Executing | Self::AwaitingUser | Self::Verifying)
             }
@@ -52,11 +97,16 @@ impl RunState {
                     | Self::Deciding
                     | Self::Verifying
             ),
-            Self::AwaitingApproval => matches!(next, Self::Executing),
+            Self::AwaitingApproval => matches!(next, Self::Executing | Self::Blocked),
             Self::AwaitingUser => matches!(next, Self::Deciding | Self::Executing),
             Self::WaitingJob => matches!(next, Self::Verifying | Self::Recovering),
             Self::Verifying => matches!(next, Self::Deciding | Self::Executing),
-            Self::Recovering => matches!(next, Self::WaitingJob | Self::Verifying | Self::Deciding),
+            Self::Recovering => matches!(
+                next,
+                Self::WaitingJob | Self::Verifying | Self::Deciding | Self::Blocked
+            ),
+            // blocked 修好后由用户重新点击运行，不自动推进。
+            Self::Blocked => matches!(next, Self::Preflighting | Self::Deciding),
             _ => false,
         }
     }
@@ -84,6 +134,13 @@ pub struct Run {
     pub error: Option<String>,
     #[serde(default)]
     pub source: RunSource,
+    /// 接纳时固定的模型配置。运行途中改选择只影响下一次决策请求，已经发出的
+    /// 请求保持原协议与配置。
+    #[serde(default)]
+    pub model_id: Option<String>,
+    /// 仅本次运行可见的指令（「仅聊天」模式）。
+    #[serde(default)]
+    pub chat_only: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

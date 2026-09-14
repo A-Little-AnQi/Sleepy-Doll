@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { readError } from "../session";
+import { Toast } from "./Toast";
 import { Select } from "./Select";
 import { ChevronIcon, SearchIcon } from "./icons";
 import type { BridgeCatalog, BridgeMethod, BridgeMethodDetail } from "../types";
@@ -37,7 +39,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
           setItems(result.items ?? result.methods ?? []);
         })
         .catch((reason) => {
-          if (revision === generation.current) setError(String(reason));
+          if (revision === generation.current) setError(readError(reason));
         })
         .finally(() => {
           if (revision === generation.current) setBusy(false);
@@ -62,7 +64,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
         );
       }
     } catch (reason) {
-      if (revision === selectionGeneration.current) setError(String(reason));
+      if (revision === selectionGeneration.current) setError(readError(reason));
     }
   };
   const more = async () => {
@@ -78,7 +80,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
         ...(result.items ?? result.methods ?? []),
       ]);
     } catch (reason) {
-      if (revision === generation.current) setError(String(reason));
+      if (revision === generation.current) setError(readError(reason));
     } finally {
       if (revision === generation.current) setBusy(false);
     }
@@ -110,11 +112,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
             : "当前宿主接口"}
         </span>
       </div>
-      {error && (
-        <div className="inline-error" role="alert">
-          {error}
-        </div>
-      )}
+      {error && <Toast message={error} onDismiss={() => setError("")} />}
       {selected ? (
         <article className="bridge-api-detail">
           <header>

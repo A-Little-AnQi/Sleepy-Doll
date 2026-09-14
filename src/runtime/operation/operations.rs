@@ -437,52 +437,6 @@ impl OperationStore {
             .collect())
     }
 
-    pub fn save_workflow(
-        &self,
-        workflow: &crate::runtime::operation::workflow::Workflow,
-    ) -> Result<()> {
-        workflow.validate()?;
-        self.connection.lock().unwrap().execute(
-            "INSERT INTO runtime_workflows(id,revision,payload,created_at) VALUES(?1,?2,?3,?4)",
-            params![
-                workflow.id,
-                workflow.revision,
-                serde_json::to_string(workflow)?,
-                workflow.created_at
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn workflow(&self, id: &str) -> Result<crate::runtime::operation::workflow::Workflow> {
-        let payload: String = self.connection.lock().unwrap().query_row(
-            "SELECT payload FROM runtime_workflows WHERE id=?1 ORDER BY revision DESC LIMIT 1",
-            [id],
-            |row| row.get(0),
-        )?;
-        Ok(serde_json::from_str(&payload)?)
-    }
-
-    pub fn workflows(&self) -> Result<Vec<crate::runtime::operation::workflow::Workflow>> {
-        read_payloads(
-            &self.connection,
-            "SELECT w.payload FROM runtime_workflows w JOIN (SELECT id,MAX(revision) revision FROM runtime_workflows GROUP BY id) latest ON latest.id=w.id AND latest.revision=w.revision ORDER BY w.created_at DESC",
-        )
-    }
-
-    pub fn record_workflow_run(
-        &self,
-        workflow_id: &str,
-        revision: u64,
-        run_id: &str,
-    ) -> Result<()> {
-        self.connection.lock().unwrap().execute(
-            "INSERT INTO runtime_workflow_runs(workflow_id,workflow_revision,run_id,created_at) VALUES(?1,?2,?3,?4)",
-            params![workflow_id, revision, run_id, crate::runtime::types::now()],
-        )?;
-        Ok(())
-    }
-
     pub fn save_preference(&self, preference: &PreferenceRecord) -> Result<()> {
         if !preference.explicitly_provided
             || preference.key.trim().is_empty()
@@ -1056,6 +1010,17 @@ impl OperationEngine {
                     effect: operation.plan.execution.effect,
                     risk: operation.plan.execution.risk,
                     unattended: operation.plan.execution.unattended,
+                    // 事务已经算过差异；除删除外由计划的执行契约给出规模。
+                    scope: Some(
+                        if operation.plan.execution.scope == crate::extension::ScopeKind::Delete {
+                            crate::runtime::operation::permissions::ChangeScope::delete()
+                        } else {
+                            crate::runtime::operation::permissions::ChangeScope {
+                                objects: operation.plan.staged_outputs.len(),
+                                ..crate::runtime::operation::permissions::ChangeScope::default()
+                            }
+                        },
+                    ),
                 },
                 grants,
             ),

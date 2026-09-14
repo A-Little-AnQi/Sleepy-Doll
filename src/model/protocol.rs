@@ -854,7 +854,9 @@ mod tests {
 
         let directory = tempfile::tempdir().unwrap();
         let journal = Journal::open(&directory.path().join("test.db")).unwrap();
-        let mut run = journal.create("go", "c", "round-trip", 1800).unwrap();
+        let mut run = journal
+            .create("go", "c", "round-trip", 1800, None, false)
+            .unwrap();
         journal.save(&mut run, RunState::Deciding).unwrap();
 
         let mut decoder = Decoder::new(ModelProtocol::AnthropicMessages);

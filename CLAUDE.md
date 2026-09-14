@@ -82,8 +82,15 @@ src/
   extension/  工具契约，以及技能、插件、MCP 三类扩展来源
   runtime/    Agent 运行时
     store/      持久化：journal、migrations、artifacts
-    operation/  事务操作：operations、kernel、verifier、workflow、permissions
+    operation/  事务操作
+      operations / kernel / verifier / permissions   事务本身
+      task / task_store / executor                   快捷任务：领域模型、持久化、确定性执行器
+      workflow                                       旧版提取结构的读取与转换（新写入不走这里）
     host/       宿主与扩展接触面：bridge、adapter、hooks、process、installation、catalog
+web/src/
+  components/  AppShell、DetailsPanel、TaskCard 等壳与复用组件
+  pages/       ChatPage、TasksPage（快捷任务 / 运行记录）、ExtensionsPage、SettingsPage
+  session.ts   会话订阅：事件归并、草稿、状态文案
 bgi-bridge/
   native/     C++ 注入器与引导 DLL
   managed/    C# 桥本体，运行在 BetterGI 进程内
@@ -93,12 +100,19 @@ bgi-bridge/
 
 ## 领域知识
 
-BetterGI 的对象模型与操作链路写在 [`skills/bgi-operator/SKILL.md`](skills/bgi-operator/SKILL.md)，
-它随安装目录分发、每次运行都附带。那里面覆盖：配置组（调度器）与任务的字段、`User\` 目录布局、
-脚本目录（`README.md` / `manifest.json` / `settings.json`）、执行模型（单条对象可直接执行，
-多条必须建配置组）、界面命令「操作当前选中项」的语义。
+BetterGI 的领域知识随能力包分发，放在 `skills/` 下，由 `build-desktop.cmd` 一起装进
+`dist\Sleepy-Doll\skills\`：
 
-**不要在这里复述它的内容，也不要另写一份功能清单** —— 功能面以桥的接口目录为准
+- [`skills/bgi-assistant/SKILL.md`](skills/bgi-assistant/SKILL.md) —— 助手行为规范、领域概念、
+  能力边界与参考路由。`references/` 下是按需读取的资料，通过 `skills.reference` 取用。
+- [`skills/bgi-operator/SKILL.md`](skills/bgi-operator/SKILL.md) —— 具体工具调用手册：
+  配置组与任务的字段、`User\` 目录布局、脚本目录（`README.md` / `manifest.json` /
+  `settings.json`）、执行模型、界面命令「操作当前选中项」的语义，以及各条稳定接口的调用顺序。
+
+两份都标了 `requiresProviders: bgi`，**只在桥连接时注入**。`CORE_AGENT_POLICY` 保持与领域无关，
+接入其他软件时不会带上 BGI 的规则。
+
+**不要在这里复述它们的内容，也不要另写一份功能清单** —— 功能面以桥的接口目录为准
 （`setting.` 全部配置项、`cmd.` 全部界面命令，每条自带中文说明）。
 
 ## 容易踩的

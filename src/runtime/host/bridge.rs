@@ -218,8 +218,41 @@ impl Bridge {
             step_id = Some(next.id.clone());
         }
         let mut request = json!({"instanceId":instance,"methodId":id,"capabilityId":binding.id,"stepId":step_id,"binding":binding,"resources":resources,"bridgeFeatures":info["features"],"catalogVersion":version,"arguments":args,"planRevision":plan.map(|p|p.revision).unwrap_or(0)});
+        // 审批级别是用户选定的，宿主动作同样按它决定要不要问。这里曾经只看精确
+        // 授权，等于把「完全控制」挡在门外 —— 选了也不生效。
+        let effect =
+            serde_json::from_value::<crate::extension::ToolEffect>(descriptor["effect"].clone())
+                .unwrap_or(crate::extension::ToolEffect::Unknown);
+        let current_permission = crate::runtime::operation::permissions::PermissionRequest {
+            provider_id: "core:bgi",
+            resource_ids: &[],
+            resource_kinds: &[],
+            effect,
+            // 契约没有声明风险等级时按标准处理，由审批级别决定去留。
+            risk: serde_json::from_value(descriptor["risk"].clone())
+                .unwrap_or(crate::extension::RiskLevel::Standard),
+            unattended: crate::extension::UnattendedPolicy::Forbidden,
+            // 这一层看不到字段级差异，按未界定处理；差异由设置事务负责。
+            scope: None,
+        };
+        let decision = crate::runtime::operation::permissions::PermissionEngine::decide(
+            policy.permission_mode,
+            &current_permission,
+            &policy.trust_grants,
+        );
+        if decision == crate::runtime::operation::permissions::PermissionDecision::Deny {
+            return Err(Error::Conflict(
+                "当前为只读级别，不能修改配置或执行命令".into(),
+            ));
+        }
+        // 放行的依据可能是审批结果、精确授权，或用户选定的审批级别。复核时必须
+        // 按同一条依据重查 —— 拿「有没有弹过审批」当唯一线索，会把按级别放行的
+        // 调用全部误判成授权已撤销。
         let mut approval_expires = None;
-        if !policy.allows(&request) {
+        let mut allowed_by_mode = false;
+        if decision == crate::runtime::operation::permissions::PermissionDecision::Ask
+            && !policy.allows(&request)
+        {
             let approval = Approval {
                 id: uuid::Uuid::new_v4().to_string(),
                 run_id: run.id.clone(),
@@ -259,6 +292,8 @@ impl Bridge {
                 }
             }
             journal.save(run, RunState::Executing)?;
+        } else if decision == crate::runtime::operation::permissions::PermissionDecision::Allow {
+            allowed_by_mode = true;
         }
         // Recheck mutable state after potentially long approval wait.
         if self.describe(id, cancel).await? != descriptor {
@@ -307,12 +342,21 @@ impl Bridge {
                 {
                     return Err(Error::Tool("Bridge 配置已变化，请重新发起操作".into()));
                 }
-                if approval_expires.is_none() && !latest.runtime.allows(&a.request) {
+                if allowed_by_mode {
+                    if crate::runtime::operation::permissions::PermissionEngine::decide(
+                        latest.runtime.permission_mode,
+                        &current_permission,
+                        &latest.runtime.trust_grants,
+                    ) != crate::runtime::operation::permissions::PermissionDecision::Allow
+                    {
+                        return Err(Error::Tool("审批级别已改变，请重新发起操作".into()));
+                    }
+                } else if approval_expires.is_none() && !latest.runtime.allows(&a.request) {
                     return Err(Error::Tool("预授权已撤销或改变".into()));
                 }
             }
             if approval_expires.is_some_and(|t| t < unix_now())
-                || (approval_expires.is_none() && !policy.allows(&a.request))
+                || (!allowed_by_mode && approval_expires.is_none() && !policy.allows(&a.request))
             {
                 return Err(Error::Tool("排队期间授权已过期".into()));
             }

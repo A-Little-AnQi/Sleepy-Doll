@@ -169,3 +169,75 @@ export function CheckIcon(p: IconProps) {
     </Svg>
   );
 }
+
+export function MoreIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="12" cy="5.5" r="1.4" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="18.5" r="1.4" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+export function PinIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M9 3.5h6l-.7 5.2 3.2 3.1H6.5l3.2-3.1Z" />
+      <path d="M12 11.8V20.5" />
+    </Svg>
+  );
+}
+
+export function ArchiveIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3.5 5.5h17v3.6h-17z" />
+      <path d="M5.2 9.1v9.4h13.6V9.1M10 12.6h4" />
+    </Svg>
+  );
+}
+
+export function PlayIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M8 5.5 18.5 12 8 18.5Z" />
+    </Svg>
+  );
+}
+
+export function ToolIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M14.7 6.3a4 4 0 0 0 5 5L20 11v6.5a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 6 17.5V8.5A2.5 2.5 0 0 1 8.5 6h6Z" />
+      <path d="M13.5 3.9 17 7.4" />
+    </Svg>
+  );
+}
+
+export function PanelIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="3.5" y="5" width="17" height="14" rx="2" />
+      <path d="M15 5v14" />
+    </Svg>
+  );
+}
+
+export function TrashIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4.5 6.5h15M9.5 6.5V4.8h5v1.7" />
+      <path d="M6.3 6.5 7.2 20h9.6l.9-13.5M10.4 10v6.4M13.6 10v6.4" />
+    </Svg>
+  );
+}
+
+export function EditIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4.5 19.5h4L19 9a2.1 2.1 0 0 0-3-3L5.5 16.5Z" />
+      <path d="m14.5 7.5 2.5 2.5" />
+    </Svg>
+  );
+}

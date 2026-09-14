@@ -146,6 +146,7 @@ impl AppController {
                 | "strategy.run"
                 | "workflow.run"
                 | "workflow.extract"
+                | "permission.set"
         ) {
             Some(self.config_edit.lock().unwrap())
         } else {
@@ -187,6 +188,8 @@ impl AppController {
                     params["conversationId"].as_str(),
                     &key,
                     params["durationSec"].as_i64(),
+                    params["mode"].as_str() == Some("chatOnly"),
+                    params["modelId"].as_str(),
                 )?))
             }
             "task.get" | "run.get" => Ok(crate::runtime::types::public_run(
@@ -231,7 +234,15 @@ impl AppController {
                     let events = self.supervisor.journal.events(conversation, after)?;
                     let remaining = deadline.saturating_duration_since(std::time::Instant::now());
                     if !events.is_empty() || remaining.is_zero() {
-                        return Ok(json!({"events":events}));
+                        // 游标过旧时明确要求重取快照，不能让被清理掉的终态静默消失。
+                        let expired = self
+                            .supervisor
+                            .journal
+                            .cursor_expired(conversation, after)?;
+                        return Ok(json!({
+                            "events":events,
+                            "snapshotRequired":expired,
+                        }));
                     }
                     let _ = crate::runtime::executor()
                         .block_on(async { tokio::time::timeout(remaining, changed).await });
@@ -240,6 +251,78 @@ impl AppController {
             "conversation.get" => {
                 let id = required(&params, "id")?;
                 Ok(json!({"id":id,"messages":self.supervisor.journal.conversation_messages(id)?}))
+            }
+            "conversation.list" => Ok(json!(self.supervisor.conversations(
+                &crate::runtime::store::journal::ConversationQuery {
+                    search: params["search"].as_str().map(str::to_owned),
+                    include_archived: params["includeArchived"].as_bool().unwrap_or(false),
+                    offset: params["offset"].as_u64().unwrap_or(0) as usize,
+                    limit: params["limit"].as_u64().unwrap_or(50) as usize,
+                }
+            )?)),
+            "conversation.rename" => {
+                self.supervisor
+                    .journal
+                    .rename_conversation(required(&params, "id")?, required(&params, "title")?)?;
+                Ok(json!({"saved":true}))
+            }
+            "conversation.setPinned" => {
+                self.supervisor.journal.set_conversation_pinned(
+                    required(&params, "id")?,
+                    params["pinned"]
+                        .as_bool()
+                        .ok_or_else(|| Error::Config("pinned 必须是布尔值".into()))?,
+                )?;
+                Ok(json!({"saved":true}))
+            }
+            "conversation.setArchived" => {
+                self.supervisor.journal.set_conversation_archived(
+                    required(&params, "id")?,
+                    params["archived"]
+                        .as_bool()
+                        .ok_or_else(|| Error::Config("archived 必须是布尔值".into()))?,
+                )?;
+                Ok(json!({"saved":true}))
+            }
+            "conversation.setModel" => {
+                let id = required(&params, "id")?;
+                let model = params["modelId"].as_str().filter(|value| !value.is_empty());
+                if let Some(model) = model
+                    && !self
+                        .config
+                        .lock()
+                        .unwrap()
+                        .models
+                        .iter()
+                        .any(|entry| entry.id == model)
+                {
+                    return Err(Error::Config("模型配置不存在".into()));
+                }
+                self.supervisor.journal.set_conversation_model(id, model)?;
+                Ok(json!({"saved":true,"modelId":model}))
+            }
+            "conversation.delete" => {
+                // 删除是用户内容的明确动作：先把影响说清楚，再执行。
+                let id = required(&params, "id")?;
+                let summary = self
+                    .supervisor
+                    .journal
+                    .conversation(id)
+                    .map(|conversation| {
+                        json!({
+                            "title":conversation.title,
+                            "taskCount":conversation.task_count,
+                        })
+                    })
+                    .unwrap_or_else(|_| json!({"title":"","taskCount":0}));
+                if params["confirmed"].as_bool() != Some(true) {
+                    return Ok(json!({
+                        "requiresConfirmation":true,
+                        "affects":summary,
+                        "keeps":"快捷任务与运行证据会保留，来源显示为已删除",
+                    }));
+                }
+                Ok(self.supervisor.journal.delete_conversation(id)?)
             }
             "task.list" => Ok(json!(
                 self.supervisor
@@ -270,62 +353,57 @@ impl AppController {
                     )?,
                 ))
             }
-            "workflow.extract" => {
-                let run_id = required(&params, "runId")?;
-                let run = self.supervisor.journal.get(run_id)?;
-                if !matches!(
-                    run.state,
-                    crate::runtime::types::RunState::Succeeded
-                        | crate::runtime::types::RunState::Answered
-                ) {
-                    return Err(Error::Conflict("只有已验证成功的运行可以提取流程".into()));
-                }
-                let plan = self
+            "workflow.extract" => self.extract_task(&params),
+            "workflow.draft.create" | "workflow.draft.update" => self.save_draft(&params),
+            "workflow.validate" => {
+                let task_id = required(&params, "id")?;
+                let revision = match params["draftRevision"].as_u64() {
+                    Some(revision) => self.supervisor.tasks.revision(task_id, revision)?,
+                    None => self
+                        .supervisor
+                        .tasks
+                        .published_revision(task_id)?
+                        .ok_or_else(|| Error::Config("这个快捷任务还没有可校验的定义".into()))?,
+                };
+                Ok(json!({
+                    "validation":revision.validation,
+                    "publishable":revision.validation.publishable(),
+                    "zeroToken":revision.model_usage.is_deterministic(),
+                    "modelUsage":revision.model_usage,
+                }))
+            }
+            "workflow.publish" => self.publish_task(&params),
+            "workflow.get" => {
+                let id = required(&params, "id")?;
+                let definition = self.supervisor.tasks.definition(id)?;
+                let conversations = self
                     .supervisor
                     .journal
-                    .plan(run_id)?
-                    .ok_or_else(|| Error::Conflict("该运行没有结构化计划".into()))?;
-                let mut steps = Vec::new();
-                let outcomes = self.supervisor.journal.step_outcomes(run_id)?;
-                for step in plan.steps {
-                    if !matches!(
-                        outcomes.get(&step.id).map(String::as_str),
-                        Some("completed" | "verifiedSucceeded")
-                    ) {
-                        return Err(Error::Conflict("计划包含没有完成验证的步骤".into()));
-                    }
-                    let tool = step.tool.ok_or_else(|| {
-                        Error::Conflict("包含旧版领域能力的运行请使用兼容策略提取".into())
-                    })?;
-                    let execution = step
-                        .execution
-                        .ok_or_else(|| Error::Conflict("计划没有固定工具执行契约".into()))?;
-                    steps.push(crate::runtime::operation::workflow::WorkflowStep {
-                        id: step.id,
-                        title: step.title,
-                        tool,
-                        arguments: step.arguments,
-                        depends_on: step.depends_on,
-                        execution,
-                        provider_version: step.provider_version,
-                        resource_versions: step.resource_versions,
-                    });
-                }
-                let workflow = crate::runtime::operation::workflow::Workflow {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    revision: 1,
-                    name: params["name"].as_str().unwrap_or(&plan.goal).into(),
-                    description: "由已验证运行提取".into(),
-                    input_schema: json!({"type":"object","properties":{},"additionalProperties":false}),
-                    steps,
-                    verified_from_run: run_id.into(),
-                    verified_at: crate::runtime::types::now(),
-                    unattended: crate::extension::UnattendedPolicy::Forbidden,
-                    created_at: crate::runtime::types::now(),
-                };
-                self.operations.store.save_workflow(&workflow)?;
-                Ok(json!(workflow))
+                    .conversations()?
+                    .into_iter()
+                    .map(|conversation| conversation.id)
+                    .collect::<std::collections::HashSet<_>>();
+                let names = self
+                    .supervisor
+                    .tool_definitions()
+                    .into_iter()
+                    .map(|definition| definition.name)
+                    .collect::<std::collections::HashSet<_>>();
+                let is_available = |name: &str| names.contains(name);
+                let revision = definition
+                    .published_revision
+                    .and_then(|revision| self.supervisor.tasks.revision(id, revision).ok());
+                Ok(json!({
+                    "summary":self.supervisor.tasks.summary(&definition, &is_available, &conversations),
+                    "definition":definition,
+                    "revision":revision,
+                    "runs":self.supervisor.tasks.run_ids(id, 20)?,
+                }))
             }
+            "workflow.list" => Ok(json!(
+                self.supervisor
+                    .task_summaries(params["conversationId"].as_str())?
+            )),
             "workflow.run" => {
                 let key = params["clientKey"]
                     .as_str()
@@ -334,12 +412,53 @@ impl AppController {
                 Ok(crate::runtime::types::public_run(
                     &self.supervisor.submit_workflow(
                         required(&params, "id")?,
+                        params["expectedPublishedRevision"].as_u64(),
                         &key,
                         params["durationSec"].as_i64(),
                     )?,
                 ))
             }
-            "workflow.list" => Ok(json!(self.operations.store.workflows()?)),
+            "workflow.rename" | "workflow.pin" | "workflow.archive" | "workflow.restore" => {
+                self.patch_task(&params, method)
+            }
+            "workflow.delete" => {
+                let id = required(&params, "id")?;
+                let mut definition = self.supervisor.tasks.definition(id)?;
+                // 运行中删除定义：逻辑删除，当前运行继续用已固定快照。
+                definition.deleted_at = Some(crate::runtime::types::now());
+                definition.updated_at = crate::runtime::types::now();
+                self.supervisor.tasks.save_definition(&definition)?;
+                Ok(json!({
+                    "deleted":true,
+                    "activeRuns":self.supervisor.task_run_ids(id)?,
+                    "historyKept":true,
+                }))
+            }
+            "workflow.copy" => {
+                let source = self.supervisor.tasks.definition(required(&params, "id")?)?;
+                let id = uuid::Uuid::new_v4().to_string();
+                let mut definition = source.clone();
+                definition.id = id.clone();
+                definition.name = format!("{} 的副本", source.name);
+                definition.published_revision = None;
+                definition.draft_revision = None;
+                definition.last_run_id = None;
+                definition.pinned = false;
+                definition.archived_at = None;
+                definition.deleted_at = None;
+                definition.created_at = crate::runtime::types::now();
+                definition.updated_at = definition.created_at.clone();
+                // 复制生成新 ID，保留来源说明，但不复用原活动运行与外部 Job。
+                definition.source_message_id = None;
+                self.supervisor.tasks.create_definition(&definition)?;
+                if let Some(mut revision) = self.supervisor.tasks.latest_revision(&source.id)? {
+                    revision.task_id = id.clone();
+                    self.supervisor.tasks.save_revision(&revision)?;
+                    definition.draft_revision = Some(revision.revision);
+                    self.supervisor.tasks.save_definition(&definition)?;
+                }
+                Ok(json!({"id":id}))
+            }
             "operation.list" => Ok(json!(self.operations.store.list()?)),
             "operation.get" => Ok(json!(self.operations.store.get(required(&params, "id")?)?)),
             "operation.create" => {
@@ -507,6 +626,31 @@ impl AppController {
                 }
                 Ok(json!({"findings":findings}))
             }
+            "permission.get" => {
+                use crate::runtime::operation::permissions::PermissionMode;
+                let mode = self.config.lock().unwrap().runtime.permission_mode;
+                Ok(json!({
+                    "mode":mode,
+                    "label":mode.label(),
+                    "description":mode.description(),
+                    "levels":PermissionMode::levels()
+                        .iter()
+                        .map(|(mode, label, description)| json!({
+                            "value":mode,
+                            "label":label,
+                            "description":description,
+                        }))
+                        .collect::<Vec<_>>(),
+                }))
+            }
+            "permission.set" => {
+                use crate::runtime::operation::permissions::PermissionMode;
+                let mode: PermissionMode = serde_json::from_value(params["mode"].clone())
+                    .map_err(|_| Error::Config("未知的审批级别".into()))?;
+                AppConfig::set_permission_mode(&self.config_path, mode)?;
+                self.reload_runtime()?;
+                Ok(json!({"mode":mode,"label":mode.label()}))
+            }
             "model.use" => self.use_model(required(&params, "id")?),
             "model.save" => {
                 AppConfig::save_model(&self.config_path, &params["model"])?;
@@ -586,6 +730,243 @@ impl AppController {
         }
     }
 
+    /// 保存或更新草稿。草稿不执行、不发布、不产生任何外部写入。
+    fn save_draft(&self, params: &Value) -> Result<Value> {
+        use crate::runtime::operation::task::{TaskLimits, TaskNode, compile};
+
+        let nodes: Vec<TaskNode> = serde_json::from_value(params["nodes"].clone())
+            .map_err(|error| Error::Config(format!("任务定义无法解析：{error}")))?;
+        let limits: Option<TaskLimits> = match params.get("limits") {
+            Some(value) if !value.is_null() => Some(serde_json::from_value(value.clone())?),
+            _ => None,
+        };
+        let catalog = self.supervisor.tool_catalog();
+        let existing = params["id"]
+            .as_str()
+            .map(str::to_owned)
+            .filter(|id| !id.is_empty());
+        let task_id = existing
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let definition = match &existing {
+            Some(id) => self.supervisor.tasks.definition(id)?,
+            None => crate::runtime::operation::task::WorkflowDefinition {
+                id: task_id.clone(),
+                name: params["name"].as_str().unwrap_or("新快捷任务").into(),
+                description: params["description"].as_str().unwrap_or("").into(),
+                source_conversation_id: params["sourceConversationId"].as_str().map(str::to_owned),
+                source_message_id: params["sourceMessageId"].as_str().map(str::to_owned),
+                source_title_snapshot: params["sourceTitleSnapshot"].as_str().unwrap_or("").into(),
+                published_revision: None,
+                draft_revision: None,
+                archived_at: None,
+                deleted_at: None,
+                pinned: false,
+                last_run_id: None,
+                created_at: crate::runtime::types::now(),
+                updated_at: crate::runtime::types::now(),
+            },
+        };
+        if definition.deleted_at.is_some() {
+            return Err(Error::Conflict("已删除的任务不能继续编辑".into()));
+        }
+        let revision_number = self.supervisor.tasks.next_revision_number(&task_id)?;
+        let revision = compile(
+            &task_id,
+            revision_number,
+            params["name"].as_str().unwrap_or(&definition.name),
+            params["description"]
+                .as_str()
+                .unwrap_or(&definition.description),
+            nodes,
+            limits,
+            &catalog,
+        )?;
+        let mut definition = definition;
+        definition.draft_revision = Some(revision_number);
+        definition.updated_at = crate::runtime::types::now();
+        if existing.is_some() {
+            self.supervisor.tasks.save_definition(&definition)?;
+        } else {
+            self.supervisor.tasks.create_definition(&definition)?;
+        }
+        self.supervisor.tasks.save_revision(&revision)?;
+        Ok(json!({
+            "id":task_id,
+            "revision":revision_number,
+            "validation":revision.validation,
+            "state":"draft",
+        }))
+    }
+
+    /// 发布一份不可变修订。发布本身不产生任何真实工具写入。
+    fn publish_task(&self, params: &Value) -> Result<Value> {
+        let id = required(params, "id")?;
+        let revision_number = params["draftRevision"]
+            .as_u64()
+            .ok_or_else(|| Error::Config("需要指出要发布的草稿版本".into()))?;
+        let revision = self.supervisor.tasks.revision(id, revision_number)?;
+        if !revision.validation.publishable() {
+            return Err(Error::Conflict(format!(
+                "任务还不能发布：{}",
+                revision
+                    .validation
+                    .issues
+                    .first()
+                    .map(|issue| issue.message.clone())
+                    .unwrap_or_else(|| "缺少必要信息".into())
+            )));
+        }
+        let mut definition = self.supervisor.tasks.definition(id)?;
+        if let Some(expected) = params["expectedPublishedRevision"].as_u64()
+            && definition
+                .published_revision
+                .is_some_and(|current| current != expected)
+        {
+            return Err(Error::Conflict(
+                "任务已经发布过更新的版本，请刷新后重试".into(),
+            ));
+        }
+        definition.published_revision = Some(revision_number);
+        definition.draft_revision = None;
+        definition.name = revision.name.clone();
+        definition.description = revision.description.clone();
+        definition.updated_at = crate::runtime::types::now();
+        self.supervisor.tasks.save_definition(&definition)?;
+        Ok(json!({
+            "taskId":id,
+            "publishedRevision":revision_number,
+            "zeroToken":revision.model_usage.is_deterministic(),
+        }))
+    }
+
+    /// 改名、置顶、归档、恢复。都不触碰执行语义与稳定 ID。
+    fn patch_task(&self, params: &Value, method: &str) -> Result<Value> {
+        use crate::runtime::operation::task_store::DefinitionPatch;
+        let id = required(params, "id")?;
+        let mut definition = self.supervisor.tasks.definition(id)?;
+        let patch = match method {
+            "workflow.rename" => DefinitionPatch {
+                name: Some(required(params, "name")?.to_owned()),
+                description: params["description"].as_str().map(str::to_owned),
+                pinned: None,
+            },
+            "workflow.pin" => DefinitionPatch {
+                pinned: Some(
+                    params["pinned"]
+                        .as_bool()
+                        .ok_or_else(|| Error::Config("pinned 必须是布尔值".into()))?,
+                ),
+                ..DefinitionPatch::default()
+            },
+            "workflow.archive" => {
+                definition.archived_at = Some(crate::runtime::types::now());
+                definition.updated_at = crate::runtime::types::now();
+                self.supervisor.tasks.save_definition(&definition)?;
+                return Ok(json!({"archived":true}));
+            }
+            _ => {
+                definition.archived_at = None;
+                definition.updated_at = crate::runtime::types::now();
+                self.supervisor.tasks.save_definition(&definition)?;
+                return Ok(json!({"archived":false}));
+            }
+        };
+        definition.apply(patch)?;
+        self.supervisor.tasks.save_definition(&definition)?;
+        Ok(json!({"saved":true}))
+    }
+
+    /// 从一次已验证运行提取快捷任务：固定执行契约与真实资源，移除发现与闲聊步骤。
+    fn extract_task(&self, params: &Value) -> Result<Value> {
+        use crate::runtime::operation::task::{
+            FailurePolicy, SequenceNode, TaskNode, ToolNode, compile,
+        };
+        let run_id = required(params, "runId")?;
+        let run = self.supervisor.journal.get(run_id)?;
+        if !matches!(
+            run.state,
+            crate::runtime::types::RunState::Succeeded | crate::runtime::types::RunState::Answered
+        ) {
+            return Err(Error::Conflict(
+                "只有已验证成功的运行可以提取为快捷任务".into(),
+            ));
+        }
+        let plan = self
+            .supervisor
+            .journal
+            .plan(run_id)?
+            .ok_or_else(|| Error::Conflict("该运行没有结构化计划".into()))?;
+        let outcomes = self.supervisor.journal.step_outcomes(run_id)?;
+        let mut nodes = Vec::new();
+        for step in plan.steps {
+            if !matches!(
+                outcomes.get(&step.id).map(String::as_str),
+                Some("completed" | "verifiedSucceeded")
+            ) {
+                return Err(Error::Conflict("计划包含没有完成验证的步骤".into()));
+            }
+            let tool = step.tool.ok_or_else(|| {
+                Error::Conflict("包含旧版领域能力的运行请使用兼容策略提取".into())
+            })?;
+            nodes.push(TaskNode::Tool(ToolNode {
+                id: step.id,
+                title: step.title,
+                tool: Some(tool),
+                capability_id: step.capability_id,
+                // 旧 Job ID 是历史证据，不是新运行的输入参数。
+                arguments: step.arguments,
+                execution: step.execution,
+                provider_version: step.provider_version,
+                resource_versions: step.resource_versions,
+                on_failure: FailurePolicy::Stop,
+                on_unverified: FailurePolicy::Stop,
+            }));
+        }
+        let nodes = vec![TaskNode::Sequence(SequenceNode {
+            id: "steps".into(),
+            title: plan.goal.clone(),
+            nodes,
+        })];
+        let catalog = self.supervisor.tool_catalog();
+        let task_id = uuid::Uuid::new_v4().to_string();
+        let revision = compile(
+            &task_id,
+            1,
+            params["name"].as_str().unwrap_or(&plan.goal),
+            "由已验证运行提取",
+            nodes,
+            None,
+            &catalog,
+        )?;
+        let definition = crate::runtime::operation::task::WorkflowDefinition {
+            id: task_id.clone(),
+            name: revision.name.clone(),
+            description: revision.description.clone(),
+            source_conversation_id: Some(run.conversation_id.clone()),
+            source_message_id: None,
+            source_title_snapshot: plan.goal.clone(),
+            // 提取自一次真实成功的运行：步骤与契约都来自实际证据，直接可用。
+            // 但这一份修订本身还没有跑过，状态仍是「尚未实机验证」。
+            published_revision: Some(1),
+            draft_revision: None,
+            archived_at: None,
+            deleted_at: None,
+            pinned: false,
+            last_run_id: None,
+            created_at: crate::runtime::types::now(),
+            updated_at: crate::runtime::types::now(),
+        };
+        self.supervisor.tasks.create_definition(&definition)?;
+        self.supervisor.tasks.save_revision(&revision)?;
+        Ok(json!({
+            "id":task_id,
+            "taskId":task_id,
+            "revision":1,
+            "validation":revision.validation,
+        }))
+    }
+
     fn bootstrap(&self) -> Result<Value> {
         let extensions = self.extensions.read().unwrap();
         let config = self.config.lock().expect("config mutex poisoned");
@@ -602,6 +983,24 @@ impl AppController {
                 timeout_ms: model.options.timeout_ms,
             })
             .collect::<Vec<_>>();
+        let permission = {
+            use crate::runtime::operation::permissions::PermissionMode;
+            let mode = config.runtime.permission_mode;
+            json!({
+                "mode":mode,
+                "label":mode.label(),
+                "description":mode.description(),
+                "levels":PermissionMode::levels()
+                    .iter()
+                    .map(|(mode, label, description)| json!({
+                        "value":mode,
+                        "label":label,
+                        "description":description,
+                    }))
+                    .collect::<Vec<_>>(),
+            })
+        };
+        let skill_environment = self.supervisor.skill_environment(&config);
         let skills = extensions
             .skills
             .list()
@@ -618,8 +1017,20 @@ impl AppController {
                     "platforms":skill.platforms,
                     "allowedTools":skill.allowed_tools,
                     "alwaysLoad":skill.always_load,
+                    "requiresProviders":skill.requires_providers,
                     "instructions":skill.body,
-                    "enabled":!config.agent.disabled_skills.contains(&skill.name)
+                    // 「启用」是用户的开关，「可用」还取决于依赖是否在线 ——
+                    // 桥没连接时 BGI 的技能不该显示成正在生效。
+                    "enabled":!config.agent.disabled_skills.contains(&skill.name),
+                    "available":!config.agent.disabled_skills.contains(&skill.name)
+                        && extensions.skills.eligible(&skill, &skill_environment.context()),
+                    "unavailableReason": if skill.requires_providers.iter().any(|p| p == "bgi")
+                        && !config.bridge.enabled
+                    {
+                        "需要连接 BetterGI"
+                    } else {
+                        ""
+                    }
                 })
             })
             .collect::<Vec<_>>();
@@ -649,7 +1060,7 @@ impl AppController {
             json!({"enabled":false,"connected":false,"baseUrl":config.bridge.base_url})
         };
         Ok(
-            json!({"preview":cfg!(feature="mock"),"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.operations.store.workflows()?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"bridge":bridge_status}),
+            json!({"preview":cfg!(feature="mock"),"permission":permission,"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.supervisor.task_summaries(None)?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"bridge":bridge_status}),
         )
     }
 

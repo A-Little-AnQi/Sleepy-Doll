@@ -1,26 +1,51 @@
 .toast {
   position: fixed;
+  /* popover 的 UA 样式会先铺满视口，这里全部收回再自己定位。 */
+  inset: auto;
   left: 50%;
-  bottom: 28px;
-  z-index: 40;
+  /* 贴在顶栏下方：底部是输入区和发送键，不能被一条不会自动消失的提示长期压住。 */
+  top: calc(var(--header-height, 52px) + 12px);
+  width: fit-content;
+  height: fit-content;
+  margin: 0;
   max-width: min(560px, calc(100vw - 32px));
   padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   transform: translateX(-50%);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
   background: var(--surface);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 14%);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
   color: var(--text);
   font-size: 13px;
   line-height: 1.55;
-  cursor: pointer;
   animation: toast-enter var(--motion-base) var(--ease-enter);
+}
+.toast-message {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.toast-action {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+.toast-action:hover {
+  background: var(--hover);
 }
 
 @keyframes toast-enter {
   from {
     opacity: 0;
-    transform: translate(-50%, 8px);
+    transform: translate(-50%, -8px);
   }
   to {
     opacity: 1;

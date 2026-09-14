@@ -100,6 +100,41 @@ pub enum UnattendedPolicy {
     Forbidden,
 }
 
+/// 一次写入的实际影响从哪里取值。权限判定按影响而不是工具名，但引擎自己读不到
+/// 领域语义，所以由契约声明。缺省 `unknown` 表示无法界定，引擎不猜。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScopeKind {
+    #[default]
+    Unknown,
+    /// 逐个配置叶字段：比较目标资源的当前内容与新内容。
+    Fields,
+    /// 按对象计数：`scopeTarget` 指向的参数是对象 ID 列表。
+    Objects,
+    /// 删除用户内容。
+    Delete,
+    /// 整份替换或重置。
+    Whole,
+}
+
+/// 工具是否可能调用语言模型。零 token 承诺只对 `none` 成立：会调用模型的 MCP
+/// 工具、自由脚本和无法判断的工具都不能伪装成零 token。缺省是 `unknown`，
+/// 声明为零 token 必须由可信契约给出，不由工具自述。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelUsage {
+    None,
+    Possible,
+    #[default]
+    Unknown,
+}
+
+impl ModelUsage {
+    pub fn is_deterministic(self) -> bool {
+        matches!(self, Self::None)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct ToolExecution {
@@ -118,6 +153,14 @@ pub struct ToolExecution {
     pub deferred: bool,
     pub always_load: bool,
     pub search_hint: Option<String>,
+    pub model_usage: ModelUsage,
+    pub scope: ScopeKind,
+    /// 受影响目标所在的参数名。
+    #[serde(default)]
+    pub scope_target: Option<String>,
+    /// 读取目标当前内容所用的只读工具；与 `Fields` 搭配。
+    #[serde(default)]
+    pub scope_reader: Option<String>,
 }
 
 impl Default for ToolExecution {
@@ -138,6 +181,10 @@ impl Default for ToolExecution {
             deferred: true,
             always_load: false,
             search_hint: None,
+            model_usage: ModelUsage::Unknown,
+            scope: ScopeKind::Unknown,
+            scope_target: None,
+            scope_reader: None,
         }
     }
 }
@@ -154,6 +201,8 @@ impl ToolExecution {
             verification: VerificationMode::None,
             compensation: CompensationMode::None,
             unattended: UnattendedPolicy::Allowed,
+            // 内置只读工具都在本机完成，不经过模型网关。
+            model_usage: ModelUsage::None,
             ..Self::default()
         }
     }

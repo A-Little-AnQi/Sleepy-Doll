@@ -4,7 +4,7 @@ use std::{
     net::ToSocketAddrs,
     sync::{
         Arc, Mutex, RwLock,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -17,6 +17,9 @@ use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 use crate::error::{Error, Result};
 
 type IpcHandler = Arc<dyn Fn(&str, Value) -> Result<Value> + Send + Sync>;
+/// 演示会话的重置。只有 mock 有这条：让「模拟对话」每次开演前把上一条清掉，
+/// 不然每演一次侧栏就多一条。
+type DemoReset = Arc<dyn Fn(&str) -> Result<()> + Send + Sync>;
 
 #[derive(Clone)]
 struct MockJob {
@@ -25,14 +28,54 @@ struct MockJob {
     cancelled: bool,
 }
 
+/// 录制下来的一段对话，用来复现真实会话。
+///
+/// 首轮（报文里没有任何工具结果）比对开场白：一致就把进度归零，从头回放；不一致就
+/// 不回放，退回按关键词选场景的默认行为。
+///
+/// 进度按「轮」而不是消耗队列：队列被取空一次就再也演不出来了，而录制是要反复看的。
+#[derive(Default)]
+struct Replay {
+    prompt: String,
+    turns: Vec<Value>,
+    cursor: usize,
+    active: bool,
+}
+
+impl Replay {
+    fn next_turn(&mut self, input: &Value) -> Option<Value> {
+        if self.turns.is_empty() {
+            return None;
+        }
+        if is_first_turn(input) {
+            if latest_user_text(input).as_deref() != Some(self.prompt.as_str()) {
+                self.active = false;
+                return None;
+            }
+            self.cursor = 0;
+            self.active = true;
+        }
+        if !self.active {
+            return None;
+        }
+        let turn = self.turns.get(self.cursor)?.clone();
+        self.cursor += 1;
+        Some(turn)
+    }
+}
+
 #[derive(Default)]
 struct MockState {
     jobs: RwLock<HashMap<String, MockJob>>,
     ipc: RwLock<Option<IpcHandler>>,
     responses: Mutex<VecDeque<Value>>,
+    replay: Mutex<Replay>,
+    demo_reset: RwLock<Option<DemoReset>>,
     keys: Mutex<HashMap<String, (String, String)>>,
     faults: Mutex<MockFaults>,
     bgi_user_path: RwLock<Option<String>>,
+    /// 模型网关请求计数。证明零 token 只能看真实请求数，不能只看界面标签。
+    model_requests: AtomicUsize,
 }
 
 #[derive(Clone, Default)]
@@ -60,8 +103,35 @@ impl MockBackend {
     pub fn set_responses(&self, responses: Vec<Value>) {
         *self.state.responses.lock().unwrap() = responses.into();
     }
+    /// 注册演示会话的重置：收到 `/dev/reset-demo` 时调用。
+    pub fn set_demo_reset<F>(&self, handler: F)
+    where
+        F: Fn(&str) -> Result<()> + Send + Sync + 'static,
+    {
+        *self
+            .state
+            .demo_reset
+            .write()
+            .expect("demo reset lock poisoned") = Some(Arc::new(handler));
+    }
+    /// 载入一段录制对话：开场白一致时按序回放。
+    pub fn set_replay(&self, prompt: impl Into<String>, turns: Vec<Value>) {
+        *self.state.replay.lock().unwrap() = Replay {
+            prompt: prompt.into(),
+            turns,
+            cursor: 0,
+            active: false,
+        };
+    }
     pub fn job_count(&self) -> usize {
         self.state.jobs.read().unwrap().len()
+    }
+    /// 到模型网关的请求次数。零 token 任务必须让这个数字保持不动。
+    pub fn model_requests(&self) -> usize {
+        self.state.model_requests.load(Ordering::SeqCst)
+    }
+    pub fn reset_model_requests(&self) {
+        self.state.model_requests.store(0, Ordering::SeqCst);
     }
     pub fn set_bgi_user_path(&self, path: impl Into<String>) {
         *self.state.bgi_user_path.write().unwrap() = Some(path.into());
@@ -153,6 +223,7 @@ fn handle_request(mut request: Request, state: &MockState) {
         .read_to_string(&mut body);
     let input = serde_json::from_str(&body).unwrap_or(Value::Null);
     if url.starts_with("/v1/") || url == "/api/chat" {
+        state.model_requests.fetch_add(1, Ordering::SeqCst);
         let base = state.faults.lock().unwrap().model_delay_ms;
         let mut rng = MockRng::new();
         thread::sleep(first_token_delay(base, &mut rng));
@@ -394,31 +465,36 @@ fn stream_frames(
         return Some(("text/event-stream", chunks));
     }
     if path == "/v1/messages" {
-        if payload["content"][0]["type"] == "tool_use" {
-            let block = &payload["content"][0];
-            chunks.push_back((
-                sse(json!({"type":"message_start","message":{"usage":{"input_tokens":0}}})),
-                0,
-            ));
-            chunks.push_back((sse(json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":block["id"],"name":block["name"],"input":{}}})),0));
-            chunks.push_back((sse(json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":block["input"].to_string()}})),0));
-            if !truncate {
-                chunks.push_back((sse(json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":0}})),0));
-                chunks.push_back((sse(json!({"type":"message_stop"})), 0));
-            }
-            return Some(("text/event-stream", chunks));
-        }
-        let text = payload["content"][0]["text"].as_str().unwrap_or_default();
+        // 逐块发出，不能只看第一块：一轮里既有正文又有工具调用，只取首块会把
+        // 工具调用整段丢掉。
+        let blocks = payload["content"].as_array().cloned().unwrap_or_default();
+        let calls = blocks.iter().any(|block| block["type"] == "tool_use");
         chunks.push_back((
             sse(json!({"type":"message_start","message":{"usage":{"input_tokens":0}}})),
             0,
         ));
-        chunks.push_back((sse(json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})), 0));
-        chunks.extend(stream_plan(text, base, &mut rng).into_iter().map(|(text, delay)| {
-            (sse(json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}})), delay)
-        }));
+        for (index, block) in blocks.iter().enumerate() {
+            if block["type"] == "thinking" {
+                chunks.push_back((sse(json!({"type":"content_block_start","index":index,"content_block":{"type":"thinking","thinking":"","signature":""}})),0));
+                chunks.extend(stream_plan(block["thinking"].as_str().unwrap_or_default(), base, &mut rng).into_iter().map(|(text, delay)| {
+                    (sse(json!({"type":"content_block_delta","index":index,"delta":{"type":"thinking_delta","thinking":text}})), delay)
+                }));
+                chunks.push_back((sse(json!({"type":"content_block_delta","index":index,"delta":{"type":"signature_delta","signature":block["signature"].as_str().unwrap_or_default()}})),0));
+            } else if block["type"] == "tool_use" {
+                chunks.push_back((sse(json!({"type":"content_block_start","index":index,"content_block":{"type":"tool_use","id":block["id"],"name":block["name"],"input":{}}})),0));
+                chunks.push_back((sse(json!({"type":"content_block_delta","index":index,"delta":{"type":"input_json_delta","partial_json":block["input"].to_string()}})),0));
+            } else {
+                let text = block["text"].as_str().unwrap_or_default();
+                chunks.push_back((sse(json!({"type":"content_block_start","index":index,"content_block":{"type":"text","text":""}})), 0));
+                chunks.extend(stream_plan(text, base, &mut rng).into_iter().map(|(text, delay)| {
+                    (sse(json!({"type":"content_block_delta","index":index,"delta":{"type":"text_delta","text":text}})), delay)
+                }));
+            }
+            chunks.push_back((sse(json!({"type":"content_block_stop","index":index})), 0));
+        }
         if !truncate {
-            chunks.push_back((sse(json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":0}})), 0));
+            let reason = if calls { "tool_use" } else { "end_turn" };
+            chunks.push_back((sse(json!({"type":"message_delta","delta":{"stop_reason":reason},"usage":{"output_tokens":0}})), 0));
             chunks.push_back((sse(json!({"type":"message_stop"})), 0));
         }
         return Some(("text/event-stream", chunks));
@@ -473,22 +549,49 @@ fn route(method: &Method, url: &str, input: &Value, state: &MockState) -> (u16, 
     if *method == Method::Post && path == "/ipc" {
         return ipc(input, state);
     }
+    // 开发专用：开演前清掉上一次的演示会话。只在这里提供，不进应用 API。
+    if *method == Method::Post && path == "/dev/reset-demo" {
+        let id = input["conversationId"].as_str().unwrap_or_default();
+        let handler = state.demo_reset.read().unwrap().clone();
+        return match handler {
+            Some(handler) if !id.is_empty() => match handler(id) {
+                Ok(()) => (200, json!({"ok":true})),
+                Err(error) => (500, json!({"error":error.to_string()})),
+            },
+            _ => (400, json!({"error":"conversationId 必填，或未注册重置"})),
+        };
+    }
     if *method == Method::Post && path == "/v1/responses" {
+        if let Some(turn) = state.replay.lock().unwrap().next_turn(input) {
+            return (200, responses_turn(&turn));
+        }
         if let Some(value) = state.responses.lock().unwrap().pop_front() {
             return (200, value);
         }
         return (200, responses(input));
     }
     if *method == Method::Post && path == "/v1/chat/completions" {
+        if let Some(turn) = state.replay.lock().unwrap().next_turn(input) {
+            return (200, chat_turn(&turn));
+        }
         return (200, chat(input));
     }
     if *method == Method::Post && path == "/v1/messages" {
+        if let Some(turn) = state.replay.lock().unwrap().next_turn(input) {
+            return (200, anthropic_turn(&turn));
+        }
         return (200, anthropic(input));
     }
     if *method == Method::Post && path.starts_with("/v1/models/") {
+        if let Some(turn) = state.replay.lock().unwrap().next_turn(input) {
+            return (200, gemini_turn(&turn));
+        }
         return (200, gemini(input));
     }
     if *method == Method::Post && path == "/api/chat" {
+        if let Some(turn) = state.replay.lock().unwrap().next_turn(input) {
+            return (200, ollama_turn(&turn));
+        }
         return (200, ollama(input));
     }
     if *method == Method::Get && path == "/bridge/v1/info" {
@@ -699,7 +802,8 @@ fn response_text(text: &str) -> Value {
 }
 
 /// Adapt all model protocols to the same deterministic scenario engine.
-fn scenario(input: &Value) -> Value {
+/// 把各协议的报文归一成 Responses 形状的条目，供场景匹配与回放判定共用。
+fn scenario_items(input: &Value) -> Vec<Value> {
     let mut items = Vec::new();
     for message in input["messages"].as_array().into_iter().flatten() {
         if message["role"] == "tool" {
@@ -731,7 +835,118 @@ fn scenario(input: &Value) -> Value {
             }
         }
     }
-    responses(&json!({"input":items}))["output"][0].clone()
+    items
+}
+
+fn scenario(input: &Value) -> Value {
+    responses(&json!({"input":scenario_items(input)}))["output"][0].clone()
+}
+
+/// 一次报文里没有任何工具结果 —— 即一段对话的第一轮。
+fn is_first_turn(input: &Value) -> bool {
+    !scenario_items(input)
+        .iter()
+        .any(|item| item["type"] == "function_call_output")
+}
+
+/// 报文里最后一条用户文本。第一轮时它就是用户的开场白。
+fn latest_user_text(input: &Value) -> Option<String> {
+    scenario_items(input)
+        .iter()
+        .rev()
+        .find(|item| item["role"] == "user")
+        .and_then(|item| item["content"].as_str())
+        .map(str::to_owned)
+}
+
+/// 把录制的一轮渲染成各协议的响应体。
+///
+/// 工具名在这里换成 wire 名：库里存的是内部名，运行时按 wire 名映射回来。
+fn turn_calls(turn: &Value) -> Vec<Value> {
+    turn["calls"].as_array().cloned().unwrap_or_default()
+}
+
+fn named(name: &Value) -> String {
+    crate::runtime::gateway::wire_name(name.as_str().unwrap_or(""))
+}
+
+fn anthropic_turn(turn: &Value) -> Value {
+    let mut content = Vec::new();
+    // 思考块必须排在正文与工具调用之前，签名原样带上。
+    if let Some(thinking) = turn["thinking"].as_str().filter(|text| !text.is_empty()) {
+        content.push(
+            json!({"type":"thinking","thinking":thinking,"signature":"mock-replay-signature"}),
+        );
+    }
+    if let Some(text) = turn["text"].as_str().filter(|text| !text.is_empty()) {
+        content.push(json!({"type":"text","text":text}));
+    }
+    for call in turn_calls(turn) {
+        content.push(json!({"type":"tool_use",
+            "id":call["id"].as_str().unwrap_or("call"),
+            "name":named(&call["name"]),
+            "input":call["arguments"]}));
+    }
+    if content.is_empty() {
+        content.push(json!({"type":"text","text":""}));
+    }
+    json!({"id":"mock-replay","content":content,
+        "stop_reason":if turn_calls(turn).is_empty() {"end_turn"} else {"tool_use"},
+        "usage":{"input_tokens":0,"output_tokens":0}})
+}
+
+fn responses_turn(turn: &Value) -> Value {
+    let mut output = Vec::new();
+    if let Some(text) = turn["text"].as_str().filter(|text| !text.is_empty()) {
+        output.push(json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":text}]}));
+    }
+    for call in turn_calls(turn) {
+        output.push(json!({"type":"function_call",
+            "call_id":call["id"].as_str().unwrap_or("call"),
+            "name":named(&call["name"]),
+            "arguments":call["arguments"].to_string()}));
+    }
+    json!({"id":"mock-replay","status":"completed","output":output,
+        "usage":{"input_tokens":0,"output_tokens":0}})
+}
+
+fn chat_turn(turn: &Value) -> Value {
+    let calls = turn_calls(turn);
+    let message = if calls.is_empty() {
+        json!({"role":"assistant","content":turn["text"]})
+    } else {
+        json!({"role":"assistant","content":turn["text"].as_str().filter(|t| !t.is_empty()),
+            "tool_calls":calls.iter().map(|call| json!({
+                "id":call["id"].as_str().unwrap_or("call"),"type":"function",
+                "function":{"name":named(&call["name"]),"arguments":call["arguments"].to_string()}})).collect::<Vec<_>>()})
+    };
+    json!({"choices":[{"message":message,"finish_reason":if calls.is_empty() {"stop"} else {"tool_calls"}}],
+        "usage":{"prompt_tokens":0,"completion_tokens":0}})
+}
+
+fn gemini_turn(turn: &Value) -> Value {
+    let calls = turn_calls(turn);
+    let mut parts = Vec::new();
+    if let Some(text) = turn["text"].as_str().filter(|text| !text.is_empty()) {
+        parts.push(json!({"text":text}));
+    }
+    for call in &calls {
+        parts.push(json!({"functionCall":{"name":named(&call["name"]),"args":call["arguments"]}}));
+    }
+    json!({"candidates":[{"content":{"role":"model","parts":parts},"finishReason":"STOP"}],
+        "usageMetadata":{"promptTokenCount":0,"candidatesTokenCount":0}})
+}
+
+fn ollama_turn(turn: &Value) -> Value {
+    let calls = turn_calls(turn);
+    let message = if calls.is_empty() {
+        json!({"role":"assistant","content":turn["text"]})
+    } else {
+        json!({"role":"assistant","content":turn["text"].as_str().filter(|t| !t.is_empty()),
+            "tool_calls":calls.iter().map(|call| json!({"function":{
+                "name":named(&call["name"]),"arguments":call["arguments"]}})).collect::<Vec<_>>()})
+    };
+    json!({"model":"mock","message":message,"done":true,"done_reason":"stop","prompt_eval_count":0,"eval_count":0})
 }
 
 fn chat(input: &Value) -> Value {

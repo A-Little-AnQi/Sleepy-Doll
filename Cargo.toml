@@ -67,3 +67,8 @@ required-features = ["mock"]
 name = "mock_backend"
 path = "tests/mock_backend.rs"
 required-features = ["mock"]
+
+[[test]]
+name = "tasks"
+path = "tests/tasks.rs"
+required-features = ["mock"]

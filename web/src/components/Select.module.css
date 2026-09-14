@@ -41,13 +41,11 @@
 }
 
 .select-menu {
-  position: absolute;
+  /* 位置由组件按触发器的视口坐标算好（含贴边翻转），这里只负责外观。
+     挂在 body 上，不受任何祖先的层叠上下文或 overflow 影响。 */
+  position: fixed;
   z-index: 1000;
-  top: calc(100% + 6px);
-  right: 0;
-  width: max(100%, 240px);
-  max-width: min(360px, calc(100vw - 24px));
-  max-height: min(300px, 50vh);
+  max-width: calc(100vw - 16px);
   padding: 5px;
   overflow: auto;
   border: 1px solid var(--border);
