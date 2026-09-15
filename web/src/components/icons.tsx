@@ -120,6 +120,15 @@ export function ChevronIcon(p: IconProps) {
   );
 }
 
+export function FolderIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3.6 8h5.2l1.7 2.2H20.4v9.2H3.6Z" />
+      <path d="M3.6 8V6.4A1.6 1.6 0 0 1 5.2 4.8h4.1L11 6.8" />
+    </Svg>
+  );
+}
+
 export function PlusIcon(p: IconProps) {
   return (
     <Svg {...p}>
@@ -166,6 +175,15 @@ export function CheckIcon(p: IconProps) {
   return (
     <Svg {...p}>
       <path d="m5 12.5 4.5 4.5L19 7" />
+    </Svg>
+  );
+}
+
+export function CopyIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="8.2" y="8.2" width="11.3" height="12.3" rx="1.8" />
+      <path d="M15.5 8.2V6.2A1.7 1.7 0 0 0 13.8 4.5H6.2A1.7 1.7 0 0 0 4.5 6.2v12.1A1.7 1.7 0 0 0 6.2 20" />
     </Svg>
   );
 }

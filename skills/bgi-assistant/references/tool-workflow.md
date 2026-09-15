@@ -13,7 +13,7 @@
 | `capability.invoke` | `bgi.api.invoke` | 调用已确认的写接口，运行时跟踪到终态 |
 | `task.status` | `bgi.job.get` | 查询已有 Job；接纳响应里已经带终态时不要重复查询 |
 | `task.cancel` | `bgi.job.cancel` | 取消 Job |
-| 用户资源 | `bgi.user.list` / `bgi.user.read` / `bgi.user.inspect_script` / `bgi.user.write` / `bgi.user.restore` | 读写 `User\` 下的文件；具体顺序见 `bgi-operator` 技能 |
+| 用户资源 | `bgi.user.resolve` / `bgi.user.list` / `bgi.user.read` / `bgi.user.inspect_script` / `bgi.user.write` / `bgi.user.restore` | 采集和运行先 `resolve`；其余读写见 `bgi-operator` |
 | 插件语义能力 | `bgi.capability.search` / `bgi.capability.describe` / `bgi.capability.invoke` | 仅在任务明确涉及已安装插件时使用 |
 
 同样的对应关系也适用于其他文档：凡是提到“能力目录”，在 Sleepy Doll 里就是 `bgi.api.*`。
@@ -27,6 +27,8 @@
 调用前先按 [capability-boundaries.md](capability-boundaries.md) 判断。无关问题、不可知的私人事实，以及已经明确不存在的完整功能不进入能力搜索。用户要求现场制作新脚本时，只有感知、数据、动作与验证能够闭环，才继续发现和组合原子能力。
 
 ## 标准循环
+
+采集、刷取、跑配置组不走本循环，先 `bgi.user.resolve`。下面只用于「当前设置是什么、打开某页、改开关、排障」这类需要宿主接口的请求。
 
 1. 将用户原话归一化成“动作 + 对象 + 约束”，并补入 [bgi-domain.md](bgi-domain.md) 中的 BetterGI 术语。
 2. 只有当游戏状态会影响下一步时才调用 `bgi.state.get`，例如要执行游戏任务、排查识别、查看活动任务。不要把它机械地加到每次闲聊前。

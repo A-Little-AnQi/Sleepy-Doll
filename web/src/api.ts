@@ -13,6 +13,8 @@ import type {
   TaskValidation,
   WorkflowDetail,
 } from "./types";
+import type { GroupLayout } from "./conversation-groups";
+import { withPermission } from "./types";
 
 declare global {
   interface Window {
@@ -37,7 +39,22 @@ interface IpcEnvelope<T> {
   error?: { message: string };
 }
 
-export const MOCK_BACKEND = "http://127.0.0.1:47124/ipc";
+export function mockIpcUrl(dev = import.meta.env.DEV) {
+  return dev ? "/ipc" : "http://127.0.0.1:47124/ipc";
+}
+
+export const MOCK_BACKEND = mockIpcUrl();
+
+/** 旧 mock 在 waitMs>0 且没有新事件时会回空 500。桌面 IPC 才长轮询。 */
+export function eventsReadParams(
+  conversationId: string,
+  after: number,
+  nativeIpc: boolean,
+) {
+  return nativeIpc
+    ? { conversationId, after, waitMs: 20_000 }
+    : { conversationId, after };
+}
 const pending = new Map<
   string,
   {
@@ -81,7 +98,15 @@ async function invokeMock<T>(
         : "无法连接本地服务。",
     );
   }
-  const envelope = (await response.json()) as IpcEnvelope<T>;
+    const text = await response.text();
+    if (!text) {
+      throw new Error(
+        response.ok
+          ? "无法连接本地服务。"
+          : `Mock Backend 返回 HTTP ${response.status}`,
+      );
+    }
+    const envelope = JSON.parse(text) as IpcEnvelope<T>;
   if (!response.ok || !envelope.ok) {
     throw new Error(
       envelope.error?.message ?? `Mock Backend 返回 HTTP ${response.status}`,
@@ -120,25 +145,22 @@ function invoke<T>(
 }
 
 export const api = {
-  bootstrap: () => invoke<Bootstrap>("bootstrap"),
+  bootstrap: () => invoke<Bootstrap>("bootstrap").then(withPermission),
   submitTask: (
     prompt: string,
     conversationId?: string,
     clientKey: string = crypto.randomUUID(),
-    mode: "agent" | "chatOnly" = "agent",
     modelId?: string | null,
   ) =>
     invoke<TaskInfo>("task.submit", {
       prompt,
       clientKey,
-      mode,
       ...(conversationId ? { conversationId } : {}),
       // 新对话里先挑好的模型随第一条消息一起生效；留空表示跟随默认模型。
       ...(modelId ? { modelId } : {}),
     }),
   task: (id: string) => invoke<TaskInfo>("task.get", { id }),
   tasks: () => invoke<TaskInfo[]>("task.list"),
-  resume: (id: string) => invoke<TaskInfo>("run.resume", { id }),
   supplement: (
     id: string,
     content: string,
@@ -147,16 +169,17 @@ export const api = {
   approve: (id: string, approved: boolean) =>
     invoke("approval.respond", { id, approved }),
   events: (conversationId: string, after: number) =>
-    invoke<{ events: RunEvent[] }>("events.read", {
-      conversationId,
-      after,
-      waitMs: 20000,
-    }),
+    invoke<{ events: RunEvent[] }>(
+      "events.read",
+      eventsReadParams(conversationId, after, Boolean(window.ipc)),
+    ),
   cancelTask: (id: string) => invoke<TaskInfo>("task.cancel", { id }),
   conversation: (id: string) =>
     invoke<{ id: string; messages: MessageInfo[] }>("conversation.get", { id }),
   useModel: (id: string) =>
     invoke<{ activeModel: string }>("model.use", { id }),
+  deleteModel: (id: string) =>
+    invoke<{ deleted: boolean; activeModel: string }>("model.delete", { id }),
   permission: () => invoke<PermissionState>("permission.get"),
   setPermission: (mode: string) =>
     invoke<{ mode: string; label: string }>("permission.set", { mode }),
@@ -216,11 +239,16 @@ export const api = {
     }),
   renameConversation: (id: string, title: string) =>
     invoke("conversation.rename", { id, title }),
+  saveConversationGroups: (layout: GroupLayout) =>
+    invoke("conversation.groups.save", {
+      groups: layout.groups,
+      membership: layout.membership,
+    }),
   pinConversation: (id: string, pinned: boolean) =>
     invoke("conversation.setPinned", { id, pinned }),
   archiveConversation: (id: string, archived: boolean) =>
     invoke("conversation.setArchived", { id, archived }),
-  setConversationModel: (id: string, modelId: string | null) =>
+  setConversationModel: (id: string, modelId: string) =>
     invoke("conversation.setModel", { id, modelId }),
   deleteConversation: (id: string, confirmed = false) =>
     invoke<{

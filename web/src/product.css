@@ -21,6 +21,13 @@
   --header-height: 52px;
   --page-padding: 24px;
   --prose-width: 880px;
+  --sidebar-pad-x: 12px;
+  --radius: 8px;
+  --radius-sm: 6px;
+  --control-height: 32px;
+  --font-body: 13px;
+  --font-meta: 12px;
+  --font-label: 11px;
   color-scheme: light;
   font-family:
     Inter, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
@@ -185,7 +192,7 @@ a {
   padding: 0;
   border: 0;
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .button-icon {
@@ -267,6 +274,15 @@ a {
   padding-left: 35px;
   background: var(--subtle);
   border-color: var(--border);
+}
+
+.search-field.is-compact input {
+  min-height: var(--control-height);
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-right: 10px;
+  border-radius: var(--radius);
+  font-size: var(--font-body);
 }
 
 .search-field svg {
@@ -727,17 +743,33 @@ details > pre {
   height: 100%;
   display: grid;
   place-content: center;
-  gap: 14px;
+  justify-items: center;
+  gap: 8px;
+  padding: var(--page-padding);
   text-align: center;
 }
 
-.product-loading h1 {
+.product-loading > *,
+.fatal-error > * {
+  margin: 0;
+}
+
+.product-loading h1,
+.fatal-error h1 {
   font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
 }
 
 .product-loading p {
   font-size: 13px;
   color: var(--muted);
+  max-width: 28em;
+}
+
+.fatal-error pre {
+  max-width: min(36em, 100%);
+  text-align: left;
 }
 
 @keyframes pulse {

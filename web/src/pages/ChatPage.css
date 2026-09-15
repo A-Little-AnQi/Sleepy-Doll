@@ -6,17 +6,24 @@
   min-height: 0;
 }
 
+.chat-workspace > .chat-scene-switch {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .chat-scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  padding: 34px 38px;
+  padding: var(--page-padding);
 }
 
 .conversation-scene {
-  max-width: 760px;
+  max-width: var(--prose-width);
   margin: 0 auto;
 }
 
@@ -94,9 +101,9 @@
 
 .composer-dock {
   width: 100%;
-  max-width: 836px;
+  max-width: var(--prose-width);
   align-self: center;
-  padding: 12px 38px 28px;
+  padding: 12px var(--page-padding) 28px;
   display: grid;
   gap: 10px;
   flex: 0 0 auto;
@@ -140,14 +147,15 @@
 .composer-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 8px;
+  min-height: 32px;
 }
 
 .composer-submit {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
 
 .send-action {
@@ -241,23 +249,6 @@
   }
 }
 
-.composer-mode {
-  display: flex;
-  gap: 4px;
-}
-.composer-mode .subtle-action[aria-pressed="true"] {
-  border-color: var(--border-strong);
-  background: var(--selected);
-  color: var(--text);
-}
-.composer-notice,
-.composer-hint {
-  margin: 0;
-  padding: 0 4px 6px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--secondary);
-}
 .chat-unread {
   position: absolute;
   left: 50%;
@@ -273,17 +264,33 @@
   box-shadow: var(--shadow);
 }
 
-.composer-approval {
-  width: 132px;
+.composer-menu {
+  width: auto;
+  max-width: 200px;
   flex-shrink: 0;
 }
-.composer-approval [data-ui="select-trigger"] {
-  min-height: 30px;
-  padding: 4px 9px;
-  border-color: var(--border);
-  background: transparent;
-  font-size: 12px;
+.composer-model {
+  max-width: 168px;
 }
-.composer-approval [data-ui="select-trigger"]:hover {
+.composer-menu [data-ui="select-root"] {
+  width: auto;
+}
+.composer-menu [data-ui="select-trigger"] {
+  width: auto;
+  min-height: var(--control-height);
+  gap: 4px;
+  padding: 0 8px;
+  border-color: transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--font-body);
+  font-weight: 500;
+  color: var(--secondary);
+}
+.composer-menu [data-ui="select-trigger"]:hover,
+.composer-menu [data-ui="select-trigger"][aria-expanded="true"] {
   background: var(--hover);
+  color: var(--text);
+  border-color: transparent;
 }

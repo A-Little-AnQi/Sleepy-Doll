@@ -9,7 +9,9 @@ import { DEMO_ID } from "./demo-id";
  * 执行，事件流照常推送，界面按正常路径渲染。后端或链路出问题在演示里就能看见，
  * 一段前端动画会把问题盖过去。
  */
-const RESET = new URL("/dev/reset-demo", MOCK_BACKEND).toString();
+const RESET = import.meta.env.DEV
+  ? "/dev/reset-demo"
+  : new URL("/dev/reset-demo", MOCK_BACKEND).toString();
 
 /** 每次页面加载换一个会话 id，演示之间互不干扰。 */
 function conversationId() {

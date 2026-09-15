@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub const LATEST_SCHEMA_VERSION: i64 = 12;
+pub const LATEST_SCHEMA_VERSION: i64 = 13;
 
 pub fn migrate(connection: &mut Connection) -> Result<()> {
     connection.execute_batch(
@@ -270,6 +270,18 @@ const MIGRATIONS: &[(i64, &str)] = &[
         ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE conversations ADD COLUMN archived_at TEXT;
         ALTER TABLE conversations ADD COLUMN model_id TEXT;
+    "#,
+    ),
+    (
+        13,
+        r#"
+        CREATE TABLE IF NOT EXISTS conversation_groups(
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            collapsed INTEGER NOT NULL DEFAULT 0
+        );
+        ALTER TABLE conversations ADD COLUMN group_id TEXT;
     "#,
     ),
 ];

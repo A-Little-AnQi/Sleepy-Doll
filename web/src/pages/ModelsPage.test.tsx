@@ -1,55 +1,99 @@
-import { afterEach, beforeAll, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { ModelsPage } from "./ModelsPage";
-import type { Bootstrap } from "../types";
+import { afterEach, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("../api", () => ({
-  api: { saveModel: vi.fn(), useModel: vi.fn() },
+  api: {
+    deleteModel: vi.fn(),
+    saveModel: vi.fn(),
+    useModel: vi.fn(),
+  },
 }));
 
-beforeAll(() => {
-  Element.prototype.scrollIntoView = vi.fn();
-});
+import { api } from "../api";
+import { ModelsPage } from "./ModelsPage";
+import { PREVIEW_PERMISSION, type Bootstrap, type ModelInfo } from "../types";
+
 afterEach(cleanup);
 
-const bootstrap = {
+const bootstrap: Bootstrap = {
+  configPath: "/tmp/config.json",
   models: [
     {
-      id: "a",
-      name: "Model A",
-      protocol: "openai-responses",
-      model: "model-a",
-      baseUrl: "https://a.example/v1",
-      timeoutMs: 120000,
-      active: true,
-    },
-    {
-      id: "b",
-      name: "Model B",
+      id: "mock",
+      name: "Mock Anthropic",
       protocol: "anthropic-messages",
-      model: "model-b",
-      baseUrl: "https://b.example/v1",
-      timeoutMs: 90000,
-      active: false,
+      model: "mock-model",
+      baseUrl: "http://127.0.0.1/v1",
+      active: true,
+      timeoutMs: 120000,
     },
   ],
-} as unknown as Bootstrap;
+  skills: [],
+  plugins: [],
+  tools: [],
+  conversations: [],
+  tasks: [],
+  strategies: [],
+  workflows: [],
+  operations: [],
+  resources: [],
+  diagnostics: [],
+  notifications: [],
+  permission: PREVIEW_PERMISSION,
+  bridge: { enabled: true, connected: true, baseUrl: "http://127.0.0.1" },
+};
 
-it("keeps unsaved drafts when switching between models", () => {
-  render(<ModelsPage bootstrap={bootstrap} reload={vi.fn()} />);
-  const name = screen.getByRole("textbox", { name: "名称" });
-  fireEvent.change(name, { target: { value: "Unsaved A" } });
-
-  const selector = screen.getByRole("combobox", { name: "选择模型" });
-  fireEvent.click(selector);
-  fireEvent.click(screen.getByRole("option", { name: /Model B/ }));
-  expect(
-    (screen.getByRole("textbox", { name: "名称" }) as HTMLInputElement).value,
-  ).toBe("Model B");
-
-  fireEvent.click(screen.getByRole("combobox", { name: "选择模型" }));
-  fireEvent.click(screen.getByRole("option", { name: /Model A/ }));
-  expect(
-    (screen.getByRole("textbox", { name: "名称" }) as HTMLInputElement).value,
-  ).toBe("Unsaved A");
+it("lists configured models instead of hiding them in a picker", () => {
+  render(<ModelsPage bootstrap={bootstrap} reload={async () => undefined} />);
+  expect(screen.getByRole("navigation", { name: "已配置的模型" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /Mock Anthropic/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "添加" })).toBeTruthy();
 });
+
+it("shows a draft row when adding a model", () => {
+  render(<ModelsPage bootstrap={bootstrap} reload={async () => undefined} />);
+  fireEvent.click(screen.getByRole("button", { name: "添加" }));
+  expect(screen.getByRole("heading", { name: "添加模型" })).toBeTruthy();
+  expect(screen.getByText("尚未保存")).toBeTruthy();
+});
+
+it("labels the active configuration as the default model", () => {
+  render(<ModelsPage bootstrap={bootstrap} reload={async () => undefined} />);
+  expect(screen.getByText("默认")).toBeTruthy();
+  expect(screen.getByText("默认模型")).toBeTruthy();
+  expect(screen.queryByText("当前模型")).toBeNull();
+});
+
+it("keeps the last remaining model", () => {
+  render(<ModelsPage bootstrap={bootstrap} reload={async () => undefined} />);
+  expect(
+    (screen.getByRole("button", { name: "删除" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+});
+
+it("deletes a configured model after confirmation", async () => {
+  const extra: ModelInfo = {
+    id: "other",
+    name: "Mock Gemini",
+    protocol: "gemini",
+    model: "mock-model",
+    baseUrl: "http://127.0.0.1/v1",
+    active: false,
+  };
+  vi.mocked(api.deleteModel).mockResolvedValue({
+    deleted: true,
+    activeModel: "mock",
+  });
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  render(
+    <ModelsPage
+      bootstrap={{ ...bootstrap, models: [...bootstrap.models, extra] }}
+      reload={async () => undefined}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Mock Gemini/ }));
+  fireEvent.click(screen.getByRole("button", { name: "删除" }));
+  await waitFor(() => expect(api.deleteModel).toHaveBeenCalledWith("other"));
+});
+

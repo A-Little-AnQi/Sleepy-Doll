@@ -1,6 +1,7 @@
 //! 与 BetterGI 的接触面：桥的客户端、工具，以及桥进程的生命周期。
 
 pub mod control;
+pub(crate) mod resolve;
 
 use std::{
     fs,
@@ -551,6 +552,21 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             },
         ),
         (
+            "bgi.user.resolve",
+            "一次判定采集或运行目标：查配置组、核验引用路径是否还在、只按目录名找 AutoPathing 父节点。不要用 list/read 扫路线 JSON。按 verdict 行动：run 直接运行该配置组；repair 只补 missing；create 用 candidates 父节点建组；ambiguous 才提问；notFound 再考虑更新仓库。",
+            json!({"type":"object","properties":{"query":{"type":"string","minLength":1,"description":"用户原话或材料/配置组名称"}},"required":["query"],"additionalProperties":false}),
+            {
+                let client = client.clone();
+                Arc::new(move |a: &Value| {
+                    let root = client.user_root()?;
+                    Ok(resolve::resolve_local(
+                        &root,
+                        a["query"].as_str().unwrap_or(""),
+                    ))
+                }) as BridgeToolFn
+            },
+        ),
+        (
             "bgi.user.write",
             "原子创建或替换 BetterGI User 资源文件。已有文件必须提交 user.read 返回的 sha256，写入前校验 JSON、比较版本并保留独立备份；写后自动核验。不得修改 User/config.json。",
             json!({"type":"object","properties":{"path":{"type":"string","description":"相对 User 路径；不得是 config.json"},"content":{"type":"string","description":"保留未知字段后的完整文件内容"},"expectedSha256":{"type":"string","pattern":"^[0-9a-f]{64}$","description":"替换已有文件时必填，使用最近一次 user.read 返回的 sha256；新建文件省略"}},"required":["path","content"],"additionalProperties":false}),
@@ -690,7 +706,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             }
         } else if matches!(
             name,
-            "bgi.user.list" | "bgi.user.read" | "bgi.user.inspect_script"
+            "bgi.user.list" | "bgi.user.read" | "bgi.user.inspect_script" | "bgi.user.resolve"
         ) {
             ToolExecution {
                 max_result_chars: 96_000,
@@ -828,6 +844,12 @@ mod tests {
             .unwrap();
         assert!(inspect.description.contains("一次读取"));
         assert_eq!(inspect.input_schema["required"], json!(["folderName"]));
+        let resolve = definitions
+            .iter()
+            .find(|tool| tool.name == "bgi.user.resolve")
+            .unwrap();
+        assert!(resolve.description.contains("不要用 list/read 扫路线"));
+        assert_eq!(resolve.input_schema["required"], json!(["query"]));
         let write = definitions
             .iter()
             .find(|tool| tool.name == "bgi.user.write")

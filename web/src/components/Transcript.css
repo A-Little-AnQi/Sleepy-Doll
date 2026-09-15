@@ -1,15 +1,17 @@
 .message-turn {
   min-width: 0;
+  display: grid;
+  gap: 6px;
 }
 
 .message-turn.user {
   align-self: flex-end;
   max-width: 82%;
+  justify-items: end;
 }
 
 .message-turn.assistant {
-  display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .message-identity {
@@ -39,21 +41,87 @@
   display: grid;
   gap: 12px;
   min-width: 0;
+  width: 100%;
 }
 
-.reply-copy {
-  justify-self: start;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: 11px;
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 28px;
+}
+
+.message-actions.is-user {
   opacity: 0;
 }
 
-.message-turn:hover .reply-copy,
-.reply-copy:focus-visible {
+.message-turn.user:hover .message-actions,
+.message-turn.user:focus-within .message-actions {
   opacity: 1;
+}
+
+.copy-action {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--secondary);
+}
+
+.copy-action:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.copy-action-icon {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.md-fence {
+  margin: 12px 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--subtle);
+}
+
+.md-fence-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.md-fence-lang {
+  font-size: 11px;
+  text-transform: lowercase;
+}
+
+.md-fence pre {
+  margin: 0;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.md-fence pre code {
+  padding: 0;
+  background: transparent;
 }
 
 .activity-group {
@@ -124,13 +192,6 @@
   background: var(--subtle);
 }
 
-/* 推理文本通常很长，限高后内部滚动，并弱化颜色以免与回答争夺注意力。 */
-.reasoning-text {
-  max-height: 240px;
-  overflow: auto;
-  color: var(--muted);
-}
-
 .activity-item + .activity-item {
   margin-top: 14px;
   padding-top: 12px;
@@ -182,6 +243,12 @@
   }
 }
 
+.user-message ul,
+.user-message ol {
+  margin: 0.3em 0 0.4em;
+  padding-left: 1.2em;
+}
+
 .user-message {
   padding: 11px 17px;
   background: var(--hover);
@@ -191,8 +258,8 @@
 }
 
 .assistant-message {
-  font-size: 14px;
-  line-height: 1.85;
+  font-size: 15px;
+  line-height: 1.75;
   overflow-wrap: anywhere;
 }
 
@@ -207,19 +274,56 @@
 }
 
 .assistant-message h1,
+.assistant-message h2,
+.assistant-message h3 {
+  margin: 1.15em 0 0.45em;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+.assistant-message h1 {
+  font-size: 1.35em;
+}
+
 .assistant-message h2 {
-  font-size: 20px;
+  font-size: 1.15em;
 }
 
 .assistant-message h3 {
-  font-size: 16px;
+  font-size: 1.02em;
+}
+
+.assistant-message ul,
+.assistant-message ol {
+  margin: 0.4em 0 0.7em;
+  padding-left: 1.4em;
+}
+
+.assistant-message li + li {
+  margin-top: 0.2em;
+}
+
+.assistant-message hr {
+  margin: 1.2em 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.assistant-message a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.assistant-message input[type="checkbox"] {
+  margin-right: 6px;
 }
 
 .assistant-message code {
-  font-size: 12px;
+  font-size: 0.86em;
   background: var(--hover);
   border-radius: 4px;
-  padding: 2px 5px;
+  padding: 1px 5px;
 }
 
 .assistant-message pre code {
@@ -230,8 +334,9 @@
 .assistant-message table {
   display: block;
   overflow: auto;
+  margin: 10px 0;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .assistant-message th,
@@ -242,13 +347,30 @@
 }
 
 .assistant-message blockquote {
-  border: 1px solid var(--border);
-  margin: 16px 0;
-  padding: 0 18px;
-  border-radius: 8px;
+  margin: 12px 0;
+  padding: 2px 14px;
+  border: 0;
+  border-left: 3px solid var(--border-strong);
+  color: var(--secondary);
 }
 
-.assistant-message:hover .message-copy,
-.message-copy:focus-visible {
-  opacity: 1;
+.assistant-message.is-streaming > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 0.9em;
+  margin-left: 3px;
+  background: var(--text);
+  vertical-align: -2px;
+  animation: stream-caret 1s step-end infinite;
+}
+
+:root[data-reduced-motion="true"] .assistant-message.is-streaming > :last-child::after {
+  animation: none;
+}
+
+@keyframes stream-caret {
+  50% {
+    opacity: 0;
+  }
 }

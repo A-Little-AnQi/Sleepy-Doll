@@ -59,7 +59,10 @@
 
 .settings-content > .page-sheet,
 .settings-content > .bridge-api-explorer,
-.settings-content > .bridge-recovery {
+.settings-content > .bridge-recovery,
+.settings-content .page-sheet,
+.settings-content .bridge-api-explorer,
+.settings-content .bridge-recovery {
   width: 100%;
   max-width: none;
   height: auto;
@@ -134,6 +137,34 @@
   padding-top: 8px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.settings-sponsor {
+  display: grid;
+  gap: 14px;
+  width: min(100%, 720px);
+}
+
+.settings-sponsor h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.settings-sponsor p {
+  margin: 0 0 14px;
+  max-width: 36em;
+  color: var(--secondary);
+  font-size: var(--font-meta);
+  line-height: 1.65;
+}
+
+.settings-sponsor-qr {
+  width: 128px;
+  height: 128px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--subtle);
 }
 
 @media (max-width: 700px) {

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import { AppShell } from "./components/AppShell";
 import { DetailsPanel } from "./components/DetailsPanel";
+import { MotionSwitch } from "./components/MotionSwitch";
 import { ChatPage } from "./pages/ChatPage";
 import { ExtensionsPage } from "./pages/ExtensionsPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -11,7 +12,13 @@ import { readError, watchTasks } from "./session";
 import type { Bootstrap, TaskSummary } from "./types";
 
 export type Page =
-  "chat" | "tasks" | "models" | "extensions" | "bridge" | "settings";
+  | "chat"
+  | "tasks"
+  | "models"
+  | "extensions"
+  | "bridge"
+  | "settings"
+  | "sponsor";
 
 export default function App() {
   const [page, setPage] = useState<Page>("chat");
@@ -23,8 +30,6 @@ export default function App() {
     () => localStorage.getItem("sleepy-doll-details-open") !== "false",
   );
   const [selectedTask, setSelectedTask] = useState<string>();
-  /** 新对话尚未落库时先记住用户挑的模型，发第一条消息时写进会话。 */
-  const [pendingModel, setPendingModel] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -84,7 +89,11 @@ export default function App() {
         <h1>Sleepy Doll</h1>
         <p>{error || "正在载入…"}</p>
         {error && (
-          <button type="button" onClick={() => void reload()}>
+          <button
+            type="button"
+            className="primary-action"
+            onClick={() => void reload()}
+          >
             重试
           </button>
         )}
@@ -95,8 +104,6 @@ export default function App() {
   const openConversation = (id: string) => {
     setConversation(id || undefined);
     setSelectedTask(undefined);
-    // 换会话就该丢掉上一个新对话的暂存选择。
-    setPendingModel(null);
     setPage("chat");
   };
 
@@ -124,50 +131,51 @@ export default function App() {
       onNew={() => {
         setConversation(undefined);
         setSelectedTask(undefined);
-        setPendingModel(null);
         setPage("chat");
       }}
       onConversation={openConversation}
-      onModel={async (id) => {
-        if (!conversation) {
-          setPendingModel(id);
-          return;
-        }
-        await api.setConversationModel(conversation, id);
-        await reload();
-      }}
-      pendingModel={pendingModel ?? undefined}
       onToggleDetails={() => setDetailsOpen(!detailsOpen)}
       reload={reload}
     >
-      {page === "chat" ? (
-        <ChatPage
-          bootstrap={bootstrap}
-          conversationId={conversation}
-          modelId={pendingModel}
-          onConversation={openConversation}
-          reload={reload}
-        />
-      ) : page === "tasks" ? (
-        <TasksPage
-          bootstrap={bootstrap}
-          reload={reload}
-          onOpenConversation={openConversation}
-          onOpenTask={(task: TaskSummary) => {
-            setSelectedTask(task.id);
-            setDetailsOpen(true);
-          }}
-        />
-      ) : page === "extensions" ? (
-        <ExtensionsPage bootstrap={bootstrap} reload={reload} />
-      ) : (
-        <SettingsPage
-          bootstrap={bootstrap}
-          section={page}
-          onSection={setPage}
-          reload={reload}
-        />
-      )}
+      <MotionSwitch
+        viewKey={
+          page === "chat"
+            ? "chat"
+            : page === "tasks"
+              ? "tasks"
+              : page === "extensions"
+                ? "extensions"
+                : "settings"
+        }
+      >
+        {page === "chat" ? (
+          <ChatPage
+            bootstrap={bootstrap}
+            conversationId={conversation}
+            onConversation={openConversation}
+            reload={reload}
+          />
+        ) : page === "tasks" ? (
+          <TasksPage
+            bootstrap={bootstrap}
+            reload={reload}
+            onOpenConversation={openConversation}
+            onOpenTask={(task: TaskSummary) => {
+              setSelectedTask(task.id);
+              setDetailsOpen(true);
+            }}
+          />
+        ) : page === "extensions" ? (
+          <ExtensionsPage bootstrap={bootstrap} reload={reload} />
+        ) : (
+          <SettingsPage
+            bootstrap={bootstrap}
+            section={page}
+            onSection={setPage}
+            reload={reload}
+          />
+        )}
+      </MotionSwitch>
     </AppShell>
   );
 }

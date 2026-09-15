@@ -15,19 +15,18 @@ import {
 } from "../session";
 import { Toast } from "../components/Toast";
 import type { Bootstrap } from "../types";
+import { MotionSwitch } from "../components/MotionSwitch";
+import { resolveConversationModel } from "../models";
 
 interface Props {
   bootstrap: Bootstrap;
   conversationId?: string | undefined;
-  /** 新对话里先挑好的模型，随第一条消息生效。 */
-  modelId?: string | null | undefined;
   onConversation(id: string): void;
   reload(): Promise<void>;
 }
 export function ChatPage({
   bootstrap,
   conversationId,
-  modelId,
   onConversation,
   reload,
 }: Props) {
@@ -35,10 +34,6 @@ export function ChatPage({
   const { messages, task, stream, question, approval, plan, loading } = data;
   const busy = isRunning(task);
   const draftKey = `sleepy-doll-draft:${conversationId ?? "new"}`;
-  const modeKey = `sleepy-doll-mode:${conversationId ?? "new"}`;
-  const [mode, setMode] = useState<"agent" | "chatOnly">(() =>
-    localStorage.getItem(modeKey) === "chatOnly" ? "chatOnly" : "agent",
-  );
   const [prompt, setPrompt] = useState(
     () => localStorage.getItem(draftKey) ?? "",
   );
@@ -49,6 +44,15 @@ export function ChatPage({
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [pendingModel, setPendingModel] = useState<string | null>(null);
+  const conversation = bootstrap.conversations.find(
+    (entry) => entry.id === conversationId,
+  );
+  const selectedModel = resolveConversationModel(
+    bootstrap.models,
+    conversation,
+    pendingModel,
+  );
   const current = useRef(conversationId);
   current.current = conversationId;
   const alive = useRef(true);
@@ -63,14 +67,12 @@ export function ChatPage({
   }, []);
   useEffect(() => {
     setPrompt(localStorage.getItem(draftKey) ?? "");
-    setMode(
-      localStorage.getItem(modeKey) === "chatOnly" ? "chatOnly" : "agent",
-    );
     setError("");
     setNotice("");
     setSending(false);
+    setPendingModel(null);
     follow.current = true;
-  }, [draftKey, modeKey]);
+  }, [draftKey]);
   useEffect(() => {
     setConfirming(false);
   }, [approval?.id]);
@@ -137,8 +139,7 @@ export function ChatPage({
           value,
           origin,
           clientKey,
-          mode,
-          origin ? undefined : modelId,
+          origin ? undefined : selectedModel,
         );
         session(run.conversationId).start();
         if (alive.current && current.current === origin)
@@ -173,6 +174,10 @@ export function ChatPage({
   const phase = question || approval ? undefined : phaseLabel(task);
   return (
     <section className={`chat-workspace${welcome ? " is-welcome" : ""}`}>
+      <MotionSwitch
+        viewKey={conversationId ?? "new"}
+        className="chat-scene-switch"
+      >
       <div
         ref={scroll}
         className="chat-scroll"
@@ -283,14 +288,6 @@ export function ChatPage({
                   <section className="run-error">
                     <h3>{taskLabels[task.state]}</h3>
                     <p>{task.error || task.result}</p>
-                    {task.state === "needsReview" && (
-                      <button
-                        className="secondary-action"
-                        onClick={() => void act(() => api.resume(task.id))}
-                      >
-                        重新核对
-                      </button>
-                    )}
                   </section>
                 )}
               {task?.state === "succeeded" && plan && (
@@ -321,6 +318,7 @@ export function ChatPage({
           </div>
         )}
       </div>
+      </MotionSwitch>
       {unread && busy && (
         <button
           className="chat-unread"
@@ -350,12 +348,6 @@ export function ChatPage({
             }}
             onDismiss={() => setError("")}
           />
-        )}
-        {busy && (
-          <p className="composer-hint">
-            当前运行保持它开始时的模式（{task?.chatOnly ? "仅聊天" : "Agent"}
-            ）； 切换只影响之后的发送，要立刻停下来请点停止。
-          </p>
         )}
         {data.queued.length > 0 && (
           <div className="queued-list">
@@ -404,7 +396,7 @@ export function ChatPage({
             }}
           />
           <div className="composer-actions">
-            <div className="composer-approval">
+            <div className="composer-menu composer-approval">
               <Select
                 label="审批级别"
                 value={bootstrap.permission.mode}
@@ -421,43 +413,38 @@ export function ChatPage({
                 }
               />
             </div>
-            <div className="composer-mode" role="group" aria-label="对话模式">
+            {busy && (
               <button
                 className="subtle-action"
-                aria-pressed={mode === "agent"}
-                title="可以使用工具，真正去读文件、改配置、跑任务"
-                onClick={() => {
-                  setMode("agent");
-                  localStorage.setItem(modeKey, "agent");
-                }}
+                disabled={!prompt.trim() || sending}
+                title="等当前运行结束后再开始"
+                onClick={() => void send(true)}
               >
-                Agent
+                排队发送
               </button>
-              <button
-                className="subtle-action"
-                aria-pressed={mode === "chatOnly"}
-                title="只回答，不调用任何外部工具"
-                onClick={() => {
-                  setMode("chatOnly");
-                  localStorage.setItem(modeKey, "chatOnly");
-                }}
-              >
-                仅聊天
-              </button>
-            </div>
-            <span>
-              {busy && (
-                <button
-                  className="subtle-action"
-                  disabled={!prompt.trim() || sending}
-                  title="等当前运行结束后再开始"
-                  onClick={() => void send(true)}
-                >
-                  排队发送
-                </button>
-              )}
-            </span>
+            )}
             <div className="composer-submit">
+              <div className="composer-menu composer-model">
+                <Select
+                  label="模型"
+                  value={selectedModel}
+                  disabled={sending || !bootstrap.models.length}
+                  options={bootstrap.models.map((model) => ({
+                    value: model.id,
+                    label: model.name,
+                    description: model.model,
+                  }))}
+                  onChange={(id) => {
+                    if (!conversationId) {
+                      setPendingModel(id);
+                      return;
+                    }
+                    void act(async () => {
+                      await api.setConversationModel(conversationId, id);
+                    });
+                  }}
+                />
+              </div>
               {busy && (
                 <button
                   type="button"

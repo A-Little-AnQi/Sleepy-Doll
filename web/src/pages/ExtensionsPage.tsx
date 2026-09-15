@@ -11,6 +11,7 @@ import {
 } from "../components/icons";
 import { readError } from "../session";
 import type { Bootstrap } from "../types";
+import { MotionSwitch } from "../components/MotionSwitch";
 export function ExtensionsPage({
   bootstrap,
   reload,
@@ -138,6 +139,7 @@ export function ExtensionsPage({
       {error && !dialog.current?.open && (
         <Toast message={error} onDismiss={() => setError("")} />
       )}
+      <MotionSwitch viewKey={tab} kind="panel">
       {filtered.length ? (
         <div className="extension-list">
           {filtered.map((item) => (
@@ -184,6 +186,7 @@ export function ExtensionsPage({
           </h3>
         </div>
       )}
+      </MotionSwitch>
       <dialog
         ref={dialog}
         onClick={(event) => {

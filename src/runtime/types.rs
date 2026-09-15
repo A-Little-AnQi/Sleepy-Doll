@@ -138,9 +138,6 @@ pub struct Run {
     /// 请求保持原协议与配置。
     #[serde(default)]
     pub model_id: Option<String>,
-    /// 仅本次运行可见的指令（「仅聊天」模式）。
-    #[serde(default)]
-    pub chat_only: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

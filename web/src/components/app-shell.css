@@ -1,26 +1,47 @@
 .app-shell {
+  --sidebar-user-width: 248px;
   --sidebar-width: 248px;
+  --sidebar-motion: var(--motion-slow) var(--ease-enter);
   display: grid;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
   color: var(--text);
   background: var(--surface);
-  transition: grid-template-columns 0.18s ease;
+}
+.app-shell[data-resizing="true"] .app-sidebar,
+.app-shell[data-resizing="true"] .app-main {
+  transition: none;
+}
+.app-sidebar-peek {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 10px;
+  z-index: 40;
+}
+.app-sidebar-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+}
+:root[data-sidebar-resizing="true"],
+:root[data-sidebar-resizing="true"] * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 .app-shell[data-collapsed="true"] {
   --sidebar-width: 0px;
 }
-/* 窄窗口下侧栏是覆盖抽屉，不占布局列。 */
-.app-shell[data-drawer="true"] {
-  grid-template-columns: minmax(0, 1fr);
-}
 .app-shell[data-drawer="true"] .app-sidebar {
-  position: fixed;
-  inset: 0 auto 0 0;
-  width: min(280px, 88vw);
-  z-index: 50;
   box-shadow: var(--shadow);
+}
+.app-shell[data-drawer="true"] .app-main {
+  z-index: 0;
 }
 .app-scrim {
   position: fixed;
@@ -31,6 +52,11 @@
   background: #0005;
 }
 .app-sidebar {
+  /* 停靠和悬浮都用同一层固定侧栏 + translateX，避免切换 position 时无法插值。 */
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 80;
+  width: min(var(--sidebar-user-width), 88vw);
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -38,73 +64,72 @@
   background: var(--sidebar);
   border-right: 1px solid var(--border);
   white-space: nowrap;
-  transform: translateX(0);
-  opacity: 1;
-  transition:
-    transform var(--motion-base) var(--ease-enter),
-    opacity var(--motion-fast) var(--ease-standard);
-}
-.app-shell[data-collapsed="true"] .app-sidebar {
-  border: 0;
-  opacity: 0;
-  transform: translateX(-10px);
+  transform: translateX(-100%);
   pointer-events: none;
+  transition: transform var(--sidebar-motion);
+}
+.app-shell:not([data-collapsed="true"]) .app-sidebar,
+.app-shell[data-drawer="true"] .app-sidebar {
+  transform: translateX(0);
+  pointer-events: auto;
 }
 .app-brand {
-  height: 68px;
+  height: var(--header-height);
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 0 16px;
+  gap: 8px;
+  padding: 0 var(--sidebar-pad-x);
   flex-shrink: 0;
 }
 .brand-mark {
-  width: 27px;
-  height: 27px;
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
 }
 .app-brand strong {
-  font-size: 15px;
-  letter-spacing: -0.4px;
-  font-weight: 650;
+  font-size: var(--font-body);
+  letter-spacing: -0.3px;
+  font-weight: 600;
 }
 .app-brand .icon-button {
   margin-left: auto;
   color: var(--muted);
 }
 .app-new {
-  margin: 6px 12px 16px;
-  padding: 10px 12px;
+  margin: 4px var(--sidebar-pad-x) 8px;
+  min-height: var(--control-height);
+  padding: 0 10px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  border: 1px solid var(--border);
+  gap: 8px;
+  border: 0;
   background: var(--surface);
-  border-radius: 8px;
+  border-radius: var(--radius);
   text-align: left;
-  font-size: 13px;
-  box-shadow: 0 1px 2px #00000004;
+  font-size: var(--font-body);
 }
 .app-new:hover {
-  border-color: var(--border-strong);
+  background: var(--hover);
 }
 .app-nav {
   display: grid;
-  gap: 3px;
-  padding: 0 12px 18px;
+  gap: 2px;
+  padding: 0 var(--sidebar-pad-x);
+  flex-shrink: 0;
 }
 .app-nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  padding: 9px 10px;
+  min-height: var(--control-height);
+  padding: 0 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--secondary);
   text-align: left;
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 .app-nav-item:hover {
   background: var(--hover);
@@ -116,8 +141,8 @@
   font-weight: 600;
 }
 .app-nav-icon {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.6;
@@ -125,41 +150,210 @@
   stroke-linejoin: round;
   flex-shrink: 0;
 }
+.app-sidebar-tools {
+  flex-shrink: 0;
+  display: grid;
+  gap: 6px;
+  padding: 10px var(--sidebar-pad-x) 8px;
+}
+.app-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: var(--control-height);
+  padding: 0;
+  font-size: var(--font-label);
+  font-weight: 500;
+  color: var(--muted);
+}
+.app-section-head .icon-button[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--selected);
+}
+.app-sidebar-tools .search-field {
+  max-width: none;
+}
 .app-conversations {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  padding: 0 12px;
-}
-.app-section-head {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--muted);
-  padding: 12px 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 var(--sidebar-pad-x) 8px;
 }
 .app-conversations ul {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: grid;
+  gap: 1px;
 }
-
-/* 行背景由 li 统一给出，按钮和浮层用同一个变量，hover 与选中态不会脱节。 */
-.app-conversations li button {
+.app-conversations .app-group-chats-inner {
+  padding: 0 0 0 24px;
+}
+.app-row-lead {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+}
+.app-group {
+  --row-bg: transparent;
+}
+.app-group-head {
+  position: relative;
+  min-width: 0;
+  --row-bg: transparent;
+  border-radius: var(--radius);
+  background: var(--row-bg);
+  cursor: grab;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+.app-group-head:hover,
+.app-group-head:focus-within,
+.app-group.is-drop > .app-group-head {
+  --row-bg: var(--hover);
+}
+.app-group.is-drop > .app-group-head {
+  --row-bg: var(--selected);
+}
+.app-group-toggle {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
   min-width: 0;
-  padding: 9px 10px;
+  min-height: var(--control-height);
+  padding: 0 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius);
   text-align: left;
   background: var(--row-bg);
-  font-size: 12px;
+  font-size: var(--font-body);
   color: var(--secondary);
 }
-.app-conversations li:hover button,
-.app-conversations li.is-current button {
+.app-group-head:hover .app-group-toggle,
+.app-group-head:focus-within .app-group-toggle,
+.app-group.is-drop .app-group-toggle {
+  color: var(--text);
+}
+.app-group-chevron {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform: rotate(180deg);
+  transition: transform var(--motion-base) var(--ease-enter);
+}
+.app-group-chevron.is-open {
+  transform: rotate(-90deg);
+}
+.app-group-toggle small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--font-label);
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+.app-group-head:hover .app-group-toggle small,
+.app-group-head:focus-within .app-group-toggle small {
+  opacity: 0;
+}
+.app-group-chats {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--motion-base) var(--ease-enter);
+}
+.app-group-chats:not(.is-collapsed) {
+  margin-top: 1px;
+}
+.app-group-chats.is-collapsed {
+  grid-template-rows: 0fr;
+  pointer-events: none;
+}
+.app-group-chats-inner {
+  min-height: 0;
+  overflow: hidden;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 24px;
+  display: grid;
+  gap: 1px;
+  opacity: 1;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+.app-group-chats.is-collapsed .app-group-chats-inner {
+  opacity: 0;
+}
+.app-conversations li.is-source {
+  opacity: 0;
+  pointer-events: none;
+}
+.app-group.is-source {
+  opacity: 0.4;
+}
+.app-conversations li[data-sd-slot="conversation"],
+.app-group-head {
+  cursor: grab;
+}
+.app-drop-end {
+  min-height: 12px;
+}
+.app-drag-ghost {
+  position: fixed;
+  z-index: 240;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 10px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--font-body);
+  box-shadow: var(--shadow);
+  transform: scale(1.04) translateY(-2px);
+  animation: sd-lift var(--motion-fast) var(--ease-enter);
+}
+@keyframes sd-lift {
+  from {
+    transform: scale(1);
+    box-shadow: none;
+  }
+  to {
+    transform: scale(1.04) translateY(-2px);
+    box-shadow: var(--shadow);
+  }
+}
+:root[data-sd-dragging],
+:root[data-sd-dragging] * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+/* 行背景由 li 统一给出，按钮和浮层用同一个变量，hover 与选中态不会脱节。
+   只选直接子按钮：操作区的 icon-button 不能吃到 width: 100%。 */
+.app-conversations li > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius);
+  text-align: left;
+  background: var(--row-bg);
+  font-size: var(--font-body);
+  color: var(--secondary);
+  overflow: hidden;
+}
+.app-conversations li:hover > button,
+.app-conversations li.is-current > button {
   color: var(--text);
 }
 .app-conversation-title {
@@ -181,20 +375,152 @@
 }
 .app-sidebar-foot {
   display: grid;
-  gap: 4px;
-  margin: 12px;
-  padding: 12px 0 0;
+  gap: 2px;
+  flex-shrink: 0;
+  margin: 0 var(--sidebar-pad-x) 10px;
+  padding: 8px 0 0;
   border-top: 1px solid var(--border);
+}
+.app-account-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.app-account-slot {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.app-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.app-account:hover,
+.app-account[aria-expanded="true"] {
+  background: var(--hover);
+}
+.app-account-avatar {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--selected);
+  color: var(--text);
+}
+.app-account-avatar svg {
+  width: 14px;
+  height: 14px;
+}
+.app-account-copy {
+  display: grid;
+  min-width: 0;
+}
+.app-account-copy strong,
+.app-account-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-account-copy strong {
+  font-size: var(--font-body);
+  font-weight: 600;
+}
+.app-account-copy small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.app-settings-link {
+  width: auto;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.app-account-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  width: min(220px, 72vw);
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  white-space: normal;
+}
+.app-account-menu-label {
+  margin: 4px 8px 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.app-theme-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--subtle);
+}
+.app-theme-toggle button {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--secondary);
+  font-size: 12px;
+}
+.app-theme-toggle button.is-active {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+}
+.app-account-motion,
+.app-account-more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--font-body);
+  text-align: left;
+}
+.app-account-motion:hover,
+.app-account-more:hover {
+  background: var(--hover);
+}
+.app-account-more {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 8px 8px;
 }
 .app-connection {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 10px;
+  gap: 8px;
+  min-height: var(--control-height);
+  padding: 0 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: transparent;
-  font-size: 12px;
+  font-size: var(--font-body);
   color: var(--secondary);
 }
 .app-connection:hover {
@@ -203,14 +529,16 @@
 .app-connection small {
   margin-left: auto;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-label);
 }
 .app-main {
   min-width: 0;
   min-height: 0;
+  margin-left: var(--sidebar-width);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: margin-left var(--sidebar-motion);
 }
 .app-header {
   height: var(--header-height);
@@ -235,25 +563,13 @@
   min-width: 0;
 }
 .app-header h1 {
-  font-size: 13px;
+  font-size: var(--font-body);
   font-weight: 550;
   margin: 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.app-model {
-  width: 220px;
-}
-.app-model [data-ui="select-trigger"] {
-  border-color: transparent;
-  background: transparent;
-  box-shadow: none;
-  font-size: 12px;
-}
-.app-model [data-ui="select-trigger"]:hover {
-  background: var(--hover);
 }
 .app-banner {
   margin: 0;
@@ -278,7 +594,7 @@
   min-height: 0;
   overflow: hidden;
 }
-.app-view > .page-sheet {
+.app-view .page-sheet {
   height: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -287,20 +603,6 @@
      块与块之间被撑出上百像素的空隙 —— 按内容排，多余的留在底部。 */
   align-content: start;
 }
-/* 侧栏列表滚自己的，正文与详情各自独立滚动。 */
-.app-conversations .search-field.is-compact {
-  margin: 0 0 8px;
-}
-.app-section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-}
-.app-section-head .icon-button[aria-pressed="true"] {
-  color: var(--text);
-  background: var(--selected);
-}
 .app-nav-badge {
   margin-left: auto;
   min-width: 18px;
@@ -308,12 +610,13 @@
   border-radius: 999px;
   background: var(--solid);
   color: var(--inverse);
-  font-size: 10px;
+  font-size: var(--font-label);
   line-height: 16px;
   text-align: center;
 }
 .app-conversations li {
   position: relative;
+  min-width: 0;
   --row-bg: transparent;
 }
 .app-conversations li:hover {
@@ -323,6 +626,12 @@
 .app-conversations li.is-current:hover {
   --row-bg: var(--selected);
 }
+.app-conversations li.app-group,
+.app-conversations li.app-group:hover,
+.app-conversations li.app-group.is-current,
+.app-conversations li.app-group.is-current:hover {
+  --row-bg: transparent;
+}
 /* 操作按钮浮在标题之上，不占布局宽度 —— 否则 hover 会把整行撑宽，
    在固定宽度的侧栏里变成横向溢出。 */
 .app-conversation-actions {
@@ -330,16 +639,29 @@
   inset-inline-end: 2px;
   top: 50%;
   translate: 0 -50%;
-  display: none;
+  display: flex;
   align-items: center;
   gap: 1px;
   padding-inline-start: 14px;
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
   background: linear-gradient(90deg, transparent, var(--row-bg) 14px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(6px);
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-enter),
+    visibility var(--motion-fast) var(--ease-standard);
 }
-.app-conversations li:hover .app-conversation-actions,
-.app-conversations li:focus-within .app-conversation-actions {
-  display: flex;
+.app-conversations li:hover > .app-conversation-actions,
+.app-conversations li:focus-within > .app-conversation-actions,
+.app-group-head:hover > .app-conversation-actions,
+.app-group-head:focus-within > .app-conversation-actions {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
 }
 .app-conversation-actions .icon-button {
   width: 24px;
@@ -361,12 +683,12 @@
 }
 .app-conversation-flag {
   font-style: normal;
-  font-size: 10px;
+  font-size: var(--font-label);
   color: var(--muted);
 }
 .app-conversation-empty {
   padding: 10px;
-  font-size: 12px;
+  font-size: var(--font-meta);
   color: var(--muted);
 }
 .app-conversation-rename {
@@ -376,15 +698,20 @@
   width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-body);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+::view-transition-group(*) {
+  animation-duration: var(--motion-fast);
+  animation-timing-function: var(--ease-enter);
 }
 @media (max-width: 1000px) {
-  .app-shell {
-    --sidebar-width: 210px;
-  }
   .app-header {
     padding: 0 22px;
   }

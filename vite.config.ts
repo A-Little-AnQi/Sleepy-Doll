@@ -11,6 +11,18 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5173,
+    proxy: {
+      "/ipc": {
+        target: "http://127.0.0.1:47124",
+        changeOrigin: true,
+        timeout: 120_000,
+        proxyTimeout: 120_000,
+      },
+      "/dev": {
+        target: "http://127.0.0.1:47124",
+        changeOrigin: true,
+      },
+    },
     watch: process.env.WSL_DISTRO_NAME
       ? {
           usePolling: true,

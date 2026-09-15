@@ -10,7 +10,14 @@ import {
 import { Select } from "../components/Select";
 import { ModelsPage } from "./ModelsPage";
 import { BridgePage } from "./BridgePage";
-type Section = "settings" | "models" | "bridge";
+import { MotionSwitch } from "../components/MotionSwitch";
+import {
+  readReducedMotion,
+  readTheme,
+  writeReducedMotion,
+  writeTheme,
+} from "../appearance";
+type Section = "settings" | "models" | "bridge" | "sponsor";
 export function SettingsPage({
   bootstrap,
   section,
@@ -22,22 +29,16 @@ export function SettingsPage({
   onSection(section: Section): void;
   reload(): Promise<void>;
 }) {
-  const [motion, setMotion] = useState(
-    () => localStorage.getItem("sleepy-doll-reduced-motion") === "true",
-  );
-  const [theme, setTheme] = useState(
-    () => localStorage.getItem("sleepy-doll-theme") ?? "light",
-  );
+  const [motion, setMotion] = useState(readReducedMotion);
+  const [theme, setTheme] = useState(readTheme);
   const [sendKey, setSendKey] = useState(
     () => localStorage.getItem("sleepy-doll-send-key") ?? "enter",
   );
   useEffect(() => {
-    document.documentElement.dataset.reducedMotion = String(motion);
-    localStorage.setItem("sleepy-doll-reduced-motion", String(motion));
+    writeReducedMotion(motion);
   }, [motion]);
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem("sleepy-doll-theme", theme);
+    writeTheme(theme);
   }, [theme]);
   const [copied, setCopied] = useState(false);
   return (
@@ -48,6 +49,7 @@ export function SettingsPage({
             { id: "settings", name: "通用", Icon: SettingsIcon },
             { id: "models", name: "模型", Icon: ModelIcon },
             { id: "bridge", name: "BetterGI", Icon: BridgeIcon },
+            { id: "sponsor", name: "赞助作者", Icon: BrandIcon },
           ] as const
         ).map(({ id, name, Icon }) => (
           <button
@@ -61,11 +63,14 @@ export function SettingsPage({
           </button>
         ))}
       </nav>
-      <div className="settings-content" data-motion="panel">
+      <div className="settings-content">
+        <MotionSwitch viewKey={section} kind="panel">
         {section === "models" ? (
           <ModelsPage bootstrap={bootstrap} reload={reload} />
         ) : section === "bridge" ? (
           <BridgePage bootstrap={bootstrap} reload={reload} />
+        ) : section === "sponsor" ? (
+          <SponsorNote />
         ) : (
           <div className="settings-general">
             <h2>通用</h2>
@@ -80,7 +85,9 @@ export function SettingsPage({
                     { value: "light", label: "浅色" },
                     { value: "dark", label: "深色" },
                   ]}
-                  onChange={setTheme}
+                  onChange={(value) =>
+                    setTheme(value === "dark" ? "dark" : "light")
+                  }
                 />
               </div>
               <div className="setting-row">
@@ -142,7 +149,24 @@ export function SettingsPage({
             </div>
           </div>
         )}
+        </MotionSwitch>
       </div>
     </div>
+  );
+}
+
+function SponsorNote() {
+  return (
+    <aside className="settings-sponsor">
+      <h2>赞助作者</h2>
+      <p>
+        业余时间做的小工具。如果用得顺手，扫一张收款码请我喝杯咖啡就好。
+      </p>
+      <div
+        className="settings-sponsor-qr"
+        role="img"
+        aria-label="收款二维码"
+      />
+    </aside>
   );
 }

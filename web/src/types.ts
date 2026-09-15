@@ -1,3 +1,5 @@
+import type { GroupLayout } from "./conversation-groups";
+
 export interface ModelInfo {
   id: string;
   name: string;
@@ -38,7 +40,7 @@ export interface ConversationInfo {
   updatedAt: string;
   pinned?: boolean;
   archived?: boolean;
-  /** 会话自己的模型选择；为空表示跟随默认模型。 */
+  /** 会话绑定的模型。已被删除时由运行时回落到默认模型。 */
   modelId?: string | null;
   taskCount?: number;
 }
@@ -90,7 +92,6 @@ export interface TaskInfo {
   createdAt: string;
   updatedAt: string;
   modelId?: string | null;
-  chatOnly?: boolean;
   source?:
     | { kind: "agent" }
     | { kind: "savedStrategy"; strategyId: string }
@@ -271,6 +272,45 @@ export interface PermissionState {
   levels: PermissionLevel[];
 }
 
+/**
+ * 旧 mock 的 bootstrap 没有 permission 字段。正式运行时会带上完整清单；
+ * 这里只垫一层，避免预览整页崩掉。文案与 `PermissionMode::levels` 对齐。
+ */
+export const PREVIEW_PERMISSION: PermissionState = {
+  mode: "standard",
+  label: "替我审批",
+  description: "普通修改直接执行；删除文件和大幅改配置才问你一次",
+  levels: [
+    {
+      value: "planOnly",
+      label: "只读",
+      description: "只查询和阅读，任何修改都不执行",
+    },
+    {
+      value: "askEach",
+      label: "请求审批",
+      description: "每次修改前都问你一次",
+    },
+    {
+      value: "standard",
+      label: "替我审批",
+      description: "普通修改直接执行；删除文件和大幅改配置才问你一次",
+    },
+    {
+      value: "fullAccess",
+      label: "完全控制",
+      description: "一律直接执行，不再询问。删除和大范围覆盖也直接做",
+    },
+  ],
+};
+
+export function withPermission(bootstrap: Bootstrap): Bootstrap {
+  if (bootstrap.permission?.mode && bootstrap.permission.levels?.length) {
+    return bootstrap;
+  }
+  return { ...bootstrap, permission: PREVIEW_PERMISSION };
+}
+
 export interface Bootstrap {
   preview?: boolean;
   /** Absolute path of the configuration file, so the interface can point at it
@@ -281,6 +321,7 @@ export interface Bootstrap {
   plugins: PluginInfo[];
   tools: ToolInfo[];
   conversations: ConversationInfo[];
+  conversationGroups?: GroupLayout;
   tasks: TaskInfo[];
   strategies: SavedStrategy[];
   workflows: TaskSummary[];

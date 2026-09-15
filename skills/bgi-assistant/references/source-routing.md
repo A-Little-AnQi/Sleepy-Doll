@@ -46,4 +46,4 @@
 | 七圣召唤策略 | `repo/tcg/` |
 | BetterGI JS 可用 API | `bettergi.d.ts` |
 
-地图追踪选择先看 `repo.json` 的目录树，再读取完整候选父节点下的 README 与叶子元数据。叶子文件用于判断要求和内容，默认执行仍是目标目录或作者包父节点。
+地图追踪选择先看 `bgi.user.resolve` 返回的父节点与直接子目录名。不要读取完整候选父节点下的全部叶子元数据。只有 `verdict=create` 且必须区分互斥作者包时，才读取该父节点的一份 README。

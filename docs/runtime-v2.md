@@ -48,8 +48,7 @@ only when Bridge advertises idempotency; the original key is reused. Without tha
 feature the result remains unknown and the lease is retained.
 
 On restart, known Jobs are reconciled before continuing. Missing Job identity or a
-changed Bridge instance leaves the run in `needsReview`. An explicit `run.resume`
-rechecks evidence without manufacturing another game attempt. Unknown cancellation
+changed Bridge instance leaves the run in `needsReview`. Unknown cancellation
 does not release the game lease. A completed Job remains under its lease until local
 postcondition verification has finished.
 
@@ -126,7 +125,7 @@ of a call whose termination cannot be established leaves an unknown outcome.
 
 - `run.submit`: prompt, optional conversation ID, required stable client key for
   deduplication, optional duration. `task.submit/get/cancel` remain compatibility names.
-- `run.get`, `run.cancel`, `run.resume`: operate on the persisted run ID.
+- `run.get`, `run.cancel`: operate on the persisted run ID.
 - `run.input`: add text for a decision/step boundary or answer a clarification.
 - `approval.respond`: one-time response to an unexpired approval ID.
 - `events.read`: conversation ID, `after` sequence and bounded `waitMs`; returns up to

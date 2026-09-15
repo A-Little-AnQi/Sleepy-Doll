@@ -137,6 +137,7 @@ impl AppController {
                 | "bridge.setEnabled"
                 | "bridge.restore"
                 | "model.save"
+                | "model.delete"
                 | "skill.setEnabled"
                 | "plugin.setEnabled"
                 | "plugin.install"
@@ -188,7 +189,6 @@ impl AppController {
                     params["conversationId"].as_str(),
                     &key,
                     params["durationSec"].as_i64(),
-                    params["mode"].as_str() == Some("chatOnly"),
                     params["modelId"].as_str(),
                 )?))
             }
@@ -207,9 +207,6 @@ impl AppController {
                 )?;
                 Ok(json!({"accepted":true}))
             }
-            "run.resume" => Ok(crate::runtime::types::public_run(
-                &self.supervisor.journal.reopen(required(&params, "id")?)?,
-            )),
             "approval.respond" => Ok(serde_json::to_value(
                 self.supervisor.journal.decide(
                     required(&params, "id")?,
@@ -284,21 +281,28 @@ impl AppController {
                 )?;
                 Ok(json!({"saved":true}))
             }
+            "conversation.groups.save" => {
+                let layout: crate::runtime::store::journal::GroupLayout =
+                    serde_json::from_value(params.clone())?;
+                self.supervisor.journal.save_conversation_groups(&layout)?;
+                Ok(json!({"saved":true}))
+            }
             "conversation.setModel" => {
                 let id = required(&params, "id")?;
-                let model = params["modelId"].as_str().filter(|value| !value.is_empty());
-                if let Some(model) = model
-                    && !self
-                        .config
-                        .lock()
-                        .unwrap()
-                        .models
-                        .iter()
-                        .any(|entry| entry.id == model)
+                let model = required(&params, "modelId")?;
+                if !self
+                    .config
+                    .lock()
+                    .unwrap()
+                    .models
+                    .iter()
+                    .any(|entry| entry.id == model)
                 {
                     return Err(Error::Config("模型配置不存在".into()));
                 }
-                self.supervisor.journal.set_conversation_model(id, model)?;
+                self.supervisor
+                    .journal
+                    .set_conversation_model(id, Some(model))?;
                 Ok(json!({"saved":true,"modelId":model}))
             }
             "conversation.delete" => {
@@ -657,6 +661,7 @@ impl AppController {
                 self.reload_runtime()?;
                 Ok(json!({"saved":true}))
             }
+            "model.delete" => self.delete_model(required(&params, "id")?),
             "skill.setEnabled" => {
                 let name = required(&params, "name")?;
                 let enabled = params["enabled"]
@@ -968,6 +973,7 @@ impl AppController {
     }
 
     fn bootstrap(&self) -> Result<Value> {
+        self.ensure_conversation_models()?;
         let extensions = self.extensions.read().unwrap();
         let config = self.config.lock().expect("config mutex poisoned");
         let models = config
@@ -1060,7 +1066,7 @@ impl AppController {
             json!({"enabled":false,"connected":false,"baseUrl":config.bridge.base_url})
         };
         Ok(
-            json!({"preview":cfg!(feature="mock"),"permission":permission,"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.supervisor.task_summaries(None)?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"bridge":bridge_status}),
+            json!({"preview":cfg!(feature="mock"),"permission":permission,"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.supervisor.task_summaries(None)?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"conversationGroups":self.supervisor.journal.conversation_groups()?,"bridge":bridge_status}),
         )
     }
 
@@ -1109,6 +1115,28 @@ impl AppController {
         AppConfig::set_active(&self.config_path, model_id)?;
         self.reload_runtime()?;
         Ok(json!({"activeModel":model_id}))
+    }
+
+    fn delete_model(&self, id: &str) -> Result<Value> {
+        let active = AppConfig::delete_model(&self.config_path, id)?;
+        self.reload_runtime()?;
+        self.ensure_conversation_models()?;
+        Ok(json!({"deleted":true,"activeModel":active}))
+    }
+
+    fn ensure_conversation_models(&self) -> Result<()> {
+        let (ids, default) = {
+            let config = self.config.lock().expect("config mutex poisoned");
+            (
+                config
+                    .models
+                    .iter()
+                    .map(|model| model.id.clone())
+                    .collect::<Vec<_>>(),
+                config.active().id.clone(),
+            )
+        };
+        self.supervisor.journal.rebind_models(&ids, &default)
     }
 
     fn reload_runtime(&self) -> Result<()> {

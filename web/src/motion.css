@@ -1,9 +1,18 @@
 :root {
   --motion-fast: 120ms;
-  --motion-base: 190ms;
-  --motion-slow: 260ms;
+  --motion-base: 240ms;
+  --motion-slow: 320ms;
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
-  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-enter: cubic-bezier(0.22, 0.08, 0.16, 1);
+}
+
+.motion-switch {
+  min-width: 0;
+  min-height: 0;
+}
+.app-view > .motion-switch {
+  width: 100%;
+  height: 100%;
 }
 
 [data-motion="page"] {
@@ -91,16 +100,18 @@ dialog[open]::backdrop {
 @keyframes page-enter {
   from {
     opacity: 0;
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
+    transform: none;
   }
 }
 
 @keyframes panel-enter {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;

@@ -74,8 +74,9 @@ export function Select({ value, options, onChange, label, disabled }: Props) {
         Math.max(anchor.width, 240),
         window.innerWidth - MARGIN * 2,
       );
+      // 触发器比菜单窄时从左缘往右长，避免窄工具条把 240px 菜单拽进侧栏。
       const left = Math.min(
-        Math.max(MARGIN, anchor.right - width),
+        Math.max(MARGIN, anchor.width < 240 ? anchor.left : anchor.right - width),
         window.innerWidth - width - MARGIN,
       );
       const below = window.innerHeight - anchor.bottom - GAP - MARGIN;

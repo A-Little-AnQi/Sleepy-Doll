@@ -17,6 +17,7 @@ use context::message;
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
+    path::Path,
     sync::{Arc, Mutex, OnceLock, RwLock},
     time::Duration,
 };
@@ -286,7 +287,6 @@ impl Supervisor {
         conversation: Option<&str>,
         key: &str,
         duration: Option<i64>,
-        chat_only: bool,
         model: Option<&str>,
     ) -> Result<Run> {
         if self.shutting_down.load(std::sync::atomic::Ordering::SeqCst) {
@@ -337,13 +337,10 @@ impl Supervisor {
             key,
             duration,
             Some(&resolved),
-            chat_only,
         )?;
-        // 先把模型写回会话，卡片和顶栏下次读到的就是同一个选择。
-        if requested.is_some() {
-            self.journal
-                .set_conversation_model(&conversation, Some(&resolved))?;
-        }
+        // 每个对话都要有绑定的模型。删掉的配置在上面已经回落到默认。
+        self.journal
+            .set_conversation_model(&conversation, Some(&resolved))?;
         Ok(run)
     }
 
@@ -867,12 +864,7 @@ impl Supervisor {
                 attachment_text,
             );
             let plan = self.journal.plan(&run.id)?;
-            // 「仅聊天」不向模型提供任何外部工具；它仍可解释对话里已有的内容。
-            let definitions = if run.chat_only {
-                Vec::new()
-            } else {
-                self.definitions(&exposed)
-            };
+            let definitions = self.definitions(&exposed);
             let definitions_json = serde_json::to_string(&definitions)?;
             // `context::build` 的预算以字符计，工具契约也按字符扣减。
             let reserve = definitions_json.chars().count();
@@ -1852,6 +1844,27 @@ impl Supervisor {
                             "当前为只读规划模式，不能修改配置或执行命令".into(),
                         ));
                     }
+                    if id == "bgi.run_script_group" {
+                        let host = bridge.get("/bridge/v1/host", cancel).await?;
+                        if let Some(root) = host["userPath"].as_str() {
+                            let group = arguments["name"]
+                                .as_str()
+                                .or_else(|| arguments["groupName"].as_str())
+                                .or_else(|| arguments["scriptGroupName"].as_str())
+                                .unwrap_or("");
+                            if let Some(missing) = crate::bridge::resolve::missing_paths_for_group(
+                                Path::new(root),
+                                group,
+                            ) {
+                                if !missing.is_empty() {
+                                    return Err(Error::Tool(format!(
+                                        "配置组「{group}」引用的路径已经不在本机：{}。先更新或订阅这些路径，不要空跑。",
+                                        missing.join("、")
+                                    )));
+                                }
+                            }
+                        }
+                    }
                     let mut catalog = self.catalog.clone();
                     catalog.capabilities.insert(
                         id.into(),
@@ -2151,7 +2164,7 @@ impl Supervisor {
                 Ok(json!({"plan":plan,"attempts":self.journal.attempts(&run.id)?}))
             }
             // 用户文件是本地文件，不是游戏对象，也不属于任何插件。
-            "bgi.user.list" | "bgi.user.read" | "bgi.user.inspect_script" => {
+            "bgi.user.list" | "bgi.user.read" | "bgi.user.inspect_script" | "bgi.user.resolve" => {
                 let registry = self.tools().clone();
                 let call = call.clone();
                 registry

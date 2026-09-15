@@ -2,7 +2,7 @@ use crate::error::{Error, Result};
 use crate::model::ToolCall;
 use crate::runtime::types::*;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     path::Path,
@@ -18,9 +18,28 @@ pub struct ConversationSummary {
     pub updated_at: String,
     pub pinned: bool,
     pub archived: bool,
-    /// 会话自己的模型选择。为空表示跟随默认模型。
+    /// 会话绑定的模型。为空或指向已删除配置时，运行时回落到默认模型。
     pub model_id: Option<String>,
     pub task_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationGroup {
+    pub id: String,
+    pub name: String,
+    pub collapsed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupLayout {
+    #[serde(default)]
+    pub groups: Vec<ConversationGroup>,
+    #[serde(default)]
+    pub membership: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub order: Vec<String>,
 }
 
 /// 会话列表的筛选与分页。默认不含已归档会话，也不把全部历史一次给前端。
@@ -133,7 +152,6 @@ impl Journal {
         key: &str,
         duration: i64,
         model_id: Option<&str>,
-        chat_only: bool,
     ) -> Result<Run> {
         let mut db = self.connection.lock().unwrap();
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -181,7 +199,6 @@ impl Journal {
             error: None,
             source: RunSource::Agent,
             model_id: model_id.map(str::to_owned),
-            chat_only,
         };
         tx.execute("INSERT OR IGNORE INTO conversations(id,title,created_at,updated_at) VALUES(?1,?2,?3,?3)",params![conversation,prompt.chars().take(120).collect::<String>(),stamp])?;
         tx.execute(
@@ -231,36 +248,6 @@ impl Journal {
             |r| r.get(0),
         )?;
         Ok(serde_json::from_str(&payload)?)
-    }
-    pub fn reopen(&self, id: &str) -> Result<Run> {
-        let mut run = self.get(id)?;
-        if run.state != RunState::NeedsReview {
-            return Err(Error::Conflict("只有待核对运行可以恢复".into()));
-        }
-        let revision = run.revision;
-        run.revision += 1;
-        run.state = RunState::Recovering;
-        run.error = None;
-        let mut db = self.connection.lock().unwrap();
-        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if tx.execute(
-            "UPDATE runtime_runs SET state=?1,revision=?2,payload=?3 WHERE id=?4 AND revision=?5",
-            params![
-                serde_json::to_string(&run.state)?,
-                run.revision,
-                serde_json::to_string(&run)?,
-                id,
-                revision
-            ],
-        )? != 1
-        {
-            return Err(Error::Conflict("运行状态已更新".into()));
-        }
-        Self::insert_event(&tx, &run, "run.changed", &public_run(&run))?;
-        Self::insert_checkpoint(&tx, &run)?;
-        tx.commit()?;
-        self.touch();
-        Ok(run)
     }
     pub fn list(&self) -> Result<Vec<Run>> {
         self.query_runs("SELECT payload FROM runtime_runs ORDER BY rowid DESC LIMIT 100")
@@ -601,7 +588,7 @@ impl Journal {
         })
     }
 
-    /// 置顶优先，然后按最近活动。归档只在显式要求时出现。
+    /// 最近活动的会话在前。
     pub fn conversations_matching(
         &self,
         query: &ConversationQuery,
@@ -615,7 +602,7 @@ impl Journal {
              FROM conversations c
              WHERE (?1=1 OR c.archived_at IS NULL)
                AND (?2 IS NULL OR instr(lower(c.title),?2)>0)
-             ORDER BY c.pinned DESC, c.updated_at DESC
+             ORDER BY c.updated_at DESC
              LIMIT ?3 OFFSET ?4",
         )?;
         Ok(statement
@@ -681,12 +668,99 @@ impl Journal {
         Ok(())
     }
 
+    /// 没有绑定或绑的配置已经不在了，都改成当前的默认模型。
+    pub fn rebind_models(&self, valid: &[String], default: &str) -> Result<()> {
+        let connection = self.connection.lock().unwrap();
+        connection.execute(
+            "UPDATE conversations SET model_id=?1 WHERE model_id IS NULL OR trim(model_id)=''",
+            [default],
+        )?;
+        let stale: Vec<String> = {
+            let mut query = connection.prepare(
+                "SELECT DISTINCT model_id FROM conversations WHERE model_id IS NOT NULL",
+            )?;
+            query
+                .query_map([], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?
+        };
+        for id in stale {
+            if !valid.iter().any(|known| known == &id) {
+                connection.execute(
+                    "UPDATE conversations SET model_id=?1 WHERE model_id=?2",
+                    params![default, id],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     /// 归档可撤销，不删除消息，也不影响来源快捷任务。
     pub fn set_conversation_archived(&self, id: &str, archived: bool) -> Result<()> {
         self.connection.lock().unwrap().execute(
             "UPDATE conversations SET archived_at=?1 WHERE id=?2",
             params![if archived { Some(now()) } else { None }, id],
         )?;
+        self.touch();
+        Ok(())
+    }
+
+    pub fn conversation_groups(&self) -> Result<GroupLayout> {
+        let connection = self.connection.lock().unwrap();
+        let mut statement = connection.prepare(
+            "SELECT id,name,collapsed FROM conversation_groups ORDER BY position, id",
+        )?;
+        let groups = statement
+            .query_map([], |row| {
+                Ok(ConversationGroup {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    collapsed: row.get::<_, i64>(2)? != 0,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut members = connection.prepare(
+            "SELECT id, group_id FROM conversations WHERE group_id IS NOT NULL AND trim(group_id) != ''",
+        )?;
+        let membership = members
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|(_, group_id)| groups.iter().any(|group| group.id == *group_id))
+            .collect();
+        Ok(GroupLayout {
+            groups,
+            membership,
+            order: Vec::new(),
+        })
+    }
+
+    pub fn save_conversation_groups(&self, layout: &GroupLayout) -> Result<()> {
+        let mut db = self.connection.lock().unwrap();
+        let tx = db.transaction()?;
+        tx.execute("DELETE FROM conversation_groups", [])?;
+        for (position, group) in layout.groups.iter().enumerate() {
+            let name = group.name.trim();
+            if name.is_empty() || group.id.trim().is_empty() {
+                continue;
+            }
+            tx.execute(
+                "INSERT INTO conversation_groups(id,name,position,collapsed) VALUES(?1,?2,?3,?4)",
+                params![group.id, name, position as i64, group.collapsed as i32],
+            )?;
+        }
+        tx.execute("UPDATE conversations SET group_id=NULL", [])?;
+        for (conversation_id, group_id) in &layout.membership {
+            if layout.groups.iter().any(|group| group.id == *group_id) {
+                tx.execute(
+                    "UPDATE conversations SET group_id=?1 WHERE id=?2",
+                    params![group_id, conversation_id],
+                )?;
+            }
+        }
+        tx.commit()?;
+        drop(db);
         self.touch();
         Ok(())
     }
@@ -1135,7 +1209,6 @@ impl Journal {
             key,
             duration,
             None,
-            false,
         )?;
         run.source = RunSource::SavedStrategy {
             strategy_id: strategy.id.clone(),
@@ -1163,7 +1236,6 @@ impl Journal {
             key,
             duration,
             None,
-            false,
         )?;
         run.source = RunSource::SavedWorkflow {
             workflow_id: task_id.to_owned(),

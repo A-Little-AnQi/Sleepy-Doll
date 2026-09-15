@@ -74,7 +74,7 @@ const KEEP_RECENT_RESULTS: usize = 1;
 fn reobtainable(name: &str) -> bool {
     matches!(
         name,
-        "bgi.user.list" | "bgi.user.read" | "bgi.user.inspect_script"
+        "bgi.user.list" | "bgi.user.read" | "bgi.user.inspect_script" | "bgi.user.resolve"
     ) || matches!(
         name,
         "bgi.state.get"

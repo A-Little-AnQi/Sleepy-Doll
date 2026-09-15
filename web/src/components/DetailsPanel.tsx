@@ -10,6 +10,7 @@ import type {
 } from "../types";
 import { CloseIcon, HistoryIcon } from "./icons";
 import { TaskCard, type TaskActions } from "./TaskCard";
+import { MotionSwitch } from "./MotionSwitch";
 import "./details-panel.css";
 
 /**
@@ -119,6 +120,10 @@ export function DetailsPanel({
       </header>
       {error && <Toast message={error} onDismiss={() => setError("")} />}
       <div className="details-body">
+        <MotionSwitch
+          viewKey={`${conversationId ?? "none"}:${selectedTask ?? "list"}`}
+          kind="panel"
+        >
         {selectedTask ? (
           detail ? (
             <TaskDetail
@@ -151,6 +156,7 @@ export function DetailsPanel({
             <p>说明你想反复做的那件事，Agent 会把它做成一键运行的任务。</p>
           </div>
         )}
+        </MotionSwitch>
       </div>
     </aside>
   );

@@ -389,6 +389,41 @@ impl AppConfig {
             Ok(())
         })
     }
+
+    pub fn delete_model(path: impl AsRef<Path>, id: &str) -> Result<String> {
+        let mut active = String::new();
+        update_raw(path.as_ref(), |value| {
+            let current_active = value["activeModel"].as_str().unwrap_or("").to_owned();
+            let next_active = {
+                let models = value["models"]
+                    .as_array_mut()
+                    .ok_or_else(|| Error::Config("models must be an array".into()))?;
+                if models.len() <= 1 {
+                    return Err(Error::Config("至少保留一个模型作为默认".into()));
+                }
+                let before = models.len();
+                models.retain(|model| model["id"].as_str() != Some(id));
+                if models.len() == before {
+                    return Err(Error::Config("模型配置不存在".into()));
+                }
+                if current_active == id {
+                    models[0]["id"].as_str().unwrap_or("").to_owned()
+                } else {
+                    current_active
+                }
+            };
+            value["activeModel"] = serde_json::Value::String(next_active.clone());
+            if let Some(fallbacks) = value["agent"]["fallbackModels"].as_array_mut() {
+                fallbacks.retain(|entry| {
+                    let current = entry.as_str();
+                    current != Some(id) && current != Some(next_active.as_str())
+                });
+            }
+            active = next_active;
+            Ok(())
+        })?;
+        Ok(active)
+    }
 }
 
 pub const USAGE: &str = "\
@@ -834,5 +869,65 @@ mod tests {
             hooks: vec![],
         };
         assert!(config.validate().is_err());
+    }
+
+    fn write_models_config(directory: &Path, active: &str, models: usize) -> PathBuf {
+        let path = directory.join("config.json");
+        let entries: Vec<serde_json::Value> = (0..models)
+            .map(|index| {
+                let id = if index == 0 { "a" } else { "b" };
+                serde_json::json!({
+                    "id": id,
+                    "name": id,
+                    "protocol": "openai-chat",
+                    "model": "m",
+                    "baseUrl": "http://127.0.0.1"
+                })
+            })
+            .collect();
+        fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({
+                "version": 1,
+                "activeModel": active,
+                "models": entries,
+                "agent": {
+                    "systemPrompt": "test",
+                    "fallbackModels": if models > 1 {
+                        serde_json::json!(["b"])
+                    } else {
+                        serde_json::json!([])
+                    }
+                },
+                "bridge": {"enabled": false, "baseUrl": "http://127.0.0.1"},
+                "storage": {"database": directory.join("test.db")}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        path
+    }
+
+    #[test]
+    fn refuses_to_delete_the_last_model() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = write_models_config(directory.path(), "a", 1);
+        let error = AppConfig::delete_model(&path, "a").unwrap_err().to_string();
+        assert!(error.contains("至少保留一个模型作为默认"));
+    }
+
+    #[test]
+    fn deleting_the_default_model_promotes_another() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = write_models_config(directory.path(), "a", 2);
+        assert_eq!(AppConfig::delete_model(&path, "a").unwrap(), "b");
+        let config: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(config["activeModel"], "b");
+        assert_eq!(config["models"].as_array().unwrap().len(), 1);
+        assert!(config["agent"]["fallbackModels"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 }

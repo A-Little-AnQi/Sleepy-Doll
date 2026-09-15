@@ -14,3 +14,40 @@
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   align-content: start;
 }
+.record-list {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.record {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.record-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.record-title {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.record small {
+  color: var(--muted);
+  font-size: 11px;
+}

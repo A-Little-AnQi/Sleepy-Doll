@@ -5,6 +5,7 @@
   min-height: 0;
   background: var(--surface);
   border-left: 1px solid var(--border);
+  animation: panel-enter var(--motion-slow) var(--ease-enter) both;
 }
 .details-head {
   display: flex;
@@ -115,6 +116,7 @@
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
+  animation: page-enter var(--motion-slow) var(--ease-enter) both;
 }
 .details-scrim {
   position: fixed;
@@ -123,4 +125,5 @@
   background: #0006;
   border: 0;
   padding: 0;
+  animation: backdrop-enter var(--motion-base) ease-out both;
 }

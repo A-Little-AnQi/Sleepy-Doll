@@ -233,6 +233,13 @@ class Session {
             });
           }
           failures = 0;
+          if (
+            !batch.events.length &&
+            !window.ipc &&
+            import.meta.env.MODE !== "test"
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
         } catch (error) {
           failures++;
           this.publish({

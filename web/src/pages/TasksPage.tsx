@@ -10,6 +10,7 @@ import {
 } from "../session";
 import { Toast } from "../components/Toast";
 import type { Bootstrap, TaskInfo, TaskSummary } from "../types";
+import { MotionSwitch } from "../components/MotionSwitch";
 import "./TasksPage.css";
 
 type Filter = "all" | "runnable" | "attention" | "archived";
@@ -197,6 +198,7 @@ export function TasksPage({
           </div>
         )}
       </div>
+      <MotionSwitch viewKey={tab} kind="panel">
       {tab === "tasks" ? (
         visible.length ? (
           <div className="task-grid">
@@ -260,6 +262,7 @@ export function TasksPage({
           </p>
         </div>
       )}
+      </MotionSwitch>
     </div>
   );
 }
@@ -289,7 +292,6 @@ function RunRow({
             minute: "2-digit",
           })}
           {run.source?.kind === "savedWorkflow" && " · 快捷任务"}
-          {run.chatOnly && " · 仅聊天"}
         </small>
         {run.error && <small>{run.error}</small>}
       </div>
