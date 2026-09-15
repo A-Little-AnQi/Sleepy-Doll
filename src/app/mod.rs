@@ -26,6 +26,7 @@ struct ModelView<'a> {
     base_url: &'a str,
     active: bool,
     timeout_ms: u64,
+    context_window: u64,
 }
 
 struct Extensions {
@@ -987,6 +988,7 @@ impl AppController {
                 base_url: &model.base_url,
                 active: model.id == config.active_model,
                 timeout_ms: model.options.timeout_ms,
+                context_window: model.options.context_window,
             })
             .collect::<Vec<_>>();
         let permission = {

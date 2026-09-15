@@ -868,13 +868,26 @@ impl Supervisor {
             let definitions_json = serde_json::to_string(&definitions)?;
             // `context::build` 的预算以字符计，工具契约也按字符扣减。
             let reserve = definitions_json.chars().count();
-            let messages =
+            let packed =
                 context::build(system, history.clone(), char_budget.saturating_sub(reserve))?;
-            // 必须与 token 上限同单位：它和 `input_tokens`/`output_tokens` 都按
-            // token 计，序列化字节数不是。
-            let estimated = context::estimate_messages_tokens(&messages)
-                + context::estimate_tokens(&definitions_json)
-                + 1024;
+            let estimated = packed.tokens + context::estimate_tokens(&definitions_json) + 1024;
+            run.context_tokens = estimated;
+            run.context_window = token_budget;
+            let compacted = packed.compacted();
+            if compacted {
+                self.journal.emit(
+                    run,
+                    "context.compacted",
+                    json!({
+                        "clearedResults": packed.cleared_results,
+                        "droppedGroups": packed.dropped_groups,
+                        "tokens": packed.tokens,
+                        "window": token_budget,
+                    }),
+                )?;
+            }
+            run.context_compacted = run.context_compacted || compacted;
+            let messages = packed.messages;
             let guard = self.model_gate.read().await;
             let model_config = self.config.read().unwrap().clone();
             // 只看当前这一轮的上下文占用。把历轮输入累加起来比，算的是累计

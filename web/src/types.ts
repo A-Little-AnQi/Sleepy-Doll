@@ -8,6 +8,7 @@ export interface ModelInfo {
   baseUrl: string;
   active: boolean;
   timeoutMs?: number;
+  contextWindow?: number;
 }
 
 export interface SkillInfo {
@@ -92,6 +93,12 @@ export interface TaskInfo {
   createdAt: string;
   updatedAt: string;
   modelId?: string | null;
+  inputTokens?: number;
+  outputTokens?: number;
+  usageEstimated?: boolean;
+  contextTokens?: number;
+  contextWindow?: number;
+  contextCompacted?: boolean;
   source?:
     | { kind: "agent" }
     | { kind: "savedStrategy"; strategyId: string }

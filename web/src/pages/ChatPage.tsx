@@ -17,6 +17,10 @@ import { Toast } from "../components/Toast";
 import type { Bootstrap } from "../types";
 import { MotionSwitch } from "../components/MotionSwitch";
 import { resolveConversationModel } from "../models";
+import {
+  estimateMessagesTokens,
+  formatTokens,
+} from "../context-usage";
 
 interface Props {
   bootstrap: Bootstrap;
@@ -53,6 +57,14 @@ export function ChatPage({
     conversation,
     pendingModel,
   );
+  const contextWindow =
+    task?.contextWindow ||
+    bootstrap.models.find((entry) => entry.id === selectedModel)
+      ?.contextWindow ||
+    200_000;
+  const contextUsed =
+    task?.contextTokens ??
+    estimateMessagesTokens(messages, [stream, prompt]);
   const current = useRef(conversationId);
   current.current = conversationId;
   const alive = useRef(true);
@@ -424,6 +436,19 @@ export function ChatPage({
               </button>
             )}
             <div className="composer-submit">
+              <div
+                className={`context-meter${contextUsed / contextWindow >= 0.85 ? " is-high" : ""}`}
+                title={
+                  task?.contextCompacted
+                    ? "已压缩较早上下文；完整记录仍保存在本机"
+                    : "当前装进模型的上下文（估算）"
+                }
+              >
+                <span>
+                  {formatTokens(contextUsed)} / {formatTokens(contextWindow)}
+                </span>
+                {task?.contextCompacted ? <em>已压缩</em> : null}
+              </div>
               <div className="composer-menu composer-model">
                 <Select
                   label="模型"

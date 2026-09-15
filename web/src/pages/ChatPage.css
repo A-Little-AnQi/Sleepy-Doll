@@ -158,6 +158,24 @@
   margin-left: auto;
 }
 
+.context-meter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.context-meter.is-high {
+  color: var(--secondary);
+}
+
+.context-meter em {
+  font-style: normal;
+}
+
 .send-action {
   display: grid;
   place-items: center;

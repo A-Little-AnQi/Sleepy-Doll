@@ -855,7 +855,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let journal = Journal::open(&directory.path().join("test.db")).unwrap();
         let mut run = journal
-            .create("go", "c", "round-trip", 1800, None, false)
+            .create("go", "c", "round-trip", 1800, None)
             .unwrap();
         journal.save(&mut run, RunState::Deciding).unwrap();
 

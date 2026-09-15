@@ -68,4 +68,5 @@ it("puts the model picker in the composer instead of following a default option"
     "Mock Anthropic",
   );
   expect(screen.queryByText("跟随默认模型")).toBeNull();
+  expect(screen.getByText("0 / 200k")).toBeTruthy();
 });

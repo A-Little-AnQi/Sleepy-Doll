@@ -128,6 +128,15 @@ pub struct Run {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub usage_estimated: bool,
+    /// 最近一次实际发给模型的上下文占用（token，含系统提示与已压缩后的历史）。
+    #[serde(default)]
+    pub context_tokens: u64,
+    /// 该次请求所用的窗口上限。
+    #[serde(default)]
+    pub context_window: u64,
+    /// 本轮是否已经丢掉或清空过较早上下文。界面只展示这一事实，不再展开细节。
+    #[serde(default)]
+    pub context_compacted: bool,
     #[serde(default)]
     pub message_boundary: i64,
     pub result: Option<String>,

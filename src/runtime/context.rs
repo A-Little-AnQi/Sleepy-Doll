@@ -65,6 +65,28 @@ fn estimate_message_tokens(message: &Message) -> u64 {
 /// 模型仍看得到自己调过什么、返回过什么形状，只是不再带全文。
 const CLEARED_TOOL_RESULT: &str = "[较早的工具结果内容已清除，需要时重新调用]";
 
+/// 发给模型前的上下文。原文仍在 SQLite；这里只是这一轮实际装进窗口的内容。
+#[derive(Debug)]
+pub struct PackedContext {
+    pub messages: Vec<Message>,
+    pub tokens: u64,
+    pub cleared_results: usize,
+    pub dropped_groups: usize,
+}
+
+impl PackedContext {
+    pub fn compacted(&self) -> bool {
+        self.cleared_results > 0 || self.dropped_groups > 0
+    }
+}
+
+impl std::ops::Deref for PackedContext {
+    type Target = [Message];
+    fn deref(&self) -> &Self::Target {
+        &self.messages
+    }
+}
+
 /// 无论如何都保留全文的工具结果条数。留一条就够让模型看到最近一次调用的
 /// 返回；留多了会变成硬下限 —— 恰好这么多条大结果时一条都清不掉，仍然超限。
 const KEEP_RECENT_RESULTS: usize = 1;
@@ -123,7 +145,7 @@ pub fn used(messages: &[Message]) -> usize {
 
 /// Evict entire tool groups, never an isolated tool result. The original transcript
 /// stays in SQLite. This extractive digest cannot introduce facts or permissions.
-pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<Vec<Message>> {
+pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<PackedContext> {
     let mut groups: Vec<Vec<Message>> = Vec::new();
     for m in history {
         if m.role == Role::Tool {
@@ -148,6 +170,8 @@ pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<Vec
     let cost = |g: &Vec<Message>| group_cost(g);
     let mut total = system.chars().count() + groups.iter().map(cost).sum::<usize>();
     let mut removed = Vec::new();
+    let mut cleared_results = 0usize;
+    let mut dropped_groups = 0usize;
 
     // 预算不够时先清旧工具结果的正文，再考虑整组丢弃。占大头的就是这些结果，
     // 而它们的调用与结果配对必须留着 —— 直接报错会让整轮以「超出上下文预算」
@@ -181,11 +205,13 @@ pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<Vec
         let freed = m.content.chars().count() - CLEARED_TOOL_RESULT.chars().count();
         m.content = CLEARED_TOOL_RESULT.into();
         total = total.saturating_sub(freed);
+        cleared_results += 1;
     }
 
     while total + 2048 > budget && groups.len() > 2 {
         let g = groups.remove(0);
         total = total.saturating_sub(cost(&g));
+        dropped_groups += 1;
         if g[0].role == Role::User {
             removed.push(g[0].content.chars().take(180).collect::<String>());
         }
@@ -211,5 +237,66 @@ pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<Vec
         ));
     }
     result.extend(groups.into_iter().flatten());
-    Ok(result)
+    let tokens = estimate_messages_tokens(&result);
+    Ok(PackedContext {
+        messages: result,
+        tokens,
+        cleared_results,
+        dropped_groups,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::ToolCall;
+    use serde_json::json;
+
+    #[test]
+    fn refuses_oversized_recent_messages() {
+        assert!(
+            build(
+                "system".into(),
+                vec![message(Role::User, "a".repeat(5000))],
+                4096
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn clears_stale_tool_results_and_reports_compaction() {
+        let mut older = message(Role::Assistant, "先查");
+        older.tool_calls = vec![ToolCall {
+            id: "old".into(),
+            name: "bgi.state.get".into(),
+            arguments: json!({}),
+        }];
+        let mut older_result = message(Role::Tool, "旧".repeat(3000));
+        older_result.tool_call_id = Some("old".into());
+        let mut newer = message(Role::Assistant, "再查");
+        newer.tool_calls = vec![ToolCall {
+            id: "new".into(),
+            name: "bgi.state.get".into(),
+            arguments: json!({}),
+        }];
+        let mut newer_result = message(Role::Tool, "新".repeat(3000));
+        newer_result.tool_call_id = Some("new".into());
+        let packed = build(
+            "system".into(),
+            vec![
+                older,
+                older_result,
+                newer,
+                newer_result,
+                message(Role::User, "继续"),
+            ],
+            7_000,
+        )
+        .unwrap();
+        assert!(packed.compacted());
+        assert_eq!(packed.cleared_results, 1);
+        assert!(packed.tokens > 0);
+        assert!(packed.iter().any(|m| m.content.contains("已清除")));
+    }
 }
