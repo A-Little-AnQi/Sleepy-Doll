@@ -709,9 +709,8 @@ impl Journal {
 
     pub fn conversation_groups(&self) -> Result<GroupLayout> {
         let connection = self.connection.lock().unwrap();
-        let mut statement = connection.prepare(
-            "SELECT id,name,collapsed FROM conversation_groups ORDER BY position, id",
-        )?;
+        let mut statement = connection
+            .prepare("SELECT id,name,collapsed FROM conversation_groups ORDER BY position, id")?;
         let groups = statement
             .query_map([], |row| {
                 Ok(ConversationGroup {

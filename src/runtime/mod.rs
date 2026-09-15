@@ -331,13 +331,9 @@ impl Supervisor {
             .clone()
             .or(stored)
             .unwrap_or_else(|| self.config.read().unwrap().active().id.clone());
-        let run = self.journal.create(
-            prompt,
-            &conversation,
-            key,
-            duration,
-            Some(&resolved),
-        )?;
+        let run = self
+            .journal
+            .create(prompt, &conversation, key, duration, Some(&resolved))?;
         // 每个对话都要有绑定的模型。删掉的配置在上面已经回落到默认。
         self.journal
             .set_conversation_model(&conversation, Some(&resolved))?;
@@ -1868,13 +1864,13 @@ impl Supervisor {
                             if let Some(missing) = crate::bridge::resolve::missing_paths_for_group(
                                 Path::new(root),
                                 group,
-                            ) {
-                                if !missing.is_empty() {
-                                    return Err(Error::Tool(format!(
-                                        "配置组「{group}」引用的路径已经不在本机：{}。先更新或订阅这些路径，不要空跑。",
-                                        missing.join("、")
-                                    )));
-                                }
+                            )
+                            .filter(|missing| !missing.is_empty())
+                            {
+                                return Err(Error::Tool(format!(
+                                    "配置组「{group}」引用的路径已经不在本机：{}。先更新或订阅这些路径，不要空跑。",
+                                    missing.join("、")
+                                )));
                             }
                         }
                     }

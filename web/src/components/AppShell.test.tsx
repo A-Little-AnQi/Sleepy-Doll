@@ -37,6 +37,7 @@ function stubWide(wide = true) {
     addEventListener() {},
     removeEventListener() {},
     addListener() {},
+    removeListener() {},
     onchange: null,
     dispatchEvent() {
       return false;

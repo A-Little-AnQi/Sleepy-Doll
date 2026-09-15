@@ -20,7 +20,8 @@ export function readLayout(): GroupLayout {
   try {
     const raw = JSON.parse(localStorage.getItem(GROUPS_KEY) ?? "null");
     if (!raw || !Array.isArray(raw.groups)) return emptyLayout();
-    const groups = raw.groups
+    // 显式标注：JSON.parse 返回 any，不标注的话下面 some/find 的参数都是隐式 any。
+    const groups: ConversationGroup[] = raw.groups
       .filter(
         (group: ConversationGroup) =>
           group && typeof group.id === "string" && typeof group.name === "string",

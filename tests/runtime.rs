@@ -19,10 +19,10 @@ fn journal() -> (tempfile::TempDir, Journal) {
 #[test]
 fn durable_submission_is_idempotent_and_conflicts_are_rejected() {
     let (_d, j) = journal();
-    let a = j.create("go", "c", "key", 1800, None, false).unwrap();
-    let b = j.create("go", "c", "key", 1800, None, false).unwrap();
+    let a = j.create("go", "c", "key", 1800, None).unwrap();
+    let b = j.create("go", "c", "key", 1800, None).unwrap();
     assert_eq!(a.id, b.id);
-    assert!(j.create("other", "c", "key", 1800, None, false).is_err());
+    assert!(j.create("other", "c", "key", 1800, None).is_err());
     assert_eq!(j.history(&a).unwrap().len(), 1);
     assert_eq!(j.events("c", 0).unwrap().len(), 1);
 }
@@ -31,7 +31,7 @@ fn durable_submission_is_idempotent_and_conflicts_are_rejected() {
 fn repeated_supplement_is_recorded_once_even_after_run_completion() {
     let (_directory, journal) = journal();
     let mut run = journal
-        .create("first", "conversation", "run-key", 1800, None, false)
+        .create("first", "conversation", "run-key", 1800, None)
         .unwrap();
     journal.save(&mut run, RunState::Deciding).unwrap();
     journal
@@ -62,9 +62,7 @@ fn repeated_supplement_is_recorded_once_even_after_run_completion() {
 #[test]
 fn structured_checkpoint_tracks_run_revision_and_pending_step() {
     let (_d, j) = journal();
-    let mut run = j
-        .create("goal", "c", "checkpoint", 1800, None, false)
-        .unwrap();
+    let mut run = j.create("goal", "c", "checkpoint", 1800, None).unwrap();
     j.save(&mut run, RunState::Deciding).unwrap();
     let plan = PlanRevision {
         revision: 1,
@@ -90,7 +88,7 @@ fn structured_checkpoint_tracks_run_revision_and_pending_step() {
 #[test]
 fn stale_revision_and_terminal_transition_cannot_advance_run() {
     let (_d, j) = journal();
-    let mut a = j.create("go", "c", "key", 1800, None, false).unwrap();
+    let mut a = j.create("go", "c", "key", 1800, None).unwrap();
     let mut stale = a.clone();
     j.save(&mut a, RunState::Deciding).unwrap();
     assert!(j.save(&mut stale, RunState::Deciding).is_err());
@@ -101,7 +99,7 @@ fn stale_revision_and_terminal_transition_cannot_advance_run() {
 #[test]
 fn game_leases_survive_reopen_and_are_not_released_by_other_attempts() {
     let (d, j) = journal();
-    let run = j.create("go", "c", "k", 1800, None, false).unwrap();
+    let run = j.create("go", "c", "k", 1800, None).unwrap();
     let a = j.prepare(&run, "one", json!({}), "game").unwrap();
     let b = j.prepare(&run, "two", json!({}), "game").unwrap();
     assert!(j.acquire(&a).unwrap());
@@ -116,17 +114,17 @@ fn game_leases_survive_reopen_and_are_not_released_by_other_attempts() {
 #[test]
 fn queued_messages_do_not_enter_prior_run_context() {
     let (_d, j) = journal();
-    let a = j.create("first", "c", "1", 1800, None, false).unwrap();
-    j.create("second", "c", "2", 1800, None, false).unwrap();
+    let a = j.create("first", "c", "1", 1800, None).unwrap();
+    j.create("second", "c", "2", 1800, None).unwrap();
     assert_eq!(j.history(&a).unwrap().len(), 1);
 }
 
 #[test]
 fn queued_transcript_groups_answers_under_their_own_run() {
     let (_d, j) = journal();
-    let mut a = j.create("first", "c", "1", 1800, None, false).unwrap();
+    let mut a = j.create("first", "c", "1", 1800, None).unwrap();
     j.save(&mut a, RunState::Deciding).unwrap();
-    let mut b = j.create("second", "c", "2", 1800, None, false).unwrap();
+    let mut b = j.create("second", "c", "2", 1800, None).unwrap();
     j.append_message(&a, &context::message(Role::Assistant, "first answer"))
         .unwrap();
     assert_eq!(j.conversation_messages("c").unwrap().len(), 2);
@@ -143,13 +141,12 @@ fn queued_transcript_groups_answers_under_their_own_run() {
 #[test]
 fn conversation_fork_copies_completed_history_only() {
     let (_d, j) = journal();
-    let mut completed = j.create("first", "c", "fork-1", 1800, None, false).unwrap();
+    let mut completed = j.create("first", "c", "fork-1", 1800, None).unwrap();
     j.save(&mut completed, RunState::Deciding).unwrap();
     j.append_message(&completed, &context::message(Role::Assistant, "done"))
         .unwrap();
     j.finish(&mut completed, RunState::Answered).unwrap();
-    j.create("pending", "c", "fork-2", 1800, None, false)
-        .unwrap();
+    j.create("pending", "c", "fork-2", 1800, None).unwrap();
     let fork = j.fork_conversation("c", None).unwrap();
     let messages = j.conversation_messages(&fork).unwrap();
     assert_eq!(messages.len(), 2);
@@ -159,7 +156,7 @@ fn conversation_fork_copies_completed_history_only() {
 #[test]
 fn finish_cannot_drop_an_acknowledged_supplement() {
     let (_d, j) = journal();
-    let mut run = j.create("first", "c", "1", 1800, None, false).unwrap();
+    let mut run = j.create("first", "c", "1", 1800, None).unwrap();
     j.save(&mut run, RunState::Deciding).unwrap();
     j.input(&run.id, "supplement", "new constraint").unwrap();
     assert!(!j.finish(&mut run, RunState::Answered).unwrap());
@@ -170,7 +167,7 @@ fn finish_cannot_drop_an_acknowledged_supplement() {
 #[test]
 fn approval_is_single_use_and_expiring() {
     let (_d, j) = journal();
-    let mut run = j.create("approval", "c", "key", 1800, None, false).unwrap();
+    let mut run = j.create("approval", "c", "key", 1800, None).unwrap();
     j.save(&mut run, RunState::Deciding).unwrap();
     j.save(&mut run, RunState::Executing).unwrap();
     j.save(&mut run, RunState::AwaitingApproval).unwrap();
@@ -334,7 +331,7 @@ fn token_estimation_counts_characters_not_bytes() {
 #[test]
 fn fork_conversation_preserves_thinking_blocks() {
     let (_d, j) = journal();
-    let mut run = j.create("go", "c", "fork", 1800, None, false).unwrap();
+    let mut run = j.create("go", "c", "fork", 1800, None).unwrap();
     j.save(&mut run, RunState::Deciding).unwrap();
     let reasoning = Reasoning {
         protocol: ModelProtocol::AnthropicMessages,
@@ -1073,7 +1070,7 @@ fn restart_reconciles_existing_job_without_repeating_action() {
     let db = d.path().join("test.db");
     let journal = Journal::open(&db).unwrap();
     let mut run = journal
-        .create("recover existing action", "c", "key", 1800, None, false)
+        .create("recover existing action", "c", "key", 1800, None)
         .unwrap();
     journal.save(&mut run, RunState::Deciding).unwrap();
     journal.save(&mut run, RunState::Executing).unwrap();
@@ -1511,11 +1508,11 @@ fn invalid_task_is_rejected_with_the_offending_node() {
 #[test]
 fn stale_event_cursor_asks_for_a_snapshot() {
     let (_d, j) = journal();
-    let early = j.create("first", "a", "k1", 1800, None, false).unwrap();
+    let early = j.create("first", "a", "k1", 1800, None).unwrap();
     for _ in 0..3 {
         j.emit(&early, "noise", json!({})).unwrap();
     }
-    let late = j.create("second", "b", "k2", 1800, None, false).unwrap();
+    let late = j.create("second", "b", "k2", 1800, None).unwrap();
     assert!(late.message_boundary > 0);
 
     // 会话 a 的事件仍在窗口里，从 0 或 1 续读都安全。

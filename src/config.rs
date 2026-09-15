@@ -925,9 +925,11 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(config["activeModel"], "b");
         assert_eq!(config["models"].as_array().unwrap().len(), 1);
-        assert!(config["agent"]["fallbackModels"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            config["agent"]["fallbackModels"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
 }
