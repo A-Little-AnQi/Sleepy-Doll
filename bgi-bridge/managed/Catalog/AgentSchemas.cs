@@ -22,7 +22,7 @@ public static class AgentSchemas
     private static JsonElement Value => ArgumentSchema.Parse("""{"description":"新值，必须符合 get_setting 返回的 valueSchema；不得将遮蔽值当作原值提交。"}""");
     public static JsonElement Input(string id) => id switch
     {
-        "bgi.ping" or "bgi.probe" or "bgi.get_status" or "bgi.list_setting_sections" or "bgi.list_setting_changes" => ArgumentSchema.Empty,
+        "bgi.ping" or "bgi.probe" or "bgi.get_status" or "bgi.start_game" or "bgi.list_setting_sections" or "bgi.list_setting_changes" => ArgumentSchema.Empty,
         "bgi.search_settings" => Object(
             ("terms", ArgumentSchema.Parse("""{"type":"array","maxItems":16,"items":{"type":"string","maxLength":100},"description":"搜索词数组，所有词均需匹配路径或用途说明；空数组表示不限定。"}"""), false),
             ("section", Text("分区名，来自 list_setting_sections。"), false),
@@ -75,6 +75,7 @@ public static class AgentSchemas
         {
             "bgi.ping" => ResultObject(description, ("ok", Flag("桥请求处理成功。"), true), ("hostLoaded", Flag("宿主程序集可见。"), true), ("at", Text("观测时间，ISO 8601。"), true)),
             "bgi.get_status" => ResultObject(description, ("ready", Flag("当前状态检查是否就绪。"), true), ("runtime", Any("截图、窗口和独立任务状态；未能观测的项必须保留未知。"), true), ("observedAt", Text("ISO 8601 观测时间。"), true)),
+            "bgi.start_game" => ResultObject(description, ("started", Flag("本次是否发出了启动。"), true), ("alreadyRunning", Flag("宿主已经在运行，未重复启动。"), true), ("ready", Flag("返回时是否已可截图并执行游戏动作。"), true), ("stillLoading", Flag("为 true 表示原神仍在加载，用 get_status 继续等，不是失败。"), true), ("elapsedMs", ArgumentSchema.Parse("""{"type":"integer","description":"本次等待的毫秒数。"}"""), true), ("note", Text("需要用户知道的一句话说明。"), true), ("runtime", Any("启动后的截图、窗口和独立任务状态。"), true)),
             "bgi.probe" => ResultObject(description, ("hostLoaded", Flag("宿主程序集已加载。"), true), ("uiDispatcherAvailable", Flag("能否在宿主 UI 线程调度。"), true), ("serviceProviderReachable", Flag("服务容器是否可达。"), true)),
             "bgi.search_settings" => ResultObject(description, ("total", ArgumentSchema.Parse("""{"type":"integer","description":"匹配总数。"}"""), true), ("items", ArrayOf(Setting, "匹配的设置契约。"), true)),
             "bgi.list_setting_sections" => ResultObject(description, ("sections", ArrayOf(Any("name、description、settingCount、writableCount、sensitiveCount。"), "设置分区摘要。"), true)),

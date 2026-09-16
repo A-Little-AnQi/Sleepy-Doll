@@ -31,7 +31,16 @@ try
         Check(discovery.GetProperty("sideEffects").GetArrayLength() > 0, "discovery hides effects");
         Check(discovery.GetProperty("parameters").GetArrayLength() == descriptor.InputSchema.GetProperty("properties").EnumerateObject().Count(), "discovery hides parameters");
     }
-    Check(registry.Count == 16, "all core APIs must have contracts");
+    Check(registry.Count == 17, "all core APIs must have contracts");
+    // 启动游戏的意义就在于游戏还没起来 —— 它一旦被游戏就绪门禁挡住，就永远
+    // 用不上了，只能退回让用户自己点。
+    var startGame = registry.All.Single(method => method.Id == "bgi.start_game");
+    Check(startGame.Effect == "hostCommand" && !startGame.RequiresGameReady,
+        "starting the game must not require the game to be ready");
+    // 启动入口是硬编码的宿主成员名：它一旦对不上，接口只会在运行时才发现，
+    // 而那一刻用户正等着游戏启动。
+    Check(SourceDocumentation.Find("C", StatusTools.StartViewModel, StatusTools.StartCommand) is not null,
+        "start_game 绑定的宿主命令不在 host-documentation.json 里：" + StatusTools.StartCommand);
     var runGroup = registry.All.Single(method => method.Id == "bgi.run_script_group");
     Check(runGroup.Effect == "gameWrite" && runGroup.RequiresGameReady,
         "named script-group execution must require game readiness");

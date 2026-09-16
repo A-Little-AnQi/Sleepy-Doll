@@ -1,8 +1,10 @@
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using BgiBridge.Bgi;
 using BgiBridge.Catalog;
 using BgiBridge.Jobs;
 using BgiBridge.Protocol;
@@ -462,6 +464,8 @@ internal static class BridgeExceptionTranslator
     public static string Describe(Exception ex) => ex switch
     {
         BridgeException bridge => $"{bridge.Code}: {bridge.Message}",
+        // 宿主命令的异常经反射调用后是 TargetInvocationException：报内层才有可读的原因。
+        TargetInvocationException wrapped => Describe(Reflect.Root(wrapped)),
         _ => $"{ex.GetType().Name}: {ex.Message}",
     };
 }

@@ -141,7 +141,8 @@ public static class Reflect
             ?? matches[0];
     }
 
-    private static MethodInfo? FindMethod(Type type, string name, int argCount) =>
+    /// <summary>按名字与参数个数取方法：先精确匹配，再忽略大小写。容忍同名重载。</summary>
+    public static MethodInfo? FindMethod(Type type, string name, int argCount) =>
         MethodCache.GetOrAdd((type, name, argCount), static key =>
         {
             var (t, n, count) = key;
@@ -291,7 +292,8 @@ public static class Reflect
     public static Exception Root(Exception ex) =>
         ex is TargetInvocationException { InnerException: { } inner } ? Root(inner) : ex;
 
-    private static BridgeException Translate(Exception ex) => ex switch
+    /// <summary>把宿主抛出的异常映射到桥的错误码。</summary>
+    public static BridgeException Translate(Exception ex) => ex switch
     {
         BridgeException bridge => bridge,
         OperationCanceledException => new BridgeException("CANCELLED", "操作已取消。"),

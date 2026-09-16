@@ -15,16 +15,21 @@ public static class SourceDocumentation
     public static SourceEntry? Find(string prefix, Type owner, string name)
     {
         for (var type = owner; type is not null; type = type.BaseType)
-            if (Entries.TryGetValue($"{prefix}:{type.FullName}.{name}", out var entry))
-            {
-                // This DTO is explicitly copied into AutoFightConfig by the host.
-                if (entry.Summary.Length == 0 && type.FullName == "BetterGenshinImpact.GameTask.AutoLeyLineOutcrop.AutoLeyLineOutcropFightConfig+FightFinishDetectConfig"
-                    && Entries.TryGetValue($"P:BetterGenshinImpact.GameTask.AutoFight.AutoFightConfig+FightFinishDetectConfig.{name}", out var shared))
-                    return entry with { Summary = "地脉花战斗检查：" + shared.Summary, DocumentationSource = "host-shared-config" };
-                return entry;
-            }
+        {
+            var entry = Find(prefix, type.FullName!, name);
+            if (entry is null) continue;
+            // This DTO is explicitly copied into AutoFightConfig by the host.
+            if (entry.Summary.Length == 0 && type.FullName == "BetterGenshinImpact.GameTask.AutoLeyLineOutcrop.AutoLeyLineOutcropFightConfig+FightFinishDetectConfig"
+                && Entries.TryGetValue($"P:BetterGenshinImpact.GameTask.AutoFight.AutoFightConfig+FightFinishDetectConfig.{name}", out var shared))
+                return entry with { Summary = "地脉花战斗检查：" + shared.Summary, DocumentationSource = "host-shared-config" };
+            return entry;
+        }
         return null;
     }
+
+    /// <summary>按宿主类型全名查找。硬编码宿主成员名的桥代码用它核对文档里的真实成员。</summary>
+    public static SourceEntry? Find(string prefix, string ownerFullName, string name) =>
+        Entries.TryGetValue($"{prefix}:{ownerFullName}.{name}", out var entry) ? entry : null;
 
     public static string[]? StringEnum(SourceEntry? entry)
     {

@@ -172,18 +172,7 @@ public static partial class CommandCatalog
                     $"命令「{name}」当前不可执行——检查页面状态和必填参数。", 409);
             cancellation.ThrowIfCancellationRequested();
 
-            // 异步命令等它真正结束。IAsyncRelayCommand 来自 CommunityToolkit，
-            // 我们零第三方依赖，只能按方法签名探测。
-            var executeAsync = command.GetType().GetMethod("ExecuteAsync", [typeof(object)]);
-            if (IsAsyncCommand(command.GetType()) && executeAsync is not null)
-            {
-                if (executeAsync.Invoke(command, [parameter]) is Task task)
-                    await task;
-            }
-            else
-            {
-                command.Execute(parameter);
-            }
+            await Commands.RunAsync(command, parameter);
 
             return (object?)new { command = name, executed = true, configurationCheckpoint = checkpoint };
         }).ConfigureAwait(false);

@@ -73,22 +73,22 @@ impl Bridge {
         let status = response.status();
         let value = crate::runtime::gateway::read_json(response, cancel).await?;
         if !status.is_success() {
-            if status.is_server_error()
-                && !matches!(
-                    value["error"]["code"].as_str(),
-                    Some("GAME_BUSY" | "QUEUE_FULL" | "GAME_NOT_READY")
-                )
-            {
+            // 桥的错误体是 {code, message}。5xx 里带着桥自己的错误码，说明桥已经处理并
+            // 确认了结果；INTERNAL 是未处理异常的兜底，REQUEST_FAILED 表示响应根本不是
+            // 桥写的 —— 这两种才无法判断执行到哪一步。
+            let code = value["code"].as_str().unwrap_or("REQUEST_FAILED");
+            if status.is_server_error() && matches!(code, "INTERNAL" | "REQUEST_FAILED") {
                 return Err(Error::Http(format!(
                     "Bridge server response {} cannot confirm execution outcome",
                     status.as_u16()
                 )));
             }
-            return Err(Error::Tool(format!(
-                "Bridge {}: {}",
-                status.as_u16(),
-                value["error"]["code"].as_str().unwrap_or("REQUEST_FAILED")
-            )));
+            let detail = value["message"].as_str().unwrap_or("");
+            return Err(Error::Tool(if detail.is_empty() {
+                format!("Bridge {}: {code}", status.as_u16())
+            } else {
+                format!("Bridge {}: {code} {detail}", status.as_u16())
+            }));
         }
         Ok(value)
     }
@@ -309,7 +309,10 @@ impl Bridge {
         if snapshot["instanceId"] != instance
             || (requires_capture && snapshot["runtime"]["captureReady"] != true)
         {
-            return Err(Error::Tool("游戏尚未就绪".into()));
+            return Err(Error::Tool(
+                "游戏尚未就绪：截图器未启动或游戏窗口未打开。先调用 bgi.start_game 启动原神，用 bgi.get_status 等到 ready=true，再重试本次调用；不要把启动这一步交回用户。"
+                    .into(),
+            ));
         }
         request["preconditionSnapshot"] = snapshot["snapshotId"].clone();
         let mut a = journal.prepare(run, call_id, request, instance)?;
@@ -408,7 +411,9 @@ impl Bridge {
             .request("POST", "/bridge/v1/invoke", Some(&wire), cancel)
             .await;
         for retry in 0..3u32 {
-            if !matches!(&accepted,Err(Error::Tool(message)) if message.contains("GAME_BUSY")||message.contains("QUEUE_FULL"))
+            // BUSY / GAME_BUSY：有互斥执行（例如独立任务持锁）；QUEUE_FULL：容量已满。
+            // 两者都按契约做有界退避重试，原键重发由幂等保证。
+            if !matches!(&accepted,Err(Error::Tool(message)) if message.contains("BUSY")||message.contains("QUEUE_FULL"))
             {
                 break;
             }

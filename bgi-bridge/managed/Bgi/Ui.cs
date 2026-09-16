@@ -28,6 +28,14 @@ public static class Ui
 
     public static Task InvokeAsync(Action action) => Dispatch(typeof(Action), action);
 
+    /// <summary>在 UI 线程上启动一个异步操作，并等它真正结束。</summary>
+    public static async Task InvokeAsync(Func<Task> func)
+    {
+        Task? operation = null;
+        await InvokeAsync((Action)(() => operation = func())).ConfigureAwait(false);
+        await operation!.ConfigureAwait(false);
+    }
+
     public static async Task<T> InvokeAsync<T>(Func<T> func)
     {
         T result = default!;
