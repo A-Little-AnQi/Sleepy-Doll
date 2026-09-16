@@ -109,41 +109,6 @@
   flex: 0 0 auto;
 }
 
-.command-deck {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 16px;
-  border: 1px solid var(--border-strong);
-  border-radius: 16px;
-  box-shadow: 0 3px 14px #00000004;
-  background: var(--surface);
-}
-
-.command-deck:focus-within {
-  border-color: var(--secondary);
-}
-
-.command-deck textarea {
-  width: 100%;
-  min-height: 46px;
-  max-height: 180px;
-  resize: none;
-  border: 0;
-  outline: none;
-  box-shadow: none;
-  background: transparent;
-  padding: 0;
-  line-height: 1.8;
-  font-size: 14px;
-}
-
-.command-deck textarea:focus,
-.command-deck textarea:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
-
 .composer-actions {
   display: flex;
   align-items: center;
@@ -156,24 +121,6 @@
   align-items: center;
   gap: 8px;
   margin-left: auto;
-}
-
-.context-meter {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.context-meter.is-high {
-  color: var(--secondary);
-}
-
-.context-meter em {
-  font-style: normal;
 }
 
 .send-action {

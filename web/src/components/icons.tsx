@@ -112,6 +112,23 @@ export function SettingsIcon(p: IconProps) {
   );
 }
 
+export function SunIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 3.2v1.8M12 19v1.8M3.2 12h1.8M19 12h1.8M5.4 5.4l1.3 1.3M17.3 17.3l1.3 1.3M18.6 5.4l-1.3 1.3M6.7 17.3l-1.3 1.3" />
+    </Svg>
+  );
+}
+
+export function MoonIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M16.2 14.2A6.4 6.4 0 0 1 9.4 5.8 5.6 5.6 0 1 0 16.2 14.2Z" />
+    </Svg>
+  );
+}
+
 export function ChevronIcon(p: IconProps) {
   return (
     <Svg {...p}>

@@ -1,0 +1,13 @@
+.sd-composer-deck {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.sd-composer-deck:focus-within {
+  border-color: var(--border-strong);
+}

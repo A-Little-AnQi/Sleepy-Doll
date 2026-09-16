@@ -1,31 +1,44 @@
 import { useEffect, useRef, useState } from "react";
-import { BrandIcon, SettingsIcon } from "./icons";
+import { BrandIcon } from "./icons";
+import { ThemeSwitch } from "./ThemeSwitch";
+import { SettingRow } from "./SettingRow";
+import { Select } from "./Select";
 import {
-  readReducedMotion,
   readTheme,
-  writeReducedMotion,
   writeTheme,
   type ThemeId,
+  type ThemeOrigin,
 } from "../appearance";
+import {
+  LOCALE_OPTIONS,
+  readLocale,
+  writeLocale,
+  type LocaleId,
+} from "../locale";
 
 export function SidebarAccount({
-  settingsActive,
   onSettings,
 }: {
-  settingsActive: boolean;
   onSettings(): void;
 }) {
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState(readTheme);
-  const [motion, setMotion] = useState(readReducedMotion);
+  const [locale, setLocale] = useState(readLocale);
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent) => {
-      if (event.target instanceof Node && !root.current?.contains(event.target)) {
-        setOpen(false);
+      if (!(event.target instanceof Node)) return;
+      if (root.current?.contains(event.target)) return;
+      // 语言下拉挂在 body 上，点选项不能当成点了菜单外面。
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-ui='select-menu']")
+      ) {
+        return;
       }
+      setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
@@ -38,9 +51,9 @@ export function SidebarAccount({
     };
   }, [open]);
 
-  const applyTheme = (next: ThemeId) => {
+  const applyTheme = (next: ThemeId, origin: ThemeOrigin) => {
     setTheme(next);
-    writeTheme(next);
+    return writeTheme(next, origin);
   };
 
   return (
@@ -53,7 +66,16 @@ export function SidebarAccount({
           aria-haspopup="menu"
           aria-expanded={open}
           aria-controls="app-account-menu"
-          onClick={() => setOpen((value) => !value)}
+          onClick={() => {
+            setOpen((value) => {
+              const next = !value;
+              if (next) {
+                setTheme(readTheme());
+                setLocale(readLocale());
+              }
+              return next;
+            });
+          }}
         >
           <span className="app-account-avatar">
             <BrandIcon />
@@ -63,70 +85,42 @@ export function SidebarAccount({
             <small>本机</small>
           </span>
         </button>
-        {open && (
-          <div
-            id="app-account-menu"
-            className="app-account-menu"
-            role="menu"
-            aria-label="外观与快捷设置"
-          >
-            <p className="app-account-menu-label">外观</p>
-            <div className="app-theme-toggle" role="group" aria-label="主题">
-              <button
-                type="button"
-                role="menuitemradio"
-                aria-checked={theme === "light"}
-                className={theme === "light" ? "is-active" : ""}
-                onClick={() => applyTheme("light")}
-              >
-                浅色
-              </button>
-              <button
-                type="button"
-                role="menuitemradio"
-                aria-checked={theme === "dark"}
-                className={theme === "dark" ? "is-active" : ""}
-                onClick={() => applyTheme("dark")}
-              >
-                深色
-              </button>
-            </div>
-            <button
-              type="button"
-              className="app-account-motion"
-              role="menuitemcheckbox"
-              aria-checked={motion}
-              onClick={() => {
-                const next = !motion;
-                setMotion(next);
-                writeReducedMotion(next);
-              }}
-            >
-              减少动态效果
-              <span className={`switch ${motion ? "on" : ""}`} />
-            </button>
-            <button
-              type="button"
-              className="app-account-more"
-              role="menuitem"
-              onClick={() => {
-                setOpen(false);
-                onSettings();
-              }}
-            >
-              全部设置
-            </button>
-          </div>
-        )}
       </div>
-      <button
-        className={`app-nav-item app-settings-link${settingsActive ? " is-active" : ""}`}
-        aria-current={settingsActive ? "page" : undefined}
-        onClick={onSettings}
-      >
-        <SettingsIcon className="app-nav-icon" />
-        <span>设置</span>
-      </button>
+      {open && (
+        <div
+          id="app-account-menu"
+          className="app-account-menu"
+          role="menu"
+          aria-label="账户菜单"
+        >
+          <SettingRow label="主题" compact>
+            <ThemeSwitch theme={theme} onChange={applyTheme} />
+          </SettingRow>
+          <SettingRow label="语言" compact>
+            <Select
+              label="语言"
+              value={locale}
+              options={LOCALE_OPTIONS}
+              onChange={(value) => {
+                const next = value as LocaleId;
+                setLocale(next);
+                writeLocale(next);
+              }}
+            />
+          </SettingRow>
+          <button
+            type="button"
+            className="app-account-more"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onSettings();
+            }}
+          >
+            设置
+          </button>
+        </div>
+      )}
     </div>
   );
 }

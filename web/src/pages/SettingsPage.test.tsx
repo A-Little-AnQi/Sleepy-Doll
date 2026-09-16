@@ -1,7 +1,17 @@
-import { afterEach, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SettingsPage } from "./SettingsPage";
 import { PREVIEW_PERMISSION, type Bootstrap } from "../types";
+
+vi.mock("../api", () => ({
+  api: {
+    configRead: vi.fn(async () => ({
+      path: "/tmp/config.json",
+      content: '{"version":3}\n',
+    })),
+    configWrite: vi.fn(async () => ({ saved: true })),
+  },
+}));
 
 afterEach(cleanup);
 
@@ -76,4 +86,49 @@ it("switches to the sponsor tab from the nav", () => {
   );
   fireEvent.click(screen.getByRole("button", { name: "赞助作者" }));
   expect(seen).toEqual(["sponsor"]);
+});
+
+it("applies the selected theme from the general settings", async () => {
+  document.documentElement.dataset.theme = "light";
+  render(
+    <SettingsPage
+      bootstrap={bootstrap}
+      section="settings"
+      onSection={() => undefined}
+      reload={async () => undefined}
+    />,
+  );
+  const themeSwitch = screen.getByRole("switch", { name: "切换为黑夜" });
+  expect(themeSwitch.textContent).toContain("黑夜");
+  fireEvent.click(themeSwitch);
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  await waitFor(() => {
+    expect(document.activeElement).toBe(
+      screen.getByRole("switch", { name: "切换为白昼" }),
+    );
+  });
+  expect(screen.getByRole("switch", { name: "切换为白昼" }).textContent).toContain(
+    "白昼",
+  );
+});
+
+it("opens the config editor from the general settings", async () => {
+  render(
+    <SettingsPage
+      bootstrap={bootstrap}
+      section="settings"
+      onSection={() => undefined}
+      reload={async () => undefined}
+    />,
+  );
+  expect(screen.getByText("/tmp/config.json")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(screen.getByRole("heading", { name: "编辑配置" })).toBeTruthy();
+  expect(document.querySelector(".sd-dialog-layer")?.parentElement).toBe(
+    document.body,
+  );
+  await waitFor(() => {
+    expect(dialog.textContent).toContain("/tmp/config.json");
+  });
 });

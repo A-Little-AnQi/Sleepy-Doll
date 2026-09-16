@@ -1,0 +1,85 @@
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 58px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.setting-row.is-compact {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: var(--control-height);
+  padding: 4px 0;
+  border-bottom: 0;
+  gap: 12px;
+}
+
+.setting-row-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.setting-row-copy strong {
+  flex: 0 0 auto;
+  font-size: var(--font-body);
+  font-weight: 550;
+}
+
+.setting-row-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted);
+  font:
+    var(--font-label)/1.5 "Cascadia Code",
+    Consolas,
+    monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setting-row-control {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.setting-row.is-compact .setting-row-copy {
+  flex: none;
+}
+
+.setting-row.is-compact .setting-row-copy strong {
+  font-weight: 500;
+  color: var(--secondary);
+}
+
+.setting-row-control > [data-ui="select-root"],
+.setting-row-control > .app-theme-switch {
+  width: var(--setting-control-width, 180px);
+  max-width: 100%;
+}
+
+.setting-row-control > .app-theme-switch {
+  margin-bottom: 0;
+}
+
+.setting-row.is-compact .setting-row-control {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.setting-row.is-compact .setting-row-control > .app-theme-switch,
+.setting-row.is-compact .setting-row-control > [data-ui="select-root"] {
+  width: 128px;
+}
+
+.setting-row.is-compact [data-ui="select-trigger"] {
+  background: var(--well);
+  box-shadow: var(--well-inset);
+}

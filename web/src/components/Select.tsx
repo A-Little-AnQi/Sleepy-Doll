@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CheckIcon, ChevronIcon } from "./icons";
+import { CheckIcon } from "./icons";
+import { DisclosureChevron } from "./DisclosureChevron";
 import styles from "./Select.module.css";
 
 interface Props {
@@ -61,6 +62,10 @@ export function Select({ value, options, onChange, label, disabled }: Props) {
     trigger.current?.focus();
   };
 
+  // 有说明的选项需要比触发器更宽；语言这类短选项跟触发器对齐，
+  // 否则侧栏菜单里会出现 128px 控件配 240px 弹层。
+  const roomy = options.some((option) => option.description);
+
   // 摆位在绘制前算好，避免弹层先出现在错误位置再跳一下。
   useLayoutEffect(() => {
     if (!open) {
@@ -71,12 +76,11 @@ export function Select({ value, options, onChange, label, disabled }: Props) {
       const anchor = trigger.current?.getBoundingClientRect();
       if (!anchor) return;
       const width = Math.min(
-        Math.max(anchor.width, 240),
+        Math.max(anchor.width, roomy ? 240 : 0),
         window.innerWidth - MARGIN * 2,
       );
-      // 触发器比菜单窄时从左缘往右长，避免窄工具条把 240px 菜单拽进侧栏。
       const left = Math.min(
-        Math.max(MARGIN, anchor.width < 240 ? anchor.left : anchor.right - width),
+        Math.max(MARGIN, anchor.left),
         window.innerWidth - width - MARGIN,
       );
       const below = window.innerHeight - anchor.bottom - GAP - MARGIN;
@@ -101,7 +105,7 @@ export function Select({ value, options, onChange, label, disabled }: Props) {
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [open]);
+  }, [open, roomy]);
 
   useEffect(() => {
     if (!open) return;
@@ -190,7 +194,7 @@ export function Select({ value, options, onChange, label, disabled }: Props) {
         }}
       >
         <span>{selected?.label ?? "选择模型"}</span>
-        <ChevronIcon className={styles["select-chevron"] ?? ""} />
+        <DisclosureChevron expanded={open} />
       </button>
       {open &&
         placement &&

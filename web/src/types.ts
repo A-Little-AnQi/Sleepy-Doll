@@ -9,6 +9,9 @@ export interface ModelInfo {
   active: boolean;
   timeoutMs?: number;
   contextWindow?: number;
+  maxOutputTokens?: number;
+  auth?: "auto" | "apiKey" | "bearer";
+  promptCache?: boolean;
 }
 
 export interface SkillInfo {
@@ -99,6 +102,7 @@ export interface TaskInfo {
   contextTokens?: number;
   contextWindow?: number;
   contextCompacted?: boolean;
+  cacheReadTokens?: number;
   source?:
     | { kind: "agent" }
     | { kind: "savedStrategy"; strategyId: string }

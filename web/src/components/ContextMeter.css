@@ -1,0 +1,45 @@
+.sd-context {
+  display: grid;
+  justify-items: end;
+  align-content: center;
+  gap: 4px;
+  min-width: 72px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sd-context.is-high {
+  color: var(--secondary);
+}
+
+.sd-context-track {
+  display: block;
+  width: 56px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.sd-context-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+}
+
+.sd-context-copy {
+  font-weight: 550;
+  letter-spacing: 0.01em;
+}
+
+.sd-context em {
+  font-style: normal;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--secondary);
+  font-size: 10px;
+}

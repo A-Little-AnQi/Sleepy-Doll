@@ -16,6 +16,12 @@ const protocols = [
   { value: "ollama-chat", label: "Ollama" },
 ];
 
+const authModes = [
+  { value: "auto", label: "自动" },
+  { value: "apiKey", label: "x-api-key（官方）" },
+  { value: "bearer", label: "Bearer（多数中转）" },
+];
+
 type ModelForm = {
   id: string;
   name: string;
@@ -24,6 +30,10 @@ type ModelForm = {
   baseUrl: string;
   apiKey: string;
   timeoutMs: number;
+  contextWindow: number;
+  maxOutputTokens: number;
+  auth: "auto" | "apiKey" | "bearer";
+  promptCache: boolean;
 };
 
 function protocolLabel(value: string) {
@@ -39,6 +49,10 @@ function formFor(model?: Bootstrap["models"][number]): ModelForm {
     baseUrl: model?.baseUrl ?? "https://api.openai.com/v1",
     apiKey: "",
     timeoutMs: model?.timeoutMs ?? 120000,
+    contextWindow: model?.contextWindow ?? 200_000,
+    maxOutputTokens: model?.maxOutputTokens ?? 8192,
+    auth: model?.auth ?? "auto",
+    promptCache: model?.promptCache !== false,
   };
 }
 
@@ -70,7 +84,11 @@ export function ModelsPage({
         form.protocol !== selected.protocol ||
         form.model !== selected.model ||
         form.baseUrl !== selected.baseUrl ||
-        form.timeoutMs !== (selected.timeoutMs ?? 120000)));
+        form.timeoutMs !== (selected.timeoutMs ?? 120000) ||
+        form.contextWindow !== (selected.contextWindow ?? 200_000) ||
+        form.maxOutputTokens !== (selected.maxOutputTokens ?? 8192) ||
+        form.auth !== (selected.auth ?? "auto") ||
+        form.promptCache !== (selected.promptCache !== false)));
   const choose = (id: string) => {
     drafts.current.set(selectedId, form);
     const model = bootstrap.models.find((item) => item.id === id);
@@ -259,6 +277,90 @@ export function ModelsPage({
                   ? "密钥不会回显。留空继续用已保存的，填写则替换。"
                   : "密钥只保存在本机配置里。"}
               </p>
+              {(form.protocol === "anthropic-messages" ||
+                form.protocol === "gemini") && (
+                <>
+                  <Select
+                    label="鉴权方式"
+                    value={form.auth}
+                    options={authModes}
+                    onChange={(value) =>
+                      updateForm((draft) => ({
+                        ...draft,
+                        auth: value as ModelForm["auth"],
+                      }))
+                    }
+                  />
+                  <p className="field-help">
+                    官方 Claude 用 x-api-key。国内中转多数跟 Claude Code 的
+                    ANTHROPIC_AUTH_TOKEN 一样，要选 Bearer。自动：sk-ant- 走官方头，其余走
+                    Bearer。
+                  </p>
+                </>
+              )}
+            </section>
+            <section className="form-section">
+              <h4>窗口</h4>
+              <div className="form-grid">
+                <label>
+                  <span>上下文窗口（token）</span>
+                  <input
+                    type="number"
+                    min={8192}
+                    max={2000000}
+                    required
+                    value={form.contextWindow}
+                    onChange={(event) =>
+                      updateForm((draft) => ({
+                        ...draft,
+                        contextWindow: Number(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  <span>最大输出（token）</span>
+                  <input
+                    type="number"
+                    min={256}
+                    max={128000}
+                    required
+                    value={form.maxOutputTokens}
+                    onChange={(event) =>
+                      updateForm((draft) => ({
+                        ...draft,
+                        maxOutputTokens: Number(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+              <p className="field-help">
+                按模型实际窗口填。32k 的模型和 200k 的模型不该共用一个上限，运行时的压缩预算跟着这个走。
+              </p>
+              {form.protocol === "anthropic-messages" && (
+                <label className="toggle-row">
+                  <span>提示缓存</span>
+                  <button
+                    type="button"
+                    className={`switch ${form.promptCache ? "on" : ""}`}
+                    role="switch"
+                    aria-checked={form.promptCache}
+                    onClick={() =>
+                      updateForm((draft) => ({
+                        ...draft,
+                        promptCache: !draft.promptCache,
+                      }))
+                    }
+                  />
+                </label>
+              )}
+              {form.protocol === "anthropic-messages" && (
+                <p className="field-help">
+                  在 tools / system / 最近消息上打 cache_control 断点。OpenAI 与 Gemini
+                  由服务端自动缓存。不支持该字段的 Claude 中转请关掉。
+                </p>
+              )}
             </section>
             <footer className="detail-actions">
               <button className="primary-action" disabled={busy}>

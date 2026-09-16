@@ -13,6 +13,24 @@ pub fn message(role: Role, content: impl Into<String>) -> Message {
     }
 }
 
+/// 技能匹配看最初目标，也看最近几条用户补充。只盯第一句会让「你好」之后的
+/// 真正任务装不上领域手册。
+pub fn skill_query(prompt: &str, history: &[Message]) -> String {
+    let mut parts = vec![prompt.to_owned()];
+    for message in history
+        .iter()
+        .rev()
+        .filter(|message| message.role == Role::User)
+        .take(4)
+    {
+        if message.content == prompt || message.content.starts_with('[') {
+            continue;
+        }
+        parts.push(message.content.clone());
+    }
+    parts.join("\n")
+}
+
 /// 粗略 token 估算，单位与 `policy.max_tokens` 一致。
 ///
 /// ASCII 每 4 字符 1 token，非 ASCII 每字符 1 token。中文实测约 1～1.5
@@ -298,5 +316,19 @@ mod tests {
         assert_eq!(packed.cleared_results, 1);
         assert!(packed.tokens > 0);
         assert!(packed.iter().any(|m| m.content.contains("已清除")));
+    }
+
+    #[test]
+    fn skill_query_includes_recent_user_supplements() {
+        let query = skill_query(
+            "你好",
+            &[
+                message(Role::User, "你好"),
+                message(Role::Assistant, "在"),
+                message(Role::User, "帮我改配置组"),
+            ],
+        );
+        assert!(query.contains("你好"));
+        assert!(query.contains("帮我改配置组"));
     }
 }

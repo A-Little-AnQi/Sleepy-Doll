@@ -20,6 +20,18 @@ pub enum ModelProtocol {
     OllamaChat,
 }
 
+/// Anthropic / Gemini 的鉴权头。官方 Claude 用 `x-api-key`，国内多数中转
+/// 跟 Claude Code 的 `ANTHROPIC_AUTH_TOKEN` 一样要 `Authorization: Bearer`。
+/// `auto`：密钥以 `sk-ant-` 开头走官方头，否则走 Bearer。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelAuth {
+    #[default]
+    Auto,
+    ApiKey,
+    Bearer,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelOptions {
@@ -35,6 +47,10 @@ pub struct ModelOptions {
     /// 与模型无关的常数 —— 200k 窗口的模型和 32k 窗口的模型不该共用一个上限。
     #[serde(default = "default_context_window")]
     pub context_window: u64,
+    /// Anthropic 提示缓存断点。OpenAI / Gemini 由服务端自动缓存，此开关无效。
+    /// 不支持 `cache_control` 的 Claude 中转关掉即可，避免 400。
+    #[serde(default = "default_true")]
+    pub prompt_cache: bool,
 }
 
 /// 当前主流模型的窗口量级。配置里按实际模型改。
@@ -49,6 +65,7 @@ impl Default for ModelOptions {
             timeout_ms: default_model_timeout(),
             reasoning_effort: None,
             context_window: default_context_window(),
+            prompt_cache: true,
         }
     }
 }
@@ -67,6 +84,8 @@ pub struct ModelConfig {
     pub base_url: String,
     #[serde(default)]
     pub api_key: Option<String>,
+    #[serde(default)]
+    pub auth: ModelAuth,
     #[serde(default)]
     pub headers: HashMap<String, String>,
     #[serde(default)]
@@ -107,6 +126,25 @@ const fn default_max_skills() -> usize {
 }
 const fn default_true() -> bool {
     true
+}
+
+pub fn user_skill_directory(config_dir: &Path, config: &AppConfig) -> Option<PathBuf> {
+    let user = config_dir.join("skills");
+    config
+        .agent
+        .skill_directories
+        .iter()
+        .find(|path| *path == &user)
+        .cloned()
+}
+
+/// 配置文件旁的 `skills/` 是用户导入的；其余（安装目录、`../skills`）随产品。
+pub fn skill_directory_source(config_dir: &Path, path: &Path) -> &'static str {
+    if path == config_dir.join("skills") {
+        "user"
+    } else {
+        "product"
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,6 +245,18 @@ impl AppConfig {
         config.runtime.catalog_directory = absolute(&base, &config.runtime.catalog_directory);
         config.validate()?;
         Ok(config)
+    }
+
+    pub fn write_document(path: impl AsRef<Path>, content: &str) -> Result<()> {
+        let value: serde_json::Value = serde_json::from_str(content)
+            .map_err(|error| Error::Config(format!("JSON 无效：{error}")))?;
+        if !value.is_object() {
+            return Err(Error::Config("配置必须是 JSON 对象".into()));
+        }
+        let candidate: Self = serde_json::from_value(value.clone())
+            .map_err(|error| Error::Config(error.to_string()))?;
+        candidate.validate()?;
+        atomic_write(path.as_ref(), &value)
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -364,9 +414,48 @@ impl AppConfig {
                         .ok_or_else(|| Error::Config("响应超时必须在 1 到 600 秒之间".into()))
                 })
                 .transpose()?;
+            let context_window = input
+                .get("contextWindow")
+                .map(|value| {
+                    value
+                        .as_u64()
+                        .filter(|value| (8_192..=2_000_000).contains(value))
+                        .ok_or_else(|| Error::Config("上下文窗口必须在 8k 到 2M token 之间".into()))
+                })
+                .transpose()?;
+            let max_output = input
+                .get("maxOutputTokens")
+                .map(|value| {
+                    value
+                        .as_u64()
+                        .filter(|value| (256..=128_000).contains(value))
+                        .ok_or_else(|| {
+                            Error::Config("最大输出必须在 256 到 128k token 之间".into())
+                        })
+                })
+                .transpose()?;
+            let auth = input
+                .get("auth")
+                .cloned()
+                .filter(|value| matches!(value.as_str(), Some("auto" | "apiKey" | "bearer")));
+            let prompt_cache = input
+                .get("promptCache")
+                .and_then(serde_json::Value::as_bool);
             if let Some(model) = existing {
                 if let Some(timeout) = timeout {
                     model["options"]["timeoutMs"] = serde_json::json!(timeout);
+                }
+                if let Some(window) = context_window {
+                    model["options"]["contextWindow"] = serde_json::json!(window);
+                }
+                if let Some(max_output) = max_output {
+                    model["options"]["maxOutputTokens"] = serde_json::json!(max_output);
+                }
+                if let Some(prompt_cache) = prompt_cache {
+                    model["options"]["promptCache"] = serde_json::json!(prompt_cache);
+                }
+                if let Some(auth) = auth {
+                    model["auth"] = auth;
                 }
                 for field in ["name", "protocol", "model", "baseUrl"] {
                     model[field] = input[field].clone();
@@ -375,7 +464,17 @@ impl AppConfig {
                     model["apiKey"] = input["apiKey"].clone();
                 }
             } else {
-                models.push(serde_json::json!({
+                let mut options = serde_json::json!({"timeoutMs":timeout.unwrap_or(120_000)});
+                if let Some(window) = context_window {
+                    options["contextWindow"] = serde_json::json!(window);
+                }
+                if let Some(max_output) = max_output {
+                    options["maxOutputTokens"] = serde_json::json!(max_output);
+                }
+                if let Some(prompt_cache) = prompt_cache {
+                    options["promptCache"] = serde_json::json!(prompt_cache);
+                }
+                let mut model = serde_json::json!({
                     "id": id,
                     "name": input["name"],
                     "protocol": input["protocol"],
@@ -383,11 +482,38 @@ impl AppConfig {
                     "baseUrl": input["baseUrl"],
                     "apiKey": input["apiKey"],
                     "headers": {},
-                    "options": {"timeoutMs":timeout.unwrap_or(120_000)}
-                }));
+                    "options": options
+                });
+                if let Some(auth) = auth {
+                    model["auth"] = auth;
+                }
+                models.push(model);
             }
             Ok(())
         })
+    }
+
+    /// 用户技能落点：配置文件旁的 `skills/`。没有这条目录就补上。
+    pub fn ensure_user_skill_directory(path: impl AsRef<Path>) -> Result<PathBuf> {
+        let path = path.as_ref();
+        let config = AppConfig::load(path)?;
+        let config_dir = path
+            .parent()
+            .ok_or_else(|| Error::Config("configuration path has no parent".into()))?;
+        if let Some(existing) = user_skill_directory(config_dir, &config) {
+            fs::create_dir_all(&existing)?;
+            return Ok(existing);
+        }
+        let root = config_dir.join("skills");
+        fs::create_dir_all(&root)?;
+        update_raw(path, |value| {
+            let dirs = value["agent"]["skillDirectories"]
+                .as_array_mut()
+                .ok_or_else(|| Error::Config("skillDirectories must be an array".into()))?;
+            dirs.push(serde_json::json!("./skills"));
+            Ok(())
+        })?;
+        Ok(root)
     }
 
     pub fn delete_model(path: impl AsRef<Path>, id: &str) -> Result<String> {
@@ -930,6 +1056,39 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn save_model_writes_window_and_auth() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = write_models_config(directory.path(), "a", 1);
+        AppConfig::save_model(
+            &path,
+            &serde_json::json!({
+                "id":"a","name":"a","protocol":"anthropic-messages","model":"claude",
+                "baseUrl":"http://127.0.0.1","timeoutMs":60000,"contextWindow":32000,
+                "maxOutputTokens":4096,"auth":"bearer","promptCache":false
+            }),
+        )
+        .unwrap();
+        let loaded = AppConfig::load(&path).unwrap();
+        assert_eq!(loaded.models[0].options.context_window, 32_000);
+        assert_eq!(loaded.models[0].options.max_output_tokens, Some(4096));
+        assert_eq!(loaded.models[0].auth, ModelAuth::Bearer);
+        assert!(!loaded.models[0].options.prompt_cache);
+    }
+
+    #[test]
+    fn skill_directory_next_to_config_is_user() {
+        let config_dir = PathBuf::from("/home/user/sleepy-doll");
+        assert_eq!(
+            skill_directory_source(&config_dir, &config_dir.join("skills")),
+            "user"
+        );
+        assert_eq!(
+            skill_directory_source(&config_dir, &PathBuf::from("/opt/Sleepy-Doll/skills")),
+            "product"
         );
     }
 }

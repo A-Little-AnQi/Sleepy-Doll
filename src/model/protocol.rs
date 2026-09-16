@@ -33,11 +33,19 @@ pub(super) fn openai_chat_body(
     tools: &[ToolDefinition],
 ) -> Value {
     let mut body = json!({"model":config.model,"messages":messages.iter().map(openai_message).collect::<Vec<_>>(),"tools":tools.iter().map(tool_schema).collect::<Vec<_>>()});
-    if let Some(value) = config.options.temperature {
+    let stem = openai_model_stem(&config.model);
+    if let Some(value) = config.options.temperature
+        && !is_openai_o_series(stem)
+    {
         body["temperature"] = json!(value);
     }
     if let Some(value) = config.options.max_output_tokens {
-        body["max_tokens"] = json!(value);
+        let field = if uses_max_completion_tokens(stem) {
+            "max_completion_tokens"
+        } else {
+            "max_tokens"
+        };
+        body[field] = json!(value);
     }
     body
 }
@@ -171,7 +179,11 @@ pub(super) fn anthropic_body(
             converted.push(json!({"role":role,"content":blocks}));
         }
     }
-    json!({"model":config.model,"system":system,"max_tokens":config.options.max_output_tokens.unwrap_or(8192),"messages":converted,"tools":tools.iter().map(|tool| json!({"name":tool.name,"description":tool.description,"input_schema":tool.input_schema})).collect::<Vec<_>>()})
+    let mut body = json!({"model":config.model,"system":system,"max_tokens":config.options.max_output_tokens.unwrap_or(8192),"messages":converted,"tools":tools.iter().map(|tool| json!({"name":tool.name,"description":tool.description,"input_schema":tool.input_schema})).collect::<Vec<_>>()});
+    if config.options.prompt_cache {
+        inject_anthropic_cache(&mut body);
+    }
+    body
 }
 
 pub(super) fn gemini_body(
@@ -219,10 +231,11 @@ pub(super) fn gemini_body(
                     r.blocks
                         .iter()
                         .filter_map(|b| {
-                            Some((
-                                b["callIndex"].as_u64()? as usize,
-                                b["signature"].as_str()?.to_owned(),
-                            ))
+                            let signature = b["signature"]
+                                .as_str()
+                                .or_else(|| b["thoughtSignature"].as_str())
+                                .or_else(|| b["thought_signature"].as_str())?;
+                            Some((b["callIndex"].as_u64()? as usize, signature.to_owned()))
                         })
                         .collect::<BTreeMap<usize, String>>()
                 })
@@ -266,6 +279,188 @@ pub(super) fn ollama_body(
     tools: &[ToolDefinition],
 ) -> Value {
     json!({"model":config.model,"stream":false,"messages":messages.iter().map(openai_message).collect::<Vec<_>>(),"tools":tools.iter().map(tool_schema).collect::<Vec<_>>(),"options":{"temperature":config.options.temperature,"num_predict":config.options.max_output_tokens}})
+}
+
+fn openai_model_stem(model: &str) -> &str {
+    model.rsplit('/').next().unwrap_or(model)
+}
+
+/// o1 / o3 / o4：官方 Chat Completions 拒绝 `max_tokens` 和 `temperature`。
+fn is_openai_o_series(model: &str) -> bool {
+    let model = model.to_ascii_lowercase();
+    model.len() > 1
+        && model.starts_with('o')
+        && model.as_bytes().get(1).is_some_and(|b| b.is_ascii_digit())
+}
+
+fn uses_max_completion_tokens(model: &str) -> bool {
+    let model = model.to_ascii_lowercase();
+    is_openai_o_series(&model) || model.starts_with("gpt-5")
+}
+
+/// Anthropic 提示缓存：最多 4 个断点，标在 tools 末、system 末、最新非 thinking
+/// 块，长对话再标上一条更早的 user。与 CC Switch `cache_injector` 同策略。
+/// 绝不能泄漏到 openai-chat：Kimi / NIM / Qwen 会因 `cache_control` 直接 400。
+fn inject_anthropic_cache(body: &mut Value) {
+    let existing = count_cache_breakpoints(body);
+    let mut budget = 4usize.saturating_sub(existing);
+    if budget == 0 {
+        return;
+    }
+    if let Some(last) = body
+        .get_mut("tools")
+        .and_then(Value::as_array_mut)
+        .and_then(|tools| tools.last_mut())
+        && set_ephemeral_cache(last)
+    {
+        budget -= 1;
+    }
+    if budget > 0 {
+        if let Some(text) = body
+            .get("system")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            && !text.is_empty()
+        {
+            body["system"] = json!([{"type": "text", "text": text}]);
+        }
+        if let Some(last) = body
+            .get_mut("system")
+            .and_then(Value::as_array_mut)
+            .and_then(|system| system.last_mut())
+            && set_ephemeral_cache(last)
+        {
+            budget -= 1;
+        }
+    }
+    if budget == 0 {
+        return;
+    }
+    let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for message in messages.iter_mut().rev() {
+        if inject_message_breakpoint(message) {
+            budget -= 1;
+            break;
+        }
+    }
+    if budget == 0 || messages.len() < 4 {
+        return;
+    }
+    let mut user_count = 0;
+    for message in messages.iter_mut().rev() {
+        if message.get("role").and_then(Value::as_str) != Some("user") {
+            continue;
+        }
+        user_count += 1;
+        if user_count == 2 {
+            inject_message_breakpoint(message);
+            break;
+        }
+    }
+}
+
+fn set_ephemeral_cache(value: &mut Value) -> bool {
+    if value.get("cache_control").is_some() {
+        return false;
+    }
+    let Some(object) = value.as_object_mut() else {
+        return false;
+    };
+    object.insert("cache_control".into(), json!({"type": "ephemeral"}));
+    true
+}
+
+fn inject_message_breakpoint(message: &mut Value) -> bool {
+    let Some(content) = message.get_mut("content").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    let Some(block) = content.iter_mut().rev().find(|block| {
+        !matches!(
+            block.get("type").and_then(Value::as_str),
+            Some("thinking" | "redacted_thinking")
+        )
+    }) else {
+        return false;
+    };
+    set_ephemeral_cache(block)
+}
+
+fn count_cache_breakpoints(body: &Value) -> usize {
+    let mut count = 0;
+    if let Some(tools) = body.get("tools").and_then(Value::as_array) {
+        count += tools
+            .iter()
+            .filter(|t| t.get("cache_control").is_some())
+            .count();
+    }
+    if let Some(system) = body.get("system").and_then(Value::as_array) {
+        count += system
+            .iter()
+            .filter(|b| b.get("cache_control").is_some())
+            .count();
+    }
+    if let Some(messages) = body.get("messages").and_then(Value::as_array) {
+        for message in messages {
+            if let Some(content) = message.get("content").and_then(Value::as_array) {
+                count += content
+                    .iter()
+                    .filter(|b| b.get("cache_control").is_some())
+                    .count();
+            }
+        }
+    }
+    count
+}
+
+pub(crate) fn usage_from_openai_chat(node: &Value) -> Usage {
+    Usage {
+        input_tokens: node["prompt_tokens"].as_u64(),
+        output_tokens: node["completion_tokens"].as_u64(),
+        cache_read_tokens: node["prompt_tokens_details"]["cached_tokens"]
+            .as_u64()
+            .or_else(|| node["prompt_tokens_details"]["cachedTokens"].as_u64()),
+        cache_write_tokens: None,
+    }
+}
+
+pub(crate) fn usage_from_openai_responses(node: &Value) -> Usage {
+    Usage {
+        input_tokens: node["input_tokens"].as_u64(),
+        output_tokens: node["output_tokens"].as_u64(),
+        cache_read_tokens: node["input_tokens_details"]["cached_tokens"]
+            .as_u64()
+            .or_else(|| node["cache_read_input_tokens"].as_u64()),
+        cache_write_tokens: node["cache_creation_input_tokens"].as_u64(),
+    }
+}
+
+pub(crate) fn usage_from_anthropic(node: &Value) -> Usage {
+    Usage {
+        input_tokens: node["input_tokens"].as_u64(),
+        output_tokens: node["output_tokens"].as_u64(),
+        cache_read_tokens: node["cache_read_input_tokens"].as_u64(),
+        cache_write_tokens: node["cache_creation_input_tokens"].as_u64(),
+    }
+}
+
+pub(crate) fn usage_from_gemini(node: &Value) -> Usage {
+    Usage {
+        input_tokens: node["promptTokenCount"].as_u64(),
+        output_tokens: node["candidatesTokenCount"].as_u64(),
+        cache_read_tokens: node["cachedContentTokenCount"].as_u64(),
+        cache_write_tokens: None,
+    }
+}
+
+pub(crate) fn usage_from_ollama(raw: &Value) -> Usage {
+    Usage {
+        input_tokens: raw["prompt_eval_count"].as_u64(),
+        output_tokens: raw["eval_count"].as_u64(),
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+    }
 }
 
 fn parse_arguments(value: &Value) -> Result<Value> {
@@ -411,13 +606,12 @@ pub(crate) fn parse_response(protocol: ModelProtocol, raw: &Value) -> Result<Mod
                 text: string(&message["content"]),
                 tool_calls: calls,
                 finish_reason: choice["finish_reason"].as_str().map(str::to_owned),
-                usage: Usage {
-                    input_tokens: raw["usage"]["prompt_tokens"].as_u64(),
-                    output_tokens: raw["usage"]["completion_tokens"].as_u64(),
-                },
+                usage: usage_from_openai_chat(&raw["usage"]),
                 reasoning: display_reasoning(
                     ModelProtocol::OpenaiChat,
-                    message["reasoning_content"].as_str(),
+                    message["reasoning_content"]
+                        .as_str()
+                        .or_else(|| message["reasoning"].as_str()),
                 ),
             })
         }
@@ -444,11 +638,17 @@ pub(crate) fn parse_response(protocol: ModelProtocol, raw: &Value) -> Result<Mod
             Ok(ModelResponse {
                 text,
                 tool_calls: calls,
-                finish_reason: raw["status"].as_str().map(str::to_owned),
-                usage: Usage {
-                    input_tokens: raw["usage"]["input_tokens"].as_u64(),
-                    output_tokens: raw["usage"]["output_tokens"].as_u64(),
+                finish_reason: if raw["status"] == "incomplete" {
+                    Some(
+                        raw["incomplete_details"]["reason"]
+                            .as_str()
+                            .unwrap_or("max_output_tokens")
+                            .to_owned(),
+                    )
+                } else {
+                    raw["status"].as_str().map(str::to_owned)
                 },
+                usage: usage_from_openai_responses(&raw["usage"]),
                 reasoning: responses_reasoning(&output),
             })
         }
@@ -472,10 +672,7 @@ pub(crate) fn parse_response(protocol: ModelProtocol, raw: &Value) -> Result<Mod
                 text,
                 tool_calls: calls,
                 finish_reason: raw["stop_reason"].as_str().map(str::to_owned),
-                usage: Usage {
-                    input_tokens: raw["usage"]["input_tokens"].as_u64(),
-                    output_tokens: raw["usage"]["output_tokens"].as_u64(),
-                },
+                usage: usage_from_anthropic(&raw["usage"]),
                 reasoning: anthropic_reasoning(&blocks),
             })
         }
@@ -511,10 +708,7 @@ pub(crate) fn parse_response(protocol: ModelProtocol, raw: &Value) -> Result<Mod
                 text,
                 tool_calls: calls,
                 finish_reason: candidate["finishReason"].as_str().map(str::to_owned),
-                usage: Usage {
-                    input_tokens: raw["usageMetadata"]["promptTokenCount"].as_u64(),
-                    output_tokens: raw["usageMetadata"]["candidatesTokenCount"].as_u64(),
-                },
+                usage: usage_from_gemini(&raw["usageMetadata"]),
                 reasoning: gemini_reasoning(&parts),
             })
         }
@@ -535,10 +729,7 @@ pub(crate) fn parse_response(protocol: ModelProtocol, raw: &Value) -> Result<Mod
                 text: string(&message["content"]),
                 tool_calls: calls,
                 finish_reason: raw["done_reason"].as_str().map(str::to_owned),
-                usage: Usage {
-                    input_tokens: raw["prompt_eval_count"].as_u64(),
-                    output_tokens: raw["eval_count"].as_u64(),
-                },
+                usage: usage_from_ollama(raw),
                 reasoning: display_reasoning(
                     ModelProtocol::OllamaChat,
                     message["thinking"].as_str(),
@@ -914,5 +1105,184 @@ mod tests {
         assert_eq!(content[0]["signature"], "sig-abc");
         assert_eq!(content[0]["thinking"], "先读状态");
         assert_eq!(content[1]["type"], "text");
+    }
+
+    fn tool(name: &str) -> crate::extension::ToolDefinition {
+        crate::extension::ToolDefinition {
+            name: name.into(),
+            description: name.into(),
+            input_schema: json!({"type":"object","properties":{}}),
+            output_schema: None,
+            source: "test".into(),
+            provider_version: None,
+            execution: Default::default(),
+        }
+    }
+
+    #[test]
+    fn anthropic_injects_prompt_cache_breakpoints() {
+        let config: ModelConfig = serde_json::from_value(json!({
+            "id":"test","name":"test","protocol":"anthropic-messages",
+            "model":"test","baseUrl":"http://localhost"
+        }))
+        .unwrap();
+        let messages = vec![
+            Message {
+                role: Role::System,
+                content: "sys".into(),
+                tool_call_id: None,
+                tool_calls: vec![],
+                reasoning: None,
+            },
+            Message {
+                role: Role::User,
+                content: "hi".into(),
+                tool_call_id: None,
+                tool_calls: vec![],
+                reasoning: None,
+            },
+        ];
+        let body = anthropic_body(&config, &messages, &[tool("a"), tool("b")]);
+        assert_eq!(body["tools"][1]["cache_control"]["type"], "ephemeral");
+        assert!(body["tools"][0].get("cache_control").is_none());
+        assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(
+            body["messages"][0]["content"][0]["cache_control"]["type"],
+            "ephemeral"
+        );
+        assert_eq!(count_cache_breakpoints(&body), 3);
+    }
+
+    #[test]
+    fn anthropic_cache_skips_thinking_blocks() {
+        let config: ModelConfig = serde_json::from_value(json!({
+            "id":"test","name":"test","protocol":"anthropic-messages",
+            "model":"test","baseUrl":"http://localhost"
+        }))
+        .unwrap();
+        let messages = vec![Message {
+            role: Role::Assistant,
+            content: "result".into(),
+            tool_call_id: None,
+            tool_calls: vec![],
+            reasoning: Some(thinking("sig")),
+        }];
+        let body = anthropic_body(&config, &messages, &[]);
+        let content = body["messages"][0]["content"].as_array().unwrap();
+        assert!(content[0].get("cache_control").is_none());
+        assert_eq!(content[1]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn prompt_cache_can_be_disabled() {
+        let config: ModelConfig = serde_json::from_value(json!({
+            "id":"test","name":"test","protocol":"anthropic-messages",
+            "model":"test","baseUrl":"http://localhost",
+            "options":{"promptCache":false}
+        }))
+        .unwrap();
+        let messages = vec![Message {
+            role: Role::User,
+            content: "hi".into(),
+            tool_call_id: None,
+            tool_calls: vec![],
+            reasoning: None,
+        }];
+        let body = anthropic_body(&config, &messages, &[tool("a")]);
+        assert!(body["system"].is_string());
+        assert!(body["tools"][0].get("cache_control").is_none());
+        assert!(
+            body["messages"][0]["content"][0]
+                .get("cache_control")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn openai_chat_never_emits_cache_control() {
+        let config: ModelConfig = serde_json::from_value(json!({
+            "id":"test","name":"test","protocol":"openai-chat",
+            "model":"kimi-k2","baseUrl":"http://localhost",
+            "options":{"maxOutputTokens":1024,"temperature":0.2}
+        }))
+        .unwrap();
+        let messages = vec![Message {
+            role: Role::User,
+            content: "hi".into(),
+            tool_call_id: None,
+            tool_calls: vec![],
+            reasoning: None,
+        }];
+        let body = openai_chat_body(&config, &messages, &[tool("a")]);
+        let encoded = body.to_string();
+        assert!(!encoded.contains("cache_control"), "{encoded}");
+        assert_eq!(body["max_tokens"], 1024);
+        assert_eq!(body["temperature"], 0.2);
+    }
+
+    #[test]
+    fn openai_o_series_uses_max_completion_tokens_and_drops_temperature() {
+        let config: ModelConfig = serde_json::from_value(json!({
+            "id":"test","name":"test","protocol":"openai-chat",
+            "model":"o3-mini","baseUrl":"http://localhost",
+            "options":{"maxOutputTokens":2048,"temperature":0.7}
+        }))
+        .unwrap();
+        let body = openai_chat_body(&config, &[], &[]);
+        assert_eq!(body["max_completion_tokens"], 2048);
+        assert!(body.get("max_tokens").is_none());
+        assert!(body.get("temperature").is_none());
+    }
+
+    #[test]
+    fn openai_gpt5_uses_max_completion_tokens() {
+        let config: ModelConfig = serde_json::from_value(json!({
+            "id":"test","name":"test","protocol":"openai-chat",
+            "model":"gpt-5.2","baseUrl":"http://localhost",
+            "options":{"maxOutputTokens":1024}
+        }))
+        .unwrap();
+        let body = openai_chat_body(&config, &[], &[]);
+        assert_eq!(body["max_completion_tokens"], 1024);
+    }
+
+    #[test]
+    fn parses_cache_tokens_from_each_provider() {
+        let openai = parse_response(
+            ModelProtocol::OpenaiChat,
+            &json!({"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],
+                "usage":{"prompt_tokens":100,"completion_tokens":10,
+                    "prompt_tokens_details":{"cached_tokens":80}}}),
+        )
+        .unwrap();
+        assert_eq!(openai.usage.cache_read_tokens, Some(80));
+        assert_eq!(
+            openai.usage.context_tokens(ModelProtocol::OpenaiChat),
+            Some(100)
+        );
+
+        let anthropic = parse_response(
+            ModelProtocol::AnthropicMessages,
+            &json!({"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn",
+                "usage":{"input_tokens":20,"output_tokens":5,
+                    "cache_read_input_tokens":80,"cache_creation_input_tokens":10}}),
+        )
+        .unwrap();
+        assert_eq!(anthropic.usage.cache_read_tokens, Some(80));
+        assert_eq!(
+            anthropic
+                .usage
+                .context_tokens(ModelProtocol::AnthropicMessages),
+            Some(110)
+        );
+
+        let gemini = parse_response(
+            ModelProtocol::Gemini,
+            &json!({"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],
+                "usageMetadata":{"promptTokenCount":90,"candidatesTokenCount":4,
+                    "cachedContentTokenCount":70}}),
+        )
+        .unwrap();
+        assert_eq!(gemini.usage.cache_read_tokens, Some(70));
     }
 }

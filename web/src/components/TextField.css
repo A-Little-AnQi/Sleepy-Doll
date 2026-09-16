@@ -1,0 +1,51 @@
+.sd-field {
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--font-body);
+  outline: none;
+  box-shadow: none;
+}
+
+textarea.sd-field {
+  height: auto;
+  min-height: 180px;
+  padding: 10px;
+  resize: vertical;
+  line-height: 1.55;
+  font:
+    12px/1.55 "Cascadia Code",
+    Consolas,
+    monospace;
+}
+
+.sd-field:hover {
+  border-color: var(--border-strong);
+}
+
+.sd-field:focus {
+  border-color: var(--text);
+}
+
+.sd-field.is-bare,
+.sd-field.is-bare:hover,
+.sd-field.is-bare:focus,
+.sd-field.is-bare:focus-visible {
+  height: auto;
+  min-height: 46px;
+  max-height: 180px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  resize: none;
+  line-height: 1.8;
+  font: inherit;
+  font-size: 14px;
+}

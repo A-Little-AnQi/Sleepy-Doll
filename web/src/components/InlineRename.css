@@ -1,0 +1,9 @@
+.sd-inline-rename {
+  width: 100%;
+  margin: 0;
+}
+
+.sd-inline-rename .sd-field {
+  height: var(--control-height);
+  min-height: var(--control-height);
+}

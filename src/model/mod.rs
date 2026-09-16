@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    config::{ModelConfig, ModelProtocol},
+    config::{ModelAuth, ModelConfig, ModelProtocol},
     error::{Error, Result},
     extension::ToolDefinition,
 };
@@ -81,6 +81,39 @@ pub struct Usage {
     pub input_tokens: Option<u64>,
     #[serde(default)]
     pub output_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u64>,
+}
+
+impl Usage {
+    pub fn merge(&mut self, incoming: Usage) {
+        if incoming.input_tokens.is_some() {
+            self.input_tokens = incoming.input_tokens;
+        }
+        if incoming.output_tokens.is_some() {
+            self.output_tokens = incoming.output_tokens;
+        }
+        if incoming.cache_read_tokens.is_some() {
+            self.cache_read_tokens = incoming.cache_read_tokens;
+        }
+        if incoming.cache_write_tokens.is_some() {
+            self.cache_write_tokens = incoming.cache_write_tokens;
+        }
+    }
+
+    /// 当前上下文占用。Anthropic 的 `input_tokens` 不含缓存命中，要加回去才
+    /// 和窗口可比；OpenAI / Gemini 的 prompt 计数已经含缓存。
+    pub fn context_tokens(&self, protocol: ModelProtocol) -> Option<u64> {
+        let input = self.input_tokens?;
+        Some(match protocol {
+            ModelProtocol::AnthropicMessages => {
+                input + self.cache_read_tokens.unwrap_or(0) + self.cache_write_tokens.unwrap_or(0)
+            }
+            _ => input,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,7 +168,10 @@ impl JsonTransport for UreqTransport {
 
 mod protocol;
 
-pub(crate) use protocol::parse_response;
+pub(crate) use protocol::{
+    parse_response, usage_from_anthropic, usage_from_gemini, usage_from_ollama,
+    usage_from_openai_chat,
+};
 
 pub struct ProtocolModel {
     config: ModelConfig,
@@ -169,16 +205,34 @@ impl ProtocolModel {
         if let Some(key) = &self.config.api_key {
             match self.config.protocol {
                 ModelProtocol::AnthropicMessages => {
-                    headers.insert("x-api-key".into(), key.clone());
+                    if anthropic_uses_bearer(self.config.auth, key) {
+                        headers
+                            .entry("authorization".into())
+                            .or_insert_with(|| format!("Bearer {key}"));
+                    } else {
+                        headers
+                            .entry("x-api-key".into())
+                            .or_insert_with(|| key.clone());
+                    }
                     headers
                         .entry("anthropic-version".into())
                         .or_insert_with(|| "2023-06-01".into());
                 }
                 ModelProtocol::Gemini => {
-                    headers.insert("x-goog-api-key".into(), key.clone());
+                    if self.config.auth == ModelAuth::Bearer {
+                        headers
+                            .entry("authorization".into())
+                            .or_insert_with(|| format!("Bearer {key}"));
+                    } else {
+                        headers
+                            .entry("x-goog-api-key".into())
+                            .or_insert_with(|| key.clone());
+                    }
                 }
                 ModelProtocol::OpenaiResponses | ModelProtocol::OpenaiChat => {
-                    headers.insert("authorization".into(), format!("Bearer {key}"));
+                    headers
+                        .entry("authorization".into())
+                        .or_insert_with(|| format!("Bearer {key}"));
                 }
                 ModelProtocol::OllamaChat => {}
             }
@@ -213,6 +267,68 @@ impl Model for ProtocolModel {
     }
     fn config(&self) -> &ModelConfig {
         &self.config
+    }
+}
+
+fn anthropic_uses_bearer(auth: ModelAuth, key: &str) -> bool {
+    match auth {
+        ModelAuth::Bearer => true,
+        ModelAuth::ApiKey => false,
+        // 官方密钥是 `sk-ant-`；中转普遍是 `sk-` / 任意 token，走 Bearer。
+        ModelAuth::Auto => !key.starts_with("sk-ant-"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn anthropic(auth: ModelAuth, key: &str) -> ProtocolModel {
+        ProtocolModel::new(ModelConfig {
+            id: "t".into(),
+            name: "t".into(),
+            protocol: ModelProtocol::AnthropicMessages,
+            model: "claude".into(),
+            base_url: "http://localhost".into(),
+            api_key: Some(key.into()),
+            auth,
+            headers: HashMap::new(),
+            options: Default::default(),
+        })
+    }
+
+    #[test]
+    fn anthropic_official_key_uses_x_api_key() {
+        let headers = anthropic(ModelAuth::Auto, "sk-ant-official").headers();
+        assert_eq!(
+            headers.get("x-api-key").map(String::as_str),
+            Some("sk-ant-official")
+        );
+        assert!(!headers.contains_key("authorization"));
+    }
+
+    #[test]
+    fn anthropic_gateway_token_uses_bearer() {
+        let headers = anthropic(ModelAuth::Auto, "sk-gateway").headers();
+        assert_eq!(
+            headers.get("authorization").map(String::as_str),
+            Some("Bearer sk-gateway")
+        );
+        assert!(!headers.contains_key("x-api-key"));
+    }
+
+    #[test]
+    fn anthropic_auth_can_be_forced() {
+        let headers = anthropic(ModelAuth::Bearer, "sk-ant-official").headers();
+        assert_eq!(
+            headers.get("authorization").map(String::as_str),
+            Some("Bearer sk-ant-official")
+        );
+        let headers = anthropic(ModelAuth::ApiKey, "sk-gateway").headers();
+        assert_eq!(
+            headers.get("x-api-key").map(String::as_str),
+            Some("sk-gateway")
+        );
     }
 }
 

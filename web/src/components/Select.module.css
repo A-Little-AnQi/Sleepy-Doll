@@ -1,26 +1,16 @@
-.select-chevron {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
 .select-trigger {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   width: 100%;
-  min-height: 37px;
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
-  padding: 8px 11px;
+  min-height: var(--control-height);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 11px;
   background: var(--surface);
   text-align: left;
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 .select-trigger > span {
@@ -29,15 +19,12 @@
   text-overflow: ellipsis;
 }
 
-.select-chevron {
-  width: 14px;
-  height: 14px;
-  transform: rotate(-90deg);
-  color: var(--muted);
+.select-trigger:hover {
+  border-color: var(--border-strong);
 }
 
 .select-trigger[aria-expanded="true"] {
-  border-color: var(--secondary);
+  border-color: var(--text);
 }
 
 .select-menu {

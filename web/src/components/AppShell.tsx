@@ -23,7 +23,6 @@ import type { Bootstrap, ConversationInfo } from "../types";
 import {
   BrandIcon,
   ChatIcon,
-  ChevronIcon,
   EditIcon,
   FolderIcon,
   PanelIcon,
@@ -35,6 +34,8 @@ import {
   TrashIcon,
 } from "./icons";
 import { SidebarAccount } from "./SidebarAccount";
+import { InlineRename } from "./InlineRename";
+import { DisclosureChevron } from "./DisclosureChevron";
 import { Toast } from "./Toast";
 import {
   SIDEBAR_DEFAULT_WIDTH,
@@ -132,10 +133,7 @@ function idsKey(items: Array<{ id: string }>) {
 }
 
 function runLayout(apply: () => void) {
-  const reduced =
-    document.documentElement.dataset.reducedMotion === "true" ||
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (reduced || typeof document.startViewTransition !== "function") {
+  if (typeof document.startViewTransition !== "function") {
     apply();
     return;
   }
@@ -310,7 +308,7 @@ export function AppShell({
     if (
       event.target instanceof Element &&
       event.target.closest(
-        ".app-conversation-actions, .app-conversation-rename, input",
+        ".app-conversation-actions, .sd-inline-rename, input",
       )
     ) {
       return;
@@ -621,16 +619,15 @@ export function AppShell({
           )}
         </ul>
       </div>
-      <div className="app-sidebar-foot">
+      <div className="app-sidebar-status">
         <button className="app-connection" onClick={() => onPage("bridge")}>
           <PluginIcon className="app-nav-icon" />
           <span>BetterGI</span>
           <small>{bridgeLabel}</small>
         </button>
-        <SidebarAccount
-          settingsActive={settings}
-          onSettings={() => onPage("settings")}
-        />
+      </div>
+      <div className="app-sidebar-foot">
+        <SidebarAccount onSettings={() => onPage("settings")} />
       </div>
       <div
         className="app-sidebar-resize"
@@ -803,25 +800,16 @@ function GroupRow({
       style={{ viewTransitionName: vtName(group.id) } as CSSProperties}
     >
       {editing ? (
-        <form
-          className="app-conversation-rename"
-          onSubmit={(event) => {
-            event.preventDefault();
+        <InlineRename
+          label="分组名称"
+          value={name}
+          onChange={setName}
+          onSubmit={() => {
             setEditing(false);
             persistLayout(renameGroup(layout, group.id, name));
           }}
-        >
-          <input
-            aria-label="分组名称"
-            value={name}
-            autoFocus
-            onChange={(event) => setName(event.target.value)}
-            onBlur={() => setEditing(false)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") setEditing(false);
-            }}
-          />
-        </form>
+          onCancel={() => setEditing(false)}
+        />
       ) : (
         <div
           className="app-group-head"
@@ -839,8 +827,9 @@ function GroupRow({
             }
           >
             <span className="app-row-lead" aria-hidden="true">
-              <ChevronIcon
-                className={`app-group-chevron${group.collapsed ? "" : " is-open"}`}
+              <DisclosureChevron
+                expanded={!group.collapsed}
+                className="app-group-chevron"
               />
             </span>
             <span className="app-conversation-title">{group.name}</span>
@@ -936,25 +925,16 @@ function ConversationRow({
         className={current ? "is-current" : undefined}
         style={{ viewTransitionName: vtName(entry.id) } as CSSProperties}
       >
-        <form
-          className="app-conversation-rename"
-          onSubmit={(event) => {
-            event.preventDefault();
+        <InlineRename
+          label="会话名称"
+          value={title}
+          onChange={setTitle}
+          onSubmit={() => {
             setEditing(false);
             void onAct(() => api.renameConversation(entry.id, title));
           }}
-        >
-          <input
-            aria-label="会话名称"
-            value={title}
-            autoFocus
-            onChange={(event) => setTitle(event.target.value)}
-            onBlur={() => setEditing(false)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") setEditing(false);
-            }}
-          />
-        </form>
+          onCancel={() => setEditing(false)}
+        />
       </li>
     );
   }

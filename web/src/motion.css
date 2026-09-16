@@ -70,14 +70,9 @@ button:active:not(:disabled),
   transform-origin: top center;
   animation: menu-enter var(--motion-base) var(--ease-enter) both;
 }
-/* 关掉动画之后必须回到无 transform 的状态，见上面 keyframes 的说明。 */
 
 [data-ui="select-trigger"] svg {
-  transition: transform var(--motion-base) var(--ease-enter);
-}
-
-[data-ui="select-trigger"][aria-expanded="true"] svg {
-  transform: rotate(90deg);
+  transition: none;
 }
 
 details > :not(summary) {
@@ -123,6 +118,21 @@ dialog[open]::backdrop {
   from {
     opacity: 0;
     transform: translateY(-4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes menu-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.02);
   }
   to {
     opacity: 1;
@@ -180,24 +190,4 @@ dialog[open]::backdrop {
     opacity: 1;
     transform: scale(1);
   }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: 0.001ms !important;
-  }
-}
-
-html[data-reduced-motion="true"] *,
-html[data-reduced-motion="true"] *::before,
-html[data-reduced-motion="true"] *::after {
-  animation-duration: 0.001ms !important;
-  animation-iteration-count: 1 !important;
-  scroll-behavior: auto !important;
-  transition-duration: 0.001ms !important;
 }

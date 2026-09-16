@@ -15,36 +15,13 @@
 
 .settings-nav {
   flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 4px;
   padding: 12px 0 14px;
-  margin-bottom: 0;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
 
-.settings-nav button {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  padding: 8px 13px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  font-size: 13px;
-  color: var(--secondary);
-}
-
-.settings-nav button:hover {
-  background: var(--hover);
-}
-
-.settings-nav button.is-active {
-  background: var(--selected);
-  color: var(--text);
-  font-weight: 600;
+.settings-nav .sd-tabs {
+  width: 100%;
 }
 
 .settings-content {
@@ -91,43 +68,6 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--muted);
-}
-
-.setting-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  min-height: 58px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.setting-row strong {
-  font-size: 13px;
-  font-weight: 550;
-}
-
-.setting-row > [data-ui="select-root"] {
-  width: 180px;
-  flex: 0 0 auto;
-}
-
-.setting-row small {
-  display: block;
-  margin-top: 5px;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.path-value {
-  margin: 4px 0 0;
-  color: var(--secondary);
-  font:
-    11px/1.7 "Cascadia Code",
-    Consolas,
-    monospace;
-  overflow-wrap: anywhere;
 }
 
 .settings-about {
@@ -185,17 +125,17 @@
     display: none;
   }
 
-  .settings-nav button {
-    flex: 0 0 auto;
-  }
-
-  .setting-row {
+  .settings-general .setting-row {
     align-items: flex-start;
     flex-wrap: wrap;
     gap: 12px;
   }
 
-  .setting-row > [data-ui="select-root"] {
+  .settings-general .setting-row-control,
+  .settings-general .setting-row-control > [data-ui="select-root"],
+  .settings-general .setting-row-control > .app-theme-switch {
     width: 100%;
+    max-width: none;
+    flex: 1 1 100%;
   }
 }

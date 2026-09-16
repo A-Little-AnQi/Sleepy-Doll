@@ -15,6 +15,11 @@
   --inverse: #fff;
   --solid: #202020;
   --shadow: 0 8px 30px #0000000c, 0 1px 4px #00000006;
+  --well: #e6e6e6;
+  --well-hover: #dcdcdc;
+  --well-inset: inset 0 1px 2px #0000001a, inset 0 0 0 1px #00000012;
+  --knob: #fff;
+  --knob-shadow: 0 1px 2px #00000022, 0 3px 7px #00000014, inset 0 1px 0 #fff;
   /* 布局尺寸。按 CSS 像素判断，缩放后以实际 CSS 宽度决定断点。 */
   --sidebar-width: 248px;
   --details-width: 336px;
@@ -51,6 +56,11 @@
   --inverse: #171717;
   --solid: #e9e9e9;
   --shadow: 0 8px 30px #0004, 0 1px 4px #0004;
+  --well: #101010;
+  --well-hover: #171717;
+  --well-inset: inset 0 1px 3px #000000b3, inset 0 0 0 1px #ffffff12;
+  --knob: #2c2c2c;
+  --knob-shadow: 0 1px 2px #000a, 0 4px 10px #0007, inset 0 1px 0 #ffffff18;
   color-scheme: dark;
 }
 
@@ -493,12 +503,19 @@ a {
 :where(input:not([type="checkbox"])),
 .form-section input {
   width: 100%;
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
-  padding: 10px 12px;
-  font-size: 13px;
+  height: var(--control-height);
+  min-height: var(--control-height);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 10px;
+  font-size: var(--font-body);
   outline: none;
   box-shadow: none;
+}
+
+:where(input:not([type="checkbox"])):hover,
+.form-section input:hover {
+  border-color: var(--border-strong);
 }
 
 .form-section {
@@ -596,6 +613,79 @@ a {
 .switch.on:after {
   background: var(--inverse);
   transform: translateX(14px);
+}
+
+.app-theme-switch {
+  --theme-knob: 26px;
+  position: relative;
+  display: block;
+  overflow: hidden;
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height);
+  margin-bottom: 0;
+  padding: 3px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--well);
+  box-shadow: var(--well-inset);
+  color: var(--secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.app-theme-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  z-index: 1;
+  width: var(--theme-knob);
+  height: var(--theme-knob);
+  border-radius: 50%;
+  background: var(--knob);
+  box-shadow: var(--knob-shadow);
+  pointer-events: none;
+  transition: left var(--motion-base, 240ms) var(--ease-enter, cubic-bezier(0.22, 0.08, 0.16, 1));
+}
+.app-theme-switch.is-dark .app-theme-switch-knob {
+  left: calc(100% - 3px - var(--theme-knob));
+}
+.app-theme-switch-copy {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 0 8px 0 calc(var(--theme-knob) + 8px);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  pointer-events: none;
+}
+.app-theme-switch.is-dark .app-theme-switch-copy {
+  justify-content: flex-start;
+  padding: 0 calc(var(--theme-knob) + 8px) 0 8px;
+}
+.app-theme-switch-copy svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.app-theme-switch:hover,
+.app-theme-switch.is-hot,
+.app-theme-switch:focus-visible {
+  background: var(--well-hover);
+}
+.app-theme-switch,
+.app-theme-switch * {
+  cursor: pointer;
+}
+button.app-theme-switch:active:not(:disabled) {
+  transform: none;
 }
 
 .toggle-row {
@@ -794,16 +884,4 @@ details > pre {
   .form-grid {
     grid-template-columns: 1fr;
   }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  * {
-    animation: none !important;
-    transition: none !important;
-  }
-}
-
-html[data-reduced-motion="true"] * {
-  animation: none !important;
-  transition: none !important;
 }

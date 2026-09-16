@@ -8,16 +8,23 @@ import {
   BrandIcon,
 } from "../components/icons";
 import { Select } from "../components/Select";
+import { ThemeSwitch } from "../components/ThemeSwitch";
 import { ModelsPage } from "./ModelsPage";
 import { BridgePage } from "./BridgePage";
-import { MotionSwitch } from "../components/MotionSwitch";
+import { SettingRow } from "../components/SettingRow";
+import { SlidingTabs } from "../components/SlidingTabs";
+import { ConfigEditor } from "../components/ConfigEditor";
+import { api } from "../api";
+import { readTheme, writeTheme } from "../appearance";
 import {
-  readReducedMotion,
-  readTheme,
-  writeReducedMotion,
-  writeTheme,
-} from "../appearance";
+  LOCALE_OPTIONS,
+  readLocale,
+  writeLocale,
+  type LocaleId,
+} from "../locale";
+
 type Section = "settings" | "models" | "bridge" | "sponsor";
+
 export function SettingsPage({
   bootstrap,
   section,
@@ -29,42 +36,39 @@ export function SettingsPage({
   onSection(section: Section): void;
   reload(): Promise<void>;
 }) {
-  const [motion, setMotion] = useState(readReducedMotion);
   const [theme, setTheme] = useState(readTheme);
+  const [locale, setLocale] = useState(readLocale);
   const [sendKey, setSendKey] = useState(
     () => localStorage.getItem("sleepy-doll-send-key") ?? "enter",
   );
+  const [editing, setEditing] = useState(false);
+  const [configPath, setConfigPath] = useState(bootstrap.configPath);
+  useEffect(() => setConfigPath(bootstrap.configPath), [bootstrap.configPath]);
   useEffect(() => {
-    writeReducedMotion(motion);
-  }, [motion]);
-  useEffect(() => {
-    writeTheme(theme);
-  }, [theme]);
-  const [copied, setCopied] = useState(false);
+    if (bootstrap.configPath) return;
+    void api
+      .configRead()
+      .then((result) => {
+        if (result.path) setConfigPath(result.path);
+      })
+      .catch(() => undefined);
+  }, [bootstrap.configPath]);
   return (
     <div className="settings-layout">
-      <nav className="settings-nav" aria-label="设置分类">
-        {(
-          [
-            { id: "settings", name: "通用", Icon: SettingsIcon },
-            { id: "models", name: "模型", Icon: ModelIcon },
-            { id: "bridge", name: "BetterGI", Icon: BridgeIcon },
-            { id: "sponsor", name: "赞助作者", Icon: BrandIcon },
-          ] as const
-        ).map(({ id, name, Icon }) => (
-          <button
-            key={id}
-            className={section === id ? "is-active" : ""}
-            aria-current={section === id ? "page" : undefined}
-            onClick={() => onSection(id)}
-          >
-            <Icon className="button-icon" />
-            {name}
-          </button>
-        ))}
-      </nav>
+      <div className="settings-nav">
+        <SlidingTabs
+          ariaLabel="设置分类"
+          value={section}
+          onChange={onSection}
+          items={[
+            { id: "settings", name: "通用", icon: <SettingsIcon className="button-icon" /> },
+            { id: "models", name: "模型", icon: <ModelIcon className="button-icon" /> },
+            { id: "bridge", name: "BetterGI", icon: <BridgeIcon className="button-icon" /> },
+            { id: "sponsor", name: "赞助作者", icon: <BrandIcon className="button-icon" /> },
+          ]}
+        />
+      </div>
       <div className="settings-content">
-        <MotionSwitch viewKey={section} kind="panel">
         {section === "models" ? (
           <ModelsPage bootstrap={bootstrap} reload={reload} />
         ) : section === "bridge" ? (
@@ -75,36 +79,31 @@ export function SettingsPage({
           <div className="settings-general">
             <h2>通用</h2>
             <section className="settings-group">
-              <h3>外观</h3>
-              <div className="setting-row">
-                <strong>主题</strong>
+              <SettingRow label="主题">
+                <ThemeSwitch
+                  theme={theme}
+                  onChange={(next, origin) => {
+                    setTheme(next);
+                    return writeTheme(next, origin);
+                  }}
+                />
+              </SettingRow>
+              <SettingRow label="语言">
                 <Select
-                  label="主题"
-                  value={theme}
-                  options={[
-                    { value: "light", label: "浅色" },
-                    { value: "dark", label: "深色" },
-                  ]}
-                  onChange={(value) =>
-                    setTheme(value === "dark" ? "dark" : "light")
-                  }
+                  label="语言"
+                  value={locale}
+                  options={LOCALE_OPTIONS}
+                  onChange={(value) => {
+                    const next = value as LocaleId;
+                    setLocale(next);
+                    writeLocale(next);
+                  }}
                 />
-              </div>
-              <div className="setting-row">
-                <strong>减少动态效果</strong>
-                <button
-                  className={`switch ${motion ? "on" : ""}`}
-                  role="switch"
-                  aria-label="减少动态效果"
-                  aria-checked={motion}
-                  onClick={() => setMotion(!motion)}
-                />
-              </div>
+              </SettingRow>
             </section>
             <section className="settings-group">
               <h3>对话</h3>
-              <div className="setting-row">
-                <strong>发送快捷键</strong>
+              <SettingRow label="发送快捷键">
                 <Select
                   label="发送快捷键"
                   value={sendKey}
@@ -117,29 +116,18 @@ export function SettingsPage({
                     localStorage.setItem("sleepy-doll-send-key", value);
                   }}
                 />
-              </div>
+              </SettingRow>
             </section>
             <section className="settings-group">
               <h3>本地数据</h3>
-              <div className="setting-row">
-                <div>
-                  <strong>配置文件</strong>
-                  <p className="path-value">{bootstrap.configPath}</p>
-                </div>
+              <SettingRow label="配置文件" hint={configPath}>
                 <button
                   className="subtle-action"
-                  onClick={() =>
-                    void navigator.clipboard
-                      .writeText(bootstrap.configPath)
-                      .then(() => {
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 2000);
-                      })
-                  }
+                  onClick={() => setEditing(true)}
                 >
-                  {copied ? "已复制" : "复制路径"}
+                  编辑
                 </button>
-              </div>
+              </SettingRow>
             </section>
             <div className="settings-about">
               <BrandIcon className="brand-mark" />
@@ -149,8 +137,14 @@ export function SettingsPage({
             </div>
           </div>
         )}
-        </MotionSwitch>
       </div>
+      <ConfigEditor
+        path={configPath}
+        open={editing}
+        onClose={() => setEditing(false)}
+        onSaved={reload}
+        onPath={setConfigPath}
+      />
     </div>
   );
 }

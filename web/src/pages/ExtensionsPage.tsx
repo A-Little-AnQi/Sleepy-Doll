@@ -50,7 +50,12 @@ export function ExtensionsPage({
           enabled: skill.enabled !== false,
           available: skill.available !== false,
           unavailableReason: skill.unavailableReason ?? "",
-          meta: skill.source,
+          meta:
+            skill.source === "product"
+              ? "随产品"
+              : skill.source === "user"
+                ? "本机"
+                : skill.source,
           detail: skill.instructions ?? "",
           error: "",
         }))
@@ -92,19 +97,17 @@ export function ExtensionsPage({
           >
             <RefreshIcon className="button-icon" />
           </button>
-          {tab === "plugins" && (
-            <button
-              className="secondary-action"
-              onClick={() => {
-                setInstall(true);
-                setError("");
-                dialog.current?.showModal();
-              }}
-            >
-              <PlusIcon className="button-icon" />
-              导入插件
-            </button>
-          )}
+          <button
+            className="secondary-action"
+            onClick={() => {
+              setInstall(true);
+              setError("");
+              dialog.current?.showModal();
+            }}
+          >
+            <PlusIcon className="button-icon" />
+            {tab === "skills" ? "导入技能" : "导入插件"}
+          </button>
         </div>
       </div>
       <div className="list-toolbar">
@@ -203,7 +206,13 @@ export function ExtensionsPage({
         }}
       >
         <div className="dialog-head">
-          <h2>{install ? "导入插件" : current?.name}</h2>
+          <h2>
+            {install
+              ? tab === "skills"
+                ? "导入技能"
+                : "导入插件"
+              : current?.name}
+          </h2>
           <button
             className="icon-button"
             aria-label="关闭"
@@ -219,7 +228,11 @@ export function ExtensionsPage({
               className="form-section"
               onSubmit={(event) => {
                 event.preventDefault();
-                void run(() => api.installPlugin(path)).then((ok) => {
+                void run(() =>
+                  tab === "skills"
+                    ? api.installSkill(path)
+                    : api.installPlugin(path),
+                ).then((ok) => {
                   if (ok) {
                     setPath("");
                     dialog.current?.close();
@@ -228,13 +241,20 @@ export function ExtensionsPage({
               }}
             >
               <label>
-                <span>插件目录</span>
+                <span>
+                  {tab === "skills" ? "技能目录" : "插件目录"}
+                </span>
                 <input
                   placeholder="文件夹的完整路径"
                   value={path}
                   onChange={(event) => setPath(event.target.value)}
                 />
               </label>
+              {tab === "skills" && (
+                <p className="field-help">
+                  目录里要有 SKILL.md。导入后出现在本机技能目录，可随时开关。
+                </p>
+              )}
               <div>
                 <button
                   className="primary-action"

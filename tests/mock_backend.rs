@@ -21,6 +21,7 @@ fn model(base_url: &str, protocol: ModelProtocol) -> ProtocolModel {
         model: "mock-model".into(),
         base_url,
         api_key: None,
+        auth: Default::default(),
         headers: HashMap::new(),
         options: ModelOptions {
             timeout_ms: 5_000,

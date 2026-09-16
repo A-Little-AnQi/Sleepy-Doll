@@ -186,6 +186,117 @@ impl SkillRegistry {
     }
 }
 
+/// 把一份含 `SKILL.md` 的目录拷进用户技能根。名称来自 frontmatter，否则用目录名。
+pub fn install(destination_root: &Path, source: &Path) -> Result<String> {
+    let source = source.canonicalize()?;
+    let directory = if source.is_file() {
+        if source.file_name().and_then(|n| n.to_str()) != Some("SKILL.md") {
+            return Err(Error::Config("请选择包含 SKILL.md 的技能目录".into()));
+        }
+        source
+            .parent()
+            .ok_or_else(|| Error::Config("技能路径无效".into()))?
+            .to_path_buf()
+    } else {
+        source
+    };
+    let skill_md = directory.join("SKILL.md");
+    if !skill_md.is_file() {
+        return Err(Error::Config("目录里没有 SKILL.md".into()));
+    }
+    let text = fs::read_to_string(&skill_md)?;
+    let (fields, _) = frontmatter(&text);
+    let name = fields
+        .get("name")
+        .cloned()
+        .or_else(|| {
+            directory
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_owned)
+        })
+        .ok_or_else(|| Error::Config("skill has no name".into()))?;
+    if name.is_empty()
+        || name.len() > 80
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(Error::Config("技能名称不合法".into()));
+    }
+    fs::create_dir_all(destination_root)?;
+    let destination = destination_root.join(&name);
+    if destination.exists() {
+        return Err(Error::Config(format!("技能 {name} 已存在")));
+    }
+    if directory == destination
+        || directory.starts_with(&destination)
+        || destination.starts_with(&directory)
+    {
+        return Err(Error::Config("源目录与安装目录不能重叠".into()));
+    }
+    let mut files = Vec::new();
+    collect_skill_files(&directory, &directory, &mut files)?;
+    let total = files.iter().try_fold(0u64, |sum, path| {
+        Ok::<_, std::io::Error>(sum + fs::metadata(directory.join(path))?.len())
+    })?;
+    if files.len() > 200 || total > 2 * 1024 * 1024 {
+        return Err(Error::Config("技能超过本地安装大小限制".into()));
+    }
+    let stage = destination_root.join(format!(".staging-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&stage)?;
+    let copied = (|| -> Result<()> {
+        for path in &files {
+            let target = stage.join(path);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(directory.join(path), target)?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = copied {
+        let _ = fs::remove_dir_all(&stage);
+        return Err(error);
+    }
+    if let Err(error) = fs::rename(&stage, &destination) {
+        let _ = fs::remove_dir_all(&stage);
+        return Err(error.into());
+    }
+    Ok(name)
+}
+
+fn collect_skill_files(root: &Path, dir: &Path, result: &mut Vec<PathBuf>) -> Result<()> {
+    if dir.components().count() > root.components().count() + 8 {
+        return Err(Error::Config("技能目录层级过深".into()));
+    }
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with('.') || name == "node_modules" {
+            continue;
+        }
+        let ty = entry.file_type()?;
+        if ty.is_symlink() {
+            return Err(Error::Config("技能安装不接受符号链接".into()));
+        }
+        if ty.is_dir() {
+            collect_skill_files(root, &entry.path(), result)?;
+        } else if ty.is_file() {
+            if fs::metadata(entry.path())?.len() > 128 * 1024 {
+                return Err(Error::Config("技能文件超过 128KB".into()));
+            }
+            result.push(entry.path().strip_prefix(root).unwrap().into());
+        } else {
+            return Err(Error::Config("技能含有不支持的文件类型".into()));
+        }
+        if result.len() > 200 {
+            return Err(Error::Config("技能文件数过多".into()));
+        }
+    }
+    Ok(())
+}
+
 fn list_field(fields: &HashMap<String, String>, name: &str) -> Vec<String> {
     fields
         .get(name)
@@ -337,5 +448,25 @@ mod tests {
         );
         assert!(body.starts_with("# BGI 操作规范"));
         assert_eq!(fields.get("alwaysLoad").map(String::as_str), Some("true"));
+    }
+
+    #[test]
+    fn install_copies_a_skill_directory() {
+        let source = tempfile::tempdir().unwrap();
+        let skill = source.path().join("my-note");
+        fs::create_dir(&skill).unwrap();
+        fs::write(
+            skill.join("SKILL.md"),
+            "---\nname: my-note\ndescription: 本机笔记\n---\n\n# 笔记\n",
+        )
+        .unwrap();
+        fs::create_dir(skill.join("references")).unwrap();
+        fs::write(skill.join("references/a.md"), "ref").unwrap();
+        let dest = tempfile::tempdir().unwrap();
+        let name = install(dest.path(), &skill).unwrap();
+        assert_eq!(name, "my-note");
+        assert!(dest.path().join("my-note/SKILL.md").is_file());
+        assert!(dest.path().join("my-note/references/a.md").is_file());
+        assert!(install(dest.path(), &skill).is_err());
     }
 }

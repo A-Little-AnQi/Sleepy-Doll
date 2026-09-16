@@ -29,6 +29,28 @@ use types::*;
 /// otherwise become one locked insert per token.
 const DELTA_BATCH_CHARS: usize = 240;
 const DELTA_BATCH_INTERVAL: Duration = Duration::from_millis(150);
+/// 输出被截断后最多再续写几次。再多就以已有正文收成 Partial。
+const MAX_TRUNCATION_RECOVERIES: usize = 3;
+
+fn remember_discovered(run: &mut Run, exposed: &HashSet<String>) {
+    let mut names: Vec<String> = exposed.iter().cloned().collect();
+    names.sort();
+    run.discovered = names;
+}
+
+fn context_overflow(error: &Error) -> bool {
+    let text = match error {
+        Error::Http(message) | Error::ModelProtocol(message) | Error::Conflict(message) => {
+            message.to_lowercase()
+        }
+        _ => return false,
+    };
+    text.contains("prompt is too long")
+        || text.contains("context length")
+        || text.contains("context window")
+        || text.contains("http 413")
+        || (text.contains("token") && text.contains("exceed"))
+}
 
 /// 与领域无关的底座：语气、证据纪律、内部实现的边界。
 ///
@@ -485,14 +507,20 @@ impl Supervisor {
             .collect())
     }
 
-    /// 运行接纳时固定的模型配置；配置已被删除时回落到默认模型，
-    /// 但不静默换到另一个模型 —— 缺失的配置会让这一轮显式失败。
-    fn model_for(&self, run: &Run) -> crate::config::ModelConfig {
+    /// 运行接纳时固定的模型配置。配置被删掉时显式失败，不静默换成别的协议。
+    fn model_for(&self, run: &Run) -> Result<crate::config::ModelConfig> {
         let config = self.config.read().unwrap();
-        run.model_id
-            .as_ref()
-            .and_then(|id| config.models.iter().find(|model| &model.id == id).cloned())
-            .unwrap_or_else(|| config.active().clone())
+        match run.model_id.as_deref() {
+            None => Ok(config.active().clone()),
+            Some(id) => config
+                .models
+                .iter()
+                .find(|model| model.id == id)
+                .cloned()
+                .ok_or_else(|| {
+                    Error::Config("本轮绑定的模型配置已删除，请重新选择后再发送".into())
+                }),
+        }
     }
 
     fn tool_names(&self) -> HashSet<String> {
@@ -754,9 +782,11 @@ impl Supervisor {
                 .await;
         }
         self.journal.save(run, RunState::Deciding)?;
-        let mut exposed: HashSet<String> = HashSet::new();
+        let mut exposed: HashSet<String> = run.discovered.iter().cloned().collect();
         let mut history = self.journal.history(run)?;
         let skill_snapshot = self.skills();
+        let mut truncation_recoveries = 0usize;
+        let mut budget_scale = 100usize;
         loop {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
@@ -794,7 +824,10 @@ impl Supervisor {
                 .join("\n");
             let matched = if current.agent.auto_load_skills {
                 skill_snapshot
-                    .search(&run.prompt, current.agent.max_loaded_skills)
+                    .search(
+                        &context::skill_query(&run.prompt, &history),
+                        current.agent.max_loaded_skills,
+                    )
                     .into_iter()
                     .map(|s| s.name)
                     .collect::<HashSet<_>>()
@@ -844,9 +877,10 @@ impl Supervisor {
             }
             // 预算按当前模型自己的窗口推导，所以先取模型。运行接纳时已经固定
             // 配置；运行途中换选择只影响之后开始的运行。
-            let model = self.model_for(run);
+            let model = self.model_for(run)?;
             let output_reserve = model.options.max_output_tokens.unwrap_or(8192);
-            let (char_budget, token_budget) = policy::budget(&policy, &model);
+            let (base_chars, token_budget) = policy::budget(&policy, &model);
+            let char_budget = (base_chars.saturating_mul(budget_scale) / 100).max(4096);
             let attachment_text = attachments.render(char_budget / 3);
             let configured = configured_agent_instructions(&current.agent.system_prompt);
             let system = format!(
@@ -901,6 +935,7 @@ impl Supervisor {
             run.output_tokens += output_reserve;
             run.usage_estimated = true;
             self.journal.save(run, RunState::Deciding)?;
+            let protocol = model.protocol;
             let mut candidates = vec![model];
             candidates.extend(model_config.agent.fallback_models.iter().filter_map(|id| {
                 model_config
@@ -967,6 +1002,10 @@ impl Supervisor {
                         response = Some(value);
                         break;
                     }
+                    Err(error) if !emitted && context_overflow(&error) && budget_scale > 66 => {
+                        last_error = Some(error);
+                        break;
+                    }
                     Err(error)
                         if !emitted
                             && index + 1 < model_config.agent.fallback_models.len() + 1
@@ -981,6 +1020,16 @@ impl Supervisor {
                     }
                     Err(error) => return Err(error),
                 }
+            }
+            if response.is_none()
+                && last_error.as_ref().is_some_and(context_overflow)
+                && budget_scale > 66
+            {
+                budget_scale = 66;
+                self.journal
+                    .emit(run, "context.overflow", json!({"scale": budget_scale}))?;
+                drop(guard);
+                continue;
             }
             let response = response.ok_or_else(|| {
                 last_error.unwrap_or_else(|| Error::Http("all configured models failed".into()))
@@ -997,6 +1046,10 @@ impl Supervisor {
                             .map(|c| c.arguments.to_string().len() as u64 + 64)
                             .sum::<u64>(),
                 );
+            run.cache_read_tokens = response.usage.cache_read_tokens.unwrap_or(0);
+            if let Some(actual) = response.usage.context_tokens(protocol) {
+                run.context_tokens = actual;
+            }
             run.usage_estimated = previously_estimated
                 || response.usage.input_tokens.is_none()
                 || response.usage.output_tokens.is_none();
@@ -1039,6 +1092,30 @@ impl Supervisor {
                 "assistant.completed",
                 json!({"text":response.text,"turn":run.decisions}),
             )?;
+            if gateway::output_truncated(response.finish_reason.as_deref())
+                && calls.is_empty()
+                && deferred.is_empty()
+            {
+                if truncation_recoveries >= MAX_TRUNCATION_RECOVERIES {
+                    run.result = Some(response.text.clone());
+                    run.error = Some("回复在输出长度上限处被截断".into());
+                    self.journal.finish(run, RunState::Partial)?;
+                    return Ok(());
+                }
+                truncation_recoveries += 1;
+                let nudge = message(
+                    Role::User,
+                    "上一轮回复在输出长度上限处被截断。从截断处继续写完，不要重复已经给出的内容。",
+                );
+                self.journal.append_message(run, &nudge)?;
+                history.push(nudge);
+                self.journal.emit(
+                    run,
+                    "output.truncated",
+                    json!({"turn":run.decisions,"recoveries":truncation_recoveries}),
+                )?;
+                continue;
+            }
             if calls.is_empty() && deferred.is_empty() {
                 let attempts = self.journal.attempts(&run.id)?;
                 let next = if attempts.iter().any(|a| {
@@ -1128,6 +1205,7 @@ impl Supervisor {
                         self.record_result(run, call, result, result_limit, &mut history)?;
                     }
                 }
+                remember_discovered(run, &exposed);
                 self.journal.save(run, RunState::Deciding)?;
                 continue;
             }
@@ -1146,6 +1224,7 @@ impl Supervisor {
                     .tool(run, &call, &bridge, &policy, cancel, &mut exposed)
                     .await;
                 self.record_result(run, &call, result, result_limit, &mut history)?;
+                remember_discovered(run, &exposed);
                 if matches!(run.state, RunState::AwaitingUser | RunState::Verifying) {
                     self.journal.save(run, RunState::Deciding)?;
                 }
@@ -1160,6 +1239,7 @@ impl Supervisor {
                     .unwrap_or(12_000);
                 self.record_result(run, call, result, result_limit, &mut history)?;
             }
+            remember_discovered(run, &exposed);
             self.journal.save(run, RunState::Deciding)?;
         }
     }
@@ -1351,10 +1431,7 @@ impl Supervisor {
             Err(Error::Cancelled) => return Err(Error::Cancelled),
             Err(Error::Storage(e)) => return Err(Error::Storage(e)),
             Err(Error::Conflict(e)) => return Err(Error::Conflict(e)),
-            Err(e) => {
-                eprintln!("PROBE tool {} failed: {}", call.name, e);
-                json!({"ok":false,"error":e.to_string()})
-            }
+            Err(e) => json!({"ok":false,"error":e.to_string()}),
         };
         self.journal
             .record_tool(&run.conversation_id, call, &value)?;
@@ -2204,9 +2281,7 @@ impl Supervisor {
                     &current.runtime.trust_grants,
                 );
                 if permission == operation::permissions::PermissionDecision::Deny {
-                    return Err(Error::Conflict(
-                        "当前处于只读规划模式，禁止执行此写操作".into(),
-                    ));
+                    return Err(Error::Tool("当前处于只读规划模式，禁止执行此写操作".into()));
                 }
                 if !current.runtime.allows(&request)
                     && permission != operation::permissions::PermissionDecision::Allow
@@ -2228,12 +2303,14 @@ impl Supervisor {
                             return Err(Error::Cancelled);
                         }
                         if unix_now() > approval.expires_at || unix_now() > run.deadline {
-                            return Err(Error::Conflict("等待操作授权超时".into()));
+                            self.journal.save(run, RunState::Executing)?;
+                            return Err(Error::Tool("等待操作授权超时".into()));
                         }
                         if let Some(decision) = self.journal.approval_result(&approval.id)?.decision
                         {
                             if !decision {
-                                return Err(Error::Conflict("用户拒绝了本次操作".into()));
+                                self.journal.save(run, RunState::Executing)?;
+                                return Err(Error::Tool("用户拒绝了本次操作".into()));
                             }
                             break;
                         }
@@ -2327,9 +2404,7 @@ impl Supervisor {
                     &current.runtime.trust_grants,
                 );
                 if permission == operation::permissions::PermissionDecision::Deny {
-                    return Err(Error::Conflict(
-                        "当前处于只读规划模式，禁止执行写操作".into(),
-                    ));
+                    return Err(Error::Tool("当前处于只读规划模式，禁止执行写操作".into()));
                 }
                 if !current.runtime.allows(&request)
                     && permission != operation::permissions::PermissionDecision::Allow
@@ -2351,12 +2426,14 @@ impl Supervisor {
                             return Err(Error::Cancelled);
                         }
                         if unix_now() > approval.expires_at || unix_now() > run.deadline {
-                            return Err(Error::Conflict("等待插件授权超时".into()));
+                            self.journal.save(run, RunState::Executing)?;
+                            return Err(Error::Tool("等待插件授权超时".into()));
                         }
                         if let Some(decision) = self.journal.approval_result(&approval.id)?.decision
                         {
                             if !decision {
-                                return Err(Error::Conflict("用户拒绝插件调用".into()));
+                                self.journal.save(run, RunState::Executing)?;
+                                return Err(Error::Tool("用户拒绝插件调用".into()));
                             }
                             break;
                         }

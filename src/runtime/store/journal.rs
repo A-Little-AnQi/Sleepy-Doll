@@ -197,11 +197,13 @@ impl Journal {
             context_tokens: 0,
             context_window: 0,
             context_compacted: false,
+            cache_read_tokens: 0,
             message_boundary: 0,
             result: None,
             error: None,
             source: RunSource::Agent,
             model_id: model_id.map(str::to_owned),
+            discovered: Vec::new(),
         };
         tx.execute("INSERT OR IGNORE INTO conversations(id,title,created_at,updated_at) VALUES(?1,?2,?3,?3)",params![conversation,prompt.chars().take(120).collect::<String>(),stamp])?;
         tx.execute(
@@ -1119,6 +1121,7 @@ impl Journal {
                 .collect::<std::collections::HashSet<_>>()
                 .into_iter()
                 .collect(),
+            discovered: run.discovered.clone(),
             created_at: now(),
         };
         db.execute(

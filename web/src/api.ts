@@ -169,7 +169,7 @@ export const api = {
   approve: (id: string, approved: boolean) =>
     invoke("approval.respond", { id, approved }),
   events: (conversationId: string, after: number) =>
-    invoke<{ events: RunEvent[] }>(
+    invoke<{ events: RunEvent[]; snapshotRequired?: boolean }>(
       "events.read",
       eventsReadParams(conversationId, after, Boolean(window.ipc)),
     ),
@@ -191,6 +191,10 @@ export const api = {
     baseUrl: string;
     apiKey: string;
     timeoutMs?: number;
+    contextWindow?: number;
+    maxOutputTokens?: number;
+    auth?: string;
+    promptCache?: boolean;
   }) => invoke<{ saved: boolean }>("model.save", { model }),
   setSkillEnabled: (name: string, enabled: boolean) =>
     invoke<{ enabled: boolean }>("skill.setEnabled", { name, enabled }),
@@ -217,6 +221,8 @@ export const api = {
     }),
   installPlugin: (path: string) =>
     invoke<{ id: string }>("plugin.install", { path }),
+  installSkill: (path: string) =>
+    invoke<{ name: string }>("skill.install", { path }),
   removePlugin: (id: string) => invoke("plugin.remove", { id }),
   reloadExtensions: () => invoke("extensions.reload"),
   extractStrategy: (runId: string, name: string) =>
@@ -231,6 +237,10 @@ export const api = {
   executeOperation: (id: string) => invoke("operation.execute", { id }),
   rollbackOperation: (id: string) => invoke("operation.rollback", { id }),
 
+  configRead: () =>
+    invoke<{ path: string; content: string }>("config.read"),
+  configWrite: (content: string) =>
+    invoke<{ saved: boolean }>("config.write", { content }),
   conversations: (search = "", includeArchived = false) =>
     invoke<ConversationInfo[]>("conversation.list", {
       search,

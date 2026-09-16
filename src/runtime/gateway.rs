@@ -2,7 +2,10 @@ use crate::{
     config::{ModelConfig, ModelProtocol},
     error::{Error, Result},
     extension::ToolDefinition,
-    model::{Message, ModelResponse, ProtocolModel, Reasoning, ToolCall, Usage, parse_response},
+    model::{
+        Message, ModelResponse, ProtocolModel, Reasoning, ToolCall, Usage, parse_response,
+        usage_from_anthropic, usage_from_gemini, usage_from_ollama, usage_from_openai_chat,
+    },
 };
 use futures_util::StreamExt;
 use serde_json::{Value, json};
@@ -262,28 +265,33 @@ pub(crate) fn wire_name(name: &str) -> String {
     format!("{}_{}", readable, &super::types::hash(&json!(name))[..8])
 }
 
+pub fn output_truncated(reason: Option<&str>) -> bool {
+    matches!(reason, Some("max_tokens" | "max_output_tokens" | "length"))
+}
+
 pub fn validate(r: &ModelResponse) -> Result<()> {
-    if !matches!(
-        r.finish_reason.as_deref(),
-        Some("stop" | "completed" | "end_turn" | "tool_use" | "tool_calls" | "STOP")
-    ) {
-        // 思考占满输出预算时先落在这一支：`max_tokens` 不在允许列表里。
-        // 仍然拒绝（该轮确实没有完成），但要给出可操作的原因。
+    let truncated = output_truncated(r.finish_reason.as_deref());
+    if !truncated
+        && !matches!(
+            r.finish_reason.as_deref(),
+            Some("stop" | "completed" | "end_turn" | "tool_use" | "tool_calls" | "STOP")
+        )
+    {
         return Err(Error::ModelProtocol(
-            if r.finish_reason.as_deref() == Some("max_tokens") && r.reasoning.is_some() {
-                "模型在思考阶段耗尽输出预算，本轮没有产生可见回复".into()
-            } else {
-                "response interrupted, refused, or missing completion marker".into()
-            },
+            "response interrupted, refused, or missing completion marker".into(),
         ));
     }
     if r.text.trim().is_empty() && r.tool_calls.is_empty() {
         // 不降级为成功：调用方会据此结束该轮，界面只剩一个空气泡。
-        return Err(Error::ModelProtocol(if r.reasoning.is_some() {
-            "模型只返回了思考内容，没有可见回复".into()
-        } else {
-            "empty model response".into()
-        }));
+        return Err(Error::ModelProtocol(
+            if truncated && r.reasoning.is_some() {
+                "模型在思考阶段耗尽输出预算，本轮没有产生可见回复".into()
+            } else if r.reasoning.is_some() {
+                "模型只返回了思考内容，没有可见回复".into()
+            } else {
+                "empty model response".into()
+            },
+        ));
     }
     let mut ids = std::collections::HashSet::new();
     for c in &r.tool_calls {
@@ -461,11 +469,11 @@ impl Decoder {
         match self.protocol {
             ModelProtocol::OpenaiResponses => match v["type"].as_str().unwrap_or("") {
                 "response.output_text.delta" => delta = v["delta"].as_str().unwrap_or("").into(),
-                "response.completed" => {
+                "response.completed" | "response.incomplete" => {
                     self.final_response = Some(parse_response(self.protocol, &v["response"])?);
                     self.completed = true;
                 }
-                "response.failed" | "response.incomplete" | "response.refusal.delta" => {
+                "response.failed" | "response.refusal.delta" => {
                     return Err(Error::ModelProtocol("response did not complete".into()));
                 }
                 _ => {}
@@ -474,7 +482,10 @@ impl Decoder {
                 let c = &v["choices"][0];
                 delta = c["delta"]["content"].as_str().unwrap_or("").into();
                 // 只为界面：多数提供方拒绝回传该字段。
-                if let Some(thinking) = c["delta"]["reasoning_content"].as_str() {
+                if let Some(thinking) = c["delta"]["reasoning_content"]
+                    .as_str()
+                    .or_else(|| c["delta"]["reasoning"].as_str())
+                {
                     self.push_reasoning_text(thinking);
                 }
                 if !c["delta"]["refusal"].is_null() {
@@ -499,16 +510,14 @@ impl Decoder {
                     self.reason = Some(s.into());
                     self.completed = true;
                 }
-                if let Some(n) = v["usage"]["prompt_tokens"].as_u64() {
-                    self.usage.input_tokens = Some(n);
-                }
-                if let Some(n) = v["usage"]["completion_tokens"].as_u64() {
-                    self.usage.output_tokens = Some(n);
+                if v.get("usage").is_some() {
+                    self.usage.merge(usage_from_openai_chat(&v["usage"]));
                 }
             }
             ModelProtocol::AnthropicMessages => match v["type"].as_str().unwrap_or("") {
                 "message_start" => {
-                    self.usage.input_tokens = v["message"]["usage"]["input_tokens"].as_u64()
+                    self.usage
+                        .merge(usage_from_anthropic(&v["message"]["usage"]));
                 }
                 // 按块类型分派，不能用 `if ... type == "tool_use"` 守卫：
                 // 那会把思考块的起始帧一起吞掉。
@@ -573,7 +582,7 @@ impl Decoder {
                 }
                 "message_delta" => {
                     self.reason = v["delta"]["stop_reason"].as_str().map(str::to_owned);
-                    self.usage.output_tokens = v["usage"]["output_tokens"].as_u64();
+                    self.usage.merge(usage_from_anthropic(&v["usage"]));
                 }
                 "message_stop" => self.completed = true,
                 _ => {}
@@ -597,9 +606,12 @@ impl Decoder {
                         // 签名按 functionCall 序号索引：并行调用时只有第一个
                         // part 带签名，回传时必须附回同一个 part。
                         let call_index = self.calls.len();
-                        if let (Some(signature), Pending::Gemini { signatures, .. }) =
-                            (p["thoughtSignature"].as_str(), &mut self.pending)
-                        {
+                        if let (Some(signature), Pending::Gemini { signatures, .. }) = (
+                            p["thoughtSignature"]
+                                .as_str()
+                                .or_else(|| p["thought_signature"].as_str()),
+                            &mut self.pending,
+                        ) {
                             signatures.insert(call_index, signature.into());
                         }
                         self.calls.insert(
@@ -617,8 +629,7 @@ impl Decoder {
                     self.completed = true;
                 }
                 if v.get("usageMetadata").is_some() {
-                    self.usage.input_tokens = v["usageMetadata"]["promptTokenCount"].as_u64();
-                    self.usage.output_tokens = v["usageMetadata"]["candidatesTokenCount"].as_u64();
+                    self.usage.merge(usage_from_gemini(&v["usageMetadata"]));
                 }
             }
             ModelProtocol::OllamaChat => {
@@ -640,8 +651,7 @@ impl Decoder {
                 if v["done"] == true {
                     self.completed = true;
                     self.reason = Some(v["done_reason"].as_str().unwrap_or("stop").into());
-                    self.usage.input_tokens = v["prompt_eval_count"].as_u64();
-                    self.usage.output_tokens = v["eval_count"].as_u64();
+                    self.usage.merge(usage_from_ollama(&v));
                 }
             }
         }

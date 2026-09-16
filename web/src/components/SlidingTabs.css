@@ -1,0 +1,55 @@
+.sd-tabs {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 4px;
+  border-radius: var(--radius);
+  background: var(--subtle);
+}
+
+.sd-tabs-pill {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  z-index: 0;
+  border-radius: 6px;
+  background: var(--selected);
+  pointer-events: none;
+  opacity: 0;
+}
+
+.sd-tabs-pill[data-ready="true"] {
+  opacity: 1;
+}
+
+.sd-tabs button {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--control-height);
+  padding: 0 13px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-size: var(--font-body);
+  font-weight: 550;
+  color: var(--secondary);
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+
+.sd-tabs button:hover {
+  color: var(--text);
+}
+
+.sd-tabs button.is-active {
+  color: var(--text);
+}
+
+.sd-tabs button:active:not(:disabled) {
+  transform: none;
+}

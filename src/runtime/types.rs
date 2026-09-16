@@ -137,6 +137,10 @@ pub struct Run {
     /// 本轮是否已经丢掉或清空过较早上下文。界面只展示这一事实，不再展开细节。
     #[serde(default)]
     pub context_compacted: bool,
+    /// 最近一次请求的缓存命中（token）。Anthropic 是 cache_read，OpenAI / Gemini
+    /// 是 prompt 里被计为 cached 的部分。
+    #[serde(default)]
+    pub cache_read_tokens: u64,
     #[serde(default)]
     pub message_boundary: i64,
     pub result: Option<String>,
@@ -147,6 +151,11 @@ pub struct Run {
     /// 请求保持原协议与配置。
     #[serde(default)]
     pub model_id: Option<String>,
+    /// 本轮已经发现、允许直接调用的工具与桥接口。崩溃恢复后必须从这里还原，
+    /// 不能只靠内存里的 HashSet —— 否则模型会按历史里的 describe 结果直接
+    /// invoke，被运行时拒绝。
+    #[serde(default)]
+    pub discovered: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,6 +211,9 @@ pub struct RunCheckpoint {
     pub bridge_instances: Vec<String>,
     #[serde(default)]
     pub catalog_versions: Vec<String>,
+    /// 与 `Run.discovered` 同步，给模型看已经授权过哪些调用。
+    #[serde(default)]
+    pub discovered: Vec<String>,
     pub created_at: String,
 }
 

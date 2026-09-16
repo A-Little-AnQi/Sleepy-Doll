@@ -85,6 +85,20 @@ fn structured_checkpoint_tracks_run_revision_and_pending_step() {
     assert_eq!(checkpoint.plan_revision, Some(1));
     assert_eq!(checkpoint.pending_step.as_deref(), Some("one"));
 }
+
+#[test]
+fn discovered_tools_survive_run_payload_roundtrip() {
+    let (_d, j) = journal();
+    let mut run = j.create("goal", "c", "discovered", 1800, None).unwrap();
+    run.discovered = vec!["bridge-api:bgi.ping:v1".into()];
+    j.save(&mut run, RunState::Deciding).unwrap();
+    let loaded = j.get(&run.id).unwrap();
+    assert_eq!(loaded.discovered, vec!["bridge-api:bgi.ping:v1"]);
+    assert_eq!(
+        j.checkpoint(&run.id).unwrap().discovered,
+        vec!["bridge-api:bgi.ping:v1"]
+    );
+}
 #[test]
 fn stale_revision_and_terminal_transition_cannot_advance_run() {
     let (_d, j) = journal();
@@ -300,6 +314,15 @@ fn thinking_only_turn_reports_a_specific_error() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("输出预算"), "{error}");
+
+    let partial = sleepy_doll::model::ModelResponse {
+        text: "先说一半".into(),
+        tool_calls: vec![],
+        finish_reason: Some("max_tokens".into()),
+        usage: Default::default(),
+        reasoning: None,
+    };
+    sleepy_doll::runtime::gateway::validate(&partial).unwrap();
 }
 
 /// 估算结果与 `max_tokens` 同单位：中文按字计，不按字节。
@@ -398,6 +421,15 @@ fn call(name: &str, args: Value) -> Value {
 }
 fn answer() -> Value {
     json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}],"usage":{"input_tokens":0,"output_tokens":0}})
+}
+
+fn truncated(text: &str) -> Value {
+    json!({
+        "status":"incomplete",
+        "incomplete_details":{"reason":"max_output_tokens"},
+        "output":[{"type":"message","content":[{"type":"output_text","text":text}]}],
+        "usage":{"input_tokens":0,"output_tokens":0}
+    })
 }
 
 #[test]
@@ -1292,6 +1324,88 @@ fn model_fallback_occurs_only_before_any_stream_output() {
             .any(|event| event["kind"] == "model.fallback")
     );
 }
+
+#[test]
+fn truncated_model_output_continues_instead_of_failing_the_run() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    backend.set_responses(vec![truncated("先说一半"), answer()]);
+    let directory = tempfile::tempdir().unwrap();
+    let app = controller(&backend, &directory);
+    let run = ipc(
+        &app,
+        "run.submit",
+        json!({"prompt":"continue please","clientKey":"truncate"}),
+    );
+    let terminal = wait(
+        &app,
+        run["id"].as_str().unwrap(),
+        &["answered", "partial", "failed", "needsReview"],
+    );
+    assert_eq!(terminal["state"], "answered");
+    let events = ipc(
+        &app,
+        "events.read",
+        json!({"conversationId":run["conversationId"],"after":0}),
+    );
+    assert!(
+        events["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["kind"] == "output.truncated"),
+        "{events}"
+    );
+    app.shutdown();
+}
+
+#[test]
+fn rejected_approval_returns_to_the_model_instead_of_failing_the_run() {
+    let backend = MockBackend::start("127.0.0.1:0").unwrap();
+    backend.set_responses(vec![
+        call("bgi.api.describe", json!({"methodId":"mock.config"})),
+        call(
+            "bgi.api.invoke",
+            json!({"methodId":"mock.config","arguments":{}}),
+        ),
+        answer(),
+    ]);
+    let directory = tempfile::tempdir().unwrap();
+    let app = approval_controller(&backend, &directory);
+    let run = ipc(
+        &app,
+        "run.submit",
+        json!({"prompt":"change test configuration","clientKey":"reject-write"}),
+    );
+    let id = run["id"].as_str().unwrap();
+    wait(&app, id, &["awaitingApproval"]);
+    for _ in 0..100 {
+        let events = ipc(
+            &app,
+            "events.read",
+            json!({"conversationId":run["conversationId"],"after":0}),
+        );
+        if let Some(event) = events["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|event| event["kind"] == "approval.requested")
+        {
+            ipc(
+                &app,
+                "approval.respond",
+                json!({"id":event["data"]["id"],"approved":false}),
+            );
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let terminal = wait(&app, id, &["answered", "failed", "needsReview"]);
+    assert_eq!(terminal["state"], "answered");
+    assert_eq!(backend.job_count(), 0);
+    app.shutdown();
+}
+
 #[test]
 fn disabled_skill_cannot_be_read_by_an_existing_run() {
     let backend = MockBackend::start("127.0.0.1:0").unwrap();

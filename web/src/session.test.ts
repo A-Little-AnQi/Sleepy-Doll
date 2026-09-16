@@ -75,6 +75,55 @@ describe("application-owned conversation subscriptions", () => {
     await flush();
   });
 
+  it("reloads the snapshot when the event cursor has expired", async () => {
+    const id = "expired-cursor";
+    const pending: ReturnType<
+      typeof deferred<{ events: RunEvent[]; snapshotRequired?: boolean }>
+    >[] = [];
+    vi.mocked(api.conversation).mockResolvedValue({ id, messages: [] });
+    vi.mocked(api.events).mockImplementation(() => {
+      const request =
+        deferred<{ events: RunEvent[]; snapshotRequired?: boolean }>();
+      pending.push(request);
+      return request.promise;
+    });
+    const entry = session(id);
+    const unsubscribe = entry.subscribe(vi.fn());
+    await flush();
+    pending[0]!.resolve({
+      events: [
+        {
+          sequence: 9,
+          conversationId: id,
+          runId: "r",
+          kind: "run.created",
+          data: { id: "r", state: "deciding" },
+        },
+      ],
+    });
+    await flush();
+    pending[1]!.resolve({ events: [], snapshotRequired: true });
+    await flush();
+    await flush();
+    expect(api.events).toHaveBeenLastCalledWith(id, 0);
+    pending[2]!.resolve({
+      events: [
+        {
+          sequence: 12,
+          conversationId: id,
+          runId: "r",
+          kind: "run.changed",
+          data: { id: "r", state: "answered" },
+        },
+      ],
+    });
+    await flush();
+    expect(entry.read().task?.state).toBe("answered");
+    unsubscribe();
+    pending[3]?.resolve({ events: [] });
+    await flush();
+  });
+
   it("deduplicates overlapping event batches after a reconnect", async () => {
     const id = "overlapping-events";
     const pending: ReturnType<typeof deferred<{ events: RunEvent[] }>>[] = [];

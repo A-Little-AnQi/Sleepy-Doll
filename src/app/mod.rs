@@ -27,6 +27,9 @@ struct ModelView<'a> {
     active: bool,
     timeout_ms: u64,
     context_window: u64,
+    max_output_tokens: Option<u64>,
+    auth: crate::config::ModelAuth,
+    prompt_cache: bool,
 }
 
 struct Extensions {
@@ -65,13 +68,20 @@ impl AppController {
             .try_lock()
             .map_err(|_| Error::Conflict("该数据目录已有运行中的 Sleepy Doll".into()))?;
         let mut skills = SkillRegistry::default();
+        let config_dir = config_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
         skills.load(
             &config
                 .agent
                 .skill_directories
                 .iter()
                 .cloned()
-                .map(|path| (path, "workspace".into()))
+                .map(|path| {
+                    let source = crate::config::skill_directory_source(&config_dir, &path);
+                    (path, source.into())
+                })
                 .collect::<Vec<_>>(),
         )?;
         let mut tools = ToolRegistry::default();
@@ -140,6 +150,7 @@ impl AppController {
                 | "model.save"
                 | "model.delete"
                 | "skill.setEnabled"
+                | "skill.install"
                 | "plugin.setEnabled"
                 | "plugin.install"
                 | "plugin.remove"
@@ -149,6 +160,7 @@ impl AppController {
                 | "workflow.run"
                 | "workflow.extract"
                 | "permission.set"
+                | "config.write"
         ) {
             Some(self.config_edit.lock().unwrap())
         } else {
@@ -164,6 +176,16 @@ impl AppController {
                 self.reload_extensions()?;
                 Ok(json!({"id":id}))
             }
+            "skill.install" => {
+                let root = AppConfig::ensure_user_skill_directory(&self.config_path)?;
+                *self.config.lock().unwrap() = AppConfig::load(&self.config_path)?;
+                let name = crate::extension::skills::install(
+                    &root,
+                    Path::new(required(&params, "path")?),
+                )?;
+                self.reload_extensions()?;
+                Ok(json!({"name":name}))
+            }
             "plugin.remove" => {
                 let config = self.config.lock().unwrap().clone();
                 crate::runtime::host::installation::remove(&config, required(&params, "id")?)?;
@@ -173,6 +195,18 @@ impl AppController {
             "extensions.reload" => {
                 self.reload_extensions()?;
                 Ok(json!({"reloaded":true}))
+            }
+            "config.read" => Ok(json!({
+                "path": self.config_path.display().to_string(),
+                "content": std::fs::read_to_string(&self.config_path)?,
+            })),
+            "config.write" => {
+                crate::config::AppConfig::write_document(
+                    &self.config_path,
+                    required(&params, "content")?,
+                )?;
+                self.reload_runtime()?;
+                Ok(json!({"saved": true}))
             }
             "bootstrap" => self.bootstrap(),
             "task.submit" | "run.submit" => {
@@ -989,6 +1023,9 @@ impl AppController {
                 active: model.id == config.active_model,
                 timeout_ms: model.options.timeout_ms,
                 context_window: model.options.context_window,
+                max_output_tokens: model.options.max_output_tokens,
+                auth: model.auth,
+                prompt_cache: model.options.prompt_cache,
             })
             .collect::<Vec<_>>();
         let permission = {
@@ -1074,13 +1111,23 @@ impl AppController {
 
     fn reload_extensions(&self) -> Result<()> {
         let config = AppConfig::load(&self.config_path)?;
+        let config_dir = self
+            .config_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
         let mut skills = SkillRegistry::default();
         skills.load(
             &config
                 .agent
                 .skill_directories
                 .iter()
-                .map(|p| (p.clone(), "workspace".into()))
+                .map(|p| {
+                    (
+                        p.clone(),
+                        crate::config::skill_directory_source(&config_dir, p).into(),
+                    )
+                })
                 .collect::<Vec<_>>(),
         )?;
         let mut tools = ToolRegistry::default();

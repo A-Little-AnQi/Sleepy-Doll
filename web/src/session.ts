@@ -146,6 +146,15 @@ class Session {
             needsHistory = false;
           }
           const batch = await api.events(this.id, this.cursor);
+          if (batch.snapshotRequired) {
+            // 事件窗口被裁过，游标已经对不上。先重取消息快照，再从头续流，
+            // 否则终态 run.changed 会静默丢，界面一直停在进行中。
+            this.cursor = 0;
+            this.streams.clear();
+            this.completedStreams.clear();
+            needsHistory = true;
+            continue;
+          }
           let refresh = false;
           for (const event of batch.events) {
             if (event.sequence <= this.cursor) continue;

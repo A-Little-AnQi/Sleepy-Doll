@@ -72,6 +72,14 @@ it("keeps the last remaining model", () => {
   ).toBe(true);
 });
 
+it("exposes the context window for the selected model", () => {
+  render(<ModelsPage bootstrap={bootstrap} reload={async () => undefined} />);
+  expect(screen.getByLabelText("上下文窗口（token）")).toBeTruthy();
+  expect(
+    (screen.getByLabelText("上下文窗口（token）") as HTMLInputElement).value,
+  ).toBe("200000");
+});
+
 it("deletes a configured model after confirmation", async () => {
   const extra: ModelInfo = {
     id: "other",

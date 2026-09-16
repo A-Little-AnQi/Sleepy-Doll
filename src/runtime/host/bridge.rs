@@ -183,7 +183,7 @@ impl Bridge {
                 .iter()
                 .any(|a| a.request["capabilityId"] == binding.id && a.request["arguments"] == *args)
         {
-            return Err(Error::Conflict(
+            return Err(Error::Tool(
                 "该动作已有执行记录，需要核对结果，不能直接重复提交".into(),
             ));
         }
@@ -211,9 +211,7 @@ impl Bridge {
                 ));
             }
             if attempts.iter().any(|a| a.request["stepId"] == next.id) {
-                return Err(Error::Conflict(
-                    "该步骤已有调用尝试，请核对结果后再继续".into(),
-                ));
+                return Err(Error::Tool("该步骤已有调用尝试，请核对结果后再继续".into()));
             }
             step_id = Some(next.id.clone());
         }
@@ -241,9 +239,7 @@ impl Bridge {
             &policy.trust_grants,
         );
         if decision == crate::runtime::operation::permissions::PermissionDecision::Deny {
-            return Err(Error::Conflict(
-                "当前为只读级别，不能修改配置或执行命令".into(),
-            ));
+            return Err(Error::Tool("当前为只读级别，不能修改配置或执行命令".into()));
         }
         // 放行的依据可能是审批结果、精确授权，或用户选定的审批级别。复核时必须
         // 按同一条依据重查 —— 拿「有没有弹过审批」当唯一线索，会把按级别放行的
@@ -271,15 +267,18 @@ impl Bridge {
                     return Err(Error::Cancelled);
                 }
                 if unix_now() > run.deadline {
-                    return Err(Error::Conflict("等待授权超过任务时限".into()));
+                    journal.save(run, RunState::Executing)?;
+                    return Err(Error::Tool("等待授权超过任务时限".into()));
                 }
                 let result = journal.approval_result(&approval.id)?;
                 if result.expires_at < unix_now() {
+                    journal.save(run, RunState::Executing)?;
                     return Err(Error::Tool("授权等待已过期".into()));
                 }
                 if let Some(allowed) = result.decision {
                     if !allowed {
-                        return Err(Error::Conflict("用户拒绝了此操作".into()));
+                        journal.save(run, RunState::Executing)?;
+                        return Err(Error::Tool("用户拒绝了此操作".into()));
                     }
                     if result.request_hash != hash(&request) {
                         return Err(Error::Conflict("approval binding changed".into()));

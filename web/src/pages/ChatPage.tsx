@@ -17,10 +17,10 @@ import { Toast } from "../components/Toast";
 import type { Bootstrap } from "../types";
 import { MotionSwitch } from "../components/MotionSwitch";
 import { resolveConversationModel } from "../models";
-import {
-  estimateMessagesTokens,
-  formatTokens,
-} from "../context-usage";
+import { ContextMeter } from "../components/ContextMeter";
+import { ComposerDeck } from "../components/ComposerDeck";
+import { ComposerField } from "../components/ComposerField";
+import { estimateMessagesTokens } from "../context-usage";
 
 interface Props {
   bootstrap: Bootstrap;
@@ -101,13 +101,6 @@ export function ChatPage({
       setUnread(true);
     }
   }, [messages, stream, plan, task]);
-  useEffect(() => {
-    if (textarea.current) {
-      textarea.current.style.height = "auto";
-      textarea.current.style.height =
-        Math.min(textarea.current.scrollHeight, 180) + "px";
-    }
-  }, [prompt]);
   const setDraft = (value: string) => {
     setPrompt(value);
     localStorage.setItem(draftKey, value);
@@ -376,10 +369,9 @@ export function ChatPage({
             ))}
           </div>
         )}
-        <div className="command-deck">
-          <textarea
+        <ComposerDeck>
+          <ComposerField
             ref={textarea}
-            rows={2}
             aria-label="消息"
             placeholder={
               question
@@ -436,19 +428,12 @@ export function ChatPage({
               </button>
             )}
             <div className="composer-submit">
-              <div
-                className={`context-meter${contextUsed / contextWindow >= 0.85 ? " is-high" : ""}`}
-                title={
-                  task?.contextCompacted
-                    ? "已压缩较早上下文；完整记录仍保存在本机"
-                    : "当前装进模型的上下文（估算）"
-                }
-              >
-                <span>
-                  {formatTokens(contextUsed)} / {formatTokens(contextWindow)}
-                </span>
-                {task?.contextCompacted ? <em>已压缩</em> : null}
-              </div>
+              <ContextMeter
+                used={contextUsed}
+                window={contextWindow}
+                compacted={Boolean(task?.contextCompacted)}
+                cacheRead={task?.cacheReadTokens ?? 0}
+              />
               <div className="composer-menu composer-model">
                 <Select
                   label="模型"
@@ -498,7 +483,7 @@ export function ChatPage({
               )}
             </div>
           </div>
-        </div>
+        </ComposerDeck>
         {welcome && (
           <div className="chat-examples">
             {["查看游戏状态", "查找可用路线"].map((example) => (

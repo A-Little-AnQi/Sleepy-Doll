@@ -55,8 +55,10 @@ export default function App() {
     void reload();
     document.documentElement.dataset.theme =
       localStorage.getItem("sleepy-doll-theme") ?? "light";
-    document.documentElement.dataset.reducedMotion =
-      localStorage.getItem("sleepy-doll-reduced-motion") ?? "false";
+    document.documentElement.lang =
+      localStorage.getItem("sleepy-doll-locale") === "en" ? "en" : "zh-CN";
+    delete document.documentElement.dataset.reducedMotion;
+    localStorage.removeItem("sleepy-doll-reduced-motion");
   }, [reload]);
 
   useEffect(() => {

@@ -195,7 +195,7 @@ it("lets conversations be pointer-sorted instead of html5-dragged", () => {
   ).toBeTruthy();
 });
 
-it("keeps settings on the right and opens theme choices from the local user slot", () => {
+it("opens theme choices and settings from the local user slot", async () => {
   stubWide(true);
   const seen: string[] = [];
   render(
@@ -210,13 +210,37 @@ it("keeps settings on the right and opens theme choices from the local user slot
       reload={async () => undefined}
     />,
   );
-  const row = document.querySelector(".app-account-row") as HTMLElement;
-  expect(row.lastElementChild?.textContent).toContain("设置");
+  expect(screen.queryByRole("button", { name: "设置" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /本地用户/ }));
-  expect(screen.getByRole("menu", { name: "外观与快捷设置" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("menuitemradio", { name: "深色" }));
+  expect(screen.getByRole("menu", { name: "账户菜单" })).toBeTruthy();
+  expect(screen.getByRole("menuitem", { name: "设置" })).toBeTruthy();
+  expect(screen.getByText("主题")).toBeTruthy();
+  expect(screen.getByRole("combobox", { name: "语言" })).toBeTruthy();
+  const themeSwitch = screen.getByRole("switch", { name: "切换为黑夜" });
+  expect(themeSwitch.textContent).toContain("黑夜");
+  expect(themeSwitch.querySelector("svg")).toBeTruthy();
+  fireEvent.click(themeSwitch);
   expect(document.documentElement.dataset.theme).toBe("dark");
-  fireEvent.click(screen.getByRole("menuitem", { name: "全部设置" }));
+  await waitFor(() => {
+    expect(
+      screen.getByRole("switch", { name: "切换为白昼" }),
+    ).toBe(document.activeElement);
+  });
+  expect(screen.getByRole("switch", { name: "切换为白昼" }).textContent).toContain(
+    "白昼",
+  );
+  fireEvent.click(screen.getByRole("menuitem", { name: "设置" }));
   expect(seen).toEqual(["settings"]);
+});
+
+it("keeps BetterGI above the account divider", () => {
+  renderShell(false);
+  expect(
+    document.querySelector(".app-sidebar-status .app-connection"),
+  ).toBeTruthy();
+  expect(
+    document.querySelector(".app-sidebar-foot .app-connection"),
+  ).toBeNull();
+  expect(document.querySelector(".app-sidebar-foot .app-account")).toBeTruthy();
 });
 
