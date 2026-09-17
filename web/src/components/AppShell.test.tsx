@@ -169,6 +169,14 @@ it("puts a draft chat in the sidebar when the user starts a new chat", () => {
 
 it("puts a draft row in the sidebar once the new chat has text", () => {
   stubWide(true);
+  localStorage.setItem(
+    GROUPS_KEY,
+    JSON.stringify({
+      groups: [{ id: "g1", name: "路线", collapsed: false }],
+      membership: {},
+      order: [],
+    }),
+  );
   render(
     <AppShell
       bootstrap={bootstrap}
@@ -182,7 +190,8 @@ it("puts a draft row in the sidebar once the new chat has text", () => {
       reload={async () => undefined}
     />,
   );
-  expect(screen.getByRole("button", { name: "新对话" })).toBeTruthy();
+  const draft = screen.getByRole("button", { name: "新对话" });
+  expect(draft.closest(".app-group")).toBeNull();
   expect(screen.queryByText("还没有对话")).toBeNull();
 });
 
@@ -361,7 +370,7 @@ const chat = (
   updatedAt: "t",
 });
 
-it("shows a draft chat in the group you were in, then assigns the created conversation", () => {
+it("puts a header new chat in the ungrouped list, even if you were in a group", () => {
   stubWide(true);
   localStorage.setItem(
     GROUPS_KEY,
@@ -395,15 +404,14 @@ it("shows a draft chat in the group you were in, then assigns the created conver
   render(<Harness />);
   fireEvent.click(screen.getByRole("button", { name: "新建对话" }));
   const draft = screen.getByRole("button", { name: "新对话" });
-  expect(draft.closest(".app-group")).toBeTruthy();
-  expect(draft.closest(".app-group")?.textContent).toContain("路线");
+  expect(draft.closest(".app-group")).toBeNull();
   act(() => {
     setList([chat("c1", "夜巡"), chat("c2", "新对话")]);
     setId("c2");
   });
-  expect(JSON.parse(localStorage.getItem(GROUPS_KEY) ?? "{}").membership.c2).toBe(
-    "g1",
-  );
+  expect(
+    JSON.parse(localStorage.getItem(GROUPS_KEY) ?? "{}").membership.c2,
+  ).toBeUndefined();
 });
 
 it("toggles a group by clicking the row, not only the chevron", () => {

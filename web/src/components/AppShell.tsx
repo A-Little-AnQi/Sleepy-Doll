@@ -268,7 +268,7 @@ export function AppShell({
     if (bootstrap.conversationGroups === undefined) return;
     void api.saveConversationGroups(next).catch(() => undefined);
   };
-  const startNew = (groupId: string | null = destinationRef.current) => {
+  const startNew = (groupId: string | null = null) => {
     pendingGroupRef.current = groupId;
     setDestination(groupId);
     setStartedNew(true);
@@ -552,7 +552,7 @@ export function AppShell({
           <SidebarIcon className="button-icon" />
         </button>
       </div>
-      <button className="app-new" onClick={() => startNew()}>
+      <button className="app-new" onClick={() => startNew(null)}>
         <PlusIcon className="button-icon" />
         <span>新建对话</span>
       </button>
@@ -588,9 +588,6 @@ export function AppShell({
               if (!created) return;
               persistLayout(next);
               setRenamingGroupId(created.id);
-              pendingGroupRef.current = created.id;
-              setDestination(created.id);
-              onNew();
             }}
           >
             <FolderIcon className="button-icon" />
@@ -739,7 +736,7 @@ export function AppShell({
                     className="icon-button"
                     title="新建对话"
                     aria-label="新建对话"
-                    onClick={() => startNew()}
+                    onClick={() => startNew(null)}
                   >
                     <PlusIcon className="button-icon" />
                   </button>
