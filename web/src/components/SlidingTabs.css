@@ -39,6 +39,7 @@
   font-size: var(--font-body);
   font-weight: 550;
   color: var(--secondary);
+  white-space: nowrap;
   transition: color var(--motion-fast) var(--ease-standard);
 }
 
@@ -52,4 +53,9 @@
 
 .sd-tabs button:active:not(:disabled) {
   transform: none;
+}
+
+.sd-tabs-count {
+  color: var(--muted);
+  font-size: var(--font-meta);
 }

@@ -462,13 +462,13 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  width: 100%;
+  width: auto;
   min-height: var(--control-height);
-  margin-top: 2px;
-  padding: 0 2px;
+  margin: 4px -10px -10px;
+  padding: 0 10px;
   border: 0;
   border-top: 1px solid var(--border);
-  border-radius: 0;
+  border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px);
   background: transparent;
   color: var(--text);
   font-size: var(--font-body);
@@ -684,6 +684,10 @@ html[data-theme-reveal="true"]::view-transition-new(root) {
 }
 html[data-theme-reveal="true"]::view-transition-group(root) {
   animation-duration: 560ms;
+}
+html[data-theme-reveal="true"]::view-transition-group(.sd-theme-move) {
+  animation-duration: var(--motion-base);
+  animation-timing-function: var(--ease-enter);
 }
 html[data-theme-reveal="true"] .app-conversations li,
 html[data-theme-reveal="true"] .app-group {

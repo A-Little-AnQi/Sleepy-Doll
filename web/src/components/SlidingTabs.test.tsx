@@ -1,6 +1,8 @@
-import { expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SlidingTabs } from "./SlidingTabs";
+
+afterEach(cleanup);
 
 it("changes the active tab without remounting the tablist", () => {
   const seen: string[] = [];
@@ -31,6 +33,25 @@ it("changes the active tab without remounting the tablist", () => {
   expect(screen.getByRole("button", { name: "模型" }).getAttribute("aria-current")).toBe(
     "page",
   );
+});
+
+it("keeps an extra count inside the tab button", () => {
+  render(
+    <SlidingTabs
+      ariaLabel="扩展类型"
+      value="skills"
+      onChange={() => undefined}
+      items={[
+        {
+          id: "skills",
+          name: "技能",
+          extra: <span className="sd-tabs-count">2</span>,
+        },
+        { id: "plugins", name: "插件" },
+      ]}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "技能2" })).toBeTruthy();
 });
 
 it("does not replay the pill motion when the active tab did not change", () => {

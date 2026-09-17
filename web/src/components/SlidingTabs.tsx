@@ -7,7 +7,12 @@ export function SlidingTabs<T extends string>({
   onChange,
   ariaLabel,
 }: {
-  items: ReadonlyArray<{ id: T; name: string; icon?: ReactNode }>;
+  items: ReadonlyArray<{
+    id: T;
+    name: string;
+    icon?: ReactNode;
+    extra?: ReactNode;
+  }>;
   value: T;
   onChange(id: T): void;
   ariaLabel: string;
@@ -83,6 +88,7 @@ export function SlidingTabs<T extends string>({
         >
           {item.icon}
           {item.name}
+          {item.extra}
         </button>
       ))}
     </nav>

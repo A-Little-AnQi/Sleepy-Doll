@@ -98,17 +98,17 @@ it("applies the selected theme from the general settings", async () => {
       reload={async () => undefined}
     />,
   );
-  const themeSwitch = screen.getByRole("switch", { name: "切换为黑夜" });
-  expect(themeSwitch.textContent).toContain("黑夜");
+  const themeSwitch = screen.getByRole("switch", { name: "主题" });
+  expect(themeSwitch.textContent).toContain("白昼");
   fireEvent.click(themeSwitch);
   expect(document.documentElement.dataset.theme).toBe("dark");
   await waitFor(() => {
     expect(document.activeElement).toBe(
-      screen.getByRole("switch", { name: "切换为白昼" }),
+      screen.getByRole("switch", { name: "主题" }),
     );
   });
-  expect(screen.getByRole("switch", { name: "切换为白昼" }).textContent).toContain(
-    "白昼",
+  expect(screen.getByRole("switch", { name: "主题" }).textContent).toContain(
+    "黑夜",
   );
 });
 

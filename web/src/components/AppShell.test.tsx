@@ -234,18 +234,18 @@ it("opens theme choices and settings from the local user slot", async () => {
   expect(screen.getByRole("menuitem", { name: "设置" })).toBeTruthy();
   expect(screen.getByText("主题")).toBeTruthy();
   expect(screen.getByRole("combobox", { name: "语言" })).toBeTruthy();
-  const themeSwitch = screen.getByRole("switch", { name: "切换为黑夜" });
-  expect(themeSwitch.textContent).toContain("黑夜");
+  const themeSwitch = screen.getByRole("switch", { name: "主题" });
+  expect(themeSwitch.textContent).toContain("白昼");
   expect(themeSwitch.querySelector("svg")).toBeTruthy();
   fireEvent.click(themeSwitch);
   expect(document.documentElement.dataset.theme).toBe("dark");
   await waitFor(() => {
     expect(
-      screen.getByRole("switch", { name: "切换为白昼" }),
+      screen.getByRole("switch", { name: "主题" }),
     ).toBe(document.activeElement);
   });
-  expect(screen.getByRole("switch", { name: "切换为白昼" }).textContent).toContain(
-    "白昼",
+  expect(screen.getByRole("switch", { name: "主题" }).textContent).toContain(
+    "黑夜",
   );
   fireEvent.click(screen.getByRole("menuitem", { name: "设置" }));
   expect(seen).toEqual(["settings"]);

@@ -12,6 +12,7 @@ import {
 import { readError } from "../session";
 import type { Bootstrap } from "../types";
 import { MotionSwitch } from "../components/MotionSwitch";
+import { SlidingTabs } from "../components/SlidingTabs";
 export function ExtensionsPage({
   bootstrap,
   reload,
@@ -111,24 +112,27 @@ export function ExtensionsPage({
         </div>
       </div>
       <div className="list-toolbar">
-        <div className="segmented" role="tablist" aria-label="扩展类型">
-          {(["skills", "plugins"] as const).map((value) => (
-            <button
-              key={value}
-              role="tab"
-              aria-selected={tab === value}
-              className={tab === value ? "is-active" : ""}
-              onClick={() => {
-                setTab(value);
-                setQuery("");
-                setError("");
-              }}
-            >
-              {value === "skills" ? "技能" : "插件"}
-              <span>{bootstrap[value].length}</span>
-            </button>
-          ))}
-        </div>
+        <SlidingTabs
+          ariaLabel="扩展类型"
+          value={tab}
+          onChange={(value) => {
+            setTab(value);
+            setQuery("");
+            setError("");
+          }}
+          items={[
+            {
+              id: "skills",
+              name: "技能",
+              extra: <span className="sd-tabs-count">{bootstrap.skills.length}</span>,
+            },
+            {
+              id: "plugins",
+              name: "插件",
+              extra: <span className="sd-tabs-count">{bootstrap.plugins.length}</span>,
+            },
+          ]}
+        />
         <label className="search-field">
           <SearchIcon />
           <input

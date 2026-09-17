@@ -11,6 +11,7 @@ import {
 import { Toast } from "../components/Toast";
 import type { Bootstrap, TaskInfo, TaskSummary } from "../types";
 import { MotionSwitch } from "../components/MotionSwitch";
+import { SlidingTabs } from "../components/SlidingTabs";
 import "./TasksPage.css";
 
 type Filter = "all" | "runnable" | "attention" | "archived";
@@ -149,28 +150,15 @@ export function TasksPage({
         </span>
       </div>
       <div className="list-toolbar">
-        <div
-          className="segmented"
-          role="tablist"
-          aria-label="快捷任务与运行记录"
-        >
-          <button
-            role="tab"
-            aria-selected={tab === "tasks"}
-            className={tab === "tasks" ? "is-active" : ""}
-            onClick={() => setTab("tasks")}
-          >
-            快捷任务
-          </button>
-          <button
-            role="tab"
-            aria-selected={tab === "runs"}
-            className={tab === "runs" ? "is-active" : ""}
-            onClick={() => setTab("runs")}
-          >
-            运行记录
-          </button>
-        </div>
+        <SlidingTabs
+          ariaLabel="快捷任务与运行记录"
+          value={tab}
+          onChange={setTab}
+          items={[
+            { id: "tasks", name: "快捷任务" },
+            { id: "runs", name: "运行记录" },
+          ]}
+        />
       </div>
       {error && <Toast message={error} onDismiss={() => setError("")} />}
       <div className="list-toolbar">

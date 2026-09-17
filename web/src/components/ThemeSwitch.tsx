@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { MoonIcon, SunIcon } from "./icons";
 import type { ThemeId, ThemeOrigin } from "../appearance";
 
@@ -12,13 +12,14 @@ export function ThemeSwitch({
   const dark = theme === "dark";
   const next: ThemeId = dark ? "light" : "dark";
   const [hot, setHot] = useState(false);
+  const vt = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   return (
     <button
       type="button"
       className={`app-theme-switch${dark ? " is-dark" : ""}${hot ? " is-hot" : ""}`}
       role="switch"
       aria-checked={dark}
-      aria-label={dark ? "切换为白昼" : "切换为黑夜"}
+      aria-label="主题"
       onPointerEnter={() => setHot(true)}
       onPointerLeave={() => setHot(false)}
       onClick={(event) => {
@@ -35,10 +36,17 @@ export function ThemeSwitch({
         });
       }}
     >
-      <span className="app-theme-switch-knob" aria-hidden="true" />
-      <span className="app-theme-switch-copy">
-        {dark ? <SunIcon /> : <MoonIcon />}
-        {dark ? "白昼" : "黑夜"}
+      <span
+        className="app-theme-switch-knob"
+        style={{ viewTransitionName: `sd-theme-knob-${vt}` }}
+        aria-hidden="true"
+      />
+      <span
+        className="app-theme-switch-copy"
+        style={{ viewTransitionName: `sd-theme-copy-${vt}` }}
+      >
+        {dark ? <MoonIcon /> : <SunIcon />}
+        <span className="app-theme-switch-label">{dark ? "黑夜" : "白昼"}</span>
       </span>
     </button>
   );
