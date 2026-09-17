@@ -3,7 +3,7 @@
 //! 默认忽略（会调用真实模型 API、消耗真实额度），手动执行：
 //!
 //! ```text
-//! cargo test --no-default-features --features mock --test live -- --ignored --nocapture
+//! cargo test --no-default-features --test live -- --ignored --nocapture
 //! ```
 //!
 //! 用的是 `dist/Sleepy-Doll/user/config.json` 里的模型与桥配置，只把数据库换到
@@ -11,7 +11,6 @@
 
 use serde_json::{Value, json};
 use sleepy_doll::app::AppController;
-use sleepy_doll::model::mock::MockBackend;
 use std::{fs, sync::Arc, thread, time::Duration};
 
 const INSTALL: &str = "dist/Sleepy-Doll";
@@ -38,17 +37,6 @@ fn answers_a_question_about_the_users_own_configuration() {
     // 运行中的应用占着原来那个库，换一个。
     config["storage"]["database"] = json!(directory.path().join("live.db"));
     config["runtime"]["durationSec"] = json!(300);
-    let fake_bridge = if std::env::var("LIVE_FAKE_BRIDGE").as_deref() == Ok("1") {
-        let bridge = MockBackend::start("127.0.0.1:0").unwrap();
-        bridge.set_bgi_user_path(r"E:\tools\test\BetterGI\User");
-        config["bridge"]["enabled"] = json!(true);
-        config["bridge"]["baseUrl"] = json!(bridge.base_url());
-        config["bridge"]["token"] = json!("mock-token");
-        config["bridge"]["instanceId"] = Value::Null;
-        Some(bridge)
-    } else {
-        None
-    };
     let path = directory.path().join("config.json");
     fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
 
@@ -126,5 +114,4 @@ fn answers_a_question_about_the_users_own_configuration() {
     println!("结论: {}", completed["result"].as_str().unwrap_or("(无)"));
 
     controller.shutdown();
-    drop(fake_bridge);
 }

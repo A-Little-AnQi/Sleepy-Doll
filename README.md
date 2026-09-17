@@ -50,13 +50,6 @@ BetterGI 重启后点击「重新连接」。
 配置、模型密钥和会话数据库位于 `dist\Sleepy-Doll\user\`，解析顺序见
 [配置与数据存放](./docs/configuration.md)。
 
-## 离线开发
-
-```bash
-npm run mock                 # 模拟模型 API 与 BGI Bridge
-npm run dev                  # Vite 开发服务器
-```
-
 ## 注意事项
 
 - 仓库里没有 BGI 本体，因此无法进行实机键鼠、截图或路线验收。
@@ -72,7 +65,7 @@ npm run dev                  # Vite 开发服务器
 |---|---|
 | [配置与数据存放](./docs/configuration.md) | 配置解析、模型配置、密钥 |
 | [Skill 与 Plugin 格式](./docs/extensions.md) | 扩展的开发格式与执行策略 |
-| [开发环境](./docs/development.md) | 构建、测试、离线 Mock Backend |
+| [开发环境](./docs/development.md) | 构建、测试、桥契约回归 |
 | [Agent Runtime v2](./docs/runtime-v2.md) | 执行、存储与恢复语义 |
 | [Agent Kernel](./docs/agent-kernel.md) | 领域 Plugin 的 Adapter 协议 |
 | [架构与实施边界](./docs/architecture.md) | 进程模型、决策执行、能力边界 |

@@ -1,9 +1,0 @@
-{
-  "id": "mock.failure",
-  "description": "离线测试：执行失败",
-  "methodId": "mock.failure",
-  "catalogVersion": "mock-v1",
-  "aliases": ["测试失败"],
-  "resourceFields": [],
-  "postconditions": []
-}

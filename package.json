@@ -11,8 +11,8 @@
     "format": "prettier --write \"web/**/*.{ts,tsx,css,html}\" \"*.{json,ts}\"",
     "format:check": "prettier --check \"web/**/*.{ts,tsx,css,html}\" \"*.{json,ts}\"",
     "dev": "vite",
-    "desktop": "build-desktop.cmd && powershell -NoProfile -Command \"Start-Process -FilePath './target/release/sleepy-doll.exe'\"",
-    "mock": "cargo run --no-default-features --features mock --bin sleepy-doll-mock"
+    "backend": "cargo run --no-default-features --features dev-ipc --bin sleepy-doll-dev",
+    "desktop": "build-desktop.cmd && powershell -NoProfile -Command \"Start-Process -FilePath './target/release/sleepy-doll.exe'\""
   },
   "engines": {
     "node": ">=22.13"

@@ -265,19 +265,22 @@ impl AppConfig {
             return Err(Error::Config("version must be 1, 2 or 3".into()));
         }
         if self.models.is_empty() {
-            return Err(Error::Config(
-                "at least one model must be configured".into(),
-            ));
-        }
-        let matching = self
-            .models
-            .iter()
-            .filter(|model| model.id == self.active_model)
-            .count();
-        if matching != 1 {
-            return Err(Error::Config(
-                "activeModel must reference exactly one configured model".into(),
-            ));
+            if !self.active_model.is_empty() {
+                return Err(Error::Config(
+                    "activeModel must be empty when no models are configured".into(),
+                ));
+            }
+        } else {
+            let matching = self
+                .models
+                .iter()
+                .filter(|model| model.id == self.active_model)
+                .count();
+            if matching != 1 {
+                return Err(Error::Config(
+                    "activeModel must reference exactly one configured model".into(),
+                ));
+            }
         }
         let mut ids = std::collections::HashSet::new();
         for model in &self.models {
@@ -322,11 +325,11 @@ impl AppConfig {
         Ok(())
     }
 
-    pub fn active(&self) -> &ModelConfig {
+    pub fn active(&self) -> Result<&ModelConfig> {
         self.models
             .iter()
             .find(|model| model.id == self.active_model)
-            .expect("validated active model")
+            .ok_or_else(|| Error::Config("还没有配置模型。请先在设置里添加。".into()))
     }
 
     pub fn set_active(path: impl AsRef<Path>, model_id: &str) -> Result<()> {
@@ -489,6 +492,9 @@ impl AppConfig {
                 }
                 models.push(model);
             }
+            if value["activeModel"].as_str().unwrap_or("").is_empty() {
+                value["activeModel"] = serde_json::json!(id);
+            }
             Ok(())
         })
     }
@@ -524,16 +530,17 @@ impl AppConfig {
                 let models = value["models"]
                     .as_array_mut()
                     .ok_or_else(|| Error::Config("models must be an array".into()))?;
-                if models.len() <= 1 {
-                    return Err(Error::Config("至少保留一个模型作为默认".into()));
-                }
                 let before = models.len();
                 models.retain(|model| model["id"].as_str() != Some(id));
                 if models.len() == before {
                     return Err(Error::Config("模型配置不存在".into()));
                 }
                 if current_active == id {
-                    models[0]["id"].as_str().unwrap_or("").to_owned()
+                    models
+                        .first()
+                        .and_then(|model| model["id"].as_str())
+                        .unwrap_or("")
+                        .to_owned()
                 } else {
                     current_active
                 }
@@ -958,7 +965,8 @@ mod tests {
         seed(&path).unwrap();
         assert!(path.exists());
         let config = AppConfig::load(&path).unwrap();
-        assert_eq!(config.active_model, "local-mock");
+        assert_eq!(config.active_model, "");
+        assert!(config.models.is_empty());
         // The template keeps its resource roots next to the configuration file.
         assert!(directory.path().join("user").join("skills").is_dir());
         assert!(directory.path().join("user").join(".sleepy-doll").is_dir());
@@ -1035,11 +1043,13 @@ mod tests {
     }
 
     #[test]
-    fn refuses_to_delete_the_last_model() {
+    fn deletes_the_last_model_and_clears_the_default() {
         let directory = tempfile::tempdir().unwrap();
         let path = write_models_config(directory.path(), "a", 1);
-        let error = AppConfig::delete_model(&path, "a").unwrap_err().to_string();
-        assert!(error.contains("至少保留一个模型作为默认"));
+        assert_eq!(AppConfig::delete_model(&path, "a").unwrap(), "");
+        let config = AppConfig::load(&path).unwrap();
+        assert!(config.models.is_empty());
+        assert_eq!(config.active_model, "");
     }
 
     #[test]
@@ -1057,6 +1067,24 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn save_first_model_becomes_the_default() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("user").join("config.json");
+        seed(&path).unwrap();
+        AppConfig::save_model(
+            &path,
+            &serde_json::json!({
+                "id":"primary","name":"主模型","protocol":"openai-chat","model":"m",
+                "baseUrl":"http://127.0.0.1"
+            }),
+        )
+        .unwrap();
+        let loaded = AppConfig::load(&path).unwrap();
+        assert_eq!(loaded.active_model, "primary");
+        assert_eq!(loaded.models.len(), 1);
     }
 
     #[test]

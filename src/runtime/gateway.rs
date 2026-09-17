@@ -248,8 +248,7 @@ fn parse_arguments(text: &str) -> Result<Value> {
 
 /// 内部工具名 → 发给提供方的名字。
 ///
-/// mock 回放录制轮次时也要用它：库里存的是内部名（`bgi.user.list`），而回包必须
-/// 带 wire 名，运行时才映射得回来。
+/// 库里存的是内部名（`bgi.user.list`），回包必须带 wire 名，运行时才映射得回来。
 pub(crate) fn wire_name(name: &str) -> String {
     let readable = name
         .chars()

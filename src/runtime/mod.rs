@@ -324,7 +324,8 @@ impl Supervisor {
         // an input problem, instead of failing mid-run with a budget error after the
         // user has already waited for a model turn.
         let config = self.config.read().unwrap();
-        let (context_chars, _) = policy::budget(&config.runtime, config.active());
+        let active = config.active()?;
+        let (context_chars, _) = policy::budget(&config.runtime, active);
         let prompt_chars = prompt.chars().count();
         let reserved = config.agent.system_prompt.chars().count() + 8192;
         drop(config);
@@ -352,7 +353,15 @@ impl Supervisor {
         let resolved = requested
             .clone()
             .or(stored)
-            .unwrap_or_else(|| self.config.read().unwrap().active().id.clone());
+            .or_else(|| {
+                self.config
+                    .read()
+                    .unwrap()
+                    .active()
+                    .ok()
+                    .map(|model| model.id.clone())
+            })
+            .ok_or_else(|| Error::Config("还没有配置模型。请先在设置里添加。".into()))?;
         let run = self
             .journal
             .create(prompt, &conversation, key, duration, Some(&resolved))?;
@@ -511,7 +520,7 @@ impl Supervisor {
     fn model_for(&self, run: &Run) -> Result<crate::config::ModelConfig> {
         let config = self.config.read().unwrap();
         match run.model_id.as_deref() {
-            None => Ok(config.active().clone()),
+            None => config.active().cloned(),
             Some(id) => config
                 .models
                 .iter()

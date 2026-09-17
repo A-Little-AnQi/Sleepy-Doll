@@ -6,7 +6,7 @@
 
 tao/wry 承担 Windows 窗口和 WebView，React 通过 IPC 调用 AppController。
 模型、Skills、Plugins、审批、事务内核和数据库都由 Rust 负责。
-桌面和离线 Mock 共享相同运行时；本版没有独立第三方 HTTP Gateway 或 CLI。
+本版没有独立第三方 HTTP Gateway 或 CLI。
 模型是纯文本单入口，不提供图片输入。
 
 ## 决策与执行

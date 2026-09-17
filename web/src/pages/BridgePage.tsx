@@ -73,9 +73,6 @@ export function BridgePage({
           <p>管理宿主连接、接口契约和可恢复的配置变更。</p>
         </div>
       </header>
-      {bridge.simulated && (
-        <p className="notice">当前显示模拟数据，不代表真实 BetterGI 状态。</p>
-      )}
       {(error || notice) && (
         <Toast
           message={error || notice}

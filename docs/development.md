@@ -30,7 +30,7 @@ build-desktop.cmd      # 桥 + 界面 + release EXE，组装到 dist\Sleepy-Doll
 BetterGI；`bgi-bridge/dev/dev-rebuild.cmd` 已包含该步骤。
 
 开发时 `cargo run` 的可执行文件在 `target/<profile>/` 下，找不到旁边的桥组件，会自动回退到
-仓库的 `bgi-bridge/dist`。debug、release、mock 各自使用独立的 `user/` 目录，配置解析规则见
+仓库的 `bgi-bridge/dist`。debug 与 release 各自使用独立的 `user/` 目录，配置解析规则见
 [配置与数据存放](./configuration.md)。
 
 桌面 EXE 通过 Windows manifest 在启动时请求管理员权限，桥的开关不另外提权。
@@ -52,27 +52,29 @@ BetterGI；`bgi-bridge/dev/dev-rebuild.cmd` 已包含该步骤。
 `npm run check` 执行类型检查及生产构建。响应超时可在模型设置中调整；IPC 普通请求、事件长轮询和
 桥加载采用不同的请求期限。模型只在收到响应体之前重试临时故障，部分流式响应不会重放。
 
-Mock 流式响应使用逐帧 flush 的 HTTP chunked 写入，避免 tiny_http 默认 chunk encoder
-把 token-sized 数据积攒到大缓冲区。流式回归必须验证首个 delta 在结束前到达、至少有多次增量，
-不能只检查最终文字。一次默认时序实测：修复前首块约 12.6 秒、共 2 块；修复后约 0.38 秒、
-共 168 块（随机抖动下的样本，不是延迟保证）。
-
 `Transcript.tsx` 按用户轮次组织助手消息，按调用 ID 关联工具返回，合并相邻工具记录。
 默认显示紧凑摘要，参数和返回数据在二级详情中展开。历史 Markdown 文本独立 memo，
 避免每次流式增量都重新解析整段历史。
 
 ```bash
-cargo test --no-default-features --features mock   # 全部测试
-cargo test --lib --no-default-features --features mock   # 仅单元测试
+cargo test --no-default-features   # 全部测试
+cargo test --lib --no-default-features   # 仅单元测试
 ```
 
-`--features mock` 是必需的：驱动 `AppController` 的测试套件都通过 Mock Backend 运行，而该
-feature 不在默认集合里。CI 还会跑 `cargo fmt --all -- --check`、`cargo check` 和
+CI 还会跑 `cargo fmt --all -- --check`、`cargo check` 和
 `cargo check --no-default-features`。
 
-## 离线 Mock Backend
+## 浏览器预览
 
-### 桥契约回归
+桌面壳走原生 IPC。浏览器开发只需要本地 HTTP 网关，转发到同一个 `AppController`，
+不造假模型、也不造假 BetterGI。首次写入的配置与发行模板相同：没有模型。
+
+```bash
+npm run backend   # 127.0.0.1:47124/ipc
+npm run dev       # Vite http://127.0.0.1:5173/
+```
+
+## 桥契约回归
 
 修改桥或宿主版本后，重新生成源码文档索引并运行契约测试：
 
@@ -86,78 +88,3 @@ feature 不在默认集合里。CI 还会跑 `cargo fmt --all -- --check`、`car
 忽略的 real_bridge_switch_round_trip 集成测试仅用于指定测试安装、管理员环境。
 它逐页核对全部目录项及示例，读取所有配置项，并对日志详细程度开关做预览、提交、回退，
 检查配置值整体恢复；不执行游戏命令。离线恢复测试使用临时假安装，要求真实 BetterGI 已退出。
-
-Mock Backend 是独立 Rust 进程，模拟模型 API、BGI Bridge 和浏览器开发模式下的 IPC 网关。
-它只监听 `127.0.0.1`，不访问外网，模型用量固定为 0。
-
-它是**开发工具，不在发布版中**：由非默认的 `mock` feature 门控，默认构建与 release 二进制
-既不编译 `src/mock.rs`，也不链接其 HTTP 依赖。它固定读取仓库根的
-`sleepy-doll.mock.config.json`（编译期路径），不接受命令行参数，因此开发数据不会因为启动
-位置不同而散落。
-
-```bash
-npm run mock   # 启动 mock 后端
-npm run dev    # 启动 Vite 开发服务器
-```
-
-Mock 进程启动时会打印实际读取的配置路径与当前 `activeModel`。浏览器开发模式的 IPC 会把
-模型请求转发给配置里的 `activeModel`，因此要完全离线，请让 `activeModel` 指向 Mock 模型。
-
-### 用真实会话复现界面
-
-该端点绑定的是真正的 `AppController`，所以把 mock 的库换成真实数据的一致快照，调界面时
-看到的就是完全一致的会话，不必为每处调整调用真实模型：
-
-```bash
-python scripts/seed-mock-db.py        # 默认取 dist\Sleepy-Doll\user\ 下的库
-```
-
-脚本用 SQLite 的备份接口取快照（源库通常带着未合并的 WAL，直接复制文件会丢掉最近的提交），
-连同附件目录一并搬过去，最后逐表对数确认完整。两个路径都在 `.gitignore` 里。源库路径可以
-作为参数指定。
-
-### 「模拟对话」
-
-开发模式的侧栏里多一条「模拟对话」（生产构建没有）。点它会替你发出录制的开场白，之后一切
-走正常链路：mock 后端回放录制的助手轮次、工具真实执行、事件流照常推送。所以链路或后端出
-问题，在演示里就能看见 —— 一段前端动画会把问题盖过去。
-
-录制来自哪段会话由这个脚本决定，它同时产出两份：
-
-```bash
-python scripts/build-demo-conversation.py "调度器"   # 不带参数会列出可选会话
-```
-
-| 产物 | 内容 |
-|---|---|
-| `.sleepy-doll/replay.json` | 助手轮次（正文、推理、工具调用），mock 后端按序回放 |
-| `web/src/demo.ts` | 只有那句开场白，前端用它发出第一条消息 |
-
-开场白与录制不一致时不会回放，退回按关键词选场景的默认行为。工具名在库里是内部名，回放时
-由运行时同一个 `wire_name` 换算，脚本里不复刻哈希。
-
-想让演示里的文件工具读到真实内容，启动 mock 时把 BGI 的 User 目录指过去：
-
-```bash
-SLEEPY_DOLL_MOCK_BGI_USER="E:\tools\test\BetterGI\User" npm run mock
-```
-
-浏览器开发模式会自动连接 `http://127.0.0.1:47124/ipc`；Wry 桌面模式仍使用原生 IPC，不受
-影响。该端点绑定整个 `AppController`，所以它只接受 `http://localhost:5173`、
-`http://127.0.0.1:5173`、`http://[::1]:5173` 和 `http://localhost:4173` 这几个开发来源
-（精确匹配）；带其他 `Origin` 的浏览器请求会被 403 拒绝。
-
-### 模拟的节奏
-
-首个 Token 前约 220–510ms，流式输出按 1–5 个字符一块推进，块间延迟在约 50–110ms 内抖动；
-句子标点处停顿更久，偶发 260–640ms 的上游停顿。可通过 `SLEEPY_DOLL_MOCK_MODEL_DELAY_MS`
-和 `SLEEPY_DOLL_MOCK_CHUNK_DELAY_MS` 调整两个基准值，设为 `0` 可完全关闭对应延迟与抖动。
-
-### 内置交流场景
-
-- 包含“短回复”：返回单句，用于检查紧凑消息布局。
-- 包含“长回复”：返回多段、编号和长行，用于检查换行、滚动、固定输入区与长会话标题。
-- 包含“状态”或“连接”：模型调用 `bgi.state.get`，再根据 Mock Bridge 返回生成总结。
-- 包含“路线”：模型调用 `bgi.capability.search`，再生成能力目录总结。
-- Bridge 能力 `mock.success`、`mock.unknown`、`mock.failure`、`mock.busy`、`mock.denied`
-  分别覆盖成功、结果未知、失败、忙碌和权限拒绝；Job 还支持运行中与取消。

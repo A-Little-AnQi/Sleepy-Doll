@@ -387,18 +387,10 @@ export function ModelsPage({
                 <button
                   type="button"
                   className="secondary-action"
-                  disabled={busy || bootstrap.models.length < 2}
-                  title={
-                    bootstrap.models.length < 2
-                      ? "至少保留一个模型作为默认"
-                      : "删除这个模型配置"
-                  }
+                  disabled={busy}
+                  title="删除这个模型配置"
                   onClick={() => {
-                    if (
-                      !window.confirm(
-                        `删除「${selected.name}」？使用它的对话会改用默认模型。`,
-                      )
-                    ) {
+                    if (!window.confirm(`删除「${selected.name}」？`)) {
                       return;
                     }
                     setBusy(true);

@@ -107,7 +107,7 @@ export function ChatPage({
   };
   const send = async (queue = false) => {
     const value = prompt.trim();
-    if (!value || sending) return;
+    if (!value || sending || !bootstrap.models.length) return;
     const origin = conversationId;
     const retryKey = `${draftKey}:pending`;
     let pending: { key: string; prompt: string; runId?: string } | undefined;
@@ -201,6 +201,9 @@ export function ChatPage({
               alt="蜷坐在月亮上熟睡的木偶"
             />
             <h2>开始一项新任务</h2>
+            {!bootstrap.models.length && (
+              <p className="muted">先在设置里添加模型服务</p>
+            )}
           </div>
         ) : (
           <div className="conversation-scene">
@@ -474,8 +477,16 @@ export function ChatPage({
                   type="button"
                   className="send-action"
                   aria-label={busy ? "发送补充" : "发送"}
-                  title={busy ? "发送补充" : "发送"}
-                  disabled={sending || !prompt.trim()}
+                  title={
+                    !bootstrap.models.length
+                      ? "先在设置里添加模型"
+                      : busy
+                        ? "发送补充"
+                        : "发送"
+                  }
+                  disabled={
+                    sending || !prompt.trim() || !bootstrap.models.length
+                  }
                   onClick={() => void send()}
                 >
                   <SendIcon className="button-icon" />

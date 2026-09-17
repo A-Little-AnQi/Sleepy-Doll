@@ -1,6 +1,6 @@
 # Agent Runtime v2
 
-The desktop controller and offline Mock use the same Rust Supervisor. The old
+The desktop controller uses the Rust Supervisor. The old
 in-memory Agent and TaskRunner have been replaced; `agent.rs` contains compatibility
 exports only. Images and multimodal model input are intentionally out of scope.
 
@@ -63,8 +63,7 @@ catalog simply loads empty — so check the resolved path when expected capabili
 appear.
 
 Only registered semantic capabilities can be invoked. Raw Bridge method names from
-model output do not bypass this binding. The checked-in `mock.*` descriptors work
-only with `mock-v1`; they are not real BetterGI capabilities.
+model output do not bypass this binding.
 
 `resources/` descriptors contain `id`, `name`, `kind`, a relative `path`,
 `contentHash` (SHA-256), optional aliases, coordinate system and map layer. Every
@@ -154,8 +153,7 @@ the tray's explicit exit requests cancellation and allows bounded shutdown time.
 Unit and integration tests cover idempotency, stale revisions, persisted leases,
 approval expiry, queues, cancellation, lost acceptance, truncated streams, context
 limits, resource changes, observation freshness, restart reconciliation, deterministic
-multi-step execution, and out-of-order/paginated MCP replies. Mock faults are configured
-in code through `MockFaults`, not exposed as production controls.
+multi-step execution, and out-of-order/paginated MCP replies.
 
 Real-model API validation and real BetterGI contracts still require configured services.
 Bridge SSE is a negotiated wake-up/reconnect channel; authoritative Job reads remain

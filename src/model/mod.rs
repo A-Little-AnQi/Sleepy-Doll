@@ -331,6 +331,3 @@ mod tests {
         );
     }
 }
-
-#[cfg(feature = "mock")]
-pub mod mock;

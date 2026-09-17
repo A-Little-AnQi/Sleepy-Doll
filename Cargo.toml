@@ -8,9 +8,7 @@ license = "MIT"
 [features]
 default = ["desktop"]
 desktop = ["dep:tao", "dep:wry", "dep:rust-embed", "dep:mime_guess"]
-# Development-only offline backend. Deliberately absent from `default` so neither
-# the mock server nor its HTTP dependency is linked into a release build.
-mock = ["dep:tiny_http"]
+dev-ipc = ["dep:tiny_http"]
 
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
@@ -52,23 +50,6 @@ path = "src/main.rs"
 required-features = ["desktop"]
 
 [[bin]]
-name = "sleepy-doll-mock"
-path = "src/bin/sleepy-doll-mock.rs"
-required-features = ["mock"]
-
-# These suites drive `AppController` against the mock backend, so they only
-# build when the `mock` feature is on.
-[[test]]
-name = "runtime"
-path = "tests/runtime.rs"
-required-features = ["mock"]
-
-[[test]]
-name = "mock_backend"
-path = "tests/mock_backend.rs"
-required-features = ["mock"]
-
-[[test]]
-name = "tasks"
-path = "tests/tasks.rs"
-required-features = ["mock"]
+name = "sleepy-doll-dev"
+path = "src/bin/sleepy-doll-dev.rs"
+required-features = ["dev-ipc"]

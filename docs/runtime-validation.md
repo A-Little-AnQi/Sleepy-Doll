@@ -6,7 +6,7 @@
 
 - Rust：43 项集成测试 + 31 项单元测试通过，包括配置、Schema、五种模型协议、运行状态机、
   授权、幂等、取消、恢复、消息归属、排队、计划执行、资源与 Skills、插件安装和 MCP。
-- `cargo clippy --all-targets --no-default-features --features mock -- -D warnings` 通过。
+- `cargo clippy --all-targets --no-default-features -- -D warnings` 通过。
 - `cargo check --target x86_64-pc-windows-gnu` 通过，覆盖 Windows 托盘和 Wry 编译路径。
 - TypeScript 类型检查、Vite 生产构建通过。
 - 已修改前端文件的 Prettier 检查和 Git 空白检查通过。
@@ -42,8 +42,7 @@
 ## 尚未验证的外部边界
 
 - 用户未提供真实模型服务，本轮没有调用付费模型或进行真实厂商 API 验收。
-- 没有真实 BGI Bridge 契约联调及游戏内后置条件验收；仓库中的 `mock.*`
-  绑定仅供离线测试，不可用来代替真实业务能力。
+- 没有真实 BGI Bridge 契约联调及游戏内后置条件验收。
 - Windows 托盘和窗口做了交叉编译检查，尚未在原生窗口中完成关闭、唤回、退出验收。
 - 系统字体缩放、辅助技术完整审计、真实 Bridge SSE 重放缺口及真实插件取消行为
-  尚未完成实机验收；不把 Mock 通过解释为这些外部边界已通过。
+  尚未完成实机验收。

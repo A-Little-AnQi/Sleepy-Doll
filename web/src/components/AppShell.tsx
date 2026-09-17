@@ -11,8 +11,6 @@ import {
 import { createPortal, flushSync } from "react-dom";
 import type { Page } from "../App";
 import { api } from "../api";
-import { DEMO_TITLE } from "../demo-id";
-import { demoConversationId, startDemo } from "../demo-session";
 import {
   isRunning,
   needsConfirmation,
@@ -242,9 +240,8 @@ export function AppShell({
   const conversation = bootstrap.conversations.find(
     (entry) => entry.id === conversationId,
   );
-  const bridgeLabel = bootstrap.bridge.simulated
-    ? "模拟连接"
-    : bootstrap.bridge.enabled && bootstrap.bridge.connected
+  const bridgeLabel =
+    bootstrap.bridge.enabled && bootstrap.bridge.connected
       ? "已连接"
       : "未连接";
 
@@ -548,32 +545,6 @@ export function AppShell({
             event.preventDefault();
           }}
         >
-          {/* 开发专用：点击后由脚本自动演一遍真实会话，不连后端、不调模型。
-              生产构建里 import.meta.env.DEV 为假，整段被摇掉。 */}
-          {import.meta.env.DEV && (
-            <li
-              className={
-                page === "chat" && conversationId === demoConversationId()
-                  ? "is-current"
-                  : undefined
-              }
-            >
-              <button
-                title={DEMO_TITLE}
-                aria-current={
-                  page === "chat" && conversationId === demoConversationId()
-                    ? "page"
-                    : undefined
-                }
-                onClick={() => {
-                  startDemo();
-                  onConversation(demoConversationId());
-                }}
-              >
-                <span className="app-conversation-title">{DEMO_TITLE}</span>
-              </button>
-            </li>
-          )}
           {grouped.groups.map(({ group, items }) => (
             <GroupRow
               key={group.id}
@@ -702,14 +673,6 @@ export function AppShell({
                   ? (conversation?.title ?? "新对话")
                   : NAV.find((item) => item.page === page)?.label}
             </h1>
-            {bootstrap.preview && (
-              <span
-                className="tag"
-                title="连接的是本地测试后端，不代表真实游戏状态"
-              >
-                模拟预览
-              </span>
-            )}
           </div>
           <div className="app-header-actions">
             {detailsAvailable && (
@@ -865,30 +828,32 @@ function GroupRow({
           </div>
         </div>
       )}
-      <div
-        className={`app-group-chats${group.collapsed ? " is-collapsed" : ""}`}
-        inert={group.collapsed}
-      >
-        <ul className="app-group-chats-inner">
-          {items.map((entry) => (
-            <ConversationRow
-              key={entry.id}
-              entry={entry}
-              current={page === "chat" && conversationId === entry.id}
-              running={bootstrap.tasks.find(
-                (task) => task.conversationId === entry.id && isRunning(task),
-              )}
-              onOpen={() => onConversation(entry.id)}
-              onAct={onAct}
-              permissionMode={bootstrap.permission.mode}
-              nested
-              groupId={group.id}
-              draggingId={draggingId}
-              onDragArm={onDragArm}
-            />
-          ))}
-        </ul>
-      </div>
+      {items.length > 0 && (
+        <div
+          className={`app-group-chats${group.collapsed ? " is-collapsed" : ""}`}
+          inert={group.collapsed}
+        >
+          <ul className="app-group-chats-inner">
+            {items.map((entry) => (
+              <ConversationRow
+                key={entry.id}
+                entry={entry}
+                current={page === "chat" && conversationId === entry.id}
+                running={bootstrap.tasks.find(
+                  (task) => task.conversationId === entry.id && isRunning(task),
+                )}
+                onOpen={() => onConversation(entry.id)}
+                onAct={onAct}
+                permissionMode={bootstrap.permission.mode}
+                nested
+                groupId={group.id}
+                draggingId={draggingId}
+                onDragArm={onDragArm}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
     </li>
   );
 }

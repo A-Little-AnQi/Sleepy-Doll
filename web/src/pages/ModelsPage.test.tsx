@@ -19,10 +19,10 @@ const bootstrap: Bootstrap = {
   configPath: "/tmp/config.json",
   models: [
     {
-      id: "mock",
-      name: "Mock Anthropic",
+      id: "primary",
+      name: "主模型",
       protocol: "anthropic-messages",
-      model: "mock-model",
+      model: "test-model",
       baseUrl: "http://127.0.0.1/v1",
       active: true,
       timeoutMs: 120000,
@@ -46,7 +46,7 @@ const bootstrap: Bootstrap = {
 it("lists configured models instead of hiding them in a picker", () => {
   render(<ModelsPage bootstrap={bootstrap} reload={async () => undefined} />);
   expect(screen.getByRole("navigation", { name: "已配置的模型" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: /Mock Anthropic/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /主模型/ })).toBeTruthy();
   expect(screen.getByRole("button", { name: "添加" })).toBeTruthy();
 });
 
@@ -64,12 +64,12 @@ it("labels the active configuration as the default model", () => {
   expect(screen.queryByText("当前模型")).toBeNull();
 });
 
-it("keeps the last remaining model", () => {
+it("keeps the last remaining model deletable", () => {
   render(<ModelsPage bootstrap={bootstrap} reload={async () => undefined} />);
   expect(
     (screen.getByRole("button", { name: "删除" }) as HTMLButtonElement)
       .disabled,
-  ).toBe(true);
+  ).toBe(false);
 });
 
 it("exposes the context window for the selected model", () => {
@@ -83,15 +83,15 @@ it("exposes the context window for the selected model", () => {
 it("deletes a configured model after confirmation", async () => {
   const extra: ModelInfo = {
     id: "other",
-    name: "Mock Gemini",
+    name: "Gemini",
     protocol: "gemini",
-    model: "mock-model",
+    model: "test-model",
     baseUrl: "http://127.0.0.1/v1",
     active: false,
   };
   vi.mocked(api.deleteModel).mockResolvedValue({
     deleted: true,
-    activeModel: "mock",
+    activeModel: "primary",
   });
   vi.spyOn(window, "confirm").mockReturnValue(true);
   render(
@@ -100,7 +100,7 @@ it("deletes a configured model after confirmation", async () => {
       reload={async () => undefined}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: /Mock Gemini/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Gemini/ }));
   fireEvent.click(screen.getByRole("button", { name: "删除" }));
   await waitFor(() => expect(api.deleteModel).toHaveBeenCalledWith("other"));
 });

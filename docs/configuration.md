@@ -19,7 +19,7 @@
 以及任何不像路径的参数都会被明确拒绝，而不是被当成配置文件名。
 
 注意 `cargo run` 的可执行文件在 `target/<profile>/` 下，所以开发时的 `user/` 也落在那里
-（`target/` 已被忽略，`cargo clean` 会一并清掉）；debug、release 与 mock 各自使用独立的
+（`target/` 已被忽略，`cargo clean` 会一并清掉）；debug 与 release 各自使用独立的
 `user/` 目录。
 
 要用仓库里的本地副本作为配置，用绝对路径（相对路径是相对可执行文件目录解析的）：
@@ -33,8 +33,8 @@ SLEEPY_DOLL_CONFIG="$PWD/sleepy-doll.dev.config.json" cargo run --release
 | 字段 | 说明 |
 |---|---|
 | `version` | 配置版本，当前为 `2`。`1` 会在启动时自动迁移并留下 `config.v1.backup.json` |
-| `activeModel` | 唯一生效的模型，必须且只能指向 `models` 里的一项 |
-| `models` | 可选模型列表，见下节 |
+| `activeModel` | 当前默认模型。没有模型时为空；有模型时必须指向 `models` 里的一项 |
+| `models` | 模型列表，首次启动为空，由用户在设置里添加 |
 | `agent` | 回合数上限、单轮工具调用上限、系统提示词、技能目录、按需加载技能数 |
 | `bridge` | BetterGI 连接开关、地址、token、超时 |
 | `plugins` | 插件目录与已启用插件的 ID 列表 |
@@ -59,7 +59,7 @@ BetterGI 连接可直接在 BetterGI 页面开关，改变后立即生效。开�
 
 ## 模型配置
 
-`models` 是可选模型列表，`activeModel` 是唯一入口。例如：
+`models` 是模型列表，首次启动为空。`activeModel` 在没有模型时为空；添加第一项时自动成为默认。例如：
 
 ```json
 {

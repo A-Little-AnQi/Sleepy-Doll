@@ -39,22 +39,20 @@ interface IpcEnvelope<T> {
   error?: { message: string };
 }
 
-export function mockIpcUrl(dev = import.meta.env.DEV) {
-  return dev ? "/ipc" : "http://127.0.0.1:47124/ipc";
-}
-
-export const MOCK_BACKEND = mockIpcUrl();
-
-/** 旧 mock 在 waitMs>0 且没有新事件时会回空 500。桌面 IPC 才长轮询。 */
 export function eventsReadParams(
   conversationId: string,
   after: number,
-  nativeIpc: boolean,
+  nativeIpc = typeof window !== "undefined" && Boolean(window.ipc),
 ) {
   return nativeIpc
     ? { conversationId, after, waitMs: 20_000 }
     : { conversationId, after };
 }
+
+export function devIpcUrl(dev = import.meta.env.DEV) {
+  return dev ? "/ipc" : "http://127.0.0.1:47124/ipc";
+}
+
 const pending = new Map<
   string,
   {
@@ -74,7 +72,7 @@ window.__sleepyDollReceive = (message) => {
   else entry.reject(new Error(message.error?.message ?? "原生请求失败"));
 };
 
-async function invokeMock<T>(
+async function invokeHttp<T>(
   id: string,
   method: string,
   params: Record<string, unknown>,
@@ -82,15 +80,13 @@ async function invokeMock<T>(
 ) {
   let response: Response;
   try {
-    response = await fetch(MOCK_BACKEND, {
+    response = await fetch(devIpcUrl(), {
       signal: AbortSignal.timeout(timeoutMs),
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id, method, params }),
     });
   } catch (error) {
-    // A dropped connection is not the same as "never started": the event stream
-    // holds a long poll open, so a restart or a sleeping machine lands here too.
     throw new Error(
       error instanceof DOMException &&
         ["TimeoutError", "AbortError"].includes(error.name)
@@ -98,18 +94,18 @@ async function invokeMock<T>(
         : "无法连接本地服务。",
     );
   }
-    const text = await response.text();
-    if (!text) {
-      throw new Error(
-        response.ok
-          ? "无法连接本地服务。"
-          : `Mock Backend 返回 HTTP ${response.status}`,
-      );
-    }
-    const envelope = JSON.parse(text) as IpcEnvelope<T>;
+  const text = await response.text();
+  if (!text) {
+    throw new Error(
+      response.ok
+        ? "无法连接本地服务。"
+        : `本地服务返回 HTTP ${response.status}`,
+    );
+  }
+  const envelope = JSON.parse(text) as IpcEnvelope<T>;
   if (!response.ok || !envelope.ok) {
     throw new Error(
-      envelope.error?.message ?? `Mock Backend 返回 HTTP ${response.status}`,
+      envelope.error?.message ?? `本地服务返回 HTTP ${response.status}`,
     );
   }
   return envelope.result as T;
@@ -127,7 +123,7 @@ function invoke<T>(
         ? 30_000
         : 15_000;
   const ipc = window.ipc;
-  if (!ipc) return invokeMock<T>(id, method, params, timeoutMs);
+  if (!ipc) return invokeHttp<T>(id, method, params, timeoutMs);
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
       pending.delete(id);

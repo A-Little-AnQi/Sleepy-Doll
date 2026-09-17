@@ -284,8 +284,8 @@ export interface PermissionState {
 }
 
 /**
- * 旧 mock 的 bootstrap 没有 permission 字段。正式运行时会带上完整清单；
- * 这里只垫一层，避免预览整页崩掉。文案与 `PermissionMode::levels` 对齐。
+ * bootstrap 缺 permission 字段时垫一层，避免整页崩掉。
+ * 文案与 `PermissionMode::levels` 对齐。
  */
 export const PREVIEW_PERMISSION: PermissionState = {
   mode: "standard",
@@ -323,7 +323,6 @@ export function withPermission(bootstrap: Bootstrap): Bootstrap {
 }
 
 export interface Bootstrap {
-  preview?: boolean;
   /** Absolute path of the configuration file, so the interface can point at it
    * instead of telling the user to "edit the configuration". */
   configPath: string;
@@ -342,7 +341,6 @@ export interface Bootstrap {
   notifications: NotificationInfo[];
   permission: PermissionState;
   bridge: {
-    simulated?: boolean;
     enabled: boolean;
     connected: boolean;
     baseUrl: string;

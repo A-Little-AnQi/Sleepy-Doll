@@ -1,45 +1,7 @@
 {
   "version": 3,
-  "activeModel": "local-mock",
-  "models": [
-    {
-      "id": "local-mock",
-      "name": "本地 Mock",
-      "protocol": "openai-chat",
-      "model": "mock-model",
-      "baseUrl": "http://127.0.0.1:47124/v1",
-      "headers": {},
-      "options": {
-        "maxOutputTokens": 4096,
-        "timeoutMs": 120000
-      }
-    },
-    {
-      "id": "local-ollama",
-      "name": "Local Ollama",
-      "protocol": "ollama-chat",
-      "model": "qwen3:8b",
-      "baseUrl": "http://127.0.0.1:11434",
-      "headers": {},
-      "options": {
-        "timeoutMs": 120000
-      }
-    },
-    {
-      "id": "primary",
-      "name": "主模型",
-      "protocol": "openai-responses",
-      "model": "your-model-id",
-      "baseUrl": "https://api.openai.com/v1",
-      "apiKey": "${ENV:OPENAI_API_KEY}",
-      "headers": {},
-      "options": {
-        "temperature": 0.2,
-        "maxOutputTokens": 8192,
-        "timeoutMs": 120000
-      }
-    }
-  ],
+  "activeModel": "",
+  "models": [],
   "agent": {
     "maxTurns": 16,
     "maxToolCallsPerTurn": 16,

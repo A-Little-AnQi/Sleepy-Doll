@@ -23,3 +23,7 @@ it("falls back to the default model when the bound one is gone", () => {
   ).toBe("beta");
   expect(resolveConversationModel(models, { modelId: null })).toBe("beta");
 });
+
+it("has no model when none are configured", () => {
+  expect(resolveConversationModel([])).toBe("");
+});

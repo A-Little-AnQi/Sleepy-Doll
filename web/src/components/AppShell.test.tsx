@@ -1,6 +1,7 @@
 import { afterEach, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AppShell } from "./AppShell";
+import { GROUPS_KEY } from "../conversation-groups";
 import { PREVIEW_PERMISSION, type Bootstrap } from "../types";
 
 afterEach(() => {
@@ -129,6 +130,23 @@ it("lets the user create a conversation group instead of toggling archived chats
   expect(screen.queryByRole("button", { name: "显示已归档" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "新建分组" }));
   expect(screen.getByRole("button", { name: /新分组/ })).toBeTruthy();
+});
+
+it("does not animate an empty group body over the empty conversation hint", () => {
+  stubWide(true);
+  localStorage.setItem(
+    GROUPS_KEY,
+    JSON.stringify({
+      groups: [{ id: "g1", name: "222", collapsed: true }],
+      membership: {},
+      order: [],
+    }),
+  );
+  renderShell(false);
+  expect(screen.getByText("还没有对话")).toBeTruthy();
+  expect(document.querySelector(".app-group-chats")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "222" }));
+  expect(document.querySelector(".app-group-chats")).toBeNull();
 });
 
 it("does not expose pin or archive on conversation rows", () => {

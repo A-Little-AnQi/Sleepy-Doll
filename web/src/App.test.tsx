@@ -6,9 +6,6 @@ vi.mock("./api", () => ({
     bootstrap: vi.fn(),
     tasks: vi.fn(),
   },
-  MOCK_BACKEND: "http://127.0.0.1:47124/ipc",
-  mockIpcUrl: (dev: boolean) =>
-    dev ? "/ipc" : "http://127.0.0.1:47124/ipc",
 }));
 
 import { api } from "./api";

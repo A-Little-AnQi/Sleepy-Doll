@@ -1,9 +1,0 @@
-{
-  "id": "mock.unknown",
-  "description": "离线测试：调用完成但目标结果未知",
-  "methodId": "mock.unknown",
-  "catalogVersion": "mock-v1",
-  "aliases": ["测试未知"],
-  "resourceFields": [],
-  "postconditions": []
-}

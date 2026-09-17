@@ -1095,7 +1095,7 @@ impl AppController {
         let bridge_status = if config.bridge.enabled {
             match crate::bridge::control::info(&config.bridge) {
                 Ok(info) => {
-                    json!({"enabled":true,"connected":info["enabled"] != false,"baseUrl":config.bridge.base_url,"simulated":info["simulated"] == true})
+                    json!({"enabled":true,"connected":info["enabled"] != false,"baseUrl":config.bridge.base_url})
                 }
                 Err(error) => {
                     json!({"enabled":true,"connected":false,"baseUrl":config.bridge.base_url,"error":error.to_string()})
@@ -1105,7 +1105,7 @@ impl AppController {
             json!({"enabled":false,"connected":false,"baseUrl":config.bridge.base_url})
         };
         Ok(
-            json!({"preview":cfg!(feature="mock"),"permission":permission,"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.supervisor.task_summaries(None)?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"conversationGroups":self.supervisor.journal.conversation_groups()?,"bridge":bridge_status}),
+            json!({"permission":permission,"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.supervisor.task_summaries(None)?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"conversationGroups":self.supervisor.journal.conversation_groups()?,"bridge":bridge_status}),
         )
     }
 
@@ -1182,7 +1182,7 @@ impl AppController {
                     .iter()
                     .map(|model| model.id.clone())
                     .collect::<Vec<_>>(),
-                config.active().id.clone(),
+                config.active_model.clone(),
             )
         };
         self.supervisor.journal.rebind_models(&ids, &default)

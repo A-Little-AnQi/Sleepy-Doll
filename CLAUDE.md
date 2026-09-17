@@ -15,16 +15,16 @@ build-desktop.cmd          # 唯一的发布构建入口，产物在 dist\Sleepy
 | `npm run check` | 前端类型检查 + 生产构建 |
 | `npm test` | 前端交互回归 |
 | `dotnet run --project bgi-bridge/dev/ContractTests.csproj` | 桥的契约测试 |
-| `cargo test --no-default-features --features mock` | 全部 Rust 测试（`mock` 是非默认特性，必须显式开） |
+| `cargo test --no-default-features` | 全部 Rust 测试 |
 | `cargo check` 与 `cargo check --no-default-features` | 两种特性组合都要过 |
-| `cargo clippy --all-targets --no-default-features --features mock -- -D warnings` | **CI 不执行 clippy，本地必须执行** |
+| `cargo clippy --all-targets --no-default-features -- -D warnings` | **CI 不执行 clippy，本地必须执行** |
 | `cargo fmt --all -- --check` | 格式 |
 
 `tests/live.rs` 是实机测试：用本机真实模型配置与真实桥执行一次完整问答，会消耗真实额度。
 它标了 `#[ignore]`，**不要让它进 CI**。手动执行：
 
 ```bash
-cargo test --no-default-features --features mock --test live -- --ignored --nocapture
+cargo test --no-default-features --test live -- --ignored --nocapture
 ```
 
 ## 约定
@@ -77,7 +77,7 @@ cargo test --no-default-features --features mock --test live -- --ignored --noca
 ```
 src/
   app/        控制器与 IPC 方法
-  model/      五个模型协议 —— mod.rs（共享类型与 Model 抽象）/ protocol.rs（编解码）/ mock.rs
+  model/      五个模型协议 —— mod.rs（共享类型与 Model 抽象）/ protocol.rs（编解码）
   bridge/     BGI 接触面 —— mod.rs（客户端与 bgi.* 工具）/ control.rs（桥进程生命周期）
   extension/  工具契约，以及技能、插件、MCP 三类扩展来源
   runtime/    Agent 运行时

@@ -18,10 +18,6 @@ export default defineConfig({
         timeout: 120_000,
         proxyTimeout: 120_000,
       },
-      "/dev": {
-        target: "http://127.0.0.1:47124",
-        changeOrigin: true,
-      },
     },
     watch: process.env.WSL_DISTRO_NAME
       ? {

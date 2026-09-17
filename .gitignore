@@ -16,7 +16,6 @@ ui-dist/
 /user/
 sleepy-doll*.config.json
 !sleepy-doll.config.example.json
-!sleepy-doll.mock.config.json
 sleepy-doll.config.*.tmp
 *.v1.backup.json
 *.json.*.tmp
