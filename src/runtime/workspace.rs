@@ -542,6 +542,8 @@ fn host_script(payload_b64: &str) -> String {
     format!(
         r#"
 $ErrorActionPreference = 'Stop'
+# 默认输出编码是 ANSI，中文错误和文件内容到调用方就成了乱码。
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $ctx = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{payload_b64}')) | ConvertFrom-Json
 $Workspace = [IO.Path]::GetFullPath($ctx.workspace)
 $Deny = @()
@@ -582,8 +584,9 @@ $global:SleepyProxies = @{{}}
 foreach ($name in @('Set-Location','Push-Location','Get-ChildItem','Get-Item','Get-Content','Set-Content','Add-Content','Out-File','Remove-Item','Rename-Item','Copy-Item','Move-Item','New-Item','Clear-Content','New-PSDrive','Remove-PSDrive','Start-Process','Invoke-Item','Set-Acl','Set-ItemProperty')) {{
   $original = Microsoft.PowerShell.Core\Get-Command -Name $name -CommandType Cmdlet -ErrorAction Stop
   $text = [System.Management.Automation.ProxyCommand]::Create((New-Object System.Management.Automation.CommandMetadata($original)))
-  $text = $text.Replace('begin {{', "begin {{`r`n    Assert-SleepyBound `$PSBoundParameters")
-  Microsoft.PowerShell.Core\Set-Item -Path "function:global:$name" -Value ([ScriptBlock]::Create($text))
+  # ProxyCommand 生成的 begin 与左花括号分处两行，锚点不带换行就匹配不到。
+  $text = $text.Replace("begin`r`n{{", "begin`r`n{{`r`n    Assert-SleepyBound `$PSBoundParameters")
+  Microsoft.PowerShell.Management\Set-Item -Path "function:global:$name" -Value ([ScriptBlock]::Create($text))
   $global:SleepyProxies[$name] = Microsoft.PowerShell.Core\Get-Command -Name $name -CommandType Function
 }}
 $ExecutionContext.SessionState.InvokeCommand.PreCommandLookupAction = {{
@@ -593,7 +596,8 @@ $ExecutionContext.SessionState.InvokeCommand.PreCommandLookupAction = {{
   if ($blocked -contains $short.ToLowerInvariant()) {{
     throw '本机没有开发环境，只能使用当前 PowerShell 会话内的命令。'
   }}
-  if ($global:SleepyProxies.ContainsKey($short)) {{
+  # 代理函数靠带模块限定的名字取回真实 cmdlet，重定向会把代理指回它自己。
+  if ($CommandName -notlike '*\*' -and $global:SleepyProxies.ContainsKey($short)) {{
     $EventArgs.Command = $global:SleepyProxies[$short]
     $EventArgs.StopSearch = $true
   }}

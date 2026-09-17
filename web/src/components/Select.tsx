@@ -79,7 +79,7 @@ export function Select({
   /** 键盘改焦点时才把选项滚进视口；指针划过不能拽列表，否则一滚就和滚动对着干。 */
   const fromKey = useRef(false);
   /** 打开时定下上下方向，滚动跟随不再翻转，避免贴阈值时整层对跳。 */
-  const side = useRef<"above" | "below">();
+  const side = useRef<"above" | "below">(undefined);
   /** 当前这次打开是否已经把选中项滚进视口；placement 后续更新不能再拽列表。 */
   const revealed = useRef(false);
   const selected = options.find((option) => option.value === value);

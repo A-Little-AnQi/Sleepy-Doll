@@ -14,7 +14,8 @@ export function SlidingTabs<T extends string>({
     extra?: ReactNode;
   }>;
   value: T;
-  onChange(id: T): void;
+  /** T 只由 items 与 value 推导；不加 NoInfer 时，直接传入的 setState 会把它推导成 string。 */
+  onChange(id: NoInfer<T>): void;
   ariaLabel: string;
 }) {
   const root = useRef<HTMLElement>(null);

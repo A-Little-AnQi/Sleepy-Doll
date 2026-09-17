@@ -123,7 +123,7 @@ it("hides host settings until the plugin is introduced", async () => {
         ...bootstrap,
         plugins: [
           {
-            ...bootstrap.plugins[0],
+            ...bootstrap.plugins[0]!,
             status: "disabled",
             configuredEnabled: false,
           },

@@ -146,7 +146,7 @@ it("opens the config editor from the general settings", async () => {
   );
   expect(screen.getByText("/tmp/config.json")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "编辑" }));
-  const dialog = await screen.findByRole("dialog");
+  await screen.findByRole("dialog");
   expect(screen.getByRole("heading", { name: "编辑配置" })).toBeTruthy();
   expect(document.querySelector(".sd-dialog-layer")?.parentElement).toBe(
     document.body,
