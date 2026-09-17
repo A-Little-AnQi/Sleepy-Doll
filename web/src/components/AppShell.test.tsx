@@ -154,6 +154,14 @@ it("does not put an empty new chat in the sidebar on first load", () => {
   expect(screen.queryByText("还没有对话")).toBeNull();
 });
 
+it("keeps new chat and drops the chat page from primary navigation", () => {
+  renderShell(false);
+  expect(screen.getByRole("button", { name: "新建对话" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "对话" })).toBeNull();
+  expect(screen.getByRole("button", { name: "快捷任务" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "工具与扩展" })).toBeTruthy();
+});
+
 it("puts a draft chat in the sidebar when the user starts a new chat", () => {
   stubWide(true);
   function Harness() {

@@ -22,7 +22,6 @@ import { hostPluginEnabled } from "../providers";
 import {
   BrandIcon,
   BridgeIcon,
-  ChatIcon,
   EditIcon,
   FolderIcon,
   PanelIcon,
@@ -63,7 +62,6 @@ import {
 import "./app-shell.css";
 
 const NAV = [
-  { page: "chat", label: "对话", Icon: ChatIcon },
   { page: "tasks", label: "快捷任务", Icon: ToolIcon },
   { page: "extensions", label: "工具与扩展", Icon: PluginIcon },
 ] as const;
@@ -567,7 +565,7 @@ export function AppShell({
           >
             <Icon className="app-nav-icon" />
             <span>{label}</span>
-            {target === "chat" &&
+            {target === "tasks" &&
               bootstrap.tasks.some((task) => isRunning(task)) && (
                 <span className="app-nav-badge" title="有运行正在进行">
                   {bootstrap.tasks.filter((task) => isRunning(task)).length}

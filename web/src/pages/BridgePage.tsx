@@ -17,36 +17,16 @@ export function BridgePage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [state, setState] = useState<unknown>();
   const [showCatalog, setShowCatalog] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
   const bridge = bootstrap.bridge;
   useEffect(() => {
     void reload();
   }, [reload]);
-  useEffect(() => {
-    if (!bridge.connected) {
-      setState(undefined);
-      return;
-    }
-    let cancelled = false;
-    void api
-      .bridgeState()
-      .then((value) => {
-        if (!cancelled) setState(value);
-      })
-      .catch((reason) => {
-        if (!cancelled) setError(readError(reason));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [bridge.connected]);
   const toggle = async (enabled: boolean) => {
     setBusy(true);
     setError("");
     setNotice("");
-    setState(undefined);
     try {
       const result = await api.setBridgeEnabled(enabled);
       if (result.warning) setNotice(result.warning);
@@ -61,8 +41,8 @@ export function BridgePage({
     return <BridgeApiExplorer onBack={() => setShowCatalog(false)} />;
   if (showRecovery)
     return <BridgeRecovery onBack={() => setShowRecovery(false)} />;
-  // 状态和失败原因写在同一个地方。这里不暴露配置里的 enabled 开关 ——
-  // 它默认就是开的，拿它当连接状态会让「没连接」显示成「已启用」。
+  // 这里不暴露配置里的 enabled 开关 —— 它默认就是开的，拿它当连接状态会让
+  // 「没连接」显示成「已启用」。
   const connection = busy
     ? { title: "正在连接", detail: "正在连接 BetterGI。" }
     : bridge.connected
@@ -85,9 +65,7 @@ export function BridgePage({
       <section className="bridge-connection-card" data-motion="panel">
         <div className="bridge-connection-row">
           <div>
-            <strong className={bridge.connected ? "is-connected" : undefined}>
-              {connection.title}
-            </strong>
+            <strong>{connection.title}</strong>
             <span>{connection.detail}</span>
           </div>
           <button
@@ -130,19 +108,6 @@ export function BridgePage({
           <ChevronIcon />
         </button>
       </div>
-      <section className="bridge-connection-card" data-motion="panel">
-        <div className="bridge-connection-row">
-          <div>
-            <strong>状态</strong>
-            {!state && (
-              <span>{bridge.connected ? "正在读取…" : "未连接"}</span>
-            )}
-          </div>
-        </div>
-        {state ? (
-          <pre className="bridge-log">{JSON.stringify(state, null, 2)}</pre>
-        ) : null}
-      </section>
     </div>
   );
 }

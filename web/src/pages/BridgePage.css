@@ -135,21 +135,6 @@
   line-height: 1.5;
 }
 
-.bridge-log {
-  margin: 0;
-  max-height: 340px;
-  padding: 16px;
-  border: 0;
-  border-top: 1px solid var(--border);
-  border-radius: 0;
-  background: var(--subtle);
-  color: var(--secondary);
-  font:
-    var(--font-meta)/1.65 "Cascadia Code",
-    Consolas,
-    monospace;
-}
-
 @media (max-width: 700px) {
   .bridge-feature-grid {
     grid-template-columns: 1fr;
