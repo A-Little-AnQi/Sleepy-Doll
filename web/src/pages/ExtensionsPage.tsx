@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import "./ExtensionsPage.css";
 import { api } from "../api";
 import { Toast } from "../components/Toast";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CloseIcon, PluginIcon, SearchIcon, PlusIcon } from "../components/icons";
 import { readError } from "../session";
 import type { Bootstrap } from "../types";
@@ -33,6 +34,7 @@ export function ExtensionsPage({
   const [path, setPath] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [pendingRemove, setPendingRemove] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -347,13 +349,10 @@ export function ExtensionsPage({
                       className="secondary-action"
                       disabled={busy || current.enabled}
                       title={current.enabled ? "请先停用插件" : undefined}
-                      onClick={() =>
-                        void run(() => api.removePlugin(current.id)).then(
-                          (ok) => {
-                            if (ok) dialog.current?.close();
-                          },
-                        )
-                      }
+                      onClick={() => {
+                        dialog.current?.close();
+                        setPendingRemove(current.id);
+                      }}
                     >
                       移除插件
                     </button>
@@ -364,6 +363,26 @@ export function ExtensionsPage({
           )}
         </div>
       </dialog>
+      <ConfirmDialog
+        open={pendingRemove != null}
+        title="移除插件"
+        confirmLabel="移除插件"
+        busy={busy}
+        onClose={() => setPendingRemove(null)}
+        onConfirm={() => {
+          const id = pendingRemove;
+          if (!id) return;
+          void run(() => api.removePlugin(id)).then((ok) => {
+            if (ok) setPendingRemove(null);
+          });
+        }}
+      >
+        <p>
+          移除「
+          {items.find((item) => item.id === pendingRemove)?.name ?? "这个插件"}
+          」。它提供的工具会从本机卸下。
+        </p>
+      </ConfirmDialog>
     </div>
   );
 }

@@ -139,6 +139,31 @@ it("exposes the context window for the selected model", () => {
   ).toBe("200000");
 });
 
+it("asks in the product dialog before deleting a model", async () => {
+  const extra: ModelInfo = {
+    id: "other",
+    name: "Gemini",
+    protocol: "gemini",
+    model: "test-model",
+    baseUrl: "http://127.0.0.1/v1",
+    active: false,
+  };
+  render(
+    <ModelsPage
+      bootstrap={{ ...bootstrap, models: [...bootstrap.models, extra] }}
+      reload={async () => undefined}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Gemini/ }));
+  fireEvent.click(screen.getByRole("button", { name: "删除" }));
+  expect(screen.getByRole("dialog", { name: "删除模型" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "删除模型" })).toBeNull(),
+  );
+  expect(api.deleteModel).not.toHaveBeenCalled();
+});
+
 it("deletes a configured model after confirmation", async () => {
   const extra: ModelInfo = {
     id: "other",
@@ -152,7 +177,6 @@ it("deletes a configured model after confirmation", async () => {
     deleted: true,
     activeModel: "primary",
   });
-  vi.spyOn(window, "confirm").mockReturnValue(true);
   render(
     <ModelsPage
       bootstrap={{ ...bootstrap, models: [...bootstrap.models, extra] }}
@@ -161,5 +185,7 @@ it("deletes a configured model after confirmation", async () => {
   );
   fireEvent.click(screen.getByRole("button", { name: /Gemini/ }));
   fireEvent.click(screen.getByRole("button", { name: "删除" }));
+  fireEvent.click(screen.getByRole("button", { name: "删除模型" }));
   await waitFor(() => expect(api.deleteModel).toHaveBeenCalledWith("other"));
 });
+

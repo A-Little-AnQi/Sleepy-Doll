@@ -1,6 +1,16 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
+
+vi.mock("../api", () => ({
+  api: {
+    saveConversationGroups: vi.fn(),
+    deleteConversation: vi.fn(),
+    renameConversation: vi.fn(),
+  },
+}));
+
+import { api } from "../api";
 import { AppShell } from "./AppShell";
 import { GROUPS_KEY } from "../conversation-groups";
 import { PREVIEW_PERMISSION, type Bootstrap, type ConversationInfo } from "../types";
@@ -8,6 +18,7 @@ import { PREVIEW_PERMISSION, type Bootstrap, type ConversationInfo } from "../ty
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  vi.clearAllMocks();
 });
 
 const bootstrap: Bootstrap = {
@@ -563,6 +574,142 @@ it("keeps expand controls when the sidebar is collapsed, without a details toggl
   expect(screen.getByRole("button", { name: "新建对话" })).toBeTruthy();
   expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   expect(screen.queryByRole("button", { name: "显示详情" })).toBeNull();
+});
+
+it("asks in the product dialog before deleting a conversation", async () => {
+  stubWide(true);
+  vi.mocked(api.deleteConversation).mockResolvedValue({
+    requiresConfirmation: true,
+    affects: { title: "夜巡", taskCount: 1 },
+    keeps: "快捷任务与运行证据会保留，来源显示为已删除",
+  });
+  render(
+    <AppShell
+      bootstrap={{
+        ...bootstrap,
+        conversations: [chat("c1", "夜巡")],
+      }}
+      page="chat"
+      conversationId="c1"
+      detailsOpen={false}
+      onPage={() => undefined}
+      onNew={() => undefined}
+      onConversation={() => undefined}
+      onToggleDetails={() => undefined}
+      reload={async () => undefined}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "删除对话", hidden: true }));
+  const dialog = await screen.findByRole("dialog", { name: "删除对话" });
+  expect(dialog.textContent).toContain("夜巡");
+  fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "删除对话" })).toBeNull(),
+  );
+  expect(api.deleteConversation).toHaveBeenCalledTimes(1);
+  expect(api.deleteConversation).toHaveBeenCalledWith("c1", false);
+});
+
+it("deletes a conversation after the product dialog is confirmed", async () => {
+  stubWide(true);
+  vi.mocked(api.deleteConversation).mockResolvedValue({
+    requiresConfirmation: true,
+    affects: { title: "夜巡", taskCount: 0 },
+    keeps: "快捷任务与运行证据会保留，来源显示为已删除",
+  });
+  render(
+    <AppShell
+      bootstrap={{
+        ...bootstrap,
+        conversations: [chat("c1", "夜巡")],
+      }}
+      page="chat"
+      conversationId="c1"
+      detailsOpen={false}
+      onPage={() => undefined}
+      onNew={() => undefined}
+      onConversation={() => undefined}
+      onToggleDetails={() => undefined}
+      reload={async () => undefined}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "删除对话", hidden: true }));
+  fireEvent.click(
+    within(await screen.findByRole("dialog", { name: "删除对话" })).getByRole(
+      "button",
+      { name: "删除对话" },
+    ),
+  );
+  await waitFor(() =>
+    expect(api.deleteConversation).toHaveBeenCalledWith("c1", true),
+  );
+});
+
+it("asks in the product dialog before deleting a group that still has chats", async () => {
+  stubWide(true);
+  localStorage.setItem(
+    GROUPS_KEY,
+    JSON.stringify({
+      groups: [{ id: "g1", name: "路线", collapsed: false }],
+      membership: { c1: "g1" },
+      order: ["c1"],
+    }),
+  );
+  render(
+    <AppShell
+      bootstrap={{ ...bootstrap, conversations: [chat("c1", "夜巡")] }}
+      page="chat"
+      conversationId="c1"
+      detailsOpen={false}
+      onPage={() => undefined}
+      onNew={() => undefined}
+      onConversation={() => undefined}
+      onToggleDetails={() => undefined}
+      reload={async () => undefined}
+    />,
+  );
+  fireEvent.contextMenu(screen.getByRole("button", { name: "路线" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "删除分组" }));
+  expect(screen.getByRole("dialog", { name: "删除分组" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "删除分组" })).toBeNull(),
+  );
+  expect(screen.getByRole("button", { name: "路线" })).toBeTruthy();
+});
+
+it("deletes a group after the product dialog is confirmed", () => {
+  stubWide(true);
+  localStorage.setItem(
+    GROUPS_KEY,
+    JSON.stringify({
+      groups: [{ id: "g1", name: "路线", collapsed: false }],
+      membership: { c1: "g1" },
+      order: ["c1"],
+    }),
+  );
+  render(
+    <AppShell
+      bootstrap={{ ...bootstrap, conversations: [chat("c1", "夜巡")] }}
+      page="chat"
+      conversationId="c1"
+      detailsOpen={false}
+      onPage={() => undefined}
+      onNew={() => undefined}
+      onConversation={() => undefined}
+      onToggleDetails={() => undefined}
+      reload={async () => undefined}
+    />,
+  );
+  fireEvent.contextMenu(screen.getByRole("button", { name: "路线" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "删除分组" }));
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "删除分组" })).getByRole(
+      "button",
+      { name: "删除分组" },
+    ),
+  );
+  expect(screen.queryByRole("button", { name: "路线" })).toBeNull();
 });
 
 

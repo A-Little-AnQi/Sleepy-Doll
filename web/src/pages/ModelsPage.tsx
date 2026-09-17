@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { api } from "../api";
 import { readError } from "../session";
 import { Toast } from "../components/Toast";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PlusIcon, TrashIcon } from "../components/icons";
 import { Select } from "../components/Select";
 import { MotionSwitch } from "../components/MotionSwitch";
@@ -126,6 +127,7 @@ export function ModelsPage({
   const [listing, setListing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [askingDelete, setAskingDelete] = useState(false);
   const creating = selectedId === "new";
   const preset = presetById(form.preset);
   const needsKey = preset?.needsKey !== false;
@@ -532,31 +534,7 @@ export function ModelsPage({
                   type="button"
                   className="secondary-action"
                   disabled={busy}
-                  onClick={() => {
-                    if (!window.confirm(`删除「${selected.name}」？`)) {
-                      return;
-                    }
-                    setBusy(true);
-                    void api
-                      .deleteModel(selected.id)
-                      .then(async (result) => {
-                        drafts.current.delete(selected.id);
-                        await reload();
-                        const next =
-                          bootstrap.models.find(
-                            (model) =>
-                              model.id === result.activeModel &&
-                              model.id !== selected.id,
-                          ) ??
-                          bootstrap.models.find(
-                            (model) => model.id !== selected.id,
-                          );
-                        resetEditor(next?.id ?? "new", formFor(next));
-                        setNotice("已删除");
-                      })
-                      .catch((reason) => setError(readError(reason)))
-                      .finally(() => setBusy(false));
-                  }}
+                  onClick={() => setAskingDelete(true)}
                 >
                   <TrashIcon className="button-icon" />
                   删除
@@ -566,6 +544,37 @@ export function ModelsPage({
           </form>
         </MotionSwitch>
       </div>
+      <ConfirmDialog
+        open={askingDelete}
+        title="删除模型"
+        confirmLabel="删除模型"
+        busy={busy}
+        onClose={() => setAskingDelete(false)}
+        onConfirm={() => {
+          if (!selected) return;
+          setBusy(true);
+          void api
+            .deleteModel(selected.id)
+            .then(async (result) => {
+              drafts.current.delete(selected.id);
+              await reload();
+              const next =
+                bootstrap.models.find(
+                  (model) =>
+                    model.id === result.activeModel &&
+                    model.id !== selected.id,
+                ) ??
+                bootstrap.models.find((model) => model.id !== selected.id);
+              resetEditor(next?.id ?? "new", formFor(next));
+              setAskingDelete(false);
+              setNotice("已删除");
+            })
+            .catch((reason) => setError(readError(reason)))
+            .finally(() => setBusy(false));
+        }}
+      >
+        <p>删除「{selected?.name}」。已绑定它的对话会改用默认模型。</p>
+      </ConfirmDialog>
     </div>
   );
 }

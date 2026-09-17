@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { readError } from "../session";
-import { Dialog } from "./Dialog";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { Toast } from "./Toast";
 import type { RecoveryRecord } from "../types";
 import { ChevronIcon } from "./icons";
@@ -119,33 +119,16 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
           还没有可恢复的备份。Sleepy Doll 修改 BetterGI 配置时会自动留下。
         </p>
       ) : null}
-      <Dialog
-        compact
+      <ConfirmDialog
         open={selected != null}
+        title="恢复配置"
+        confirmLabel="确认恢复"
+        busy={busy}
+        busyLabel="恢复中…"
         onClose={() => {
           if (!busy) setSelected(undefined);
         }}
-        title="恢复配置"
-        footer={
-          <>
-            <button
-              type="button"
-              className="subtle-action"
-              disabled={busy}
-              onClick={() => setSelected(undefined)}
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              className="primary-action"
-              disabled={busy}
-              onClick={() => void restore()}
-            >
-              {busy ? "恢复中…" : "确认恢复"}
-            </button>
-          </>
-        }
+        onConfirm={() => void restore()}
       >
         <p>
           把 BetterGI 的配置恢复到这次备份。当前配置会另存一份，便于再改回去。
@@ -157,7 +140,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
               .join(" · ")}
           </p>
         ) : null}
-      </Dialog>
+      </ConfirmDialog>
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { isRunning, readError, taskLabels } from "../session";
+import { isRunning, needsConfirmation, readError, taskLabels } from "../session";
 import { Toast } from "./Toast";
+import { ConfirmDialog } from "./ConfirmDialog";
 import type {
   Bootstrap,
   TaskInfo,
@@ -40,6 +41,7 @@ export function DetailsPanel({
   const [detail, setDetail] = useState<WorkflowDetail>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [pendingRemove, setPendingRemove] = useState<TaskSummary | null>(null);
   const tasks = conversationId
     ? bootstrap.workflows.filter(
         (task) => task.sourceConversationId === conversationId,
@@ -104,6 +106,13 @@ export function DetailsPanel({
     pin: (task, pinned) =>
       void act(task.id, () => api.pinWorkflow(task.id, pinned)),
     copy: (task) => void act(task.id, () => api.copyWorkflow(task.id)),
+    remove: (task) => {
+      if (!needsConfirmation(bootstrap.permission.mode)) {
+        void act(task.id, () => api.deleteWorkflow(task.id));
+        return;
+      }
+      setPendingRemove(task);
+    },
   };
 
   return (
@@ -161,6 +170,27 @@ export function DetailsPanel({
         )}
         </MotionSwitch>
       </div>
+      <ConfirmDialog
+        open={pendingRemove != null}
+        title="删除快捷任务"
+        confirmLabel="删除任务"
+        onClose={() => setPendingRemove(null)}
+        onConfirm={() => {
+          const task = pendingRemove;
+          setPendingRemove(null);
+          if (task) void act(task.id, () => api.deleteWorkflow(task.id));
+        }}
+      >
+        {pendingRemove ? (
+          <>
+            <p>删除「{pendingRemove.name}」。</p>
+            <p>已经跑过的运行记录和它改过的文件都会保留。</p>
+            {pendingRemove.runnable ? (
+              <p>如果有运行正在进行，那一次会继续跑完。</p>
+            ) : null}
+          </>
+        ) : null}
+      </ConfirmDialog>
     </aside>
   );
 }
@@ -256,6 +286,15 @@ function TaskDetail({
               {summary.actionLabel}
             </button>
           )}
+          {actions.remove ? (
+            <button
+              className="secondary-action"
+              disabled={busy === summary.id}
+              onClick={() => actions.remove?.(summary)}
+            >
+              删除任务
+            </button>
+          ) : null}
         </div>
       </section>
       <section className="detail-block">

@@ -9,6 +9,7 @@ import {
   taskLabels,
 } from "../session";
 import { Toast } from "../components/Toast";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { Bootstrap, TaskInfo, TaskSummary } from "../types";
 import { MotionSwitch } from "../components/MotionSwitch";
 import { SlidingTabs } from "../components/SlidingTabs";
@@ -61,6 +62,9 @@ export function TasksPage({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [tasks, setTasks] = useState<TaskSummary[]>(bootstrap.workflows);
+  const [pendingRemove, setPendingRemove] = useState<TaskSummary | null>(
+    null,
+  );
 
   useEffect(() => {
     setTasks(bootstrap.workflows);
@@ -111,18 +115,11 @@ export function TasksPage({
       void act(task.id, () => api.archiveWorkflow(task.id, archived)),
     copy: (task) => void act(task.id, () => api.copyWorkflow(task.id)),
     remove: (task) => {
-      // 「完全控制」已经表示一律直接执行，界面再拦一次只会让人以为设置没生效。
-      if (needsConfirmation(bootstrap.permission.mode)) {
-        const warning = [
-          `删除快捷任务「${task.name}」？`,
-          "已经跑过的运行记录和它改过的文件都会保留。",
-          task.runnable ? "如果有运行正在进行，那一次会继续跑完。" : "",
-        ]
-          .filter(Boolean)
-          .join("\n");
-        if (!window.confirm(warning)) return;
+      if (!needsConfirmation(bootstrap.permission.mode)) {
+        void act(task.id, () => api.deleteWorkflow(task.id));
+        return;
       }
-      void act(task.id, () => api.deleteWorkflow(task.id));
+      setPendingRemove(task);
     },
     askAi: (task) => {
       onOpenConversation(task.sourceConversationId ?? "");
@@ -254,6 +251,27 @@ export function TasksPage({
         </div>
       )}
       </MotionSwitch>
+      <ConfirmDialog
+        open={pendingRemove != null}
+        title="删除快捷任务"
+        confirmLabel="删除任务"
+        onClose={() => setPendingRemove(null)}
+        onConfirm={() => {
+          const task = pendingRemove;
+          setPendingRemove(null);
+          if (task) void act(task.id, () => api.deleteWorkflow(task.id));
+        }}
+      >
+        {pendingRemove ? (
+          <>
+            <p>删除「{pendingRemove.name}」。</p>
+            <p>已经跑过的运行记录和它改过的文件都会保留。</p>
+            {pendingRemove.runnable ? (
+              <p>如果有运行正在进行，那一次会继续跑完。</p>
+            ) : null}
+          </>
+        ) : null}
+      </ConfirmDialog>
     </div>
   );
 }

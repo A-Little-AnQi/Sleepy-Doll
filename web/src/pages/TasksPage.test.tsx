@@ -1,13 +1,16 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TasksPage } from "./TasksPage";
 import { PREVIEW_PERMISSION, type Bootstrap, type TaskSummary } from "../types";
 
 vi.mock("../api", () => ({
   api: {
     workflowList: vi.fn(),
+    deleteWorkflow: vi.fn(),
   },
 }));
+
+import { api } from "../api";
 
 afterEach(cleanup);
 
@@ -66,4 +69,39 @@ it("keeps unavailable tasks on the provider layer instead of naming the host", (
   fireEvent.click(screen.getByRole("button", { name: "连接工具" }));
   expect(onConnectTools).toHaveBeenCalled();
   expect(onOpenConversation).not.toHaveBeenCalled();
+});
+
+it("asks in the product dialog before deleting a shortcut task", () => {
+  render(
+    <TasksPage
+      bootstrap={bootstrap}
+      reload={async () => undefined}
+      onOpenConversation={() => undefined}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "巡夜 的更多操作" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "删除任务" }));
+  expect(screen.getByRole("dialog", { name: "删除快捷任务" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
+  expect(api.deleteWorkflow).not.toHaveBeenCalled();
+});
+
+it("deletes a shortcut task after the product dialog is confirmed", async () => {
+  vi.mocked(api.deleteWorkflow).mockResolvedValue({
+    deleted: true,
+    activeRuns: [],
+    historyKept: true,
+  });
+  vi.mocked(api.workflowList).mockResolvedValue([]);
+  render(
+    <TasksPage
+      bootstrap={bootstrap}
+      reload={async () => undefined}
+      onOpenConversation={() => undefined}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "巡夜 的更多操作" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "删除任务" }));
+  fireEvent.click(screen.getByRole("button", { name: "删除任务" }));
+  await waitFor(() => expect(api.deleteWorkflow).toHaveBeenCalledWith("task-1"));
 });

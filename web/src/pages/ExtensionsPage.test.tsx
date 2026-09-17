@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { api } from "../api";
 import { ExtensionsPage } from "./ExtensionsPage";
 import { PREVIEW_PERMISSION, type Bootstrap } from "../types";
@@ -136,4 +136,77 @@ it("hides host settings until the plugin is introduced", async () => {
   fireEvent.click(screen.getByRole("button", { name: /游戏自动化宿主/ }));
   expect(screen.queryByRole("button", { name: "打开设置" })).toBeNull();
   expect(screen.getByText("随产品提供。开启后会出现在侧栏和设置里。")).toBeTruthy();
+});
+
+it("asks in the product dialog before removing a plugin", async () => {
+  vi.mocked(api.reloadExtensions).mockResolvedValue(undefined);
+  vi.mocked(api.removePlugin).mockResolvedValue(undefined);
+  const reload = vi.fn(async () => undefined);
+  render(
+    <ExtensionsPage
+      bootstrap={{
+        ...bootstrap,
+        plugins: [
+          ...bootstrap.plugins,
+          {
+            manifest: {
+              id: "pack",
+              name: "路线包",
+              version: "1",
+              description: "用户插件",
+            },
+            status: "disabled",
+            configuredEnabled: false,
+          },
+        ],
+      }}
+      reload={reload}
+      tab="plugins"
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /用户插件/ }));
+  fireEvent.click(screen.getByRole("button", { name: "移除插件" }));
+  const dialog = screen.getByRole("dialog", { name: "移除插件" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "移除插件" })).toBeNull(),
+  );
+  expect(api.removePlugin).not.toHaveBeenCalled();
+});
+
+it("removes a plugin after the product dialog is confirmed", async () => {
+  vi.mocked(api.reloadExtensions).mockResolvedValue(undefined);
+  vi.mocked(api.removePlugin).mockResolvedValue(undefined);
+  const reload = vi.fn(async () => undefined);
+  render(
+    <ExtensionsPage
+      bootstrap={{
+        ...bootstrap,
+        plugins: [
+          ...bootstrap.plugins,
+          {
+            manifest: {
+              id: "pack",
+              name: "路线包",
+              version: "1",
+              description: "用户插件",
+            },
+            status: "disabled",
+            configuredEnabled: false,
+          },
+        ],
+      }}
+      reload={reload}
+      tab="plugins"
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /用户插件/ }));
+  fireEvent.click(screen.getByRole("button", { name: "移除插件" }));
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "移除插件" })).getByRole(
+      "button",
+      { name: "移除插件" },
+    ),
+  );
+  await waitFor(() => expect(api.removePlugin).toHaveBeenCalledWith("pack"));
 });

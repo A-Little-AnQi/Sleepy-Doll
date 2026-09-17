@@ -37,6 +37,7 @@ import { SidebarAccount } from "./SidebarAccount";
 import { InlineRename } from "./InlineRename";
 import { DisclosureChevron } from "./DisclosureChevron";
 import { Toast } from "./Toast";
+import { ConfirmDialog } from "./ConfirmDialog";
 import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
@@ -923,6 +924,7 @@ function GroupRow({
   const [editing, setEditing] = useState(renaming);
   const [name, setName] = useState(group.name);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [asking, setAsking] = useState(false);
   useEffect(() => setName(group.name), [group.name]);
   useEffect(() => {
     if (renaming) setEditing(true);
@@ -933,13 +935,11 @@ function GroupRow({
     if (save) persistLayout(renameGroup(layout, group.id, name));
   };
   const remove = () => {
-    if (
-      items.length &&
-      !window.confirm(`删除分组「${group.name}」？里面的对话会回到未分组。`)
-    ) {
+    if (!items.length && !draft) {
+      onDelete();
       return;
     }
-    onDelete();
+    setAsking(true);
   };
   const showBody = items.length > 0 || draft;
   return (
@@ -1040,6 +1040,18 @@ function GroupRow({
           </ul>
         </div>
       )}
+      <ConfirmDialog
+        open={asking}
+        title="删除分组"
+        confirmLabel="删除分组"
+        onClose={() => setAsking(false)}
+        onConfirm={() => {
+          setAsking(false);
+          onDelete();
+        }}
+      >
+        <p>删除「{group.name}」后，里面的对话会回到未分组。</p>
+      </ConfirmDialog>
     </li>
   );
 }
@@ -1069,6 +1081,11 @@ function ConversationRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(entry.title);
+  const [asking, setAsking] = useState<{
+    title: string;
+    tasks: number;
+    keeps: string;
+  } | null>(null);
   useEffect(() => setTitle(entry.title), [entry.title]);
   if (editing) {
     return (
@@ -1090,6 +1107,7 @@ function ConversationRow({
     );
   }
   return (
+    <>
     <li
       className={`${current ? "is-current" : ""}${nested ? " is-nested" : ""}${
         draggingId === entry.id ? " is-source" : ""
@@ -1137,18 +1155,17 @@ function ConversationRow({
             void (async () => {
               const first = await api.deleteConversation(entry.id, false);
               if (!first.requiresConfirmation) return;
-              const kept = first.keeps ?? "";
-              const tasks = first.affects?.taskCount ?? 0;
-              const confirmed =
-                !needsConfirmation(permissionMode) ||
-                window.confirm(
-                  `删除对话「${first.affects?.title ?? entry.title}」？\n` +
-                    `会删除其中的消息和运行记录${
-                      tasks ? `，其中 ${tasks} 个快捷任务会保留` : ""
-                    }。\n${kept}`,
-                );
-              if (confirmed) await api.deleteConversation(entry.id, true);
-              await onAct(async () => {});
+              const preview = {
+                title: first.affects?.title ?? entry.title,
+                tasks: first.affects?.taskCount ?? 0,
+                keeps: first.keeps ?? "",
+              };
+              if (!needsConfirmation(permissionMode)) {
+                await api.deleteConversation(entry.id, true);
+                await onAct(async () => {});
+                return;
+              }
+              setAsking(preview);
             })().catch(() => undefined);
           }}
         >
@@ -1156,5 +1173,28 @@ function ConversationRow({
         </button>
       </div>
     </li>
+    <ConfirmDialog
+      open={asking != null}
+      title="删除对话"
+      confirmLabel="删除对话"
+      onClose={() => setAsking(null)}
+      onConfirm={() => {
+        const preview = asking;
+        setAsking(null);
+        if (!preview) return;
+        void onAct(() => api.deleteConversation(entry.id, true));
+      }}
+    >
+      {asking ? (
+        <>
+          <p>
+            会删除「{asking.title}」里的消息和运行记录
+            {asking.tasks ? `，其中 ${asking.tasks} 个快捷任务会保留` : ""}。
+          </p>
+          {asking.keeps ? <p>{asking.keeps}</p> : null}
+        </>
+      ) : null}
+    </ConfirmDialog>
+    </>
   );
 }
