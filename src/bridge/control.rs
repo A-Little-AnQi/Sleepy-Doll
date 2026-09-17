@@ -25,13 +25,36 @@ pub fn directory() -> Result<PathBuf> {
         return Ok(development);
     }
     Err(Error::Config(
-        "找不到桥组件，请运行 build-desktop.cmd，将桥组件放到程序同一目录。".into(),
+        "无法连接 BetterGI：安装不完整。请重新安装 Sleepy Doll。".into(),
     ))
 }
 
+fn host_running() -> bool {
+    let mut command = if cfg!(windows) {
+        std::process::Command::new("tasklist")
+    } else {
+        std::process::Command::new("tasklist.exe")
+    };
+    command
+        .args(["/FI", "IMAGENAME eq BetterGI.exe", "/NH"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command.output().ok().is_some_and(|output| {
+        String::from_utf8_lossy(&output.stdout)
+            .to_ascii_lowercase()
+            .contains("bettergi.exe")
+    })
+}
+
 fn endpoint(config: &BridgeConfig) -> Result<(String, u16)> {
-    let url =
-        url::Url::parse(&config.base_url).map_err(|_| Error::Config("BetterGI 地址无效".into()))?;
+    let url = url::Url::parse(&config.base_url)
+        .map_err(|_| Error::Config("BetterGI 地址无效。".into()))?;
     if url.scheme() != "http"
         || !matches!(url.host_str(), Some("127.0.0.1" | "localhost"))
         || !url.username().is_empty()
@@ -40,9 +63,7 @@ fn endpoint(config: &BridgeConfig) -> Result<(String, u16)> {
         || url.query().is_some()
         || url.fragment().is_some()
     {
-        return Err(Error::Config(
-            "注入桥地址须为 http://127.0.0.1:端口（也可使用 localhost）".into(),
-        ));
+        return Err(Error::Config("BetterGI 地址无效。".into()));
     }
     let port = url.port_or_known_default().unwrap_or(3499);
     Ok((format!("127.0.0.1:{port}"), port))
@@ -74,7 +95,7 @@ pub fn info(config: &BridgeConfig) -> Result<Value> {
     let value = request(config, None)?;
     if value["protocolVersion"] != "1" || value["instanceId"].as_str().is_none() {
         return Err(Error::Tool(
-            "该端口不是兼容的 BetterGI 桥，请检查地址或更新桥组件。".into(),
+            "连上的不是可用的 BetterGI。请退出 BetterGI 后重试。".into(),
         ));
     }
     Ok(value)
@@ -87,12 +108,12 @@ fn control(config: &BridgeConfig, enabled: bool) -> Result<()> {
         .is_some_and(|v| v.iter().any(|f| f == "control"))
     {
         return Err(Error::Tool(
-            "当前桥不支持开关，请更新桥组件并重启 BetterGI。".into(),
+            "当前 BetterGI 连接方式已过期。请退出 BetterGI 后重新连接。".into(),
         ));
     }
     let result = request(config, Some(enabled))?;
     if result["enabled"] != enabled {
-        return Err(Error::Tool("桥未确认开关状态，请重试。".into()));
+        return Err(Error::Tool("连接状态未确认，请重试。".into()));
     }
     Ok(())
 }
@@ -100,7 +121,15 @@ fn control(config: &BridgeConfig, enabled: bool) -> Result<()> {
 /// Preserve method/group settings and reuse the token across retries. The app
 /// persists this token before injection, so even a delayed start is recoverable.
 pub fn prepare(config: &mut BridgeConfig) -> Result<()> {
-    let (listen, _) = endpoint(config)?;
+    let (listen, port) = endpoint(config)?;
+    let port_busy = std::net::TcpStream::connect_timeout(
+        &([127, 0, 0, 1], port).into(),
+        Duration::from_millis(500),
+    )
+    .is_ok();
+    if !host_running() && !port_busy {
+        return Err(Error::Tool("请先启动 BetterGI。".into()));
+    }
     let dir = directory()?;
     let path = dir.join("bridge.config.json");
     let mut settings: Value = if path.is_file() {
@@ -109,7 +138,9 @@ pub fn prepare(config: &mut BridgeConfig) -> Result<()> {
         serde_json::from_str(include_str!("../../bgi-bridge/bridge.config.example.json"))?
     };
     if !settings.is_object() {
-        return Err(Error::Config("bridge.config.json 必须是 JSON 对象".into()));
+        return Err(Error::Config(
+            "连接配置损坏。请重新安装 Sleepy Doll。".into(),
+        ));
     }
     if config.token.as_deref().is_none_or(|t| t.trim().is_empty()) {
         config.token = Some(
@@ -127,19 +158,9 @@ pub fn prepare(config: &mut BridgeConfig) -> Result<()> {
         );
     }
     // An existing listener must be authenticated before changing its settings.
-    let (_, port) = endpoint(config)?;
-    if std::net::TcpStream::connect_timeout(
-        &([127, 0, 0, 1], port).into(),
-        Duration::from_millis(500),
-    )
-    .is_ok()
-    {
-        info(config).map_err(|_| {
-            Error::Tool(
-                "桥端口已有服务，但鉴权或协议检查失败。请核对 token，或退出旧 BetterGI 后重试。"
-                    .into(),
-            )
-        })?;
+    if port_busy {
+        info(config)
+            .map_err(|_| Error::Tool("BetterGI 端口已被占用。请退出 BetterGI 后重试。".into()))?;
         return Ok(());
     }
     for file in [
@@ -149,7 +170,9 @@ pub fn prepare(config: &mut BridgeConfig) -> Result<()> {
         "BgiBridge.deps.json",
     ] {
         if !dir.join(file).is_file() {
-            return Err(Error::Config(format!("缺少桥组件 {file}，请重新构建。")));
+            return Err(Error::Config(
+                "无法连接 BetterGI：安装不完整。请重新安装 Sleepy Doll。".into(),
+            ));
         }
     }
     settings["enabled"] = json!(true);
@@ -173,24 +196,23 @@ pub fn enable(config: &BridgeConfig) -> Result<()> {
         }
         std::thread::sleep(Duration::from_millis(300));
     }
-    Err(Error::Tool(format!(
-        "桥启动未确认。请查看 {} 中的 bootstrap.log 和 bridge.log；修复后重启 BetterGI 再连接。",
-        directory()?.display()
-    )))
+    Err(Error::Tool(
+        "BetterGI 已启动，但还没连上。请退出 BetterGI 后重试。".into(),
+    ))
 }
 
 pub fn disable(config: &BridgeConfig) -> Option<String> {
     control(config, false)
         .err()
-        .map(|_| "Sleepy Doll 已断开；未能确认宿主桥已停用。退出 BetterGI 可完全卸载桥。".into())
+        .map(|_| "已断开。如需完全卸下连接，请退出 BetterGI。".into())
 }
 
 pub fn recovery(action: &str, arguments: &[&str]) -> Result<Value> {
-    let directory = directory()?;
+    let directory = directory().map_err(|_| Error::Config("暂时无法恢复配置。".into()))?;
     let executable = directory.join("BgiBridge.Recovery.exe");
     if !executable.is_file() {
         return Err(Error::Config(
-            "未找到配置恢复组件，请重新构建并更新桥组件。".into(),
+            "暂时无法恢复配置。请重新安装 Sleepy Doll。".into(),
         ));
     }
     crate::runtime::executor().block_on(async {
@@ -205,12 +227,10 @@ pub fn recovery(action: &str, arguments: &[&str]) -> Result<Value> {
         let output = tokio::time::timeout(std::time::Duration::from_secs(12), command.output())
             .await
             .map_err(|_| {
-                Error::Tool(
-                    "恢复请求超时，结果尚未确认。请刷新记录后核对，暂勿启动 BetterGI。".into(),
-                )
+                Error::Tool("恢复超时，结果尚未确认。请刷新后核对，先不要启动 BetterGI。".into())
             })??;
         let value: Value = serde_json::from_slice(&output.stdout)
-            .map_err(|_| Error::Tool("恢复组件没有返回有效结果，请检查 .NET 运行环境。".into()))?;
+            .map_err(|_| Error::Tool("恢复配置失败，请稍后重试。".into()))?;
         if value["ok"] != true {
             return Err(Error::Tool(
                 value["error"]["message"]
@@ -249,19 +269,17 @@ fn inject() -> Result<()> {
                 Some(5) => {
                     "未能选定 BetterGI 进程。请先启动 BetterGI，保持仅一个实例，并确认 Sleepy Doll 具有管理员权限。"
                 }
-                Some(10) => "加载等待超时，状态未知。请核对桥日志后重启 BetterGI，勿连续重试。",
-                Some(11) => "桥已加载或无法检查模块。请核对连接凭据；更新桥后需要重启 BetterGI。",
-                Some(12) => "目标架构不兼容，请使用 x64 版本 BetterGI。",
-                _ => "桥加载失败，请查看桥目录中的 injector.log 和 bootstrap.log。",
+                Some(10) => "连接超时。请重启 BetterGI 后再试。",
+                Some(11) => "BetterGI 里已有旧连接。请先退出 BetterGI，再重新连接。",
+                Some(12) => "请使用 64 位的 BetterGI。",
+                _ => "没能连上 BetterGI。请确认 BetterGI 已启动，然后重试。",
             };
             return Err(Error::Tool(message.into()));
         }
         if std::time::Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(Error::Tool(
-                "注入器超时；请检查桥日志，并在重启 BetterGI 后重试。".into(),
-            ));
+            return Err(Error::Tool("连接超时。请重启 BetterGI 后再试。".into()));
         }
         std::thread::sleep(Duration::from_millis(100));
     }

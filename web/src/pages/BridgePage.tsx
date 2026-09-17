@@ -53,25 +53,14 @@ export function BridgePage({
   // 状态和失败原因写在同一个地方。这里不暴露配置里的 enabled 开关 ——
   // 它默认就是开的，拿它当连接状态会让「没连接」显示成「已启用」。
   const connection = busy
-    ? { title: "正在连接", detail: "正在注入本地桥并等待握手。" }
+    ? { title: "正在连接", detail: "正在连接 BetterGI。" }
     : bridge.connected
-      ? {
-          title: "已连接",
-          detail:
-            "桥在 BetterGI 进程内提供接口；关掉 BetterGI 后桥就没了，重新打开后点一次连接。",
-        }
-      : {
-          title: "未连接",
-          detail: "启动 BetterGI 后点「连接 BetterGI」。桥只在本机回环上监听。",
-        };
+      ? { title: "已连接", detail: "BetterGI 正在运行。" }
+      : { title: "未连接", detail: "请先启动 BetterGI。" };
   return (
     <div className="page-sheet bridge-page">
       <header className="bridge-overview" data-motion="panel">
-        <div>
-          <span className="bridge-eyebrow">本地连接</span>
-          <h2>BetterGI</h2>
-          <p>管理宿主连接、接口契约和可恢复的配置变更。</p>
-        </div>
+        <h2>BetterGI</h2>
       </header>
       {(error || notice) && (
         <Toast
@@ -100,36 +89,44 @@ export function BridgePage({
           </button>
         </div>
         <div className="bridge-endpoint">
-          <span>本地端点</span>
+          <span>地址</span>
           <code>{bridge.baseUrl}</code>
         </div>
       </section>
       <div className="bridge-feature-grid" data-motion="panel">
-        <button className="bridge-feature" onClick={() => setShowCatalog(true)}>
+        <button
+          type="button"
+          className="bridge-feature"
+          disabled={!bridge.connected}
+          onClick={() => setShowCatalog(true)}
+        >
           <BridgeIcon />
           <span>
             <strong>接口目录</strong>
-            <small>按用途查阅参数、影响、验证与回退说明</small>
+            <small>{bridge.connected ? "查看可用接口" : "连接后可查看"}</small>
           </span>
           <ChevronIcon />
         </button>
         <button
+          type="button"
           className="bridge-feature"
           onClick={() => setShowRecovery(true)}
         >
           <HistoryIcon />
           <span>
             <strong>配置恢复</strong>
-            <small>查看事务记录，在宿主退出后恢复备份</small>
+            <small>还原之前的配置</small>
           </span>
           <ChevronIcon />
         </button>
       </div>
-      <section className="bridge-status-section" data-motion="panel">
-        <div className="block-head">
+      <section className="bridge-connection-card" data-motion="panel">
+        <div className="bridge-connection-row">
           <div>
-            <h2>运行状态</h2>
-            <p>按需读取一次，不在后台持续打扰宿主。</p>
+            <strong>状态</strong>
+            {!state && (
+              <span>{bridge.connected ? "点击刷新" : "未连接"}</span>
+            )}
           </div>
           <button
             className="secondary-action"
@@ -152,21 +149,9 @@ export function BridgePage({
           </button>
         </div>
         {state ? (
-          <pre>{JSON.stringify(state, null, 2)}</pre>
-        ) : (
-          <div className="bridge-state-empty">
-            <BridgeIcon />
-            <span>{bridge.connected ? "尚未读取" : "当前未连接"}</span>
-          </div>
-        )}
+          <pre className="bridge-log">{JSON.stringify(state, null, 2)}</pre>
+        ) : null}
       </section>
-      <details className="bridge-lifecycle">
-        <summary>组件生命周期</summary>
-        <p className="field-help">
-          关闭连接后拒绝新操作，已启动的 BetterGI 任务可能继续运行。组件随
-          BetterGI 退出卸载。
-        </p>
-      </details>
     </div>
   );
 }

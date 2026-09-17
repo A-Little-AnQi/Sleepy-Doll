@@ -20,6 +20,7 @@ import {
 import type { Bootstrap, ConversationInfo } from "../types";
 import {
   BrandIcon,
+  BridgeIcon,
   ChatIcon,
   EditIcon,
   FolderIcon,
@@ -50,6 +51,7 @@ import {
   readLayout,
   renameGroup,
   setCollapsed as setGroupCollapsed,
+  setMembership,
   splitConversations,
   orderConversations,
   writeLayout,
@@ -63,8 +65,6 @@ const NAV = [
   { page: "tasks", label: "快捷任务", Icon: ToolIcon },
   { page: "extensions", label: "工具与扩展", Icon: PluginIcon },
 ] as const;
-
-const SETTINGS_PAGES: Page[] = ["settings", "models", "bridge", "sponsor"];
 
 const DRAG_THRESHOLD = 6;
 
@@ -193,6 +193,18 @@ export function AppShell({
   });
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
+  const pendingGroupRef = useRef<string | null>(null);
+  const destinationRef = useRef<string | null>(
+    conversationId ? (layout.membership[conversationId] ?? null) : null,
+  );
+  const [destinationGroupId, setDestinationGroupId] = useState<string | null>(
+    destinationRef.current,
+  );
+  const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
+  const setDestination = (id: string | null) => {
+    destinationRef.current = id;
+    setDestinationGroupId(id);
+  };
   const draggingRef = useRef(false);
   const draftRef = useRef<GroupLayout | null>(null);
   const [draft, setDraft] = useState<GroupLayout | null>(null);
@@ -236,7 +248,6 @@ export function AppShell({
       details.removeEventListener("change", sync);
     };
   }, []);
-  const settings = SETTINGS_PAGES.includes(page);
   const conversation = bootstrap.conversations.find(
     (entry) => entry.id === conversationId,
   );
@@ -246,11 +257,42 @@ export function AppShell({
       : "未连接";
 
   const persistLayout = (next: GroupLayout) => {
+    layoutRef.current = next;
     setLayout(next);
     writeLayout(next);
     if (bootstrap.conversationGroups === undefined) return;
     void api.saveConversationGroups(next).catch(() => undefined);
   };
+  const startNew = (groupId: string | null = destinationRef.current) => {
+    pendingGroupRef.current = groupId;
+    setDestination(groupId);
+    if (groupId) {
+      const current = layoutRef.current;
+      const group = current.groups.find((item) => item.id === groupId);
+      if (group?.collapsed) {
+        persistLayout(setGroupCollapsed(current, groupId, false));
+      }
+    }
+    onNew();
+  };
+  const openExisting = (id: string) => {
+    pendingGroupRef.current = null;
+    setDestination(layoutRef.current.membership[id] ?? null);
+    onConversation(id);
+  };
+  useEffect(() => {
+    if (!conversationId) return;
+    if (pendingGroupRef.current) return;
+    setDestination(layoutRef.current.membership[conversationId] ?? null);
+  }, [conversationId]);
+  useEffect(() => {
+    const groupId = pendingGroupRef.current;
+    if (!groupId || !conversationId) return;
+    pendingGroupRef.current = null;
+    const current = layoutRef.current;
+    if (current.membership[conversationId] === groupId) return;
+    persistLayout(setMembership(current, conversationId, groupId));
+  }, [conversationId]);
 
   const shownLayout = draft ?? layout;
   const orderedConversations = useMemo(() => {
@@ -271,9 +313,10 @@ export function AppShell({
   useEffect(() => {
     if (ghost) return;
     const ids = orderedConversations.map((entry) => entry.id);
-    if (ids.join("\0") === layout.order.join("\0")) return;
-    persistLayout({ ...layout, order: ids });
-  }, [ghost, layout, orderedConversations]);
+    const current = layoutRef.current;
+    if (ids.join("\0") === current.order.join("\0")) return;
+    persistLayout({ ...current, order: ids });
+  }, [ghost, orderedConversations]);
   const [shownConversations, setShownConversations] =
     useState(orderedConversations);
   useLayoutEffect(() => {
@@ -299,6 +342,7 @@ export function AppShell({
     () => splitConversations(conversations, shownLayout),
     [conversations, shownLayout],
   );
+  const showDraft = page === "chat" && !conversationId && !query.trim();
 
   const armDrag = (event: PointerEvent<HTMLElement>, item: DragItem) => {
     if (event.button !== 0) return;
@@ -458,9 +502,11 @@ export function AppShell({
     window.addEventListener("pointerup", stop);
     window.addEventListener("pointercancel", stop);
   };
-  // 详情栏讲的是「这个对话」和「这个任务」。设置、模型、工具页没有对应对象，
-  // 在那里显示只会让人以为面板卡住了。
-  const detailsAvailable = page === "chat" || page === "tasks";
+  // 详情栏讲的是当前对话里的快捷任务。快捷任务页自己就是那张列表，
+  // 顶栏再放一个「显示详情」等于同一入口出现两次。
+  const detailsToggle = page === "chat";
+  const detailsPane = detailsOpen && (page === "chat" || page === "tasks");
+  const showHeader = page === "chat" || collapsed;
   const conversationAct = async (action: () => Promise<unknown>) => {
     setError("");
     try {
@@ -492,7 +538,7 @@ export function AppShell({
           <SidebarIcon className="button-icon" />
         </button>
       </div>
-      <button className="app-new" onClick={onNew}>
+      <button className="app-new" onClick={() => startNew()}>
         <PlusIcon className="button-icon" />
         <span>新建对话</span>
       </button>
@@ -522,7 +568,16 @@ export function AppShell({
             className="icon-button"
             title="新建分组"
             aria-label="新建分组"
-            onClick={() => persistLayout(createGroup(layout))}
+            onClick={() => {
+              const next = createGroup(layout);
+              const created = next.groups[next.groups.length - 1];
+              if (!created) return;
+              persistLayout(next);
+              setRenamingGroupId(created.id);
+              pendingGroupRef.current = created.id;
+              setDestination(created.id);
+              onNew();
+            }}
           >
             <FolderIcon className="button-icon" />
           </button>
@@ -557,10 +612,19 @@ export function AppShell({
               persistLayout={persistLayout}
               draggingId={ghost?.id}
               onDragArm={armDrag}
-              onConversation={onConversation}
+              onConversation={openExisting}
               onAct={conversationAct}
+              draft={showDraft && destinationGroupId === group.id}
+              renaming={renamingGroupId === group.id}
+              onRenaming={(open) => setRenamingGroupId(open ? group.id : null)}
+              onNew={() => startNew(group.id)}
+              onDelete={() => {
+                if (destinationRef.current === group.id) setDestination(null);
+                persistLayout(deleteGroup(layout, group.id));
+              }}
             />
           ))}
+          {showDraft && !destinationGroupId && <DraftRow />}
           {grouped.ungrouped.map((entry) => (
             <ConversationRow
               key={entry.id}
@@ -569,7 +633,7 @@ export function AppShell({
               running={bootstrap.tasks.find(
                 (task) => task.conversationId === entry.id && isRunning(task),
               )}
-              onOpen={() => onConversation(entry.id)}
+              onOpen={() => openExisting(entry.id)}
               onAct={conversationAct}
               permissionMode={bootstrap.permission.mode}
               draggingId={ghost?.id}
@@ -583,7 +647,7 @@ export function AppShell({
               aria-hidden="true"
             />
           )}
-          {!conversations.length && (
+          {!conversations.length && !showDraft && (
             <li className="app-conversation-empty">
               {query ? "没有找到匹配的对话" : "还没有对话"}
             </li>
@@ -592,7 +656,7 @@ export function AppShell({
       </div>
       <div className="app-sidebar-status">
         <button className="app-connection" onClick={() => onPage("bridge")}>
-          <PluginIcon className="app-nav-icon" />
+          <BridgeIcon className="app-nav-icon" />
           <span>BetterGI</span>
           <small>{bridgeLabel}</small>
         </button>
@@ -619,7 +683,7 @@ export function AppShell({
       data-collapsed={!docked}
       data-drawer={overlayOpen}
       data-resizing={resizing}
-      data-details={detailsOpen && roomForDetails}
+      data-details={detailsPane && roomForDetails}
       style={
         {
           "--sidebar-user-width": `${sidebarWidth}px`,
@@ -644,55 +708,52 @@ export function AppShell({
         />
       )}
       <main className="app-main">
-        <header className="app-header">
-          <div className="app-header-title">
-            {collapsed && (
-              <>
+        {showHeader ? (
+          <header className="app-header">
+            <div className="app-header-title">
+              {collapsed && (
+                <>
+                  <button
+                    className="icon-button"
+                    title="展开侧栏"
+                    aria-label="展开侧栏"
+                    onClick={pinSidebar}
+                  >
+                    <SidebarIcon className="button-icon" />
+                  </button>
+                  <button
+                    className="icon-button"
+                    title="新建对话"
+                    aria-label="新建对话"
+                    onClick={() => startNew()}
+                  >
+                    <PlusIcon className="button-icon" />
+                  </button>
+                </>
+              )}
+              {page === "chat" ? (
+                <h1>{conversation?.title ?? "新对话"}</h1>
+              ) : null}
+            </div>
+            {detailsToggle ? (
+              <div className="app-header-actions">
                 <button
                   className="icon-button"
-                  title="展开侧栏"
-                  aria-label="展开侧栏"
-                  onClick={pinSidebar}
+                  aria-pressed={detailsOpen}
+                  aria-label={detailsOpen ? "隐藏详情" : "显示详情"}
+                  title={detailsOpen ? "隐藏详情" : "显示详情"}
+                  onClick={onToggleDetails}
                 >
-                  <SidebarIcon className="button-icon" />
+                  <PanelIcon className="button-icon" />
                 </button>
-                <button
-                  className="icon-button"
-                  title="新建对话"
-                  aria-label="新建对话"
-                  onClick={onNew}
-                >
-                  <PlusIcon className="button-icon" />
-                </button>
-              </>
-            )}
-            <h1>
-              {settings
-                ? "设置"
-                : page === "chat"
-                  ? (conversation?.title ?? "新对话")
-                  : NAV.find((item) => item.page === page)?.label}
-            </h1>
-          </div>
-          <div className="app-header-actions">
-            {detailsAvailable && (
-              <button
-                className="icon-button"
-                aria-pressed={detailsOpen}
-                aria-label={detailsOpen ? "隐藏详情" : "显示详情"}
-                title={detailsOpen ? "隐藏详情" : "显示详情"}
-                onClick={onToggleDetails}
-              >
-                <PanelIcon className="button-icon" />
-              </button>
-            )}
-          </div>
-        </header>
+              </div>
+            ) : null}
+          </header>
+        ) : null}
         {error && <Toast message={error} onDismiss={() => setError("")} />}
         <div className="app-body">
           <div className="app-view">{children}</div>
-          {detailsAvailable &&
-            detailsOpen &&
+          {detailsPane &&
             (roomForDetails ? (
               details
             ) : (
@@ -727,6 +788,92 @@ export function AppShell({
   );
 }
 
+function DraftRow({ nested = false }: { nested?: boolean }) {
+  return (
+    <li className={`is-current${nested ? " is-nested" : ""}`}>
+      <button type="button" aria-current="page">
+        <span className="app-conversation-title">新对话</span>
+      </button>
+    </li>
+  );
+}
+
+function GroupContextMenu({
+  x,
+  y,
+  onRename,
+  onDelete,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  onRename(): void;
+  onDelete(): void;
+  onClose(): void;
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y });
+  useLayoutEffect(() => {
+    const node = root.current;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    setPos({
+      left: Math.max(8, Math.min(x, window.innerWidth - rect.width - 8)),
+      top: Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)),
+    });
+  }, [x, y]);
+  useEffect(() => {
+    const onDown = (event: MouseEvent) => {
+      if (event.target instanceof Node && root.current?.contains(event.target)) {
+        return;
+      }
+      onClose();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("scroll", onClose, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("scroll", onClose, true);
+    };
+  }, [onClose]);
+  return createPortal(
+    <div
+      ref={root}
+      className="app-context-menu"
+      role="menu"
+      aria-label="分组"
+      style={{ left: pos.left, top: pos.top }}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          onClose();
+          onRename();
+        }}
+      >
+        重命名
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          onClose();
+          onDelete();
+        }}
+      >
+        删除分组
+      </button>
+    </div>,
+    document.body,
+  );
+}
+
 function GroupRow({
   group,
   items,
@@ -739,6 +886,11 @@ function GroupRow({
   onDragArm,
   onConversation,
   onAct,
+  draft = false,
+  renaming = false,
+  onRenaming,
+  onNew,
+  onDelete,
 }: {
   group: { id: string; name: string; collapsed: boolean };
   items: ConversationInfo[];
@@ -751,10 +903,34 @@ function GroupRow({
   onDragArm(event: PointerEvent<HTMLElement>, item: DragItem): void;
   onConversation(id: string): void;
   onAct(action: () => Promise<unknown>): void;
+  draft?: boolean;
+  renaming?: boolean;
+  onRenaming(open: boolean): void;
+  onNew(): void;
+  onDelete(): void;
 }) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(renaming);
   const [name, setName] = useState(group.name);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   useEffect(() => setName(group.name), [group.name]);
+  useEffect(() => {
+    if (renaming) setEditing(true);
+  }, [renaming]);
+  const stopEditing = (save: boolean) => {
+    setEditing(false);
+    onRenaming(false);
+    if (save) persistLayout(renameGroup(layout, group.id, name));
+  };
+  const remove = () => {
+    if (
+      items.length &&
+      !window.confirm(`删除分组「${group.name}」？里面的对话会回到未分组。`)
+    ) {
+      return;
+    }
+    onDelete();
+  };
+  const showBody = items.length > 0 || draft;
   return (
     <li
       className={`app-group${draggingId === group.id ? " is-source" : ""}`}
@@ -767,11 +943,8 @@ function GroupRow({
           label="分组名称"
           value={name}
           onChange={setName}
-          onSubmit={() => {
-            setEditing(false);
-            persistLayout(renameGroup(layout, group.id, name));
-          }}
-          onCancel={() => setEditing(false)}
+          onSubmit={() => stopEditing(true)}
+          onCancel={() => stopEditing(false)}
         />
       ) : (
         <div
@@ -779,6 +952,11 @@ function GroupRow({
           onPointerDown={(event) =>
             onDragArm(event, { kind: "group", id: group.id, label: group.name })
           }
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setMenu({ x: event.clientX, y: event.clientY });
+          }}
         >
           <button
             type="button"
@@ -789,51 +967,48 @@ function GroupRow({
               persistLayout(setGroupCollapsed(layout, group.id, !group.collapsed))
             }
           >
-            <span className="app-row-lead" aria-hidden="true">
-              <DisclosureChevron
-                expanded={!group.collapsed}
-                className="app-group-chevron"
-              />
+            <span className="app-group-disclose" aria-hidden="true">
+              <span className="app-row-lead">
+                <DisclosureChevron
+                  expanded={!group.collapsed}
+                  className="app-group-chevron"
+                />
+              </span>
             </span>
             <span className="app-conversation-title">{group.name}</span>
-            <small>{items.length}</small>
+            <small aria-hidden="true">{items.length}</small>
           </button>
           <div className="app-conversation-actions">
             <button
               className="icon-button"
-              aria-label="重命名"
-              title="重命名"
-              onClick={() => setEditing(true)}
+              aria-label="在此分组新建对话"
+              title="在此分组新建对话"
+              onClick={onNew}
             >
-              <EditIcon className="button-icon" />
-            </button>
-            <button
-              className="icon-button"
-              aria-label="删除分组"
-              title="删除分组"
-              onClick={() => {
-                if (
-                  items.length &&
-                  !window.confirm(
-                    `删除分组「${group.name}」？里面的对话会回到未分组。`,
-                  )
-                ) {
-                  return;
-                }
-                persistLayout(deleteGroup(layout, group.id));
-              }}
-            >
-              <TrashIcon className="button-icon" />
+              <PlusIcon className="button-icon" />
             </button>
           </div>
         </div>
       )}
-      {items.length > 0 && (
+      {menu && (
+        <GroupContextMenu
+          x={menu.x}
+          y={menu.y}
+          onRename={() => {
+            setEditing(true);
+            onRenaming(true);
+          }}
+          onDelete={remove}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {showBody && (
         <div
           className={`app-group-chats${group.collapsed ? " is-collapsed" : ""}`}
           inert={group.collapsed}
         >
           <ul className="app-group-chats-inner">
+            {draft && <DraftRow nested />}
             {items.map((entry) => (
               <ConversationRow
                 key={entry.id}

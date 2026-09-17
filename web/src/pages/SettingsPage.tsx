@@ -119,7 +119,7 @@ export function SettingsPage({
               </SettingRow>
             </section>
             <section className="settings-group">
-              <h3>本地数据</h3>
+              <h3>配置</h3>
               <SettingRow label="配置文件" hint={configPath}>
                 <button
                   className="subtle-action"
@@ -153,9 +153,7 @@ function SponsorNote() {
   return (
     <aside className="settings-sponsor">
       <h2>赞助作者</h2>
-      <p>
-        业余时间做的小工具。如果用得顺手，扫一张收款码请我喝杯咖啡就好。
-      </p>
+      <p>如果这个工具对你有帮助，欢迎扫码支持。</p>
       <div
         className="settings-sponsor-qr"
         role="img"

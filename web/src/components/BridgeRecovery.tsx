@@ -1,25 +1,48 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { readError } from "../session";
+import { Dialog } from "./Dialog";
 import { Toast } from "./Toast";
 import type { RecoveryRecord } from "../types";
-import { ChevronIcon, CloseIcon, RefreshIcon } from "./icons";
+import { ChevronIcon, RefreshIcon } from "./icons";
 import "./BridgeRecovery.css";
+
+function isBackup(record: RecoveryRecord): boolean {
+  return Boolean(
+    record.createdAt && record.recordVersion && record.currentVersion,
+  );
+}
+
+function backupTitle(record: RecoveryRecord): string {
+  const paths = record.paths.filter(Boolean);
+  if (paths.length) {
+    const shown = paths.slice(0, 2).join("、");
+    return paths.length > 2 ? `${shown} 等 ${paths.length} 项` : shown;
+  }
+  if (record.operation === "offline-restore") return "恢复前的备份";
+  if (record.state === "commandCheckpoint") return "操作前的备份";
+  return "配置备份";
+}
+
+function backupWhen(iso?: string): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
+}
 
 export function BridgeRecovery({ onBack }: { onBack(): void }) {
   const [records, setRecords] = useState<RecoveryRecord[]>([]);
   const [running, setRunning] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [selected, setSelected] = useState<RecoveryRecord>();
-  const dialog = useRef<HTMLDialogElement>(null);
   const refresh = useCallback(async () => {
     setBusy(true);
     setError("");
     try {
       const result = await api.bridgeRecovery();
-      setRecords(result.records);
+      setRecords(result.records.filter(isBackup));
       setRunning(result.hostRunning);
     } catch (reason) {
       setError(readError(reason));
@@ -36,11 +59,8 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
     setError("");
     try {
       const result = await api.restoreBridgeConfig(selected);
-      if (result.restored)
-        setNotice(
-          "配置已恢复并核验，恢复前的文件也已另存。现在可以重新启动 BetterGI。",
-        );
-      dialog.current?.close();
+      if (result.restored) setNotice("配置已恢复。请重新启动 BetterGI。");
+      setSelected(undefined);
       await refresh();
     } catch (reason) {
       setError(readError(reason));
@@ -48,20 +68,10 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
       setBusy(false);
     }
   };
-  const labels: Record<string, string> = {
-    committed: "已提交",
-    rolledBack: "已回退",
-    prepared: "提交待核对",
-    recoveryRequired: "需要恢复",
-    revertedAfterFailure: "失败后已复原",
-    commandCheckpoint: "命令执行前备份",
-    offlineRestorePrepared: "恢复待核对",
-    offlineRestored: "离线恢复完成",
-  };
   return (
     <div className="bridge-recovery">
       <div className="block-head">
-        <button className="subtle-action" onClick={onBack}>
+        <button type="button" className="page-back" onClick={onBack}>
           <ChevronIcon className="button-icon" />
           BetterGI
         </button>
@@ -75,89 +85,82 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
         </button>
       </div>
       <div className="page-title">
-        <h2>配置恢复记录</h2>
+        <h2>配置恢复</h2>
       </div>
-      <p className="muted">
-        显示最近 100
-        条记录。离线恢复会恢复该记录之前的完整配置；普通按字段撤销使用接口
-        bgi.rollback_settings。
-      </p>
-      {running && (
-        <p className="notice">
-          BetterGI 仍在运行。请完全退出宿主后，再恢复整个配置。
-        </p>
-      )}
-      {notice && <Toast message={notice} onDismiss={() => setNotice("")} />}
-      {error && <Toast message={error} onDismiss={() => setError("")} />}
-      <div className="recovery-list">
-        {records.map((record) => (
-          <article className="recovery-row" key={record.changeId}>
-            <div>
-              <strong>
-                {labels[record.state ?? ""] ?? record.state ?? "记录不可用"}
-              </strong>
-              <p>
-                {record.paths.join("、") || record.operation || record.changeId}
-              </p>
-              <small>
-                {record.createdAt
-                  ? new Date(record.createdAt).toLocaleString()
-                  : ""}
-              </small>
-              {record.reason && <p>{record.reason}</p>}
-            </div>
-            <button
-              className="secondary-action"
-              disabled={busy || !record.canRestore}
-              onClick={() => {
-                setSelected(record);
-                setError("");
-                dialog.current?.showModal();
-              }}
-            >
-              离线恢复
-            </button>
-          </article>
-        ))}
-      </div>
-      {!busy && !records.length && (
-        <p className="empty-note">尚无配置变更或命令前备份。</p>
-      )}
-      <dialog ref={dialog}>
-        <div className="dialog-head">
-          <h2>恢复整个配置</h2>
-          <button
-            className="icon-button"
-            aria-label="关闭"
-            disabled={busy}
-            onClick={() => dialog.current?.close()}
-          >
-            <CloseIcon className="button-icon" />
-          </button>
+      {running ? (
+        <p className="notice">请先退出 BetterGI，再恢复配置。</p>
+      ) : null}
+      {notice ? <Toast message={notice} onDismiss={() => setNotice("")} /> : null}
+      {error ? <Toast message={error} onDismiss={() => setError("")} /> : null}
+      {records.length ? (
+        <div className="recovery-list">
+          {records.map((record) => (
+            <article className="recovery-row" key={record.changeId}>
+              <div>
+                <strong>{backupTitle(record)}</strong>
+                {backupWhen(record.createdAt) ? (
+                  <small>{backupWhen(record.createdAt)}</small>
+                ) : null}
+                {!running && record.reason ? <p>{record.reason}</p> : null}
+              </div>
+              <button
+                className="secondary-action"
+                disabled={busy || !record.canRestore}
+                onClick={() => {
+                  setSelected(record);
+                  setError("");
+                }}
+              >
+                恢复
+              </button>
+            </article>
+          ))}
         </div>
-        <div className="dialog-body">
-          <p>
-            将恢复这条记录之前的完整配置。当前文件会先另存一份；如果配置在确认后变化，恢复会被拒绝。
-          </p>
-          <pre>{selected?.configPath}</pre>
-          <div className="detail-actions">
+      ) : null}
+      {!busy && !records.length ? (
+        <p className="empty-note">
+          还没有可恢复的备份。Sleepy Doll 修改 BetterGI 配置时会自动留下。
+        </p>
+      ) : null}
+      <Dialog
+        compact
+        open={selected != null}
+        onClose={() => {
+          if (!busy) setSelected(undefined);
+        }}
+        title="恢复配置"
+        footer={
+          <>
             <button
+              type="button"
+              className="subtle-action"
+              disabled={busy}
+              onClick={() => setSelected(undefined)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
               className="primary-action"
               disabled={busy}
               onClick={() => void restore()}
             >
               {busy ? "恢复中…" : "确认恢复"}
             </button>
-            <button
-              className="secondary-action"
-              disabled={busy}
-              onClick={() => dialog.current?.close()}
-            >
-              取消
-            </button>
-          </div>
-        </div>
-      </dialog>
+          </>
+        }
+      >
+        <p>
+          把 BetterGI 的配置恢复到这次备份。当前配置会另存一份，便于再改回去。
+        </p>
+        {selected ? (
+          <p className="muted">
+            {[backupWhen(selected.createdAt), backupTitle(selected)]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        ) : null}
+      </Dialog>
     </div>
   );
 }

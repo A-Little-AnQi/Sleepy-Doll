@@ -166,7 +166,10 @@ impl JsonTransport for UreqTransport {
     }
 }
 
+mod catalog;
 mod protocol;
+
+pub use catalog::list_remote_models;
 
 pub(crate) use protocol::{
     parse_response, usage_from_anthropic, usage_from_gemini, usage_from_ollama,

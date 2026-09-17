@@ -1,8 +1,9 @@
 import { afterEach, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { AppShell } from "./AppShell";
 import { GROUPS_KEY } from "../conversation-groups";
-import { PREVIEW_PERMISSION, type Bootstrap } from "../types";
+import { PREVIEW_PERMISSION, type Bootstrap, type ConversationInfo } from "../types";
 
 afterEach(() => {
   cleanup();
@@ -129,7 +130,11 @@ it("lets the user create a conversation group instead of toggling archived chats
   renderShell(false);
   expect(screen.queryByRole("button", { name: "显示已归档" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "新建分组" }));
-  expect(screen.getByRole("button", { name: /新分组/ })).toBeTruthy();
+  expect(screen.getByLabelText("分组名称")).toBeTruthy();
+  expect((screen.getByLabelText("分组名称") as HTMLInputElement).value).toBe(
+    "新分组",
+  );
+  expect(screen.getByRole("button", { name: "新对话" })).toBeTruthy();
 });
 
 it("does not animate an empty group body over the empty conversation hint", () => {
@@ -143,7 +148,7 @@ it("does not animate an empty group body over the empty conversation hint", () =
     }),
   );
   renderShell(false);
-  expect(screen.getByText("还没有对话")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "新对话" }).closest(".app-group")).toBeNull();
   expect(document.querySelector(".app-group-chats")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "222" }));
   expect(document.querySelector(".app-group-chats")).toBeNull();
@@ -253,12 +258,220 @@ it("opens theme choices and settings from the local user slot", async () => {
 
 it("keeps BetterGI above the account divider", () => {
   renderShell(false);
-  expect(
-    document.querySelector(".app-sidebar-status .app-connection"),
-  ).toBeTruthy();
+  const button = document.querySelector(".app-sidebar-status .app-connection");
+  expect(button).toBeTruthy();
   expect(
     document.querySelector(".app-sidebar-foot .app-connection"),
   ).toBeNull();
   expect(document.querySelector(".app-sidebar-foot .app-account")).toBeTruthy();
+  expect(button?.querySelector("path")?.getAttribute("d")).toBe(
+    "M9 7V4M15 7V4M7 7h10v5a5 5 0 0 1-10 0zM12 17v4",
+  );
 });
+
+const chat = (
+  id: string,
+  title: string,
+): ConversationInfo => ({
+  id,
+  title,
+  createdAt: "t",
+  updatedAt: "t",
+});
+
+it("shows a draft chat in the group you were in, then assigns the created conversation", () => {
+  stubWide(true);
+  localStorage.setItem(
+    GROUPS_KEY,
+    JSON.stringify({
+      groups: [{ id: "g1", name: "路线", collapsed: false }],
+      membership: { c1: "g1" },
+      order: ["c1"],
+    }),
+  );
+  let setId!: (id: string | undefined) => void;
+  let setList!: (items: ConversationInfo[]) => void;
+  function Harness() {
+    const [id, setConversation] = useState<string | undefined>("c1");
+    const [list, setConversations] = useState([chat("c1", "夜巡")]);
+    setId = setConversation;
+    setList = setConversations;
+    return (
+      <AppShell
+        bootstrap={{ ...bootstrap, conversations: list }}
+        page="chat"
+        conversationId={id}
+        detailsOpen={false}
+        onPage={() => undefined}
+        onNew={() => setConversation(undefined)}
+        onConversation={setConversation}
+        onToggleDetails={() => undefined}
+        reload={async () => undefined}
+      />
+    );
+  }
+  render(<Harness />);
+  fireEvent.click(screen.getByRole("button", { name: "新建对话" }));
+  const draft = screen.getByRole("button", { name: "新对话" });
+  expect(draft.closest(".app-group")).toBeTruthy();
+  expect(draft.closest(".app-group")?.textContent).toContain("路线");
+  act(() => {
+    setList([chat("c1", "夜巡"), chat("c2", "新对话")]);
+    setId("c2");
+  });
+  expect(JSON.parse(localStorage.getItem(GROUPS_KEY) ?? "{}").membership.c2).toBe(
+    "g1",
+  );
+});
+
+it("toggles a group by clicking the row, not only the chevron", () => {
+  stubWide(true);
+  localStorage.setItem(
+    GROUPS_KEY,
+    JSON.stringify({
+      groups: [{ id: "g1", name: "路线", collapsed: true }],
+      membership: { c1: "g1" },
+      order: ["c1"],
+    }),
+  );
+  render(
+    <AppShell
+      bootstrap={{ ...bootstrap, conversations: [chat("c1", "夜巡")] }}
+      page="chat"
+      conversationId="c1"
+      detailsOpen={false}
+      onPage={() => undefined}
+      onNew={() => undefined}
+      onConversation={() => undefined}
+      onToggleDetails={() => undefined}
+      reload={async () => undefined}
+    />,
+  );
+  const row = screen.getByRole("button", { name: "路线" });
+  expect(row.getAttribute("aria-expanded")).toBe("false");
+  expect(document.querySelector(".app-group-chats.is-collapsed")).toBeTruthy();
+  fireEvent.click(row);
+  expect(row.getAttribute("aria-expanded")).toBe("true");
+  expect(document.querySelector(".app-group-chats.is-collapsed")).toBeNull();
+  fireEvent.click(row);
+  expect(row.getAttribute("aria-expanded")).toBe("false");
+  expect(document.querySelector(".app-group-chats.is-collapsed")).toBeTruthy();
+});
+
+it("shows only a new-chat control on a group and keeps rename and delete in the context menu", () => {
+  stubWide(true);
+  localStorage.setItem(
+    GROUPS_KEY,
+    JSON.stringify({
+      groups: [{ id: "g1", name: "路线", collapsed: false }],
+      membership: {},
+      order: [],
+    }),
+  );
+  render(
+    <AppShell
+      bootstrap={bootstrap}
+      page="chat"
+      detailsOpen={false}
+      onPage={() => undefined}
+      onNew={() => undefined}
+      onConversation={() => undefined}
+      onToggleDetails={() => undefined}
+      reload={async () => undefined}
+    />,
+  );
+  const group = document.querySelector(".app-group") as HTMLElement;
+  expect(within(group).queryByRole("button", { name: "删除分组" })).toBeNull();
+  expect(within(group).queryByRole("button", { name: "重命名" })).toBeNull();
+  expect(
+    within(group).getByRole("button", {
+      name: "在此分组新建对话",
+      hidden: true,
+    }),
+  ).toBeTruthy();
+  fireEvent.contextMenu(screen.getByRole("button", { name: "路线" }));
+  expect(screen.getByRole("menu", { name: "分组" })).toBeTruthy();
+  expect(screen.getByRole("menuitem", { name: "重命名" })).toBeTruthy();
+  expect(screen.getByRole("menuitem", { name: "删除分组" })).toBeTruthy();
+});
+
+it("creates a draft chat from the group plus control", () => {
+  stubWide(true);
+  localStorage.setItem(
+    GROUPS_KEY,
+    JSON.stringify({
+      groups: [{ id: "g1", name: "路线", collapsed: true }],
+      membership: {},
+      order: ["c1"],
+    }),
+  );
+  function Harness() {
+    const [id, setConversation] = useState<string | undefined>("c1");
+    return (
+      <AppShell
+        bootstrap={{ ...bootstrap, conversations: [chat("c1", "夜巡")] }}
+        page="chat"
+        conversationId={id}
+        detailsOpen={false}
+        onPage={() => undefined}
+        onNew={() => setConversation(undefined)}
+        onConversation={setConversation}
+        onToggleDetails={() => undefined}
+        reload={async () => undefined}
+      />
+    );
+  }
+  render(<Harness />);
+  fireEvent.click(
+    screen.getByRole("button", { name: "在此分组新建对话", hidden: true }),
+  );
+  expect(screen.getByRole("button", { name: "新对话" }).closest(".app-group")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "路线" }).getAttribute("aria-expanded")).toBe(
+    "true",
+  );
+});
+
+it("does not put a chrome title or details toggle on pages that already have a heading", () => {
+  stubWide(true);
+  localStorage.setItem("sleepy-doll-sidebar-collapsed", "false");
+  for (const page of ["tasks", "extensions", "settings"] as const) {
+    cleanup();
+    render(
+      <AppShell
+        bootstrap={bootstrap}
+        page={page}
+        detailsOpen={page === "tasks"}
+        onPage={() => undefined}
+        onNew={() => undefined}
+        onConversation={() => undefined}
+        onToggleDetails={() => undefined}
+        reload={async () => undefined}
+      />,
+    );
+    expect(document.querySelector(".app-header")).toBeNull();
+    expect(screen.queryByRole("button", { name: "显示详情" })).toBeNull();
+  }
+});
+
+it("keeps expand controls when the sidebar is collapsed, without a details toggle", () => {
+  stubWide(true);
+  localStorage.setItem("sleepy-doll-sidebar-collapsed", "true");
+  render(
+    <AppShell
+      bootstrap={bootstrap}
+      page="tasks"
+      detailsOpen={false}
+      onPage={() => undefined}
+      onNew={() => undefined}
+      onConversation={() => undefined}
+      onToggleDetails={() => undefined}
+      reload={async () => undefined}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "展开侧栏" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "新建对话" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  expect(screen.queryByRole("button", { name: "显示详情" })).toBeNull();
+});
+
 

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
 };
@@ -8,11 +9,12 @@ use serde_json::{Value, json};
 
 use crate::{
     bridge::{BgiClient, register_tools},
-    config::AppConfig,
+    config::{AppConfig, ModelAuth, ModelConfig, ModelOptions, ModelProtocol},
     error::{Error, Result},
     extension::plugins::PluginManager,
     extension::skills::SkillRegistry,
     extension::{FunctionTool, ToolExecution, ToolRegistry},
+    model::list_remote_models,
     runtime::types::Event,
 };
 
@@ -691,6 +693,7 @@ impl AppController {
                 Ok(json!({"mode":mode,"label":mode.label()}))
             }
             "model.use" => self.use_model(required(&params, "id")?),
+            "model.list" => self.list_models(&params),
             "model.save" => {
                 AppConfig::save_model(&self.config_path, &params["model"])?;
                 self.reload_runtime()?;
@@ -1160,6 +1163,47 @@ impl AppController {
         };
         Ok(())
     }
+    fn list_models(&self, params: &Value) -> Result<Value> {
+        let protocol: ModelProtocol = serde_json::from_value(params["protocol"].clone())
+            .map_err(|_| Error::Config("未知的模型协议".into()))?;
+        let auth = params
+            .get("auth")
+            .cloned()
+            .filter(|value| !value.is_null())
+            .and_then(|value| serde_json::from_value(value).ok())
+            .unwrap_or(ModelAuth::Auto);
+        let mut api_key = params["apiKey"]
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        if api_key.is_none()
+            && let Some(id) = params["id"].as_str().filter(|id| !id.is_empty())
+        {
+            api_key = self
+                .config
+                .lock()
+                .expect("config mutex poisoned")
+                .models
+                .iter()
+                .find(|model| model.id == id)
+                .and_then(|model| model.api_key.clone());
+        }
+        let config = ModelConfig {
+            id: "probe".into(),
+            name: "probe".into(),
+            protocol,
+            model: String::new(),
+            base_url: params["baseUrl"].as_str().unwrap_or("").to_string(),
+            api_key,
+            auth,
+            headers: HashMap::new(),
+            options: ModelOptions::default(),
+        };
+        let models = list_remote_models(&config, params["modelsUrl"].as_str())?;
+        Ok(json!({ "models": models }))
+    }
+
     fn use_model(&self, model_id: &str) -> Result<Value> {
         AppConfig::set_active(&self.config_path, model_id)?;
         self.reload_runtime()?;

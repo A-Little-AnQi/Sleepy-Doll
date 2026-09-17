@@ -35,14 +35,14 @@ public static class SettingsRecovery
         var record = JsonSerializer.Deserialize<SettingChangeRecord>(bytes, Json)
             ?? throw BridgeException.InvalidArgument("恢复记录无效。");
         if (record.Format != 1 || record.ChangeId != id || string.IsNullOrWhiteSpace(record.HostExecutable))
-            throw BridgeException.InvalidArgument("恢复记录缺少宿主身份，不能自动恢复。");
+            throw BridgeException.InvalidArgument("这份备份不完整，无法自动恢复。");
         var executable = Path.GetFullPath(record.HostExecutable);
         if (!Path.GetFileName(executable).Equals("BetterGI.exe", StringComparison.OrdinalIgnoreCase) || !File.Exists(executable))
-            throw BridgeException.InvalidArgument("无法验证备份对应的 BetterGI 安装位置。");
+            throw BridgeException.InvalidArgument("找不到对应的 BetterGI，无法自动恢复。");
         var userRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(executable)!, "User")) + Path.DirectorySeparatorChar;
         var target = Path.GetFullPath(record.ConfigPath);
         if (!target.StartsWith(userRoot, StringComparison.OrdinalIgnoreCase) || !Path.GetFileName(target).Equals("config.json", StringComparison.OrdinalIgnoreCase))
-            throw BridgeException.InvalidArgument("配置不在已验证的宿主 User 目录中；自定义目录需人工恢复。");
+            throw BridgeException.InvalidArgument("这份备份对应的配置不在 BetterGI 的默认位置，无法自动恢复。");
         var backup = Convert.FromBase64String(record.BeforeFileBase64);
         if (backup.Length > 16 * 1024 * 1024 || Hash(backup) != record.BackupDigest)
             throw BridgeException.InvalidArgument("备份内容校验失败。");
@@ -76,24 +76,26 @@ public static class SettingsRecovery
                     canRestore = !running, reason = running ? "请先完全退出 BetterGI，再恢复配置。" : null,
                 });
             }
-            catch (BridgeException error) { records.Add(new { changeId = id, canRestore = false, reason = error.Message, paths = Array.Empty<string>() }); }
-            catch { records.Add(new { changeId = id, canRestore = false, reason = "记录无法校验。", paths = Array.Empty<string>() }); }
+            catch
+            {
+                // 损坏或无法校验的备份不能恢复，不进入列表。
+            }
         }
         return new { hostRunning = running, records };
     }
     public static object Restore(string directory, string id, string expectedRecordVersion, string expectedCurrentVersion)
     {
-        if (HostRunning()) throw new BridgeException("HOST_RUNNING", "必须先完全退出 BetterGI，不能在宿主运行时覆盖整个配置。", 409);
+        if (HostRunning()) throw new BridgeException("HOST_RUNNING", "请先退出 BetterGI，再恢复配置。", 409);
         var (record, version, backup) = Read(directory, id);
-        if (version != expectedRecordVersion) throw new BridgeException("CONFIG_CONFLICT", "恢复记录已变化，请刷新后重新确认。", 409);
+        if (version != expectedRecordVersion) throw new BridgeException("CONFIG_CONFLICT", "备份已更新，请刷新后再试。", 409);
         using var mutex = new Mutex(false, "Local\\SleepyDollRecovery-" + Hash(Encoding.UTF8.GetBytes(record.ConfigPath.ToLowerInvariant())));
         var acquired = false;
         try
         {
             try { acquired = mutex.WaitOne(0); } catch (AbandonedMutexException) { acquired = true; }
-            if (!acquired) throw new BridgeException("RECOVERY_BUSY", "已有恢复操作正在进行。", 409);
+            if (!acquired) throw new BridgeException("RECOVERY_BUSY", "已有恢复正在进行。", 409);
             if (CurrentVersion(record.ConfigPath) != expectedCurrentVersion)
-                throw new BridgeException("CONFIG_CONFLICT", "当前配置在确认后发生变化，未覆盖。", 409);
+                throw new BridgeException("CONFIG_CONFLICT", "配置已变化，没有覆盖。请刷新后再试。", 409);
             var before = File.Exists(record.ConfigPath) ? File.ReadAllBytes(record.ConfigPath) : [];
             var recovery = new SettingChangeRecord
             {
@@ -109,10 +111,10 @@ public static class SettingsRecovery
                 file.Flush(true);
             }
             if (HostRunning() || CurrentVersion(record.ConfigPath) != expectedCurrentVersion)
-                throw new BridgeException("CONFIG_CONFLICT", "宿主已启动或配置发生变化，未恢复。", 409);
+                throw new BridgeException("CONFIG_CONFLICT", "BetterGI 已启动或配置已变化，没有覆盖。", 409);
             SettingsTransactionEngine.AtomicWrite(record.ConfigPath, backup);
             if (CurrentVersion(record.ConfigPath) != Hash(backup))
-                throw new BridgeException("RECOVERY_REQUIRED", "恢复后校验失败，请保留恢复记录并人工核对。", 409);
+                throw new BridgeException("RECOVERY_REQUIRED", "恢复后核对失败。请先不要启动 BetterGI。", 409);
             recovery.State = "offlineRestored";
             SettingsTransactionEngine.AtomicWrite(recoveryPath, JsonSerializer.SerializeToUtf8Bytes(recovery, Json), privateFile: true);
             return new { restored = true, recoveryChangeId = recovery.ChangeId, configPath = record.ConfigPath };

@@ -13,6 +13,7 @@ interface Props {
   }>;
   onChange(value: string): void;
   label: string;
+  placeholder?: string;
   disabled?: boolean;
 }
 
@@ -20,6 +21,38 @@ interface Props {
 const GAP = 6;
 /** 距视口边缘至少留这么多，避免贴边。 */
 const MARGIN = 8;
+
+type Placement = {
+  left: number;
+  top?: number;
+  bottom?: number;
+  width: number;
+  maxHeight: number;
+};
+
+function samePlacement(current: Placement | undefined, next: Placement) {
+  return (
+    current != null &&
+    current.left === next.left &&
+    current.top === next.top &&
+    current.bottom === next.bottom &&
+    current.width === next.width &&
+    current.maxHeight === next.maxHeight
+  );
+}
+
+function revealOption(list: HTMLElement, index: number) {
+  const option = list.querySelector<HTMLElement>(`[data-index="${index}"]`);
+  if (!option) return;
+  if (option.offsetTop < list.scrollTop) {
+    list.scrollTop = option.offsetTop;
+    return;
+  }
+  const bottom = option.offsetTop + option.offsetHeight;
+  if (bottom > list.scrollTop + list.clientHeight) {
+    list.scrollTop = bottom - list.clientHeight;
+  }
+}
 
 /**
  * 单选下拉。
@@ -29,21 +62,26 @@ const MARGIN = 8;
  * z-index 也救不回来，选项会被后面的内容盖住。挂出去之后层级只由视口决定，
  * 顺便也能在贴边时翻转和收窄。
  */
-export function Select({ value, options, onChange, label, disabled }: Props) {
+export function Select({
+  value,
+  options,
+  onChange,
+  label,
+  placeholder = "请选择",
+  disabled,
+}: Props) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState(0);
-  const [placement, setPlacement] = useState<{
-    left: number;
-    /** 向下展开时给 top，向上翻转时给 bottom —— 不用 transform 翻转，
-        否则会和入场动画的 transform 打架。 */
-    top?: number;
-    bottom?: number;
-    width: number;
-    maxHeight: number;
-  }>();
+  const [placement, setPlacement] = useState<Placement>();
+  /** 键盘改焦点时才把选项滚进视口；指针划过不能拽列表，否则一滚就和滚动对着干。 */
+  const fromKey = useRef(false);
+  /** 打开时定下上下方向，滚动跟随不再翻转，避免贴阈值时整层对跳。 */
+  const side = useRef<"above" | "below">();
+  /** 当前这次打开是否已经把选中项滚进视口；placement 后续更新不能再拽列表。 */
+  const revealed = useRef(false);
   const selected = options.find((option) => option.value === value);
   const show = () => {
     if (!trigger.current || !options.length) return;
@@ -70,9 +108,14 @@ export function Select({ value, options, onChange, label, disabled }: Props) {
   useLayoutEffect(() => {
     if (!open) {
       setPlacement(undefined);
+      side.current = undefined;
       return;
     }
-    const place = () => {
+    const place = (event?: Event) => {
+      // 列表自己滚时不要重算定位：会改 maxHeight、还会和滚轮抢 scrollTop。
+      if (event?.target instanceof Node && menu.current?.contains(event.target)) {
+        return;
+      }
       const anchor = trigger.current?.getBoundingClientRect();
       if (!anchor) return;
       const width = Math.min(
@@ -85,17 +128,20 @@ export function Select({ value, options, onChange, label, disabled }: Props) {
       );
       const below = window.innerHeight - anchor.bottom - GAP - MARGIN;
       const above = anchor.top - GAP - MARGIN;
-      // 下方放不下就翻到上面；上面也放不下时选空间更大的一侧并压缩高度。
-      const flip = below < 160 && above > below;
+      if (side.current == null) {
+        side.current = below < 160 && above > below ? "above" : "below";
+      }
+      const flip = side.current === "above";
       const available = flip ? above : below;
-      setPlacement({
+      const next: Placement = {
         left,
         ...(flip
           ? { bottom: window.innerHeight - anchor.top + GAP }
           : { top: anchor.bottom + GAP }),
         width,
         maxHeight: Math.max(120, Math.min(300, available)),
-      });
+      };
+      setPlacement((current) => (samePlacement(current, next) ? current : next));
     };
     place();
     window.addEventListener("resize", place);
@@ -127,17 +173,21 @@ export function Select({ value, options, onChange, label, disabled }: Props) {
     };
   }, [open]);
 
-  useEffect(() => {
-    const list = menu.current;
-    const option = list?.querySelector<HTMLElement>(`[data-index="${cursor}"]`);
-    if (!list || !option) return;
-    if (option.offsetTop < list.scrollTop) list.scrollTop = option.offsetTop;
-    else if (
-      option.offsetTop + option.offsetHeight >
-      list.scrollTop + list.clientHeight
-    )
-      list.scrollTop =
-        option.offsetTop + option.offsetHeight - list.clientHeight;
+  useLayoutEffect(() => {
+    if (!open) {
+      revealed.current = false;
+      fromKey.current = false;
+      return;
+    }
+    if (revealed.current || !menu.current) return;
+    revealed.current = true;
+    revealOption(menu.current, cursor);
+  }, [open, placement]);
+
+  useLayoutEffect(() => {
+    if (!open || !fromKey.current || !menu.current) return;
+    fromKey.current = false;
+    revealOption(menu.current, cursor);
   }, [cursor, open]);
 
   return (
@@ -157,6 +207,7 @@ export function Select({ value, options, onChange, label, disabled }: Props) {
         aria-controls={open ? id : undefined}
         aria-haspopup="listbox"
         aria-activedescendant={open ? `${id}-${cursor}` : undefined}
+        data-empty={selected ? undefined : "true"}
         disabled={disabled || !options.length}
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={(event) => {
@@ -179,7 +230,8 @@ export function Select({ value, options, onChange, label, disabled }: Props) {
             ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)
           ) {
             if (!open) show();
-            else
+            else {
+              fromKey.current = true;
               setCursor(
                 event.key === "Home"
                   ? 0
@@ -190,10 +242,11 @@ export function Select({ value, options, onChange, label, disabled }: Props) {
                         options.length) %
                       options.length,
               );
+            }
           }
         }}
       >
-        <span>{selected?.label ?? "选择模型"}</span>
+        <span>{selected?.label ?? placeholder}</span>
         <DisclosureChevron expanded={open} />
       </button>
       {open &&

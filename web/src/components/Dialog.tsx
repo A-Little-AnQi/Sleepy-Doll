@@ -10,6 +10,7 @@ export function Dialog({
   onClose,
   children,
   footer,
+  compact = false,
 }: {
   title: string;
   subtitle?: ReactNode;
@@ -17,6 +18,7 @@ export function Dialog({
   onClose(): void;
   children: ReactNode;
   footer?: ReactNode;
+  compact?: boolean;
 }) {
   const layer = useRef<HTMLDivElement>(null);
   const [present, setPresent] = useState(open);
@@ -57,7 +59,7 @@ export function Dialog({
     <div ref={layer} className="sd-dialog-layer">
       <div className="sd-dialog-scrim" onClick={onClose} />
       <div
-        className="sd-dialog"
+        className={compact ? "sd-dialog is-compact" : "sd-dialog"}
         role="dialog"
         aria-modal="true"
         aria-labelledby="sd-dialog-title"

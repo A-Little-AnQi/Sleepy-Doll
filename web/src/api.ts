@@ -119,7 +119,7 @@ function invoke<T>(
   const timeoutMs =
     method === "bridge.setEnabled"
       ? 100_000
-      : method === "events.read"
+      : method === "events.read" || method === "model.list"
         ? 30_000
         : 15_000;
   const ipc = window.ipc;
@@ -192,6 +192,14 @@ export const api = {
     auth?: string;
     promptCache?: boolean;
   }) => invoke<{ saved: boolean }>("model.save", { model }),
+  listModels: (probe: {
+    id?: string;
+    protocol: string;
+    baseUrl: string;
+    apiKey: string;
+    auth?: string;
+    modelsUrl?: string;
+  }) => invoke<{ models: string[] }>("model.list", probe),
   setSkillEnabled: (name: string, enabled: boolean) =>
     invoke<{ enabled: boolean }>("skill.setEnabled", { name, enabled }),
   setPluginEnabled: (id: string, enabled: boolean) =>

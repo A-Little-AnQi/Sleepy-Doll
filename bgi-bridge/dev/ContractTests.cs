@@ -232,6 +232,10 @@ try
         Reject(() => SettingsRecovery.Restore(offlineRoot, offlinePlan, record.GetProperty("recordVersion").GetString()!, "stale"), "offline stale file accepted");
         SettingsRecovery.Restore(offlineRoot, offlinePlan, record.GetProperty("recordVersion").GetString()!, record.GetProperty("currentVersion").GetString()!);
         Check(File.ReadAllBytes(offlineConfig).SequenceEqual(originalOffline), "offline restore was not byte-exact");
+        File.WriteAllText(Path.Combine(offlineRoot, $"config-change-{Guid.NewGuid():N}.json"), "{}");
+        var listed = JsonSerializer.SerializeToElement(SettingsRecovery.List(offlineRoot)).GetProperty("records");
+        foreach (var item in listed.EnumerateArray())
+            Check(item.TryGetProperty("recordVersion", out _), "unreadable records must not appear in the recovery list");
         Console.WriteLine("PASS: offline recovery conflict detection and exact backup restore");
     }
     else Console.WriteLine("SKIP: offline recovery requires every BetterGI process to be stopped");

@@ -202,6 +202,8 @@
   --row-bg: transparent;
 }
 .app-group-head {
+  display: flex;
+  align-items: center;
   position: relative;
   min-width: 0;
   --row-bg: transparent;
@@ -210,32 +212,40 @@
   cursor: grab;
   transition: background-color var(--motion-fast) var(--ease-standard);
 }
-.app-group-head:hover,
-.app-group-head:focus-within,
-.app-group.is-drop > .app-group-head {
+.app-group-head:hover {
   --row-bg: var(--hover);
 }
 .app-group.is-drop > .app-group-head {
   --row-bg: var(--selected);
 }
+.app-group-disclose {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: var(--control-height);
+  color: var(--secondary);
+}
 .app-group-toggle {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: var(--control-height);
-  padding: 0 10px;
+  padding: 0 10px 0 4px;
   border: 0;
   border-radius: var(--radius);
   text-align: left;
-  background: var(--row-bg);
+  background: transparent;
   font-size: var(--font-body);
   color: var(--secondary);
+  cursor: inherit;
 }
 .app-group-head:hover .app-group-toggle,
-.app-group-head:focus-within .app-group-toggle,
-.app-group.is-drop .app-group-toggle {
+.app-group-head:hover .app-group-disclose,
+.app-group.is-drop .app-group-toggle,
+.app-group.is-drop .app-group-disclose {
   color: var(--text);
 }
 .app-group-chevron {
@@ -249,8 +259,7 @@
   font-size: var(--font-label);
   transition: opacity var(--motion-fast) var(--ease-standard);
 }
-.app-group-head:hover .app-group-toggle small,
-.app-group-head:focus-within .app-group-toggle small {
+.app-group-head:hover .app-group-toggle small {
   opacity: 0;
 }
 .app-group-chats {
@@ -340,9 +349,12 @@
   color: var(--secondary);
   overflow: hidden;
 }
-.app-conversations li:hover > button,
+.app-conversations li:hover > button {
+  color: var(--text);
+}
 .app-conversations li.is-current > button {
   color: var(--text);
+  font-weight: 550;
 }
 .app-conversation-title {
   flex: 1;
@@ -624,8 +636,7 @@
 }
 .app-conversations li:hover > .app-conversation-actions,
 .app-conversations li:focus-within > .app-conversation-actions,
-.app-group-head:hover > .app-conversation-actions,
-.app-group-head:focus-within > .app-conversation-actions {
+.app-group-head:hover > .app-conversation-actions {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -658,6 +669,33 @@
   padding: 10px;
   font-size: var(--font-meta);
   color: var(--muted);
+}
+.app-context-menu {
+  position: fixed;
+  z-index: 240;
+  min-width: 148px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.app-context-menu button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--font-body);
+  text-align: left;
+}
+.app-context-menu button:hover,
+.app-context-menu button:focus-visible {
+  background: var(--hover);
 }
 .app-conversations .sd-inline-rename,
 .app-group > .sd-inline-rename {

@@ -11,7 +11,7 @@ const groups: Record<string, string> = {
   lifecycle: "状态与诊断",
   settings: "配置",
   setting: "配置项",
-  command: "宿主命令",
+  command: "命令",
   catalog: "目录",
 };
 export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
@@ -90,7 +90,8 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
     <div className="bridge-api-explorer" ref={root}>
       <div className="bridge-api-heading">
         <button
-          className="subtle-action"
+          type="button"
+          className="page-back"
           onClick={() => {
             if (selected) {
               setSelected(undefined);
@@ -108,8 +109,8 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
         </button>
         <span className="muted">
           {catalog && Number.isFinite(catalog.total)
-            ? catalog.total + " 个匹配接口"
-            : "当前宿主接口"}
+            ? catalog.total + " 个接口"
+            : "接口"}
         </span>
       </div>
       {error && <Toast message={error} onDismiss={() => setError("")} />}
@@ -120,7 +121,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
             <code>{selected.methodId}</code>
             <p>{guide?.purpose ?? selected.summary}</p>
             <span className="tag">
-              {selected.callable ? "可调用" : "当前不可调用"}
+              {selected.callable ? "可用" : "不可用"}
             </span>
             {selected.unavailableReason && (
               <p className="muted">{selected.unavailableReason}</p>
@@ -129,7 +130,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
           {guide ? (
             <>
               <section>
-                <h3>何时调用</h3>
+                <h3>用途</h3>
                 <ul>
                   {guide.whenToUse.map((line) => (
                     <li key={line}>{line}</li>
@@ -137,7 +138,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                 </ul>
               </section>
               <section>
-                <h3>前置条件</h3>
+                <h3>前提</h3>
                 <ul>
                   {guide.preconditions.map((line) => (
                     <li key={line}>{line}</li>
@@ -146,7 +147,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
               </section>
             </>
           ) : (
-            <p className="notice">此桥版本尚未提供完整 Agent 调用说明。</p>
+            <p className="notice">暂无说明</p>
           )}
           <section>
             <h3>参数</h3>
@@ -168,13 +169,13 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                           <td>
                             <code>{name}</code>
                           </td>
-                          <td>{schema.type ?? "见约束"}</td>
+                          <td>{schema.type ?? "—"}</td>
                           <td>
                             {selected.inputSchema.required?.includes(name)
                               ? "是"
                               : "否"}
                           </td>
-                          <td>{schema.description ?? "见完整参数约束"}</td>
+                          <td>{schema.description ?? "—"}</td>
                         </tr>
                       ),
                     )}
@@ -182,17 +183,17 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                 </table>
               </div>
             ) : (
-              <p>无需参数，传入空对象。</p>
+              <p>无需参数</p>
             )}
             <details>
-              <summary>完整参数约束</summary>
+              <summary>参数详情</summary>
               <pre>{JSON.stringify(selected.inputSchema, null, 2)}</pre>
             </details>
           </section>
           {guide && (
             <>
               <section>
-                <h3>返回值与结果判定</h3>
+                <h3>返回</h3>
                 <p>{guide.resultMeaning}</p>
                 <p>{guide.verification}</p>
                 <details>
@@ -201,7 +202,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                 </details>
               </section>
               <section>
-                <h3>副作用与回退</h3>
+                <h3>影响</h3>
                 <ul>
                   {guide.sideEffects.map((line) => (
                     <li key={line}>{line}</li>
@@ -210,7 +211,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                 <p>{guide.rollback}</p>
               </section>
               <section>
-                <h3>调用示例</h3>
+                <h3>示例</h3>
                 {guide.examples.map((example, index) => (
                   <pre key={index}>
                     {JSON.stringify(
@@ -222,7 +223,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                 ))}
               </section>
               <footer className="muted">
-                说明来源：{guide.documentationSource}
+                来源：{guide.documentationSource}
                 {guide.sourceReference ? " · " + guide.sourceReference : ""}
               </footer>
             </>
@@ -240,11 +241,11 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
             <h2>接口目录</h2>
           </div>
           <div className="list-toolbar">
-            <label className="search-field">
+            <label className="search-field is-compact">
               <SearchIcon />
               <input
                 aria-label="搜索接口"
-                placeholder="按用途、关键词或接口名搜索"
+                placeholder="搜索"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
@@ -299,20 +300,18 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                   {item.callable
                     ? item.effect === "readOnly"
                       ? "只读"
-                      : "有副作用"
-                    : "不可调用"}
+                      : "会修改"
+                    : "不可用"}
                 </span>
               </button>
             ))}
           </div>
           {!busy && !items.length && (
-            <p className="empty-note">
-              未找到接口。需要已加载的桥才能读取当前宿主目录。
-            </p>
+            <p className="empty-note">未找到接口</p>
           )}
           {busy && (
             <p className="muted" role="status">
-              读取目录中…
+              加载中…
             </p>
           )}
           {catalog?.nextOffset != null && (

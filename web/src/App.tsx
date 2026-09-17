@@ -128,7 +128,10 @@ export default function App() {
       }
       onPage={(next) => {
         setPage(next);
-        if (next !== "chat") setSelectedTask(undefined);
+        if (next !== "chat") {
+          setSelectedTask(undefined);
+          setDetailsOpen(false);
+        }
       }}
       onNew={() => {
         setConversation(undefined);

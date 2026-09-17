@@ -5,16 +5,20 @@
 
 .recovery-list {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
 }
 
 .recovery-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 18px;
+  gap: 16px;
+  padding: 16px;
   border-bottom: 1px solid var(--border);
+}
+
+.recovery-row:hover {
+  background: var(--hover);
 }
 
 .recovery-row:last-child {
@@ -22,22 +26,25 @@
 }
 
 .recovery-row > div {
+  display: grid;
+  gap: 6px;
   min-width: 0;
 }
 
 .recovery-row strong {
-  font-size: 13px;
+  font-size: var(--font-body);
+  font-weight: 600;
 }
 
 .recovery-row p {
-  margin: 8px 0;
-  font-size: 12px;
-  line-height: 1.6;
+  margin: 0;
+  font-size: var(--font-meta);
+  line-height: 1.5;
   overflow-wrap: anywhere;
   color: var(--secondary);
 }
 
 .recovery-row small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-label);
 }

@@ -5,7 +5,17 @@ import { Toast } from "../components/Toast";
 import { PlusIcon, TrashIcon } from "../components/icons";
 import { Select } from "../components/Select";
 import { MotionSwitch } from "../components/MotionSwitch";
-import type { Bootstrap } from "../types";
+import { DisclosureChevron } from "../components/DisclosureChevron";
+import type { Bootstrap, ModelInfo } from "../types";
+import {
+  MODEL_PRESETS,
+  matchPreset,
+  normalizeEndpoint,
+  presetById,
+  presetLabel,
+  type ModelAuthMode,
+  type ModelPreset,
+} from "../model-presets";
 import "./ModelsPage.css";
 
 const protocols = [
@@ -18,12 +28,18 @@ const protocols = [
 
 const authModes = [
   { value: "auto", label: "自动" },
-  { value: "apiKey", label: "x-api-key（官方）" },
-  { value: "bearer", label: "Bearer（多数中转）" },
+  { value: "apiKey", label: "API Key" },
+  { value: "bearer", label: "Bearer" },
 ];
+
+const presetOptions = MODEL_PRESETS.map((preset) => ({
+  value: preset.id,
+  label: preset.name,
+}));
 
 type ModelForm = {
   id: string;
+  preset: string;
   name: string;
   protocol: string;
   model: string;
@@ -32,27 +48,59 @@ type ModelForm = {
   timeoutMs: number;
   contextWindow: number;
   maxOutputTokens: number;
-  auth: "auto" | "apiKey" | "bearer";
+  auth: ModelAuthMode;
   promptCache: boolean;
 };
 
-function protocolLabel(value: string) {
-  return protocols.find((item) => item.value === value)?.label ?? value;
+function emptyForm(id = `model-${Date.now()}`): ModelForm {
+  return {
+    id,
+    preset: "",
+    name: "",
+    protocol: "",
+    model: "",
+    baseUrl: "",
+    apiKey: "",
+    timeoutMs: 120000,
+    contextWindow: 200_000,
+    maxOutputTokens: 8192,
+    auth: "auto",
+    promptCache: true,
+  };
 }
 
-function formFor(model?: Bootstrap["models"][number]): ModelForm {
+function fromPreset(preset: ModelPreset, id = `model-${Date.now()}`): ModelForm {
   return {
-    id: model?.id ?? `model-${Date.now()}`,
-    name: model?.name ?? "",
-    protocol: model?.protocol ?? "openai-responses",
-    model: model?.model ?? "",
-    baseUrl: model?.baseUrl ?? "https://api.openai.com/v1",
+    id,
+    preset: preset.id,
+    name: preset.id === "custom" ? "" : preset.name,
+    protocol: preset.protocol,
+    model: "",
+    baseUrl: preset.baseUrl,
     apiKey: "",
-    timeoutMs: model?.timeoutMs ?? 120000,
-    contextWindow: model?.contextWindow ?? 200_000,
-    maxOutputTokens: model?.maxOutputTokens ?? 8192,
-    auth: model?.auth ?? "auto",
-    promptCache: model?.promptCache !== false,
+    timeoutMs: preset.timeoutMs,
+    contextWindow: preset.contextWindow,
+    maxOutputTokens: preset.maxOutputTokens,
+    auth: preset.auth,
+    promptCache: true,
+  };
+}
+
+function formFor(model?: ModelInfo): ModelForm {
+  if (!model) return emptyForm();
+  return {
+    id: model.id,
+    preset: matchPreset(model),
+    name: model.name,
+    protocol: model.protocol,
+    model: model.model,
+    baseUrl: model.baseUrl,
+    apiKey: "",
+    timeoutMs: model.timeoutMs ?? 120000,
+    contextWindow: model.contextWindow ?? 200_000,
+    maxOutputTokens: model.maxOutputTokens ?? 8192,
+    auth: model.auth ?? "auto",
+    promptCache: model.promptCache !== false,
   };
 }
 
@@ -72,10 +120,15 @@ export function ModelsPage({
   const selected = bootstrap.models.find((model) => model.id === selectedId);
   const [form, setForm] = useState<ModelForm>(() => formFor(selected));
   const drafts = useRef(new Map<string, ModelForm>());
+  const [catalog, setCatalog] = useState<string[]>([]);
+  const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [listing, setListing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const creating = selectedId === "new";
+  const preset = presetById(form.preset);
+  const needsKey = preset?.needsKey !== false;
   const dirty =
     creating ||
     Boolean(form.apiKey) ||
@@ -89,21 +142,24 @@ export function ModelsPage({
         form.maxOutputTokens !== (selected.maxOutputTokens ?? 8192) ||
         form.auth !== (selected.auth ?? "auto") ||
         form.promptCache !== (selected.promptCache !== false)));
+  const resetEditor = (id: string, next: ModelForm) => {
+    setSelectedId(id);
+    setForm(next);
+    setCatalog([]);
+    setAdvanced(false);
+    setError("");
+    setNotice("");
+  };
   const choose = (id: string) => {
     drafts.current.set(selectedId, form);
     const model = bootstrap.models.find((item) => item.id === id);
-    setSelectedId(id);
-    setForm(drafts.current.get(id) ?? formFor(model));
-    setError("");
-    setNotice("");
+    resetEditor(id, drafts.current.get(id) ?? formFor(model));
   };
   const add = () => {
     if (creating) {
       const fresh = formFor();
       drafts.current.set("new", fresh);
-      setForm(fresh);
-      setError("");
-      setNotice("");
+      resetEditor("new", fresh);
       return;
     }
     choose("new");
@@ -114,11 +170,58 @@ export function ModelsPage({
       drafts.current.set(selectedId, updated);
       return updated;
     });
+  const applyPreset = (presetId: string) => {
+    const next = presetById(presetId);
+    setCatalog([]);
+    if (!next) {
+      updateForm((draft) => ({ ...emptyForm(draft.id), apiKey: draft.apiKey }));
+      return;
+    }
+    updateForm((draft) => ({
+      ...fromPreset(next, draft.id),
+      apiKey: draft.apiKey,
+    }));
+  };
   const change = (
     key: "name" | "protocol" | "model" | "baseUrl" | "apiKey",
     value: string,
   ) => updateForm((draft) => ({ ...draft, [key]: value }));
+  const fetchModels = async () => {
+    setListing(true);
+    setError("");
+    try {
+      const matched =
+        preset != null &&
+        normalizeEndpoint(form.baseUrl) === normalizeEndpoint(preset.baseUrl);
+      const result = await api.listModels({
+        ...(creating ? {} : { id: form.id }),
+        protocol: form.protocol,
+        baseUrl: form.baseUrl,
+        apiKey: form.apiKey,
+        auth: form.auth,
+        ...(matched && preset.modelsUrl ? { modelsUrl: preset.modelsUrl } : {}),
+      });
+      const models = result.models.filter(Boolean);
+      setCatalog(models);
+      if (!models.length) {
+        setNotice("没有可用模型，请手动填写。");
+        return;
+      }
+      if (!form.model || !models.includes(form.model)) {
+        change("model", models[0]!);
+      }
+      setNotice(`已获取 ${models.length} 个模型`);
+    } catch (reason) {
+      setError(readError(reason));
+    } finally {
+      setListing(false);
+    }
+  };
   const save = async () => {
+    if (!form.name.trim() || !form.protocol || !form.baseUrl.trim() || !form.model.trim()) {
+      setError("请填写名称、协议、地址和模型。");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -136,14 +239,14 @@ export function ModelsPage({
       setBusy(false);
     }
   };
+  const modelOptions = Array.from(new Set([form.model, ...catalog].filter(Boolean))).map(
+    (id) => ({ value: id, label: id }),
+  );
 
   return (
     <div className="model-settings">
       <header className="model-page-head">
-        <div>
-          <h2>模型</h2>
-          <p>配置对话用的模型服务。新对话使用默认模型，每个已有对话都有自己绑定的模型。</p>
-        </div>
+        <h2>模型</h2>
         <button className="secondary-action" type="button" onClick={add}>
           <PlusIcon className="button-icon" />
           添加
@@ -160,7 +263,7 @@ export function ModelsPage({
             >
               <span>
                 <strong>{form.name.trim() || "新模型"}</strong>
-                <small>尚未保存</small>
+                <small>未保存</small>
               </span>
             </button>
           )}
@@ -175,7 +278,7 @@ export function ModelsPage({
               <span>
                 <strong>{model.name}</strong>
                 <small>
-                  {protocolLabel(model.protocol)}
+                  {presetLabel(model)}
                   {model.model ? ` · ${model.model}` : ""}
                 </small>
               </span>
@@ -183,7 +286,7 @@ export function ModelsPage({
             </button>
           ))}
           {!bootstrap.models.length && !creating && (
-            <p className="model-list-empty">还没有模型服务</p>
+            <p className="model-list-empty">还没有模型</p>
           )}
         </nav>
         <MotionSwitch viewKey={selectedId} kind="panel" className="model-editor">
@@ -202,165 +305,206 @@ export function ModelsPage({
             {error && <Toast message={error} onDismiss={() => setError("")} />}
             {notice && <Toast message={notice} onDismiss={() => setNotice("")} />}
             <section className="form-section">
-              <h4>显示</h4>
-              <div className="form-grid">
-                <label>
-                  <span>名称</span>
-                  <input
-                    required
-                    value={form.name}
-                    placeholder="出现在对话和列表里的名字"
-                    onChange={(event) => change("name", event.target.value)}
-                  />
-                </label>
-                <label>
-                  <span>协议</span>
-                  <Select
-                    label="模型协议"
-                    value={form.protocol}
-                    options={protocols}
-                    onChange={(value) => change("protocol", value)}
-                  />
-                </label>
-              </div>
-            </section>
-            <section className="form-section">
-              <h4>连接</h4>
+              <label>
+                <span>服务商</span>
+                <Select
+                  label="服务商"
+                  placeholder="选择服务商"
+                  value={form.preset}
+                  options={presetOptions}
+                  onChange={applyPreset}
+                />
+              </label>
+              <label>
+                <span>名称</span>
+                <input
+                  required
+                  value={form.name}
+                  placeholder="例如 DeepSeek"
+                  onChange={(event) => change("name", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>请求协议</span>
+                <Select
+                  label="请求协议"
+                  placeholder="选择协议"
+                  value={form.protocol}
+                  options={protocols}
+                  onChange={(value) => change("protocol", value)}
+                />
+              </label>
               <label>
                 <span>API 地址</span>
                 <input
                   type="url"
                   required
+                  placeholder="https://api.example.com/v1"
                   value={form.baseUrl}
                   onChange={(event) => change("baseUrl", event.target.value)}
                 />
               </label>
-              <div className="form-grid">
-                <label>
-                  <span>模型 ID</span>
-                  <input
-                    required
-                    placeholder="服务商提供的模型标识"
-                    value={form.model}
-                    onChange={(event) => change("model", event.target.value)}
-                  />
-                </label>
-                <label>
-                  <span>响应超时（秒）</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={600}
-                    required
-                    value={form.timeoutMs / 1000}
-                    onChange={(event) =>
-                      updateForm((draft) => ({
-                        ...draft,
-                        timeoutMs: Number(event.target.value) * 1000,
-                      }))
-                    }
-                  />
-                </label>
-              </div>
-              <label>
-                <span>API Key</span>
-                <input
-                  type="password"
-                  autoComplete="off"
-                  placeholder={selected ? "留空保留现有密钥" : "输入密钥"}
-                  value={form.apiKey}
-                  onChange={(event) => change("apiKey", event.target.value)}
-                />
-              </label>
-              <p className="field-help">
-                {selected
-                  ? "密钥不会回显。留空继续用已保存的，填写则替换。"
-                  : "密钥只保存在本机配置里。"}
-              </p>
-              {(form.protocol === "anthropic-messages" ||
-                form.protocol === "gemini") && (
+              {needsKey && (
                 <>
-                  <Select
-                    label="鉴权方式"
-                    value={form.auth}
-                    options={authModes}
-                    onChange={(value) =>
-                      updateForm((draft) => ({
-                        ...draft,
-                        auth: value as ModelForm["auth"],
-                      }))
-                    }
-                  />
-                  <p className="field-help">
-                    官方 Claude 用 x-api-key。国内中转多数跟 Claude Code 的
-                    ANTHROPIC_AUTH_TOKEN 一样，要选 Bearer。自动：sk-ant- 走官方头，其余走
-                    Bearer。
-                  </p>
+                  <label>
+                    <span>
+                      API Key
+                      {preset?.keyUrl ? (
+                        <a
+                          className="model-key-link"
+                          href={preset.keyUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          申请密钥
+                        </a>
+                      ) : null}
+                    </span>
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      aria-label="API Key"
+                      required={creating}
+                      placeholder={selected ? "不修改请留空" : "sk-…"}
+                      value={form.apiKey}
+                      onChange={(event) => change("apiKey", event.target.value)}
+                    />
+                  </label>
                 </>
               )}
-            </section>
-            <section className="form-section">
-              <h4>窗口</h4>
-              <div className="form-grid">
-                <label>
-                  <span>上下文窗口（token）</span>
-                  <input
-                    type="number"
-                    min={8192}
-                    max={2000000}
-                    required
-                    value={form.contextWindow}
-                    onChange={(event) =>
-                      updateForm((draft) => ({
-                        ...draft,
-                        contextWindow: Number(event.target.value),
-                      }))
-                    }
-                  />
-                </label>
-                <label>
-                  <span>最大输出（token）</span>
-                  <input
-                    type="number"
-                    min={256}
-                    max={128000}
-                    required
-                    value={form.maxOutputTokens}
-                    onChange={(event) =>
-                      updateForm((draft) => ({
-                        ...draft,
-                        maxOutputTokens: Number(event.target.value),
-                      }))
-                    }
-                  />
-                </label>
-              </div>
-              <p className="field-help">
-                按模型实际窗口填。32k 的模型和 200k 的模型不该共用一个上限，运行时的压缩预算跟着这个走。
-              </p>
-              {form.protocol === "anthropic-messages" && (
-                <label className="toggle-row">
-                  <span>提示缓存</span>
+              <div className="model-field">
+                <span>模型</span>
+                <div className="model-pick">
+                  {catalog.length ? (
+                    <Select
+                      label="模型"
+                      placeholder="选择模型"
+                      value={form.model}
+                      options={modelOptions}
+                      onChange={(value) => change("model", value)}
+                    />
+                  ) : (
+                    <input
+                      required
+                      aria-label="模型"
+                      placeholder={preset?.model || "模型名称"}
+                      value={form.model}
+                      onChange={(event) => change("model", event.target.value)}
+                    />
+                  )}
                   <button
                     type="button"
-                    className={`switch ${form.promptCache ? "on" : ""}`}
-                    role="switch"
-                    aria-checked={form.promptCache}
-                    onClick={() =>
-                      updateForm((draft) => ({
-                        ...draft,
-                        promptCache: !draft.promptCache,
-                      }))
-                    }
-                  />
-                </label>
-              )}
-              {form.protocol === "anthropic-messages" && (
-                <p className="field-help">
-                  在 tools / system / 最近消息上打 cache_control 断点。OpenAI 与 Gemini
-                  由服务端自动缓存。不支持该字段的 Claude 中转请关掉。
-                </p>
-              )}
+                    className="secondary-action"
+                    disabled={listing || busy || !form.protocol || !form.baseUrl.trim()}
+                    onClick={() => void fetchModels()}
+                  >
+                    {listing ? "获取中…" : "获取模型"}
+                  </button>
+                </div>
+              </div>
+            </section>
+            <section className="form-section model-advanced">
+              <button
+                type="button"
+                className="model-advanced-toggle"
+                aria-expanded={advanced}
+                onClick={() => setAdvanced((open) => !open)}
+              >
+                <DisclosureChevron expanded={advanced} />
+                高级选项
+              </button>
+              <div
+                className={`model-advanced-body${advanced ? "" : " is-collapsed"}`}
+                inert={!advanced}
+              >
+                <div className="model-advanced-inner">
+                  <h4>连接</h4>
+                  {(form.protocol === "anthropic-messages" ||
+                    form.protocol === "gemini") && (
+                    <>
+                      <Select
+                        label="鉴权方式"
+                        value={form.auth}
+                        options={authModes}
+                        onChange={(value) =>
+                          updateForm((draft) => ({
+                            ...draft,
+                            auth: value as ModelForm["auth"],
+                          }))
+                        }
+                      />
+                    </>
+                  )}
+                  <label>
+                    <span>响应超时（秒）</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={600}
+                      required
+                      value={form.timeoutMs / 1000}
+                      onChange={(event) =>
+                        updateForm((draft) => ({
+                          ...draft,
+                          timeoutMs: Number(event.target.value) * 1000,
+                        }))
+                      }
+                    />
+                  </label>
+                  <h4>窗口</h4>
+                  <div className="form-grid">
+                    <label>
+                      <span>上下文长度</span>
+                      <input
+                        type="number"
+                        min={8192}
+                        max={2000000}
+                        required
+                        value={form.contextWindow}
+                        onChange={(event) =>
+                          updateForm((draft) => ({
+                            ...draft,
+                            contextWindow: Number(event.target.value),
+                          }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>最大输出</span>
+                      <input
+                        type="number"
+                        min={256}
+                        max={128000}
+                        required
+                        value={form.maxOutputTokens}
+                        onChange={(event) =>
+                          updateForm((draft) => ({
+                            ...draft,
+                            maxOutputTokens: Number(event.target.value),
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                  {form.protocol === "anthropic-messages" && (
+                    <label className="toggle-row">
+                      <span>提示缓存</span>
+                      <button
+                        type="button"
+                        className={`switch ${form.promptCache ? "on" : ""}`}
+                        role="switch"
+                        aria-checked={form.promptCache}
+                        onClick={() =>
+                          updateForm((draft) => ({
+                            ...draft,
+                            promptCache: !draft.promptCache,
+                          }))
+                        }
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
             </section>
             <footer className="detail-actions">
               <button className="primary-action" disabled={busy}>
@@ -380,7 +524,7 @@ export function ModelsPage({
                       .finally(() => setBusy(false));
                   }}
                 >
-                  设为默认模型
+                  设为默认
                 </button>
               )}
               {selected && (
@@ -388,7 +532,6 @@ export function ModelsPage({
                   type="button"
                   className="secondary-action"
                   disabled={busy}
-                  title="删除这个模型配置"
                   onClick={() => {
                     if (!window.confirm(`删除「${selected.name}」？`)) {
                       return;
@@ -408,8 +551,7 @@ export function ModelsPage({
                           bootstrap.models.find(
                             (model) => model.id !== selected.id,
                           );
-                        setSelectedId(next?.id ?? "new");
-                        setForm(formFor(next));
+                        resetEditor(next?.id ?? "new", formFor(next));
                         setNotice("已删除");
                       })
                       .catch((reason) => setError(readError(reason)))

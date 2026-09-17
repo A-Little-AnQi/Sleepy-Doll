@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { TextField } from "./TextField";
 import "./InlineRename.css";
 
@@ -14,6 +15,7 @@ export function InlineRename({
   onSubmit(): void;
   onCancel(): void;
 }) {
+  const skipBlur = useRef(false);
   return (
     <form
       className="sd-inline-rename"
@@ -27,9 +29,14 @@ export function InlineRename({
         value={value}
         autoFocus
         onChange={(event) => onChange(event.target.value)}
-        onBlur={onCancel}
+        onBlur={() => {
+          if (skipBlur.current) return;
+          onSubmit();
+        }}
         onKeyDown={(event) => {
-          if (event.key === "Escape") onCancel();
+          if (event.key !== "Escape") return;
+          skipBlur.current = true;
+          onCancel();
         }}
       />
     </form>

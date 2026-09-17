@@ -4,43 +4,21 @@
   gap: 22px;
 }
 
-.bridge-overview {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-}
-
-.bridge-overview h2,
-.bridge-overview p {
-  margin: 0;
-}
-
 .bridge-overview h2 {
-  margin-top: 5px;
-  font-size: 24px;
-  font-weight: 680;
-  letter-spacing: -0.6px;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
 }
 
-.bridge-overview p {
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.7;
-}
-
-.bridge-eyebrow {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
+.bridge-connection-card,
+.bridge-feature {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
 
 .bridge-connection-card {
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
 }
 
 .bridge-connection-row,
@@ -48,24 +26,25 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 17px 18px;
+  gap: 16px;
+  padding: 16px;
 }
 
 .bridge-connection-row > div {
   display: grid;
-  gap: 5px;
+  gap: 4px;
+  min-width: 0;
 }
 
 .bridge-connection-row strong {
-  font-size: 13px;
+  font-size: var(--font-body);
   font-weight: 600;
 }
 
 .bridge-connection-row span,
 .bridge-endpoint span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-meta);
 }
 
 .bridge-endpoint {
@@ -76,7 +55,7 @@
 .bridge-endpoint code {
   color: var(--secondary);
   font:
-    11px/1.6 "Cascadia Code",
+    var(--font-meta)/1.6 "Cascadia Code",
     Consolas,
     monospace;
   overflow-wrap: anywhere;
@@ -91,28 +70,40 @@
 
 .bridge-feature {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 18px;
+  grid-template-columns: 21px minmax(0, 1fr) 16px;
   align-items: center;
   gap: 12px;
   min-width: 0;
-  padding: 17px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
+  padding: 16px;
   text-align: left;
 }
 
 .bridge-feature:hover {
-  border-color: var(--border-strong);
+  background: var(--hover);
+}
+
+.bridge-feature:disabled {
+  color: var(--muted);
   background: var(--subtle);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px #00000008;
+}
+
+.bridge-feature:disabled:hover {
+  background: var(--subtle);
+}
+
+.bridge-feature:disabled strong,
+.bridge-feature:disabled small {
+  color: var(--muted);
+}
+
+.bridge-feature:disabled > svg:first-child,
+.bridge-feature:disabled > svg:last-child {
+  stroke: var(--muted);
 }
 
 .bridge-feature > svg:first-child {
   width: 21px;
   height: 21px;
-  margin-left: 5px;
   fill: none;
   stroke: var(--secondary);
   stroke-width: 1.5;
@@ -129,88 +120,38 @@
 
 .bridge-feature > span {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
 }
 
 .bridge-feature strong {
-  font-size: 13px;
+  font-size: var(--font-body);
   font-weight: 600;
 }
 
 .bridge-feature small {
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.55;
+  font-size: var(--font-meta);
+  line-height: 1.5;
 }
 
-.bridge-status-section {
-  display: grid;
-  gap: 15px;
-  padding-top: 4px;
-}
-
-.bridge-status-section .block-head > div {
-  display: grid;
-  gap: 5px;
-}
-
-.bridge-status-section h2,
-.bridge-status-section p {
+.bridge-log {
   margin: 0;
-}
-
-.bridge-status-section h2 {
-  font-size: 14px;
-  font-weight: 620;
-}
-
-.bridge-status-section p {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.bridge-status-section pre {
   max-height: 340px;
-}
-
-.bridge-state-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  min-height: 96px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 11px;
-  color: var(--muted);
+  padding: 16px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
   background: var(--subtle);
-  font-size: 12px;
-}
-
-.bridge-state-empty svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-}
-
-.bridge-lifecycle {
-  padding-top: 2px;
+  color: var(--secondary);
+  font:
+    var(--font-meta)/1.65 "Cascadia Code",
+    Consolas,
+    monospace;
 }
 
 @media (max-width: 700px) {
   .bridge-feature-grid {
     grid-template-columns: 1fr;
-  }
-
-  .bridge-overview {
-    gap: 16px;
-  }
-
-  .bridge-connection-row,
-  .bridge-endpoint {
-    gap: 16px;
-    padding: 15px;
   }
 }

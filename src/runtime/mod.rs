@@ -1876,11 +1876,9 @@ impl Supervisor {
                 let contract = bridge.describe(id, cancel).await?;
                 let version = contract["catalogVersion"]
                     .as_str()
-                    .ok_or_else(|| Error::Tool("当前桥缺少版本化调用契约，请更新桥组件".into()))?;
+                    .ok_or_else(|| Error::Tool("当前 BetterGI 连接缺少接口说明".into()))?;
                 if !contract["guide"].is_object() {
-                    return Err(Error::Tool(
-                        "当前桥没有完整 Agent 调用说明，请更新桥组件".into(),
-                    ));
+                    return Err(Error::Tool("当前 BetterGI 连接缺少接口说明".into()));
                 }
                 exposed.insert(format!("bridge-api:{id}:{version}"));
                 Ok(contract)
@@ -1890,7 +1888,7 @@ impl Supervisor {
                 let contract = bridge.describe(id, cancel).await?;
                 let version = contract["catalogVersion"]
                     .as_str()
-                    .ok_or_else(|| Error::Tool("桥接口缺少契约版本".into()))?;
+                    .ok_or_else(|| Error::Tool("当前 BetterGI 连接缺少接口说明".into()))?;
                 if !exposed.contains(&format!("bridge-api:{id}:{version}")) {
                     return Err(Error::Tool(
                         "请先用 bgi.api.describe 阅读当前版本的完整调用说明".into(),

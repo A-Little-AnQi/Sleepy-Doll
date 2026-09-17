@@ -156,3 +156,60 @@ it("closes on Escape from anywhere, not only from the trigger", () => {
   fireEvent.keyDown(document, { key: "Escape" });
   expect(screen.queryByRole("listbox")).toBeNull();
 });
+
+it("does not reanchor when the list itself scrolls", () => {
+  let top = 80;
+  const triggerRect = () => ({
+    width: 200,
+    height: 32,
+    top,
+    bottom: top + 32,
+    left: 40,
+    right: 240,
+    x: 40,
+    y: top,
+    toJSON() {},
+  });
+  render(
+    <Select
+      label="服务商"
+      value="a"
+      onChange={vi.fn()}
+      options={[
+        { value: "a", label: "Alpha" },
+        { value: "b", label: "Beta" },
+        { value: "c", label: "Gamma" },
+      ]}
+    />,
+  );
+  const trigger = screen.getByRole("combobox");
+  vi.spyOn(trigger, "getBoundingClientRect").mockImplementation(triggerRect);
+  fireEvent.click(trigger);
+  const menu = screen.getByRole("listbox");
+  expect(menu.style.top).toBe("118px");
+  top = 200;
+  fireEvent.scroll(menu);
+  expect(menu.style.top).toBe("118px");
+  fireEvent.scroll(window);
+  expect(menu.style.top).toBe("238px");
+});
+
+it("does not drag the list when the pointer moves over another option", () => {
+  render(
+    <Select
+      label="服务商"
+      value="a"
+      onChange={vi.fn()}
+      options={[
+        { value: "a", label: "Alpha" },
+        { value: "b", label: "Beta" },
+        { value: "c", label: "Gamma" },
+      ]}
+    />,
+  );
+  fireEvent.click(screen.getByRole("combobox"));
+  const menu = screen.getByRole("listbox");
+  menu.scrollTop = 12;
+  fireEvent.pointerMove(screen.getByRole("option", { name: "Gamma" }));
+  expect(menu.scrollTop).toBe(12);
+});

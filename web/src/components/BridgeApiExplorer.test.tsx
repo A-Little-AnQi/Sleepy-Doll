@@ -39,7 +39,7 @@ it("shows purpose and parameters before opening details, including disabled APIs
   render(<BridgeApiExplorer onBack={vi.fn()} />);
   expect(await screen.findByText(entry.summary)).toBeTruthy();
   expect(screen.getByText(/配置目录中的精确路径/)).toBeTruthy();
-  expect(screen.getByText("不可调用")).toBeTruthy();
+  expect(screen.getByText("不可用")).toBeTruthy();
   expect(api.bridgeDescribe).not.toHaveBeenCalled();
 });
 
