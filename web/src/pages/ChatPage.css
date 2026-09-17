@@ -48,6 +48,10 @@
   margin: 0;
 }
 
+.chat-welcome .subtle-action {
+  margin-top: 4px;
+}
+
 .welcome-mascot {
   width: clamp(220px, 34vh, 310px);
   height: clamp(220px, 34vh, 310px);

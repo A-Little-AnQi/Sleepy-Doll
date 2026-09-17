@@ -453,10 +453,10 @@
   bottom: calc(100% + 8px);
   z-index: 20;
   display: grid;
-  gap: 4px;
+  gap: 0;
   width: auto;
   min-width: 0;
-  padding: 10px;
+  padding: 6px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -465,22 +465,31 @@
   transform-origin: bottom center;
   animation: menu-rise var(--motion-base) var(--ease-enter) both;
 }
-.app-account-menu-label {
-  margin: 4px 8px 8px;
-  color: var(--muted);
-  font-size: 11px;
+.app-account-menu-prefs {
+  display: grid;
+  gap: 4px;
+  padding: 2px 6px 8px;
+}
+.app-account-menu-prefs .setting-row.is-compact {
+  min-height: var(--control-height);
+  padding: 0;
+  gap: 8px;
+}
+.app-account-menu-links {
+  display: grid;
+  gap: 1px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
 }
 .app-account-more {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  width: auto;
+  width: 100%;
   min-height: var(--control-height);
-  margin: 4px -10px -10px;
-  padding: 0 10px;
+  margin: 0;
+  padding: 0 6px;
   border: 0;
-  border-top: 1px solid var(--border);
-  border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px);
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text);
   font-size: var(--font-body);
@@ -673,6 +682,8 @@
 .app-context-menu {
   position: fixed;
   z-index: 240;
+  display: grid;
+  gap: 1px;
   min-width: 148px;
   padding: 4px;
   border: 1px solid var(--border);

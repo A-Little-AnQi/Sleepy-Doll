@@ -28,6 +28,7 @@ interface Props {
   onConversation(id: string): void;
   reload(): Promise<void>;
   onComposerDraft?(active: boolean): void;
+  onOpenHelp?(): void;
 }
 export function ChatPage({
   bootstrap,
@@ -35,6 +36,7 @@ export function ChatPage({
   onConversation,
   reload,
   onComposerDraft,
+  onOpenHelp,
 }: Props) {
   const data = useSession(conversationId);
   const { messages, task, stream, question, approval, plan, loading } = data;
@@ -215,6 +217,11 @@ export function ChatPage({
             <h2>开始一项新任务</h2>
             {!bootstrap.models.length && (
               <p className="muted">先在设置里添加模型服务</p>
+            )}
+            {onOpenHelp && (
+              <button type="button" className="subtle-action" onClick={onOpenHelp}>
+                使用说明
+              </button>
             )}
           </div>
         ) : (

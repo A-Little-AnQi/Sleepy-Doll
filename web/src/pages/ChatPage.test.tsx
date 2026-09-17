@@ -84,6 +84,7 @@ it("blocks sending until a model is configured", () => {
     />,
   );
   expect(screen.getByText("先在设置里添加模型服务")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "使用说明" })).toBeNull();
   fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
     target: { value: "帮我看看" },
   });
@@ -91,6 +92,20 @@ it("blocks sending until a model is configured", () => {
     (screen.getByRole("button", { name: "发送" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
+});
+
+it("opens the product guide from the welcome screen", () => {
+  const onOpenHelp = vi.fn();
+  render(
+    <ChatPage
+      bootstrap={bootstrap}
+      onConversation={() => undefined}
+      reload={async () => undefined}
+      onOpenHelp={onOpenHelp}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "使用说明" }));
+  expect(onOpenHelp).toHaveBeenCalled();
 });
 
 it("does not seed the welcome composer with host-specific prompts", () => {

@@ -4,6 +4,7 @@ import type { Bootstrap } from "../types";
 import { hostPluginEnabled } from "../providers";
 import {
   BridgeIcon,
+  HelpIcon,
   ModelIcon,
   SettingsIcon,
   BrandIcon,
@@ -12,6 +13,7 @@ import { Select } from "../components/Select";
 import { ThemeSwitch } from "../components/ThemeSwitch";
 import { ModelsPage } from "./ModelsPage";
 import { BridgePage } from "./BridgePage";
+import { HelpPage, type HelpOpen } from "./HelpPage";
 import { SettingRow } from "../components/SettingRow";
 import { SlidingTabs } from "../components/SlidingTabs";
 import { ConfigEditor } from "../components/ConfigEditor";
@@ -24,7 +26,7 @@ import {
   type LocaleId,
 } from "../locale";
 
-type Section = "settings" | "models" | "bridge" | "sponsor";
+type Section = "settings" | "models" | "bridge" | "help" | "sponsor";
 
 export function SettingsPage({
   bootstrap,
@@ -34,7 +36,7 @@ export function SettingsPage({
 }: {
   bootstrap: Bootstrap;
   section: Section;
-  onSection(section: Section): void;
+  onSection(section: Section | HelpOpen): void;
   reload(): Promise<void>;
 }) {
   const [theme, setTheme] = useState(readTheme);
@@ -73,6 +75,7 @@ export function SettingsPage({
                   },
                 ]
               : []),
+            { id: "help", name: "使用说明", icon: <HelpIcon className="button-icon" /> },
             { id: "sponsor", name: "赞助作者", icon: <BrandIcon className="button-icon" /> },
           ]}
         />
@@ -82,6 +85,8 @@ export function SettingsPage({
           <ModelsPage bootstrap={bootstrap} reload={reload} />
         ) : section === "bridge" ? (
           <BridgePage bootstrap={bootstrap} reload={reload} />
+        ) : section === "help" ? (
+          <HelpPage onOpen={(target) => onSection(target)} />
         ) : section === "sponsor" ? (
           <SponsorNote />
         ) : (

@@ -311,9 +311,14 @@ it("opens theme choices and settings from the local user slot", async () => {
     />,
   );
   expect(screen.queryByRole("button", { name: "设置" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "使用说明" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /本地用户/ }));
   expect(screen.getByRole("menu", { name: "账户菜单" })).toBeTruthy();
+  expect(screen.getByRole("menuitem", { name: "使用说明" })).toBeTruthy();
   expect(screen.getByRole("menuitem", { name: "设置" })).toBeTruthy();
+  const menu = screen.getByRole("menu", { name: "账户菜单" });
+  expect(menu.querySelector(".app-account-menu-prefs")).toBeTruthy();
+  expect(menu.querySelector(".app-account-menu-links")).toBeTruthy();
   expect(screen.getByText("主题")).toBeTruthy();
   expect(screen.getByRole("combobox", { name: "语言" })).toBeTruthy();
   const themeSwitch = screen.getByRole("switch", { name: "主题" });
@@ -331,6 +336,26 @@ it("opens theme choices and settings from the local user slot", async () => {
   );
   fireEvent.click(screen.getByRole("menuitem", { name: "设置" }));
   expect(seen).toEqual(["settings"]);
+});
+
+it("opens the product guide from the account menu", () => {
+  stubWide(true);
+  const seen: string[] = [];
+  render(
+    <AppShell
+      bootstrap={bootstrap}
+      page="chat"
+      detailsOpen={false}
+      onPage={(page) => seen.push(page)}
+      onNew={() => undefined}
+      onConversation={() => undefined}
+      onToggleDetails={() => undefined}
+      reload={async () => undefined}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /本地用户/ }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "使用说明" }));
+  expect(seen).toEqual(["help"]);
 });
 
 it("keeps BetterGI above the account divider", () => {

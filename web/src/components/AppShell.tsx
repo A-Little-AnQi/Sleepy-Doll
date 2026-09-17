@@ -672,7 +672,10 @@ export function AppShell({
         </div>
       )}
       <div className="app-sidebar-foot">
-        <SidebarAccount onSettings={() => onPage("settings")} />
+        <SidebarAccount
+          onHelp={() => onPage("help")}
+          onSettings={() => onPage("settings")}
+        />
       </div>
       <div
         className="app-sidebar-resize"

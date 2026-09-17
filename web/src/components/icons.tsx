@@ -112,6 +112,16 @@ export function SettingsIcon(p: IconProps) {
   );
 }
 
+export function HelpIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M9.5 9.4a2.5 2.5 0 1 1 3.7 2.2c-.8.5-1.2 1-1.2 1.9" />
+      <path d="M12 17.2h.01" />
+    </Svg>
+  );
+}
+
 export function SunIcon(p: IconProps) {
   return (
     <Svg {...p}>

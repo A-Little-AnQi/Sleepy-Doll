@@ -19,6 +19,7 @@ export type Page =
   | "extensions"
   | "bridge"
   | "settings"
+  | "help"
   | "sponsor";
 
 export default function App() {
@@ -181,6 +182,7 @@ export default function App() {
             onConversation={openConversation}
             reload={reload}
             onComposerDraft={setComposingNewChat}
+            onOpenHelp={() => setPage("help")}
           />
         ) : visiblePage === "tasks" ? (
           <TasksPage
@@ -207,6 +209,7 @@ export default function App() {
             section={
               visiblePage === "models" ||
               visiblePage === "bridge" ||
+              visiblePage === "help" ||
               visiblePage === "sponsor"
                 ? visiblePage
                 : "settings"

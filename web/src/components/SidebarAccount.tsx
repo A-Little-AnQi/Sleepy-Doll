@@ -18,8 +18,10 @@ import {
 
 export function SidebarAccount({
   onSettings,
+  onHelp,
 }: {
   onSettings(): void;
+  onHelp(): void;
 }) {
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState(readTheme);
@@ -93,32 +95,47 @@ export function SidebarAccount({
           role="menu"
           aria-label="账户菜单"
         >
-          <SettingRow label="主题" compact>
-            <ThemeSwitch theme={theme} onChange={applyTheme} />
-          </SettingRow>
-          <SettingRow label="语言" compact>
-            <Select
-              label="语言"
-              value={locale}
-              options={LOCALE_OPTIONS}
-              onChange={(value) => {
-                const next = value as LocaleId;
-                setLocale(next);
-                writeLocale(next);
+          <div className="app-account-menu-prefs">
+            <SettingRow label="主题" compact>
+              <ThemeSwitch theme={theme} onChange={applyTheme} />
+            </SettingRow>
+            <SettingRow label="语言" compact>
+              <Select
+                label="语言"
+                value={locale}
+                options={LOCALE_OPTIONS}
+                onChange={(value) => {
+                  const next = value as LocaleId;
+                  setLocale(next);
+                  writeLocale(next);
+                }}
+              />
+            </SettingRow>
+          </div>
+          <div className="app-account-menu-links">
+            <button
+              type="button"
+              className="app-account-more"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onHelp();
               }}
-            />
-          </SettingRow>
-          <button
-            type="button"
-            className="app-account-more"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onSettings();
-            }}
-          >
-            设置
-          </button>
+            >
+              使用说明
+            </button>
+            <button
+              type="button"
+              className="app-account-more"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onSettings();
+              }}
+            >
+              设置
+            </button>
+          </div>
         </div>
       )}
     </div>
