@@ -97,10 +97,18 @@ impl AppController {
         let skills = Arc::new(skills);
         let plugins = Arc::new(plugins);
         let bridge = Arc::new(BgiClient::new(config.bridge.clone()));
-        if config.bridge.enabled {
+        if config.host_plugin_enabled() && config.bridge.enabled {
             register_tools(&mut tools, bridge.clone())?;
         }
-        register_builtin_tools(&mut tools, skills.clone(), plugins.clone())?;
+        register_builtin_tools(
+            &mut tools,
+            skills.clone(),
+            plugins.clone(),
+            Arc::new(crate::runtime::workspace::Workspace::from_config(
+                &config_path,
+                (config.host_plugin_enabled() && config.bridge.enabled).then(|| bridge.clone()),
+            )),
+        )?;
         let tools = Arc::new(tools);
         let operation_store = Arc::new(
             crate::runtime::operation::operations::OperationStore::open(&config.storage.database)?,
@@ -189,8 +197,12 @@ impl AppController {
                 Ok(json!({"name":name}))
             }
             "plugin.remove" => {
+                let id = required(&params, "id")?;
+                if crate::extension::providers::is_host_provider(id) {
+                    return Err(Error::Config("随产品提供的插件不能移除。".into()));
+                }
                 let config = self.config.lock().unwrap().clone();
-                crate::runtime::host::installation::remove(&config, required(&params, "id")?)?;
+                crate::runtime::host::installation::remove(&config, id)?;
                 self.reload_extensions()?;
                 Ok(json!({"removed":true,"recoverable":true}))
             }
@@ -435,7 +447,7 @@ impl AppController {
                     .published_revision
                     .and_then(|revision| self.supervisor.tasks.revision(id, revision).ok());
                 Ok(json!({
-                    "summary":self.supervisor.tasks.summary(&definition, &is_available, &conversations),
+                    "summary":self.supervisor.tasks.summary(&definition, &is_available, &self.supervisor.introduced_providers(), &conversations),
                     "definition":definition,
                     "revision":revision,
                     "runs":self.supervisor.tasks.run_ids(id, 20)?,
@@ -747,27 +759,7 @@ impl AppController {
                 let enabled = params["enabled"]
                     .as_bool()
                     .ok_or_else(|| Error::Config("enabled 必须是布尔值".into()))?;
-                let mut config = self.config.lock().unwrap().bridge.clone();
-                if enabled {
-                    crate::bridge::control::prepare(&mut config)?;
-                    // Save credentials before starting a possibly delayed bridge.
-                    AppConfig::set_bridge(&self.config_path, &config)?;
-                    self.reload_runtime()?;
-                    crate::bridge::control::enable(&config)?;
-                    config.enabled = true;
-                    config.instance_id = None;
-                    AppConfig::set_bridge(&self.config_path, &config)?;
-                    self.reload_runtime()?;
-                    self.reload_extensions()?;
-                    Ok(json!({"enabled":true}))
-                } else {
-                    config.enabled = false;
-                    AppConfig::set_bridge(&self.config_path, &config)?;
-                    self.reload_runtime()?;
-                    self.reload_extensions()?;
-                    let warning = crate::bridge::control::disable(&config);
-                    Ok(json!({"enabled":false,"warning":warning}))
-                }
+                self.set_bridge_enabled(enabled)
             }
             _ => Err(Error::Config(format!("unknown IPC method: {method}"))),
         }
@@ -867,7 +859,7 @@ impl AppController {
                 .is_some_and(|current| current != expected)
         {
             return Err(Error::Conflict(
-                "任务已经发布过更新的版本，请刷新后重试".into(),
+                "任务已经发布过更新的版本，请再试一次".into(),
             ));
         }
         definition.published_revision = Some(revision_number);
@@ -1010,6 +1002,29 @@ impl AppController {
         }))
     }
 
+    fn set_bridge_enabled(&self, enabled: bool) -> Result<Value> {
+        let mut config = self.config.lock().unwrap().bridge.clone();
+        if enabled {
+            crate::bridge::control::prepare(&mut config)?;
+            AppConfig::set_bridge(&self.config_path, &config)?;
+            self.reload_runtime()?;
+            crate::bridge::control::enable(&config)?;
+            config.enabled = true;
+            config.instance_id = None;
+            AppConfig::set_bridge(&self.config_path, &config)?;
+            self.reload_runtime()?;
+            self.reload_extensions()?;
+            Ok(json!({"enabled":true}))
+        } else {
+            config.enabled = false;
+            AppConfig::set_bridge(&self.config_path, &config)?;
+            self.reload_runtime()?;
+            self.reload_extensions()?;
+            let warning = crate::bridge::control::disable(&config);
+            Ok(json!({"enabled":false,"warning":warning}))
+        }
+    }
+
     fn bootstrap(&self) -> Result<Value> {
         self.ensure_conversation_models()?;
         let extensions = self.extensions.read().unwrap();
@@ -1049,6 +1064,8 @@ impl AppController {
             })
         };
         let skill_environment = self.supervisor.skill_environment(&config);
+        let skill_context = skill_environment.context();
+        let online: Vec<&str> = skill_context.providers.iter().map(String::as_str).collect();
         let skills = extensions
             .skills
             .list()
@@ -1068,30 +1085,14 @@ impl AppController {
                     "requiresProviders":skill.requires_providers,
                     "instructions":skill.body,
                     // 「启用」是用户的开关，「可用」还取决于依赖是否在线 ——
-                    // 桥没连接时 BGI 的技能不该显示成正在生效。
+                    // 提供方没连上时，对应技能不该显示成正在生效。
                     "enabled":!config.agent.disabled_skills.contains(&skill.name),
                     "available":!config.agent.disabled_skills.contains(&skill.name)
-                        && extensions.skills.eligible(&skill, &skill_environment.context()),
-                    "unavailableReason": if skill.requires_providers.iter().any(|p| p == "bgi")
-                        && !config.bridge.enabled
-                    {
-                        "需要连接 BetterGI"
-                    } else {
-                        ""
-                    }
-                })
-            })
-            .collect::<Vec<_>>();
-        let plugins = extensions
-            .plugins
-            .list()
-            .iter()
-            .map(|plugin| {
-                json!({
-                    "manifest":{"id":plugin.manifest.id,"name":plugin.manifest.name,"version":plugin.manifest.version,"description":plugin.manifest.description},
-                    "status":&plugin.status,
-                    "error":plugin.error.as_ref().map(|_|"插件加载失败，请检查配置"),
-                    "configuredEnabled":config.plugins.enabled.contains(&plugin.manifest.id)
+                        && extensions.skills.eligible(&skill, &skill_context),
+                    "unavailableReason": crate::extension::providers::skill_unavailable_reason(
+                        &skill.requires_providers,
+                        &online,
+                    ),
                 })
             })
             .collect::<Vec<_>>();
@@ -1107,6 +1108,28 @@ impl AppController {
         } else {
             json!({"enabled":false,"connected":false,"baseUrl":config.bridge.base_url})
         };
+        let mut plugins = extensions
+            .plugins
+            .list()
+            .iter()
+            .map(|plugin| {
+                json!({
+                    "manifest":{"id":plugin.manifest.id,"name":plugin.manifest.name,"version":plugin.manifest.version,"description":plugin.manifest.description},
+                    "status":&plugin.status,
+                    "error":plugin.error.as_ref().map(|_|"插件加载失败，请检查配置"),
+                    "configuredEnabled":config.plugins.enabled.contains(&plugin.manifest.id)
+                })
+            })
+            .collect::<Vec<_>>();
+        if !plugins
+            .iter()
+            .any(|plugin| plugin["manifest"]["id"] == crate::extension::providers::HOST_PROVIDER)
+        {
+            plugins.insert(
+                0,
+                crate::extension::providers::host_plugin_view(config.host_plugin_enabled()),
+            );
+        }
         Ok(
             json!({"permission":permission,"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.supervisor.task_summaries(None)?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"conversationGroups":self.supervisor.journal.conversation_groups()?,"bridge":bridge_status}),
         )
@@ -1143,10 +1166,19 @@ impl AppController {
         )?;
         let skills = Arc::new(skills);
         let plugins = Arc::new(plugins);
-        if config.bridge.enabled {
-            register_tools(&mut tools, Arc::new(BgiClient::new(config.bridge.clone())))?;
+        let bridge = Arc::new(BgiClient::new(config.bridge.clone()));
+        if config.host_plugin_enabled() && config.bridge.enabled {
+            register_tools(&mut tools, bridge.clone())?;
         }
-        register_builtin_tools(&mut tools, skills.clone(), plugins.clone())?;
+        register_builtin_tools(
+            &mut tools,
+            skills.clone(),
+            plugins.clone(),
+            Arc::new(crate::runtime::workspace::Workspace::from_config(
+                &self.config_path,
+                (config.host_plugin_enabled() && config.bridge.enabled).then(|| bridge.clone()),
+            )),
+        )?;
         let tools = Arc::new(tools);
         self.operations
             .configure_file_brokers(plugins.broker_specs())?;
@@ -1251,6 +1283,7 @@ fn register_builtin_tools(
     registry: &mut ToolRegistry,
     skills: Arc<SkillRegistry>,
     plugins: Arc<PluginManager>,
+    workspace: Arc<crate::runtime::workspace::Workspace>,
 ) -> Result<()> {
     let core_read = || ToolExecution {
         deferred: false,
@@ -1259,7 +1292,7 @@ fn register_builtin_tools(
     };
     let skills_search = skills.clone();
     registry.register(
-        FunctionTool::new("skills.search", "仅在任务需要额外的已安装操作手册时搜索 Skill。bgi-operator 会自动加载，不需要先搜索或读取。", json!({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"],"additionalProperties":false}), "core:skills", move |arguments| serde_json::to_value(skills_search.search(arguments["query"].as_str().unwrap_or_default(), arguments["limit"].as_u64().unwrap_or(8) as usize)).map_err(Error::from))
+        FunctionTool::new("skills.search", "仅在任务需要额外的已安装操作手册时搜索 Skill。已经自动加载的手册不需要先搜索或读取。", json!({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"],"additionalProperties":false}), "core:skills", move |arguments| serde_json::to_value(skills_search.search(arguments["query"].as_str().unwrap_or_default(), arguments["limit"].as_u64().unwrap_or(8) as usize)).map_err(Error::from))
             .with_execution(core_read()),
     )?;
     registry.register(
@@ -1269,12 +1302,13 @@ fn register_builtin_tools(
     registry.register(
         FunctionTool::new(
             "plugins.list",
-            "仅在任务明确涉及扩展时列出已安装插件及启用状态。它不包含 BetterGI 原生功能。",
+            "仅在任务明确涉及扩展时列出已安装插件及启用状态。",
             json!({"type":"object","properties":{},"additionalProperties":false}),
             "core:plugins",
             move |_| Ok(plugins.public_list()),
         )
         .with_execution(core_read()),
     )?;
+    crate::runtime::workspace::register_tools(registry, workspace)?;
     Ok(())
 }

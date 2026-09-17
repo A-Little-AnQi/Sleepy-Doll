@@ -1,11 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import {
-  BridgeIcon,
-  ChevronIcon,
-  HistoryIcon,
-  RefreshIcon,
-} from "../components/icons";
+import { BridgeIcon, ChevronIcon, HistoryIcon } from "../components/icons";
 import { readError } from "../session";
 import type { Bootstrap } from "../types";
 import { BridgeApiExplorer } from "../components/BridgeApiExplorer";
@@ -27,10 +22,26 @@ export function BridgePage({
   const [showRecovery, setShowRecovery] = useState(false);
   const bridge = bootstrap.bridge;
   useEffect(() => {
-    if (!bridge.enabled || busy) return;
-    const timer = setInterval(() => void reload(), 5000);
-    return () => clearInterval(timer);
-  }, [bridge.enabled, busy, reload]);
+    void reload();
+  }, [reload]);
+  useEffect(() => {
+    if (!bridge.connected) {
+      setState(undefined);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .bridgeState()
+      .then((value) => {
+        if (!cancelled) setState(value);
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(readError(reason));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bridge.connected]);
   const toggle = async (enabled: boolean) => {
     setBusy(true);
     setError("");
@@ -84,7 +95,6 @@ export function BridgePage({
             disabled={busy}
             onClick={() => void toggle(true)}
           >
-            <RefreshIcon className="button-icon" />
             {busy ? "连接中…" : bridge.connected ? "重新连接" : "连接 BetterGI"}
           </button>
         </div>
@@ -125,28 +135,9 @@ export function BridgePage({
           <div>
             <strong>状态</strong>
             {!state && (
-              <span>{bridge.connected ? "点击刷新" : "未连接"}</span>
+              <span>{bridge.connected ? "正在读取…" : "未连接"}</span>
             )}
           </div>
-          <button
-            className="secondary-action"
-            disabled={busy || !bridge.connected}
-            onClick={() => {
-              setBusy(true);
-              setError("");
-              void api
-                .bridgeState()
-                .then(setState)
-                .catch((reason) => setError(readError(reason)))
-                .finally(() => {
-                  setBusy(false);
-                  void reload();
-                });
-            }}
-          >
-            <RefreshIcon className="button-icon" />
-            刷新
-          </button>
         </div>
         {state ? (
           <pre className="bridge-log">{JSON.stringify(state, null, 2)}</pre>

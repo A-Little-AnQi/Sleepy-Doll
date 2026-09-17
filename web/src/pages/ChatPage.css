@@ -139,26 +139,6 @@
   opacity: 0.22;
 }
 
-.chat-examples {
-  display: flex;
-  justify-content: center;
-  gap: 12px;
-  margin-top: 8px;
-}
-
-.chat-examples button {
-  border: 1px solid var(--border);
-  background: transparent;
-  border-radius: 7px;
-  font-size: 12px;
-  color: var(--secondary);
-  padding: 7px 13px;
-}
-
-.chat-examples button:hover {
-  background: var(--hover);
-}
-
 .queued-list > div {
   display: flex;
   align-items: center;
@@ -203,10 +183,6 @@
 
   .chat-welcome h2 {
     font-size: 23px;
-  }
-
-  .chat-examples {
-    display: none;
   }
 
   .composer-dock {

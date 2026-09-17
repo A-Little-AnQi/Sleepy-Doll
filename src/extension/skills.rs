@@ -37,7 +37,7 @@ pub struct SkillContext<'a> {
     pub plugins: &'a HashSet<String>,
     pub capabilities: &'a HashSet<String>,
     pub resource_kinds: &'a HashSet<String>,
-    /// 当前可用的领域提供方标识，例如 `bgi`。
+    /// 当前可用的领域提供方标识。
     pub providers: &'a HashSet<String>,
     pub platform: &'a str,
 }

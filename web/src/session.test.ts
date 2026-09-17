@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { api } from "./api";
-import { session } from "./session";
+import { session, subscribeRuns } from "./session";
 import type { RunEvent, TaskInfo } from "./types";
 
 vi.mock("./api", () => ({ api: { conversation: vi.fn(), events: vi.fn() } }));
@@ -72,6 +72,53 @@ describe("application-owned conversation subscriptions", () => {
     expect(entry.read().task?.state).toBe("answered");
     resubscribe();
     pending[3]?.resolve({ events: [] });
+    await flush();
+  });
+
+  it("notifies run subscribers so the shell can update without polling", async () => {
+    const id = "run-listener";
+    const pending: ReturnType<typeof deferred<{ events: RunEvent[] }>>[] = [];
+    vi.mocked(api.conversation).mockResolvedValue({ id, messages: [] });
+    vi.mocked(api.events).mockImplementation(() => {
+      const request = deferred<{ events: RunEvent[] }>();
+      pending.push(request);
+      return request.promise;
+    });
+    const seen: string[] = [];
+    const stop = subscribeRuns((task) => {
+      seen.push(`${task.id}:${task.state}`);
+    });
+    const entry = session(id);
+    const unsubscribe = entry.subscribe(vi.fn());
+    await flush();
+    pending[0]!.resolve({
+      events: [
+        {
+          sequence: 1,
+          conversationId: id,
+          runId: "run-z",
+          kind: "run.created",
+          data: { id: "run-z", state: "deciding" },
+        },
+      ],
+    });
+    await flush();
+    pending[1]!.resolve({
+      events: [
+        {
+          sequence: 2,
+          conversationId: id,
+          runId: "run-z",
+          kind: "run.changed",
+          data: { id: "run-z", state: "answered" },
+        },
+      ],
+    });
+    await flush();
+    expect(seen).toEqual(["run-z:deciding", "run-z:answered"]);
+    stop();
+    unsubscribe();
+    pending[2]?.resolve({ events: [] });
     await flush();
   });
 

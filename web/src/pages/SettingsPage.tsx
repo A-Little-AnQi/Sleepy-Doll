@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import "./SettingsPage.css";
 import type { Bootstrap } from "../types";
+import { hostPluginEnabled } from "../providers";
 import {
   BridgeIcon,
   ModelIcon,
@@ -63,7 +64,15 @@ export function SettingsPage({
           items={[
             { id: "settings", name: "通用", icon: <SettingsIcon className="button-icon" /> },
             { id: "models", name: "模型", icon: <ModelIcon className="button-icon" /> },
-            { id: "bridge", name: "BetterGI", icon: <BridgeIcon className="button-icon" /> },
+            ...(hostPluginEnabled(bootstrap)
+              ? [
+                  {
+                    id: "bridge" as const,
+                    name: "BetterGI",
+                    icon: <BridgeIcon className="button-icon" />,
+                  },
+                ]
+              : []),
             { id: "sponsor", name: "赞助作者", icon: <BrandIcon className="button-icon" /> },
           ]}
         />

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { api } from "../api";
 import { BridgePage } from "./BridgePage";
 import { PREVIEW_PERMISSION, type Bootstrap } from "../types";
@@ -56,6 +56,7 @@ it("does not open the catalog before BetterGI is connected", () => {
 });
 
 it("opens the catalog after BetterGI is connected", () => {
+  vi.mocked(api.bridgeState).mockResolvedValue({ enabled: true });
   vi.mocked(api.bridgeCatalog).mockResolvedValue({ total: 0, items: [] });
   render(
     <BridgePage bootstrap={bootstrap(true)} reload={async () => undefined} />,
@@ -66,4 +67,17 @@ it("opens the catalog after BetterGI is connected", () => {
   ).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: /接口目录/ }));
   expect(screen.getByRole("button", { name: "BetterGI" })).toBeTruthy();
+});
+
+it("loads host state when connected and has no refresh control", async () => {
+  vi.mocked(api.bridgeState).mockResolvedValue({ enabled: true });
+  render(
+    <BridgePage bootstrap={bootstrap(true)} reload={async () => undefined} />,
+  );
+  expect(screen.queryByRole("button", { name: "刷新" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /重新连接/ })).toBeTruthy();
+  await waitFor(() => {
+    expect(api.bridgeState).toHaveBeenCalled();
+  });
+  expect(await screen.findByText(/"enabled": true/)).toBeTruthy();
 });

@@ -4,7 +4,7 @@ import { readError } from "../session";
 import { Dialog } from "./Dialog";
 import { Toast } from "./Toast";
 import type { RecoveryRecord } from "../types";
-import { ChevronIcon, RefreshIcon } from "./icons";
+import { ChevronIcon } from "./icons";
 import "./BridgeRecovery.css";
 
 function isBackup(record: RecoveryRecord): boolean {
@@ -52,6 +52,11 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
   }, []);
   useEffect(() => {
     void refresh();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, [refresh]);
   const restore = async () => {
     if (!selected) return;
@@ -74,14 +79,6 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
         <button type="button" className="page-back" onClick={onBack}>
           <ChevronIcon className="button-icon" />
           BetterGI
-        </button>
-        <button
-          className="secondary-action"
-          disabled={busy}
-          onClick={() => void refresh()}
-        >
-          <RefreshIcon className="button-icon" />
-          刷新
         </button>
       </div>
       <div className="page-title">

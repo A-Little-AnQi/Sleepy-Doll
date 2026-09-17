@@ -5,6 +5,7 @@ pub mod operation;
 pub mod policy;
 pub mod store;
 pub mod types;
+pub mod workspace;
 
 use crate::{
     config::AppConfig,
@@ -66,6 +67,7 @@ const CORE_AGENT_POLICY: &str = r#"你是 Sleepy Doll，一个本地桌面助手
 3. 需要启动程序、更新内容、修改配置或执行任务时，直接去做。要不要先征求同意由运行时的审批级别决定，不要在对话里替它先问一遍；被拦下时再说明它在等什么。
 4. 一个数据源已经明确报出连接或鉴权错误时，不再调用依赖它的其他工具，直接报告这一个阻塞项。
 5. 回复先给结果；只附必要证据、生效条件，或一个无法自行解决的阻塞项。不要给用户罗列选择题来代替继续工作，也不要把自己能做到的准备步骤交回给用户。
+6. 软件目录内的本机操作使用 workspace 工具。用户没有 Node、Python、Git 或其他开发环境，命令只通过 PowerShell 执行；不要让用户安装中间件或运行时。路径必须落在软件目录内，越界或被拒绝就停止，不要改用其他方式绕过。宿主软件的配置只能走对应的桥，不能用 workspace 文件或 PowerShell 改。
 
 对用户说话：
 - 进程、注入、反射、程序集、服务、方法、路由、端点、RPC、schema、序列化、HTTP 状态码都是内部实现，不是用户要看的内容；把它们翻译成用户的功能和结果。
@@ -216,10 +218,9 @@ impl Supervisor {
             .iter()
             .cloned()
             .collect::<HashSet<_>>();
-        // 领域说明跟着提供方走：桥关掉，BGI 的行为规范与操作手册也不再出现在
-        // 提示词里，通用对话不会被它带偏。
+        // 领域说明跟着提供方走：宿主插件关掉，对应手册也不再出现在提示词里。
         let mut providers = plugins.clone();
-        if config.bridge.enabled {
+        if crate::extension::providers::host_plugin_enabled(&config.plugins.disabled) {
             providers.insert("bgi".into());
         }
         SkillEnvironment {
@@ -432,7 +433,7 @@ impl Supervisor {
             && expected != revision.revision
         {
             return Err(Error::Conflict(format!(
-                "任务已更新到第 {} 版，请刷新后重试",
+                "任务已更新到第 {} 版，请再试一次",
                 revision.revision
             )));
         }
@@ -468,6 +469,11 @@ impl Supervisor {
         self.journal.conversations_matching(query)
     }
 
+    pub fn introduced_providers(&self) -> HashSet<String> {
+        let config = self.config.read().unwrap();
+        self.skill_environment(&config).providers
+    }
+
     /// 任务定义摘要。依赖可用性由运行时判定，Core 不认识具体领域工具。
     pub fn task_summaries(
         &self,
@@ -481,6 +487,7 @@ impl Supervisor {
             .collect::<HashSet<_>>();
         let definitions = self.tasks.definitions()?;
         let available = self.tool_names();
+        let introduced = self.introduced_providers();
         let is_available = |name: &str| available.contains(name);
         let mut summaries = definitions
             .iter()
@@ -490,7 +497,7 @@ impl Supervisor {
             })
             .map(|definition| {
                 self.tasks
-                    .summary(definition, &is_available, &conversations)
+                    .summary(definition, &is_available, &introduced, &conversations)
             })
             .collect::<Vec<_>>();
         summaries.sort_by(|left, right| {
@@ -1491,7 +1498,7 @@ impl Supervisor {
         for (name, description, properties, required, execution) in [
             (
                 "tools.search",
-                "仅在任务明确涉及已安装插件时搜索插件工具。它不包含 BetterGI 原生接口或 User 文件。",
+                "仅在任务明确涉及已安装插件时搜索插件工具。它不包含宿主原生接口或用户目录里的文件。",
                 json!({"query":{"type":"string"}}),
                 json!(["query"]),
                 ToolExecution::read_only(),
@@ -1529,14 +1536,14 @@ impl Supervisor {
             ),
             (
                 "resource.search",
-                "仅搜索已安装插件登记的资源；不搜索 BetterGI 的配置组、路线、脚本或原生接口。",
+                "仅搜索已安装插件登记的资源；不搜索宿主原生接口或用户目录里的文件。",
                 json!({"query":{"type":"string"}}),
                 json!(["query"]),
                 ToolExecution::read_only(),
             ),
             (
                 "operation.propose",
-                "提交已安装领域插件生成的 MutationPlan。普通 BetterGI 文件和接口操作不使用此入口。",
+                "提交已安装领域插件生成的 MutationPlan。宿主文件和接口操作不使用此入口。",
                 json!({"title":{"type":"string"},"plan":{"type":"object"}}),
                 json!(["title", "plan"]),
                 ToolExecution {
@@ -1558,7 +1565,7 @@ impl Supervisor {
             ),
             (
                 "skills.reference",
-                "当已加载 Skill 明确引用同目录资料时读取该资料；不用于发现 BetterGI 内容。",
+                "当已加载 Skill 明确引用同目录资料时读取该资料；不用于发现宿主内容。",
                 json!({"name":{"type":"string"},"path":{"type":"string"}}),
                 json!(["name", "path"]),
                 ToolExecution::read_only(),
@@ -2257,7 +2264,12 @@ impl Supervisor {
                 Ok(json!({"plan":plan,"attempts":self.journal.attempts(&run.id)?}))
             }
             // 用户文件是本地文件，不是游戏对象，也不属于任何插件。
-            "bgi.user.list" | "bgi.user.read" | "bgi.user.inspect_script" | "bgi.user.resolve" => {
+            "bgi.user.list"
+            | "bgi.user.read"
+            | "bgi.user.inspect_script"
+            | "bgi.user.resolve"
+            | "workspace.list"
+            | "workspace.read" => {
                 let registry = self.tools().clone();
                 let call = call.clone();
                 registry
@@ -2271,13 +2283,14 @@ impl Supervisor {
                     .call_async(&call.name, &call.arguments, cancel.clone())
                     .await
             }
-            "bgi.user.write" | "bgi.user.restore" | "bgi.job.cancel" => {
+            "bgi.user.write" | "bgi.user.restore" | "bgi.job.cancel" | "workspace.write"
+            | "workspace.delete" | "workspace.shell" => {
                 let request = json!({"methodId":call.name,"arguments":a});
                 let scope = self.change_scope(call, definition, cancel).await;
                 let permission = operation::permissions::PermissionEngine::decide(
                     current.runtime.permission_mode,
                     &operation::permissions::PermissionRequest {
-                        provider_id: "core:bgi",
+                        provider_id: definition.source.as_str(),
                         resource_ids: &[],
                         resource_kinds: &[],
                         effect: definition.execution.effect,
@@ -2536,7 +2549,14 @@ mod prompt_tests {
                 "领域内容混进了全局提示词：{leaked}"
             );
         }
-        for required in ["先给结果", "无法观测", "不是角色扮演", "内部实现"] {
+        for required in [
+            "先给结果",
+            "无法观测",
+            "不是角色扮演",
+            "内部实现",
+            "PowerShell",
+            "软件目录",
+        ] {
             assert!(
                 CORE_AGENT_POLICY.contains(required),
                 "missing policy: {required}"
@@ -2544,7 +2564,7 @@ mod prompt_tests {
         }
     }
 
-    /// 领域说明绑定在提供方上：桥没开，BGI 的行为规范与操作手册都不注入。
+    /// 领域说明绑定在提供方上：宿主插件关掉，对应手册都不注入。
     #[test]
     fn bgi_skills_are_gated_on_the_bridge_provider() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("skills");
@@ -2569,7 +2589,7 @@ mod prompt_tests {
             };
             assert!(
                 !registry.eligible(skill, &context),
-                "{name} 在桥关闭时不该注入"
+                "{name} 在提供方未引入时不该注入"
             );
             let context = crate::extension::skills::SkillContext {
                 providers: &with_bgi,
@@ -2577,7 +2597,7 @@ mod prompt_tests {
             };
             assert!(
                 registry.eligible(skill, &context),
-                "{name} 在桥开启时应当注入"
+                "{name} 在提供方开启时应当注入"
             );
         }
     }

@@ -66,7 +66,7 @@ requiresProviders: bgi
 
 ## 修改全局设置
 
-`User\config.json` 不用 `bgi.user.write`。运行中的 BetterGI 会用内存值覆盖磁盘，而且字段 setter 可能有联动行为。
+`User\config.json` 和 BetterGI 安装目录里的宿主配置只能通过桥的设置事务修改，禁止用 `workspace.write`、`workspace.shell` 或任何本机文件命令改它们。运行中的 BetterGI 会用内存值覆盖磁盘，而且字段 setter 可能有联动行为。用户没有开发环境，不要为此安装中间件。
 
 固定流程：
 

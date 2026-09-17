@@ -24,12 +24,12 @@ it("runs the action instead of just closing when one is given", () => {
     <Toast
       message="连接中断"
       duration={0}
-      action={{ label: "刷新状态", onAction }}
+      action={{ label: "重试", onAction }}
       onDismiss={onDismiss}
     />,
   );
   const button = container.querySelector(".toast-action");
-  expect(button?.textContent).toBe("刷新状态");
+  expect(button?.textContent).toBe("重试");
   act(() => button?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
   expect(onAction).toHaveBeenCalled();
   // 动作按钮只跑动作，不额外触发一次「点哪都关」。

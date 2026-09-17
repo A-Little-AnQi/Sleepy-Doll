@@ -226,9 +226,7 @@ pub fn recovery(action: &str, arguments: &[&str]) -> Result<Value> {
         crate::runtime::host::process::hide_console(&mut command);
         let output = tokio::time::timeout(std::time::Duration::from_secs(12), command.output())
             .await
-            .map_err(|_| {
-                Error::Tool("恢复超时，结果尚未确认。请刷新后核对，先不要启动 BetterGI。".into())
-            })??;
+            .map_err(|_| Error::Tool("恢复超时，结果尚未确认。先不要启动 BetterGI。".into()))??;
         let value: Value = serde_json::from_slice(&output.stdout)
             .map_err(|_| Error::Tool("恢复配置失败，请稍后重试。".into()))?;
         if value["ok"] != true {

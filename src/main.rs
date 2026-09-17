@@ -68,7 +68,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     sleepy_doll::config::seed(&config_path)?;
     let controller = Arc::new(AppController::load(&config_path)?);
-    if sleepy_doll::AppConfig::load(&config_path)?.bridge.enabled {
+    let startup_config = sleepy_doll::AppConfig::load(&config_path)?;
+    if startup_config.host_plugin_enabled() && startup_config.bridge.enabled {
         let startup = controller.clone();
         thread::spawn(move || {
             let _ = startup.handle(

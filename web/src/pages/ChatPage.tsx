@@ -27,12 +27,14 @@ interface Props {
   conversationId?: string | undefined;
   onConversation(id: string): void;
   reload(): Promise<void>;
+  onComposerDraft?(active: boolean): void;
 }
 export function ChatPage({
   bootstrap,
   conversationId,
   onConversation,
   reload,
+  onComposerDraft,
 }: Props) {
   const data = useSession(conversationId);
   const { messages, task, stream, question, approval, plan, loading } = data;
@@ -41,6 +43,11 @@ export function ChatPage({
   const [prompt, setPrompt] = useState(
     () => localStorage.getItem(draftKey) ?? "",
   );
+  const [promptKey, setPromptKey] = useState(draftKey);
+  if (promptKey !== draftKey) {
+    setPromptKey(draftKey);
+    setPrompt(localStorage.getItem(draftKey) ?? "");
+  }
   const [notice, setNotice] = useState("");
   const [unread, setUnread] = useState(false);
   const [sending, setSending] = useState(false);
@@ -78,13 +85,18 @@ export function ChatPage({
     };
   }, []);
   useEffect(() => {
-    setPrompt(localStorage.getItem(draftKey) ?? "");
     setError("");
     setNotice("");
     setSending(false);
     setPendingModel(null);
     follow.current = true;
   }, [draftKey]);
+  useEffect(() => {
+    onComposerDraft?.(!conversationId && prompt.trim().length > 0);
+  }, [conversationId, prompt, onComposerDraft]);
+  useEffect(() => {
+    return () => onComposerDraft?.(false);
+  }, [onComposerDraft]);
   useEffect(() => {
     setConfirming(false);
   }, [approval?.id]);
@@ -346,14 +358,6 @@ export function ChatPage({
             message={error || data.error}
             // 连接断了是个持续状态，不自动消失，免得用户还没看清就没了。
             duration={data.error ? 0 : 4000}
-            action={{
-              label: "刷新状态",
-              onAction: () => {
-                setError("");
-                if (conversationId) session(conversationId).start();
-                void reload();
-              },
-            }}
             onDismiss={() => setError("")}
           />
         )}
@@ -495,21 +499,6 @@ export function ChatPage({
             </div>
           </div>
         </ComposerDeck>
-        {welcome && (
-          <div className="chat-examples">
-            {["查看游戏状态", "查找可用路线"].map((example) => (
-              <button
-                key={example}
-                onClick={() => {
-                  setDraft(example);
-                  textarea.current?.focus();
-                }}
-              >
-                {example}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
     </section>
   );

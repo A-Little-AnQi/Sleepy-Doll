@@ -21,7 +21,7 @@ export interface SkillInfo {
   tags: string[];
   enabled?: boolean;
   alwaysLoad?: boolean;
-  /** 需要哪些领域提供方在线，例如 `bgi`。 */
+  /** 需要哪些领域提供方在线。界面只展示插件，不暴露内部 id。 */
   requiresProviders?: string[];
   /**
    * 用户开关是开的、依赖也在线，这份说明才会真的进入模型上下文。
@@ -36,6 +36,8 @@ export interface PluginInfo {
   status: string;
   configuredEnabled?: boolean;
   error?: string;
+  /** 随产品提供的宿主插件，不能移除。 */
+  host?: boolean;
 }
 export interface ConversationInfo {
   id: string;

@@ -161,6 +161,7 @@ class Session {
             if (["run.created", "run.changed"].includes(event.kind)) {
               const run = event.data as unknown as TaskInfo;
               this.runs.set(run.id, run);
+              emitRun(run);
               refresh = true;
               if (!isRunning(run)) {
                 this.approvals.delete(run.id);
@@ -282,6 +283,20 @@ export function session(id: string) {
   }
   return entry;
 }
+const runListeners = new Set<(task: TaskInfo) => void>();
+
+function emitRun(task: TaskInfo) {
+  runListeners.forEach((listener) => listener(task));
+}
+
+/** 运行状态变化时通知壳层，用来更新列表，而不是定时拉 task.list。 */
+export function subscribeRuns(listener: (task: TaskInfo) => void) {
+  runListeners.add(listener);
+  return () => {
+    runListeners.delete(listener);
+  };
+}
+
 export function watchTasks(tasks: TaskInfo[]) {
   for (const task of tasks)
     if (isRunning(task)) session(task.conversationId).start();

@@ -44,6 +44,7 @@ it("lists restorable backups and hides unreadable records", async () => {
   });
   render(<BridgeRecovery onBack={vi.fn()} />);
   expect(await screen.findByText("autoPickEnabled、triggerInterval")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "刷新" })).toBeNull();
   expect(screen.queryByText("记录无法校验。")).toBeNull();
   expect(screen.queryByText("已提交")).toBeNull();
   expect(screen.queryByText("记录不可用")).toBeNull();

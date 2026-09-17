@@ -24,6 +24,7 @@ export function DetailsPanel({
   selectedTask,
   onSelectTask,
   onOpenConversation,
+  onConnectTools,
   reload,
   onClose,
 }: {
@@ -32,6 +33,7 @@ export function DetailsPanel({
   selectedTask?: string | undefined;
   onSelectTask(id: string | undefined): void;
   onOpenConversation(id: string): void;
+  onConnectTools?(): void;
   reload(): Promise<void>;
   onClose(): void;
 }) {
@@ -91,6 +93,7 @@ export function DetailsPanel({
       }),
     askAi: (task) =>
       onOpenConversation(task.sourceConversationId ?? conversationId ?? ""),
+    connect: () => onConnectTools?.(),
     open: (task) => onSelectTask(task.id),
     openSource: (task) => {
       if (task.sourceConversationId)
@@ -244,7 +247,11 @@ function TaskDetail({
             <button
               className="secondary-action"
               disabled={busy === summary.id}
-              onClick={() => actions.askAi?.(summary)}
+              onClick={() =>
+                summary.state === "unavailable"
+                  ? actions.connect?.(summary)
+                  : actions.askAi?.(summary)
+              }
             >
               {summary.actionLabel}
             </button>

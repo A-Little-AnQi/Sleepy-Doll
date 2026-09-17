@@ -324,6 +324,7 @@ impl TaskStore {
         &self,
         definition: &WorkflowDefinition,
         available: Availability<'_>,
+        introduced: &HashSet<String>,
     ) -> (DefinitionState, Option<WorkflowRevision>, Option<String>) {
         if definition.deleted_at.is_some() {
             return (DefinitionState::Deleted, None, None);
@@ -369,7 +370,9 @@ impl TaskStore {
             return (
                 DefinitionState::Unavailable,
                 Some(revision),
-                Some(format!("缺少依赖工具：{}", missing.join("、"))),
+                Some(crate::extension::providers::missing_plugin_issue(
+                    &missing, introduced,
+                )),
             );
         }
         (DefinitionState::ReadyUnverified, Some(revision), None)
@@ -379,9 +382,10 @@ impl TaskStore {
         &self,
         definition: &WorkflowDefinition,
         available: Availability<'_>,
+        introduced: &HashSet<String>,
         known_conversations: &HashSet<String>,
     ) -> TaskSummary {
-        let (state, revision, issue) = self.state_of(definition, available);
+        let (state, revision, issue) = self.state_of(definition, available, introduced);
         let model_usage = revision
             .as_ref()
             .map(|revision| revision.model_usage)

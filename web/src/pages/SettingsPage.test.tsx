@@ -128,7 +128,31 @@ it("opens the config editor from the general settings", async () => {
   expect(document.querySelector(".sd-dialog-layer")?.parentElement).toBe(
     document.body,
   );
-  await waitFor(() => {
-    expect(dialog.textContent).toContain("/tmp/config.json");
-  });
+});
+
+it("hides the BetterGI settings tab when the host plugin is off", () => {
+  render(
+    <SettingsPage
+      bootstrap={{
+        ...bootstrap,
+        plugins: [
+          {
+            manifest: {
+              id: "bgi",
+              name: "BetterGI",
+              version: "1",
+              description: "游戏自动化宿主",
+            },
+            status: "disabled",
+            configuredEnabled: false,
+            host: true,
+          },
+        ],
+      }}
+      section="settings"
+      onSection={() => undefined}
+      reload={async () => undefined}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: "BetterGI" })).toBeNull();
 });

@@ -8,8 +8,9 @@ import { ChatPage } from "./pages/ChatPage";
 import { ExtensionsPage } from "./pages/ExtensionsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TasksPage } from "./pages/TasksPage";
-import { readError, watchTasks } from "./session";
+import { isRunning, readError, subscribeRuns, watchTasks } from "./session";
 import type { Bootstrap, TaskSummary } from "./types";
+import { hostPluginEnabled } from "./providers";
 
 export type Page =
   | "chat"
@@ -22,6 +23,9 @@ export type Page =
 
 export default function App() {
   const [page, setPage] = useState<Page>("chat");
+  const [extensionsTab, setExtensionsTab] = useState<"skills" | "plugins">(
+    "skills",
+  );
   const [conversation, setConversation] = useState<string | undefined>(
     () => localStorage.getItem("sleepy-doll-active-conversation") ?? undefined,
   );
@@ -31,6 +35,7 @@ export default function App() {
   );
   const [selectedTask, setSelectedTask] = useState<string>();
   const [error, setError] = useState("");
+  const [composingNewChat, setComposingNewChat] = useState(false);
 
   useEffect(() => {
     if (conversation)
@@ -62,28 +67,30 @@ export default function App() {
   }, [reload]);
 
   useEffect(() => {
-    let stopped = false;
-    let timer: number;
-    const poll = async () => {
-      try {
-        const tasks = await api.tasks();
-        if (stopped) return;
-        // 后台会话的运行由订阅自己推进，切页不取消，也不抢当前焦点。
-        watchTasks(tasks);
-        setBootstrap((previous) =>
-          previous ? { ...previous, tasks } : previous,
-        );
-      } catch {
-        /* Conversation subscriptions surface connection failures. */
-      }
-      if (!stopped) timer = window.setTimeout(() => void poll(), 3000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void reload();
     };
-    void poll();
-    return () => {
-      stopped = true;
-      window.clearTimeout(timer);
-    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [reload]);
+
+  useEffect(() => {
+    // 运行列表靠会话事件推进，不定时打 task.list。
+    return subscribeRuns((task) => {
+      setBootstrap((previous) => {
+        if (!previous) return previous;
+        const tasks = previous.tasks.some((item) => item.id === task.id)
+          ? previous.tasks.map((item) => (item.id === task.id ? task : item))
+          : [task, ...previous.tasks];
+        return { ...previous, tasks };
+      });
+      if (isRunning(task)) watchTasks([task]);
+    });
   }, []);
+
+  useEffect(() => {
+    if (bootstrap) watchTasks(bootstrap.tasks);
+  }, [bootstrap]);
 
   if (!bootstrap) {
     return (
@@ -109,10 +116,22 @@ export default function App() {
     setPage("chat");
   };
 
+  const hostOn = hostPluginEnabled(bootstrap);
+  const visiblePage = page === "bridge" && !hostOn ? "settings" : page;
+  const openConnect = () => {
+    setSelectedTask(undefined);
+    setDetailsOpen(false);
+    if (hostOn) setPage("bridge");
+    else {
+      setExtensionsTab("plugins");
+      setPage("extensions");
+    }
+  };
+
   return (
     <AppShell
       bootstrap={bootstrap}
-      page={page}
+      page={visiblePage}
       conversationId={conversation}
       detailsOpen={detailsOpen}
       details={
@@ -122,6 +141,7 @@ export default function App() {
           selectedTask={selectedTask}
           onSelectTask={setSelectedTask}
           onOpenConversation={openConversation}
+          onConnectTools={openConnect}
           reload={reload}
           onClose={() => setDetailsOpen(false)}
         />
@@ -141,26 +161,28 @@ export default function App() {
       onConversation={openConversation}
       onToggleDetails={() => setDetailsOpen(!detailsOpen)}
       reload={reload}
+      composingNewChat={composingNewChat}
     >
       <MotionSwitch
         viewKey={
-          page === "chat"
+          visiblePage === "chat"
             ? "chat"
-            : page === "tasks"
+            : visiblePage === "tasks"
               ? "tasks"
-              : page === "extensions"
+              : visiblePage === "extensions"
                 ? "extensions"
                 : "settings"
         }
       >
-        {page === "chat" ? (
+        {visiblePage === "chat" ? (
           <ChatPage
             bootstrap={bootstrap}
             conversationId={conversation}
             onConversation={openConversation}
             reload={reload}
+            onComposerDraft={setComposingNewChat}
           />
-        ) : page === "tasks" ? (
+        ) : visiblePage === "tasks" ? (
           <TasksPage
             bootstrap={bootstrap}
             reload={reload}
@@ -169,13 +191,26 @@ export default function App() {
               setSelectedTask(task.id);
               setDetailsOpen(true);
             }}
+            onConnectTools={openConnect}
           />
-        ) : page === "extensions" ? (
-          <ExtensionsPage bootstrap={bootstrap} reload={reload} />
+        ) : visiblePage === "extensions" ? (
+          <ExtensionsPage
+            bootstrap={bootstrap}
+            reload={reload}
+            tab={extensionsTab}
+            onTab={setExtensionsTab}
+            onOpenHost={() => setPage("bridge")}
+          />
         ) : (
           <SettingsPage
             bootstrap={bootstrap}
-            section={page}
+            section={
+              visiblePage === "models" ||
+              visiblePage === "bridge" ||
+              visiblePage === "sponsor"
+                ? visiblePage
+                : "settings"
+            }
             onSection={setPage}
             reload={reload}
           />

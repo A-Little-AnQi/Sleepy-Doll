@@ -49,6 +49,11 @@ const labels: Record<string, string> = {
   "plugins.list": "读取插件列表",
   "tools.search": "检索工具",
   "resource.search": "查找资源",
+  "workspace.list": "查看软件目录",
+  "workspace.read": "读取软件目录文件",
+  "workspace.write": "写入软件目录文件",
+  "workspace.delete": "删除软件目录文件",
+  "workspace.shell": "执行 PowerShell",
 };
 
 function pushReasoning(turn: Turn, text: string) {

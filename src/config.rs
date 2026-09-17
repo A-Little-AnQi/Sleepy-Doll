@@ -172,6 +172,9 @@ pub struct PluginsConfig {
     pub directories: Vec<PathBuf>,
     #[serde(default)]
     pub enabled: Vec<String>,
+    /// 随产品提供的宿主插件默认开启，写进这里才关掉。
+    #[serde(default)]
+    pub disabled: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -370,8 +373,28 @@ impl AppConfig {
         })
     }
 
+    pub fn host_plugin_enabled(&self) -> bool {
+        crate::extension::providers::host_plugin_enabled(&self.plugins.disabled)
+    }
+
     pub fn set_plugin_enabled(path: impl AsRef<Path>, id: &str, enabled: bool) -> Result<()> {
         update_raw(path.as_ref(), |value| {
+            if crate::extension::providers::is_host_provider(id) {
+                if !value["plugins"].is_object() {
+                    value["plugins"] = serde_json::json!({});
+                }
+                if !value["plugins"]["disabled"].is_array() {
+                    value["plugins"]["disabled"] = serde_json::json!([]);
+                }
+                let disabled = value["plugins"]["disabled"]
+                    .as_array_mut()
+                    .ok_or_else(|| Error::Config("plugins.disabled must be an array".into()))?;
+                disabled.retain(|entry| entry.as_str() != Some(id));
+                if !enabled {
+                    disabled.push(serde_json::Value::String(id.to_owned()));
+                }
+                return Ok(());
+            }
             let entries = value["plugins"]["enabled"]
                 .as_array_mut()
                 .ok_or_else(|| Error::Config("plugins.enabled must be an array".into()))?;

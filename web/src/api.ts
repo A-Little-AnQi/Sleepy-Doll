@@ -127,7 +127,7 @@ function invoke<T>(
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
       pending.delete(id);
-      reject(new Error("请求超时。后台任务可能仍在运行，请刷新状态后重试。"));
+      reject(new Error("请求超时。后台任务可能仍在运行。"));
     }, timeoutMs);
     pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
     try {

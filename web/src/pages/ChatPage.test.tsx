@@ -17,7 +17,11 @@ import { PREVIEW_PERMISSION, type Bootstrap } from "../types";
 beforeAll(() => {
   Element.prototype.scrollTo = vi.fn();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+  sessionStorage.clear();
+});
 
 const bootstrap: Bootstrap = {
   configPath: "/tmp/config.json",
@@ -87,4 +91,39 @@ it("blocks sending until a model is configured", () => {
     (screen.getByRole("button", { name: "发送" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
+});
+
+it("does not seed the welcome composer with host-specific prompts", () => {
+  render(
+    <ChatPage
+      bootstrap={bootstrap}
+      onConversation={() => undefined}
+      reload={async () => undefined}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: "查看游戏状态" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "查找可用路线" })).toBeNull();
+});
+
+it("tells the shell when a new-chat composer has text", () => {
+  const onComposerDraft = vi.fn();
+  const { unmount } = render(
+    <ChatPage
+      bootstrap={bootstrap}
+      onConversation={() => undefined}
+      reload={async () => undefined}
+      onComposerDraft={onComposerDraft}
+    />,
+  );
+  expect(onComposerDraft).toHaveBeenCalledWith(false);
+  fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
+    target: { value: "帮我看看" },
+  });
+  expect(onComposerDraft).toHaveBeenLastCalledWith(true);
+  fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
+    target: { value: "  " },
+  });
+  expect(onComposerDraft).toHaveBeenLastCalledWith(false);
+  unmount();
+  expect(onComposerDraft).toHaveBeenLastCalledWith(false);
 });

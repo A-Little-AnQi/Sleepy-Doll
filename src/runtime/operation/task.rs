@@ -960,7 +960,7 @@ fn walk_tool(tool: &ToolNode, state: &mut Walk<'_>) {
         // 缺契约不阻止保存草稿，但阻止发布 —— 由调用方按 issues 判定。
         state.validation.issues.push(TaskIssue {
             node_id: id.clone(),
-            message: format!("工具「{name}」当前不可用，无法验证参数"),
+            message: "依赖的插件尚未连接，无法验证参数".into(),
         });
         *state.model_usage = ModelUsage::Unknown;
         return;

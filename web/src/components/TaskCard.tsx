@@ -12,6 +12,7 @@ export interface TaskActions {
   remove?(task: TaskSummary): void;
   openSource?(task: TaskSummary): void;
   askAi?(task: TaskSummary): void;
+  connect?(task: TaskSummary): void;
   open?(task: TaskSummary): void;
 }
 
@@ -54,7 +55,7 @@ export function TaskCard({
     : task.state === "archived"
       ? () => actions.archive?.(task, false)
       : task.state === "unavailable"
-        ? () => actions.askAi?.(task)
+        ? () => actions.connect?.(task)
         : () => actions.open?.(task);
   return (
     <article className="task-card" data-state={task.state}>

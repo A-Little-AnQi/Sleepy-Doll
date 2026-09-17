@@ -2,6 +2,7 @@
 
 pub mod mcp;
 pub mod plugins;
+pub mod providers;
 pub mod skills;
 
 use std::{collections::HashMap, sync::Arc};

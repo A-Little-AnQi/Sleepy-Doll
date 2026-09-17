@@ -178,10 +178,12 @@ impl<'a> TaskExecutor<'a> {
             }
         }
         if !missing.is_empty() {
-            return Err(Error::Conflict(format!(
-                "缺少依赖工具：{}",
-                missing.join("、")
-            )));
+            return Err(Error::Conflict(
+                crate::extension::providers::missing_plugin_issue(
+                    &missing,
+                    &self.supervisor.introduced_providers(),
+                ),
+            ));
         }
         Ok(())
     }

@@ -134,10 +134,59 @@ it("lets the user create a conversation group instead of toggling archived chats
   expect((screen.getByLabelText("分组名称") as HTMLInputElement).value).toBe(
     "新分组",
   );
+  expect(screen.queryByRole("button", { name: "新对话" })).toBeNull();
+});
+
+it("does not put an empty new chat in the sidebar on first load", () => {
+  renderShell(false);
+  expect(screen.queryByRole("button", { name: "新对话" })).toBeNull();
+  expect(screen.queryByText("还没有对话")).toBeNull();
+});
+
+it("puts a draft chat in the sidebar when the user starts a new chat", () => {
+  stubWide(true);
+  function Harness() {
+    const [id, setConversation] = useState<string | undefined>();
+    return (
+      <AppShell
+        bootstrap={bootstrap}
+        page="chat"
+        conversationId={id}
+        detailsOpen={false}
+        onPage={() => undefined}
+        onNew={() => setConversation(undefined)}
+        onConversation={setConversation}
+        onToggleDetails={() => undefined}
+        reload={async () => undefined}
+      />
+    );
+  }
+  render(<Harness />);
+  expect(screen.queryByRole("button", { name: "新对话" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "新建对话" }));
   expect(screen.getByRole("button", { name: "新对话" })).toBeTruthy();
 });
 
-it("does not animate an empty group body over the empty conversation hint", () => {
+it("puts a draft row in the sidebar once the new chat has text", () => {
+  stubWide(true);
+  render(
+    <AppShell
+      bootstrap={bootstrap}
+      page="chat"
+      detailsOpen={false}
+      composingNewChat
+      onPage={() => undefined}
+      onNew={() => undefined}
+      onConversation={() => undefined}
+      onToggleDetails={() => undefined}
+      reload={async () => undefined}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "新对话" })).toBeTruthy();
+  expect(screen.queryByText("还没有对话")).toBeNull();
+});
+
+it("does not animate an empty group body when there are no conversations", () => {
   stubWide(true);
   localStorage.setItem(
     GROUPS_KEY,
@@ -148,7 +197,7 @@ it("does not animate an empty group body over the empty conversation hint", () =
     }),
   );
   renderShell(false);
-  expect(screen.getByRole("button", { name: "新对话" }).closest(".app-group")).toBeNull();
+  expect(screen.queryByRole("button", { name: "新对话" })).toBeNull();
   expect(document.querySelector(".app-group-chats")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "222" }));
   expect(document.querySelector(".app-group-chats")).toBeNull();
@@ -267,6 +316,39 @@ it("keeps BetterGI above the account divider", () => {
   expect(button?.querySelector("path")?.getAttribute("d")).toBe(
     "M9 7V4M15 7V4M7 7h10v5a5 5 0 0 1-10 0zM12 17v4",
   );
+});
+
+it("hides the BetterGI entry when the host plugin is off", () => {
+  stubWide(true);
+  render(
+    <AppShell
+      bootstrap={{
+        ...bootstrap,
+        plugins: [
+          {
+            manifest: {
+              id: "bgi",
+              name: "BetterGI",
+              version: "1",
+              description: "游戏自动化宿主",
+            },
+            status: "disabled",
+            configuredEnabled: false,
+            host: true,
+          },
+        ],
+      }}
+      page="chat"
+      detailsOpen={false}
+      onPage={() => undefined}
+      onNew={() => undefined}
+      onConversation={() => undefined}
+      onToggleDetails={() => undefined}
+      reload={async () => undefined}
+    />,
+  );
+  expect(document.querySelector(".app-connection")).toBeNull();
+  expect(screen.queryByText("BetterGI")).toBeNull();
 });
 
 const chat = (
@@ -425,10 +507,11 @@ it("creates a draft chat from the group plus control", () => {
   fireEvent.click(
     screen.getByRole("button", { name: "在此分组新建对话", hidden: true }),
   );
-  expect(screen.getByRole("button", { name: "新对话" }).closest(".app-group")).toBeTruthy();
   expect(screen.getByRole("button", { name: "路线" }).getAttribute("aria-expanded")).toBe(
     "true",
   );
+  const draft = screen.getByRole("button", { name: "新对话" });
+  expect(draft.closest(".app-group")?.textContent).toContain("路线");
 });
 
 it("does not put a chrome title or details toggle on pages that already have a heading", () => {

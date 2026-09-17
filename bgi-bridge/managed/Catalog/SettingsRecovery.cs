@@ -87,7 +87,7 @@ public static class SettingsRecovery
     {
         if (HostRunning()) throw new BridgeException("HOST_RUNNING", "请先退出 BetterGI，再恢复配置。", 409);
         var (record, version, backup) = Read(directory, id);
-        if (version != expectedRecordVersion) throw new BridgeException("CONFIG_CONFLICT", "备份已更新，请刷新后再试。", 409);
+        if (version != expectedRecordVersion) throw new BridgeException("CONFIG_CONFLICT", "备份已更新。", 409);
         using var mutex = new Mutex(false, "Local\\SleepyDollRecovery-" + Hash(Encoding.UTF8.GetBytes(record.ConfigPath.ToLowerInvariant())));
         var acquired = false;
         try
@@ -95,7 +95,7 @@ public static class SettingsRecovery
             try { acquired = mutex.WaitOne(0); } catch (AbandonedMutexException) { acquired = true; }
             if (!acquired) throw new BridgeException("RECOVERY_BUSY", "已有恢复正在进行。", 409);
             if (CurrentVersion(record.ConfigPath) != expectedCurrentVersion)
-                throw new BridgeException("CONFIG_CONFLICT", "配置已变化，没有覆盖。请刷新后再试。", 409);
+                throw new BridgeException("CONFIG_CONFLICT", "配置已变化，没有覆盖。", 409);
             var before = File.Exists(record.ConfigPath) ? File.ReadAllBytes(record.ConfigPath) : [];
             var recovery = new SettingChangeRecord
             {

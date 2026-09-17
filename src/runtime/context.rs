@@ -128,6 +128,8 @@ fn reobtainable(name: &str) -> bool {
             | "plugins.list"
             | "tools.search"
             | "resource.search"
+            | "workspace.list"
+            | "workspace.read"
     )
 }
 

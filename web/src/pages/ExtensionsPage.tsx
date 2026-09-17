@@ -1,26 +1,32 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./ExtensionsPage.css";
 import { api } from "../api";
 import { Toast } from "../components/Toast";
-import {
-  CloseIcon,
-  PluginIcon,
-  RefreshIcon,
-  SearchIcon,
-  PlusIcon,
-} from "../components/icons";
+import { CloseIcon, PluginIcon, SearchIcon, PlusIcon } from "../components/icons";
 import { readError } from "../session";
 import type { Bootstrap } from "../types";
 import { MotionSwitch } from "../components/MotionSwitch";
 import { SlidingTabs } from "../components/SlidingTabs";
+import { providerOfTool } from "../providers";
 export function ExtensionsPage({
   bootstrap,
   reload,
+  tab = "skills",
+  onTab,
+  onOpenHost,
 }: {
   bootstrap: Bootstrap;
   reload(): Promise<void>;
+  tab?: "skills" | "plugins";
+  onTab?(tab: "skills" | "plugins"): void;
+  onOpenHost?(): void;
 }) {
-  const [tab, setTab] = useState<"skills" | "plugins">("skills");
+  const [uncontrolled, setUncontrolled] = useState<"skills" | "plugins">(tab);
+  const currentTab = onTab ? tab : uncontrolled;
+  const setTab = (value: "skills" | "plugins") => {
+    if (onTab) onTab(value);
+    else setUncontrolled(value);
+  };
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState("");
   const [install, setInstall] = useState(false);
@@ -43,7 +49,7 @@ export function ExtensionsPage({
     }
   };
   const items =
-    tab === "skills"
+    currentTab === "skills"
       ? bootstrap.skills.map((skill) => ({
           id: skill.name,
           name: skill.name,
@@ -59,6 +65,7 @@ export function ExtensionsPage({
                 : skill.source,
           detail: skill.instructions ?? "",
           error: "",
+          host: false,
         }))
       : bootstrap.plugins.map((plugin) => ({
           id: plugin.manifest.id,
@@ -67,12 +74,18 @@ export function ExtensionsPage({
           enabled: plugin.configuredEnabled ?? plugin.status === "enabled",
           available: plugin.status === "enabled",
           unavailableReason: plugin.error ?? "",
-          meta: plugin.manifest.version,
-          detail: bootstrap.tools
-            .filter((tool) => tool.source.includes(plugin.manifest.id))
-            .map((tool) => tool.name + "\n" + tool.description)
-            .join("\n\n"),
+          meta: plugin.host ? "随产品" : plugin.manifest.version,
+          detail: plugin.host
+            ? ""
+            : bootstrap.tools
+                .filter(
+                  (tool) =>
+                    providerOfTool(tool.name, tool.source) === plugin.manifest.id,
+                )
+                .map((tool) => tool.description || tool.name)
+                .join("\n\n"),
           error: plugin.error ?? "",
+          host: plugin.host === true,
         }));
   const filtered = items.filter((item) =>
     (item.name + item.description).toLowerCase().includes(query.toLowerCase()),
@@ -80,41 +93,50 @@ export function ExtensionsPage({
   const current = items.find((item) => item.id === selected);
   const toggle = (id: string, enabled: boolean) =>
     run(() =>
-      tab === "skills"
+      currentTab === "skills"
         ? api.setSkillEnabled(id, enabled)
         : api.setPluginEnabled(id, enabled),
     );
+  useEffect(() => {
+    let cancelled = false;
+    const scan = () => {
+      void api
+        .reloadExtensions()
+        .then(() => (cancelled ? undefined : reload()))
+        .catch((reason) => {
+          if (!cancelled) setError(readError(reason));
+        });
+    };
+    scan();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") scan();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [reload]);
   return (
     <div className="page-sheet extensions-page">
       <div className="page-title">
         <h2>已安装</h2>
-        <div className="detail-actions">
-          <button
-            className="icon-button"
-            aria-label="刷新扩展"
-            title="刷新"
-            disabled={busy}
-            onClick={() => void run(api.reloadExtensions)}
-          >
-            <RefreshIcon className="button-icon" />
-          </button>
-          <button
-            className="secondary-action"
-            onClick={() => {
-              setInstall(true);
-              setError("");
-              dialog.current?.showModal();
-            }}
-          >
-            <PlusIcon className="button-icon" />
-            {tab === "skills" ? "导入技能" : "导入插件"}
-          </button>
-        </div>
+        <button
+          className="secondary-action"
+          onClick={() => {
+            setInstall(true);
+            setError("");
+            dialog.current?.showModal();
+          }}
+        >
+          <PlusIcon className="button-icon" />
+          {currentTab === "skills" ? "导入技能" : "导入插件"}
+        </button>
       </div>
       <div className="list-toolbar">
         <SlidingTabs
           ariaLabel="扩展类型"
-          value={tab}
+          value={currentTab}
           onChange={(value) => {
             setTab(value);
             setQuery("");
@@ -146,7 +168,7 @@ export function ExtensionsPage({
       {error && !dialog.current?.open && (
         <Toast message={error} onDismiss={() => setError("")} />
       )}
-      <MotionSwitch viewKey={tab} kind="panel">
+      <MotionSwitch viewKey={currentTab} kind="panel">
       {filtered.length ? (
         <div className="extension-list">
           {filtered.map((item) => (
@@ -167,7 +189,6 @@ export function ExtensionsPage({
                 <span className="extension-meta">{item.meta}</span>
                 {item.description && <p>{item.description}</p>}
                 {item.error && <p>加载失败</p>}
-                {/* 开着但依赖不在线时，说清楚现在没生效，而不是让开关骗人。 */}
                 {item.enabled && !item.available && item.unavailableReason && (
                   <p className="extension-flag">
                     当前未生效：{item.unavailableReason}
@@ -189,7 +210,11 @@ export function ExtensionsPage({
         <div className="empty-state">
           <PluginIcon />
           <h3>
-            {query ? "无匹配结果" : tab === "skills" ? "暂无技能" : "暂无插件"}
+            {query
+              ? "无匹配结果"
+              : currentTab === "skills"
+                ? "暂无技能"
+                : "暂无插件"}
           </h3>
         </div>
       )}
@@ -212,7 +237,7 @@ export function ExtensionsPage({
         <div className="dialog-head">
           <h2>
             {install
-              ? tab === "skills"
+              ? currentTab === "skills"
                 ? "导入技能"
                 : "导入插件"
               : current?.name}
@@ -233,7 +258,7 @@ export function ExtensionsPage({
               onSubmit={(event) => {
                 event.preventDefault();
                 void run(() =>
-                  tab === "skills"
+                  currentTab === "skills"
                     ? api.installSkill(path)
                     : api.installPlugin(path),
                 ).then((ok) => {
@@ -246,7 +271,7 @@ export function ExtensionsPage({
             >
               <label>
                 <span>
-                  {tab === "skills" ? "技能目录" : "插件目录"}
+                  {currentTab === "skills" ? "技能目录" : "插件目录"}
                 </span>
                 <input
                   placeholder="文件夹的完整路径"
@@ -254,7 +279,7 @@ export function ExtensionsPage({
                   onChange={(event) => setPath(event.target.value)}
                 />
               </label>
-              {tab === "skills" && (
+              {currentTab === "skills" && (
                 <p className="field-help">
                   目录里要有 SKILL.md。导入后出现在本机技能目录，可随时开关。
                 </p>
@@ -273,11 +298,50 @@ export function ExtensionsPage({
               <>
                 <p>{current.description}</p>
                 {current.error && <p>{current.error}</p>}
-                <section className="page-block">
-                  <h3>{tab === "skills" ? "指令" : "提供的工具"}</h3>
-                  <pre>{current.detail || "无内容"}</pre>
-                </section>
-                {tab === "plugins" && (
+                {currentTab === "skills" ? (
+                  <section className="page-block">
+                    <h3>指令</h3>
+                    <pre>{current.detail || "无内容"}</pre>
+                  </section>
+                ) : current.host ? (
+                  <p className="muted">
+                    随产品提供。开启后会出现在侧栏和设置里。
+                  </p>
+                ) : (
+                  <section className="page-block">
+                    <h3>提供的工具</h3>
+                    <pre>{current.detail || "无内容"}</pre>
+                  </section>
+                )}
+                {currentTab === "skills" &&
+                  current.enabled &&
+                  !current.available && (
+                    <div className="detail-actions">
+                      <button
+                        className="secondary-action"
+                        onClick={() => {
+                          dialog.current?.close();
+                          setTab("plugins");
+                        }}
+                      >
+                        查看插件
+                      </button>
+                    </div>
+                  )}
+                {currentTab === "plugins" && current.host && current.enabled && (
+                  <div className="detail-actions">
+                    <button
+                      className="secondary-action"
+                      onClick={() => {
+                        dialog.current?.close();
+                        onOpenHost?.();
+                      }}
+                    >
+                      打开设置
+                    </button>
+                  </div>
+                )}
+                {currentTab === "plugins" && !current.host && (
                   <div className="detail-actions">
                     <button
                       className="secondary-action"

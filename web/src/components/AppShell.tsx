@@ -18,6 +18,7 @@ import {
   taskLabels,
 } from "../session";
 import type { Bootstrap, ConversationInfo } from "../types";
+import { hostPluginEnabled } from "../providers";
 import {
   BrandIcon,
   BridgeIcon,
@@ -150,6 +151,8 @@ interface Props {
   onConversation(id: string): void;
   onToggleDetails(): void;
   reload(): Promise<void>;
+  /** 输入框已有内容时，在侧栏放一条未落库的新会话。点新建由壳自己落行。 */
+  composingNewChat?: boolean;
 }
 
 export function AppShell({
@@ -164,6 +167,7 @@ export function AppShell({
   onConversation,
   onToggleDetails,
   reload,
+  composingNewChat = false,
 }: Props) {
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem("sleepy-doll-sidebar-collapsed") === "true",
@@ -200,6 +204,7 @@ export function AppShell({
   const [destinationGroupId, setDestinationGroupId] = useState<string | null>(
     destinationRef.current,
   );
+  const [startedNew, setStartedNew] = useState(false);
   const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
   const setDestination = (id: string | null) => {
     destinationRef.current = id;
@@ -266,6 +271,7 @@ export function AppShell({
   const startNew = (groupId: string | null = destinationRef.current) => {
     pendingGroupRef.current = groupId;
     setDestination(groupId);
+    setStartedNew(true);
     if (groupId) {
       const current = layoutRef.current;
       const group = current.groups.find((item) => item.id === groupId);
@@ -277,9 +283,13 @@ export function AppShell({
   };
   const openExisting = (id: string) => {
     pendingGroupRef.current = null;
+    setStartedNew(false);
     setDestination(layoutRef.current.membership[id] ?? null);
     onConversation(id);
   };
+  useEffect(() => {
+    if (conversationId) setStartedNew(false);
+  }, [conversationId]);
   useEffect(() => {
     if (!conversationId) return;
     if (pendingGroupRef.current) return;
@@ -342,7 +352,11 @@ export function AppShell({
     () => splitConversations(conversations, shownLayout),
     [conversations, shownLayout],
   );
-  const showDraft = page === "chat" && !conversationId && !query.trim();
+  const showDraft =
+    page === "chat" &&
+    !conversationId &&
+    !query.trim() &&
+    (composingNewChat || startedNew);
 
   const armDrag = (event: PointerEvent<HTMLElement>, item: DragItem) => {
     if (event.button !== 0) return;
@@ -647,20 +661,20 @@ export function AppShell({
               aria-hidden="true"
             />
           )}
-          {!conversations.length && !showDraft && (
-            <li className="app-conversation-empty">
-              {query ? "没有找到匹配的对话" : "还没有对话"}
-            </li>
-          )}
+          {!conversations.length && !showDraft && query.trim() ? (
+            <li className="app-conversation-empty">没有找到匹配的对话</li>
+          ) : null}
         </ul>
       </div>
-      <div className="app-sidebar-status">
-        <button className="app-connection" onClick={() => onPage("bridge")}>
-          <BridgeIcon className="app-nav-icon" />
-          <span>BetterGI</span>
-          <small>{bridgeLabel}</small>
-        </button>
-      </div>
+      {hostPluginEnabled(bootstrap) && (
+        <div className="app-sidebar-status">
+          <button className="app-connection" onClick={() => onPage("bridge")}>
+            <BridgeIcon className="app-nav-icon" />
+            <span>BetterGI</span>
+            <small>{bridgeLabel}</small>
+          </button>
+        </div>
+      )}
       <div className="app-sidebar-foot">
         <SidebarAccount onSettings={() => onPage("settings")} />
       </div>

@@ -47,11 +47,13 @@ export function TasksPage({
   reload,
   onOpenConversation,
   onOpenTask,
+  onConnectTools,
 }: {
   bootstrap: Bootstrap;
   reload(): Promise<void>;
   onOpenConversation(id: string): void;
   onOpenTask?: ((task: TaskSummary) => void) | undefined;
+  onConnectTools?: (() => void) | undefined;
 }) {
   const [tab, setTab] = useState<"tasks" | "runs">("tasks");
   const [query, setQuery] = useState("");
@@ -128,6 +130,7 @@ export function TasksPage({
         `请在这个对话里说明要改什么；「${task.name}」会生成新版本，旧版本继续可用。`,
       );
     },
+    connect: () => onConnectTools?.(),
     open: (task) => onOpenTask?.(task),
     openSource: (task) => {
       if (task.sourceConversationId)
