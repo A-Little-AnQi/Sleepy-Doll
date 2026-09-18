@@ -1,6 +1,66 @@
+import fs from "node:fs";
+import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+
+const IPC_PORT_FILE = fileURLToPath(
+  new URL("./.sleepy-doll/dev/ipc.port", import.meta.url),
+);
+
+function ipcPort() {
+  try {
+    const port = Number(fs.readFileSync(IPC_PORT_FILE, "utf8").trim());
+    if (Number.isInteger(port) && port >= 1 && port <= 65535) return port;
+  } catch {
+    // sleepy-doll-dev 还没写出端口文件时，沿用默认。
+  }
+  return 47124;
+}
+
+function ipcProxy(): Plugin {
+  return {
+    name: "sleepy-doll:ipc-proxy",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url ?? "";
+        if (!url.startsWith("/ipc")) {
+          next();
+          return;
+        }
+        const port = ipcPort();
+        const proxy = http.request(
+          {
+            hostname: "127.0.0.1",
+            port,
+            path: url,
+            method: req.method,
+            headers: { ...req.headers, host: `127.0.0.1:${port}` },
+            timeout: 120_000,
+          },
+          (incoming) => {
+            res.writeHead(incoming.statusCode ?? 502, incoming.headers);
+            incoming.pipe(res);
+          },
+        );
+        proxy.on("timeout", () => {
+          proxy.destroy();
+          if (!res.headersSent) {
+            res.statusCode = 504;
+            res.end();
+          }
+        });
+        proxy.on("error", () => {
+          if (!res.headersSent) {
+            res.statusCode = 502;
+            res.end();
+          }
+        });
+        req.pipe(proxy);
+      });
+    },
+  };
+}
 
 /**
  * 主程序的组件样式是按「product.css 排在最后」写的，同权重时由它盖过组件样式。
@@ -38,7 +98,7 @@ function designCssLast(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), designCssLast()],
+  plugins: [react(), designCssLast(), ipcProxy()],
   root: "web",
   build: {
     outDir: "../target/ui",
@@ -54,14 +114,7 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5173,
-    proxy: {
-      "/ipc": {
-        target: "http://127.0.0.1:47124",
-        changeOrigin: true,
-        timeout: 120_000,
-        proxyTimeout: 120_000,
-      },
-    },
+    strictPort: false,
     watch: process.env.WSL_DISTRO_NAME
       ? {
           usePolling: true,

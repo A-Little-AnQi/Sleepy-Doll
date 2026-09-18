@@ -17,7 +17,7 @@
   },
   "bridge": {
     "enabled": false,
-    "baseUrl": "http://127.0.0.1:3499",
+    "baseUrl": "http://127.0.0.1:26101",
     "token": "${ENV:BGI_BRIDGE_TOKEN}",
     "instanceId": "",
     "timeoutMs": 30000

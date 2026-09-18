@@ -1,13 +1,13 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-vi.mock("./api", () => ({
+vi.mock("./ipc/api", () => ({
   api: {
     bootstrap: vi.fn(),
   },
 }));
 
-import { api } from "./api";
+import { api } from "./ipc/api";
 import App from "./App";
 
 afterEach(cleanup);

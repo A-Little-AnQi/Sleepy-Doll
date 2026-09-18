@@ -6,13 +6,9 @@ use sleepy_doll::app::AppController;
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 const CONFIG: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/.sleepy-doll/dev/config.json");
-const BIND: &str = "127.0.0.1:47124";
-const DEV_ORIGINS: [&str; 4] = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://[::1]:5173",
-    "http://localhost:4173",
-];
+const IPC_PORT_FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/.sleepy-doll/dev/ipc.port");
+const IPC_PORT: u16 = 47124;
+const IPC_SPAN: u16 = 32;
 
 #[derive(Deserialize)]
 struct IpcRequest {
@@ -57,9 +53,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("无法写入日志（{error}），本次运行的记录只有标准错误。");
     }
     let controller = Arc::new(AppController::load(&config)?);
-    let server = Server::http(BIND).map_err(|error| error.to_string())?;
-    println!("Sleepy Doll dev backend: http://{BIND}/ipc");
-    println!("UI preview: http://127.0.0.1:5173/");
+    let (server, port) = bind_ipc()?;
+    std::fs::write(IPC_PORT_FILE, format!("{port}\n"))?;
+    println!("Sleepy Doll dev backend: http://127.0.0.1:{port}/ipc");
+    println!("UI preview: Vite 默认 http://127.0.0.1:5173/ ，占用则顺延");
     println!("Configuration: {}", config.display());
     loop {
         let request = server.recv()?;
@@ -75,7 +72,7 @@ fn handle_request(mut request: Request, controller: &Arc<AppController>) {
         .find(|header| header.field.equiv("Origin"))
         .map(|header| header.value.as_str().to_owned());
     if let Some(value) = origin.as_deref()
-        && !DEV_ORIGINS.contains(&value)
+        && !loopback_origin(value)
     {
         let _ = request.respond(Response::empty(403));
         return;
@@ -128,14 +125,36 @@ fn ipc(body: &str, controller: &Arc<AppController>) -> (u16, Value) {
     }
 }
 
+fn bind_ipc() -> Result<(Server, u16), Box<dyn std::error::Error>> {
+    let mut last = String::new();
+    for port in IPC_PORT..IPC_PORT.saturating_add(IPC_SPAN) {
+        match Server::http(format!("127.0.0.1:{port}")) {
+            Ok(server) => return Ok((server, port)),
+            Err(error) => last = error.to_string(),
+        }
+    }
+    Err(format!("无法绑定 127.0.0.1:{IPC_PORT} 起的端口：{last}").into())
+}
+
+fn loopback_origin(origin: &str) -> bool {
+    let Ok(url) = url::Url::parse(origin) else {
+        return false;
+    };
+    url.scheme() == "http"
+        && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "::1"))
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.fragment().is_none()
+}
+
 fn json_header() -> Header {
     Header::from_bytes("content-type", "application/json; charset=utf-8").expect("static header")
 }
 
 fn cors_header(origin: Option<&str>) -> Header {
     let value = origin
-        .filter(|value| DEV_ORIGINS.contains(value))
-        .unwrap_or(DEV_ORIGINS[0]);
+        .filter(|value| loopback_origin(value))
+        .unwrap_or("http://127.0.0.1:5173");
     Header::from_bytes("access-control-allow-origin", value).expect("static header")
 }
 

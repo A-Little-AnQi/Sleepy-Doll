@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" overflow="visible" aria-hidden="true">
+  <defs>
+    <radialGradient id="brand-icon-form" gradientUnits="userSpaceOnUse" cx="13.2" cy="8.6" r="11.2">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.38"/>
+      <stop offset="0.26" stop-color="#fff" stop-opacity="0.12"/>
+      <stop offset="0.58" stop-color="#000" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.28"/>
+    </radialGradient>
+    <radialGradient id="brand-icon-spec" gradientUnits="userSpaceOnUse" cx="10.1" cy="7.4" r="3.8">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.55"/>
+      <stop offset="0.4" stop-color="#fff" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="brand-icon-clip">
+      <path d="M17.71 5.01A9 9 0 1 0 17.71 16.99A6.5 6.5 0 1 1 17.71 5.01Z"/>
+    </clipPath>
+    <linearGradient id="brand-icon-gold" x1="0" y1="0.5" x2="1" y2="0.5">
+      <stop offset="0" stop-color="var(--gold, #c9a227)"/>
+      <stop offset="0.55" stop-color="var(--gold-bright, #f0d36a)"/>
+      <stop offset="1" stop-color="var(--gold-bright, #f0d36a)"/>
+    </linearGradient>
+    <linearGradient id="brand-icon-sheen" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.4"/>
+      <stop offset="0.38" stop-color="#fff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.18"/>
+    </linearGradient>
+    <filter id="brand-icon-glow" x="-80%" y="-80%" width="260%" height="260%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1.35"/>
+    </filter>
+  </defs>
+  <g transform="rotate(-35 11 11)">
+    <path d="M22.602 11.291Q24 11 22.602 10.709L18.13 9.776L17.124 7.228Q16.6 5.9 16.037 7.213L15.07 9.47L12.813 10.437Q11.5 11 12.813 11.563L15.07 12.53L16.037 14.787Q16.6 16.1 17.124 14.772L18.13 12.224Z" fill="var(--gold-bright, #f0d36a)" opacity="0.5" filter="url(#brand-icon-glow)"/>
+    <path d="M17.71 5.01A9 9 0 1 0 17.71 16.99A6.5 6.5 0 1 1 17.71 5.01Z" fill="currentColor"/>
+    <path d="M17.71 5.01A9 9 0 1 0 17.71 16.99A6.5 6.5 0 1 1 17.71 5.01Z" fill="url(#brand-icon-form)"/>
+    <path d="M17.71 5.01A9 9 0 1 0 17.71 16.99A6.5 6.5 0 1 1 17.71 5.01Z" fill="url(#brand-icon-spec)"/>
+    <g clip-path="url(#brand-icon-clip)" fill="none" stroke="#000" stroke-opacity="0.28" stroke-width="0.32" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M14.479 4.482Q15.3 4.2 14.479 3.918L13.13 3.456L12.519 1.907Q12.2 1.1 11.858 1.898L11.27 3.27L9.898 3.858Q9.1 4.2 9.898 4.542L11.27 5.13L11.858 6.502Q12.2 7.3 12.519 6.493L13.13 4.944Z" transform="rotate(18 12.2 4.2)"/>
+      <path d="M5.173 10.818Q6.1 10.5 5.173 10.182L3.65 9.66L2.96 7.912Q2.6 7 2.214 7.901L1.55 9.45L0.001 10.114Q-0.9 10.5 0.001 10.886L1.55 11.55L2.214 13.099Q2.6 14 2.96 13.088L3.65 11.34Z" transform="rotate(-24 2.6 10.5)"/>
+      <path d="M11.858 14.054Q12.6 13.8 11.858 13.546L10.64 13.128L10.088 11.729Q9.8 11 9.491 11.721L8.96 12.96L7.721 13.491Q7 13.8 7.721 14.109L8.96 14.64L9.491 15.879Q9.8 16.6 10.088 15.871L10.64 14.472Z" transform="rotate(38 9.8 13.8)"/>
+      <path d="M15.891 17.009Q16.5 16.8 15.891 16.591L14.89 16.248L14.436 15.099Q14.2 14.5 13.946 15.092L13.51 16.11L12.492 16.546Q11.9 16.8 12.492 17.054L13.51 17.49L13.946 18.508Q14.2 19.1 14.436 18.501L14.89 17.352Z" transform="rotate(-10 14.2 16.8)"/>
+    </g>
+    <path d="M22.602 11.291Q24 11 22.602 10.709L18.13 9.776L17.124 7.228Q16.6 5.9 16.037 7.213L15.07 9.47L12.813 10.437Q11.5 11 12.813 11.563L15.07 12.53L16.037 14.787Q16.6 16.1 17.124 14.772L18.13 12.224Z" fill="url(#brand-icon-gold)" stroke="url(#brand-icon-gold)" stroke-width="0.85" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M22.602 11.291Q24 11 22.602 10.709L18.13 9.776L17.124 7.228Q16.6 5.9 16.037 7.213L15.07 9.47L12.813 10.437Q11.5 11 12.813 11.563L15.07 12.53L16.037 14.787Q16.6 16.1 17.124 14.772L18.13 12.224Z" fill="url(#brand-icon-sheen)"/>
+  </g>
+</svg>

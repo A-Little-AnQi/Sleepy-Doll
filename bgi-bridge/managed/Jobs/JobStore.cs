@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace BgiBridge.Jobs;
 
-/// <summary>Job 生命周期，对齐 <c>docs/bgi-host-contracts.md</c> 的「Job 与业务成功分离」。</summary>
+/// <summary>Job 生命周期，对齐 <c>docs/bgi/host-contracts.md</c> 的「Job 与业务成功分离」。</summary>
 public static class JobState
 {
     public const string Queued = "queued";

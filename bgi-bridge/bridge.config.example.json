@@ -4,10 +4,10 @@
   "enabled": true,
 
   "//listen": "只允许回环地址。桥是本地控制面，不是网络服务。",
-  "listen": "127.0.0.1:3499",
+  "listen": "127.0.0.1:26101",
 
   "//token": "必填。Sleepy Doll 侧 user/config.json 的 bridge.token 必须是同一个值：",
-  "//token2": "\"bridge\": { \"enabled\": true, \"baseUrl\": \"http://127.0.0.1:3499\", \"token\": \"<同一个值>\" }",
+  "//token2": "\"bridge\": { \"enabled\": true, \"baseUrl\": \"http://127.0.0.1:26101\", \"token\": \"<同一个值>\" }",
   "token": "",
 
   "//groups": "按组开关。关掉的组不出现在 catalog 里，invoke 也拒绝。未列出的组默认启用。",

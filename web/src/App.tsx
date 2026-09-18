@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { api } from "./api";
+import { api } from "./ipc/api";
 import { Wordmark } from "./components/icons";
-import { AppShell } from "./components/AppShell";
-import { DetailsPanel } from "./components/DetailsPanel";
-import { MotionSwitch } from "./components/MotionSwitch";
-import { ChatPage } from "./pages/ChatPage";
-import { ExtensionsPage } from "./pages/ExtensionsPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { TasksPage } from "./pages/TasksPage";
+import { AppShell } from "./components/shell/AppShell";
+import { DetailsPanel } from "./components/shell/DetailsPanel";
+import { MotionSwitch } from "./components/controls/MotionSwitch";
+import { ChatPage } from "./pages/chat/ChatPage";
+import { ExtensionsPage } from "./pages/extensions/ExtensionsPage";
+import { SettingsPage } from "./pages/settings/SettingsPage";
+import { TasksPage } from "./pages/tasks/TasksPage";
 import { isRunning, readError, subscribeRuns, watchTasks } from "./session";
-import type { Bootstrap, TaskSummary } from "./types";
-import { hostPluginEnabled } from "./providers";
+import type { Bootstrap, TaskSummary } from "./ipc/types";
+import { hostPluginEnabled } from "./ipc/providers";
 
 export type Page =
   | "chat"

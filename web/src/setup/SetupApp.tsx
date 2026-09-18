@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { api, framelessWindow } from "../api";
+import { api, framelessWindow } from "../ipc/api";
 import { readError } from "../session";
-import { TitleBar } from "../components/TitleBar";
+import { TitleBar } from "../components/shell/TitleBar";
 import { AlertIcon, BrandIcon, CheckIcon, FolderIcon } from "../components/icons";
 import { setupApi, type SetupInfo, type SetupState } from "./api";
 import "./setup.css";

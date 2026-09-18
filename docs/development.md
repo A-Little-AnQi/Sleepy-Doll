@@ -75,14 +75,14 @@ tag 的版本号必须与 `Cargo.toml` 的 `package.version` 一致，安装程�
 ## 测试
 
 前端按职责组织：`product.css` 管理设计变量、基础样式和共享控件，页面样式与页面组件同目录，
-自定义下拉框通过 CSS Modules 隔离。`session.ts` 持有会话事件订阅与增量游标；页面只订阅视图状态，
+自定义下拉框通过 CSS Modules 隔离。`web/src/session/` 持有会话事件订阅与增量游标；页面只订阅视图状态，
 切换页面不取消后台任务。输入草稿与当前会话保存在浏览器本地存储。
 
 `npm test` 运行前端交互回归测试（会话后台订阅、事件去重、下拉键盘操作）。
 `npm run check` 执行类型检查及生产构建。响应超时可在模型设置中调整；IPC 普通请求、事件长轮询和
 桥加载采用不同的请求期限。模型只在收到响应体之前重试临时故障，部分流式响应不会重放。
 
-`Transcript.tsx` 按用户轮次组织助手消息，按调用 ID 关联工具返回，合并相邻工具记录。
+`web/src/components/chat/Transcript.tsx` 按用户轮次组织助手消息，按调用 ID 关联工具返回，合并相邻工具记录。
 默认显示紧凑摘要，参数和返回数据在二级详情中展开。历史 Markdown 文本独立 memo，
 避免每次流式增量都重新解析整段历史。
 
@@ -100,9 +100,11 @@ CI 还会执行 `cargo fmt --all -- --check`、`cargo check` 和
 不造假模型、也不造假 BetterGI。首次写入的配置与发行模板相同：没有模型。
 
 ```bash
-npm run backend   # 127.0.0.1:47124/ipc
-npm run dev       # Vite http://127.0.0.1:5173/
+npm run backend   # 127.0.0.1:47124/ipc，占用则顺延，端口写入 .sleepy-doll/dev/ipc.port
+npm run dev       # Vite http://127.0.0.1:5173/，占用则顺延；/ipc 按上述文件转发
 ```
+
+开发网关优先绑定 47124，被占则向后找空位。Vite 每次转发 `/ipc` 时读取端口文件，因此两端不必同一次启动就锁死同一端口。Vite 自己的 5173 被占时也会顺延；网关按 Origin 是否为本机回环决定 CORS，不写死 5173。
 
 ## 桥契约回归
 

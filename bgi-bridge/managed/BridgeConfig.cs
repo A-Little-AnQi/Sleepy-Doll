@@ -12,7 +12,7 @@ public sealed class BridgeConfig
 
     /// <summary>监听地址，只允许回环。</summary>
     [JsonPropertyName("listen")]
-    public string Listen { get; set; } = "127.0.0.1:3499";
+    public string Listen { get; set; } = "127.0.0.1:26101";
 
     /// <summary>Bearer token，须与 Sleepy Doll 的 bridge.token 一致。</summary>
     [JsonPropertyName("token")]
@@ -53,13 +53,13 @@ public sealed class BridgeConfig
         WriteIndented = true,
     };
 
-    /// <summary>解析 "127.0.0.1:3499"，拒绝非回环地址。</summary>
+    /// <summary>解析 "127.0.0.1:26101"，拒绝非回环地址。</summary>
     public (string Host, int Port) ResolveEndpoint()
     {
         var text = Listen?.Trim() ?? "";
         var separator = text.LastIndexOf(':');
         if (separator <= 0 || !int.TryParse(text[(separator + 1)..], out var port) || port is < 1 or > 65535)
-            throw new InvalidOperationException($"listen 必须形如 127.0.0.1:3499，实际是「{Listen}」。");
+            throw new InvalidOperationException($"listen 必须形如 127.0.0.1:26101，实际是「{Listen}」。");
 
         var host = text[..separator].Trim().Trim('[', ']');
         if (host is not ("127.0.0.1" or "localhost" or "::1"))

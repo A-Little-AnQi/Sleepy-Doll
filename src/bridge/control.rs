@@ -76,6 +76,10 @@ fn host_running() -> bool {
     })
 }
 
+/// 产品默认监听端口。占用时从这里往后找空位。
+const DEFAULT_PORT: u16 = 26101;
+const PORT_SPAN: u16 = 64;
+
 fn endpoint(config: &BridgeConfig) -> Result<(String, u16)> {
     let url = url::Url::parse(&config.base_url)
         .map_err(|_| Error::Config("BetterGI 地址无效。".into()))?;
@@ -89,8 +93,27 @@ fn endpoint(config: &BridgeConfig) -> Result<(String, u16)> {
     {
         return Err(Error::Config("BetterGI 地址无效。".into()));
     }
-    let port = url.port_or_known_default().unwrap_or(3499);
+    let port = url.port().unwrap_or(DEFAULT_PORT);
     Ok((format!("127.0.0.1:{port}"), port))
+}
+
+fn port_free(port: u16) -> bool {
+    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+fn allocate_listen(preferred: u16) -> Result<(String, u16)> {
+    let start = preferred.max(1);
+    for offset in 0..PORT_SPAN {
+        let Some(port) = start.checked_add(offset) else {
+            break;
+        };
+        if port_free(port) {
+            return Ok((format!("127.0.0.1:{port}"), port));
+        }
+    }
+    Err(Error::Tool(
+        "本地端口已被占满。请关掉占用 26101 附近端口的程序后重试。".into(),
+    ))
 }
 
 fn request(config: &BridgeConfig, enabled: Option<bool>) -> Result<Value> {
@@ -145,13 +168,9 @@ fn control(config: &BridgeConfig, enabled: bool) -> Result<()> {
 /// Preserve method/group settings and reuse the token across retries. The app
 /// persists this token before injection, so even a delayed start is recoverable.
 pub fn prepare(config: &mut BridgeConfig) -> Result<()> {
-    let (listen, port) = endpoint(config)?;
-    let port_busy = std::net::TcpStream::connect_timeout(
-        &([127, 0, 0, 1], port).into(),
-        Duration::from_millis(500),
-    )
-    .is_ok();
-    if !host_running() && !port_busy {
+    let (_, preferred) = endpoint(config)?;
+    let occupied = !port_free(preferred);
+    if !host_running() && !occupied {
         return Err(Error::Tool("请先启动 BetterGI。".into()));
     }
     let dir = directory()?;
@@ -181,17 +200,21 @@ pub fn prepare(config: &mut BridgeConfig) -> Result<()> {
                 }),
         );
     }
-    // An existing listener must be authenticated before changing listen/token.
-    // The data root is not a live setting of that listener: Recovery and the
-    // bootstrap DLL read it from disk, so pin it even when the port is busy.
-    if port_busy {
-        info(config)
-            .map_err(|_| Error::Tool("BetterGI 端口已被占用。请退出 BetterGI 后重试。".into()))?;
-        if pin_configured_root(&mut settings, &exe_dir()?, &dir) {
-            crate::config::atomic_write(&path, &settings)?;
+    if occupied {
+        // 占用方已经是本产品的桥：listen/token 不能改，只钉数据根（恢复工具和引导 DLL 从磁盘读）。
+        if info(config).is_ok() {
+            if pin_configured_root(&mut settings, &exe_dir()?, &dir) {
+                crate::config::atomic_write(&path, &settings)?;
+            }
+            return Ok(());
         }
-        return Ok(());
+        if !host_running() {
+            return Err(Error::Tool("请先启动 BetterGI。".into()));
+        }
+        let (_, port) = allocate_listen(preferred.saturating_add(1))?;
+        config.base_url = format!("http://127.0.0.1:{port}");
     }
+    let (listen, _) = endpoint(config)?;
     for file in [
         "BgiBridge.Bootstrap.dll",
         "BgiBridge.dll",
@@ -374,14 +397,22 @@ mod tests {
     fn injection_endpoint_is_local_and_unambiguous() {
         let mut config = BridgeConfig {
             enabled: false,
-            base_url: "http://127.0.0.1:3499".into(),
+            base_url: "http://127.0.0.1:26101".into(),
             token: None,
             instance_id: None,
             timeout_ms: 1000,
         };
-        assert_eq!(endpoint(&config).unwrap(), ("127.0.0.1:3499".into(), 3499));
+        assert_eq!(
+            endpoint(&config).unwrap(),
+            ("127.0.0.1:26101".into(), 26101)
+        );
+        config.base_url = "http://127.0.0.1".into();
+        assert_eq!(
+            endpoint(&config).unwrap(),
+            ("127.0.0.1:26101".into(), 26101)
+        );
         for invalid in [
-            "https://127.0.0.1:3499",
+            "https://127.0.0.1:26101",
             "http://example.com",
             "http://user:secret@localhost",
             "http://localhost/path",
@@ -390,5 +421,14 @@ mod tests {
             config.base_url = invalid.into();
             assert!(endpoint(&config).is_err(), "{invalid}");
         }
+    }
+
+    #[test]
+    fn allocate_listen_skips_an_occupied_port() {
+        let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = held.local_addr().unwrap().port();
+        let (listen, next) = allocate_listen(port).unwrap();
+        assert_ne!(next, port);
+        assert_eq!(listen, format!("127.0.0.1:{next}"));
     }
 }

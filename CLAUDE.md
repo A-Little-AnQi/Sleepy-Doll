@@ -95,9 +95,23 @@ src/
       workflow                                       旧版提取结构的读取与转换（新写入不走这里）
     host/       宿主与扩展接触面：bridge、adapter、hooks、process、installation、catalog
 web/src/
-  components/  AppShell、DetailsPanel、TaskCard 等壳与复用组件
-  pages/       ChatPage、TasksPage（快捷任务 / 运行记录）、ExtensionsPage、SettingsPage
-  session.ts   会话订阅：事件归并、草稿、状态文案
+  brand/       产品图标、字标 SVG（可直接打开），以及内部用的木偶图
+  ipc/         桌面 IPC、类型、宿主插件开关
+  session/     会话订阅、草稿、对话分组
+  appearance/  主题与界面语言
+  models/      模型选择与预设
+  components/
+    shell/     AppShell、TitleBar、侧栏、详情栏
+    chat/      对话记录与输入
+    tasks/     TaskCard
+    overlay/   Dialog、Toast
+    controls/  表单与切换控件
+    bridge/    BetterGI 页面组件
+    icons/     描边图标；品牌从图标桶再导出
+  pages/
+    chat/ tasks/ extensions/ bridge/
+    settings/  通用、模型、使用说明（设置里的标签页）
+  setup/       安装器界面
 bgi-bridge/
   native/     C++ 注入器与引导 DLL
   managed/    C# 桥本体，运行在 BetterGI 进程内

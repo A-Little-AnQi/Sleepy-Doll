@@ -77,7 +77,7 @@ BetterGI 重启后点击「重新连接」。
 - 插件自述的 `readOnly` 被当作可信输入，会跳过授权询问。不要启用来源不明的插件，
   详见 [Skill 与 Plugin 格式](./docs/extensions.md)。
 
-其余边界见 [架构与实施边界](./docs/architecture.md)。
+进程模型、执行与恢复语义见 [运行内核](./docs/internals.md)。
 
 ## 文档
 
@@ -86,11 +86,8 @@ BetterGI 重启后点击「重新连接」。
 | [配置与数据存放](./docs/configuration.md) | 配置解析、模型配置、密钥 |
 | [Skill 与 Plugin 格式](./docs/extensions.md) | 扩展的开发格式与执行策略 |
 | [开发环境](./docs/development.md) | 构建、测试、桥契约回归 |
-| [Agent Runtime v2](./docs/runtime-v2.md) | 执行、存储与恢复语义 |
-| [Agent Kernel](./docs/agent-kernel.md) | 领域 Plugin 的 Adapter 协议 |
-| [架构与实施边界](./docs/architecture.md) | 进程模型、决策执行、能力边界 |
-| [BGI 宿主契约](./docs/bgi-host-contracts.md) | 宿主约束、Job 与错误协议、并发与取消 |
-| [BGI 源码观察](./docs/bgi-source-observations.md) | BetterGI 源码静态观察记录 |
+| [运行内核](./docs/internals.md) | 进程模型、决策执行、存储与恢复 |
+| [BGI 宿主契约](./docs/bgi/host-contracts.md) | 宿主约束、Job 与错误协议、并发与取消 |
 
 ## 许可
 
