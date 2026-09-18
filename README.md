@@ -29,25 +29,44 @@ build-desktop.cmd
 ```text
 dist\Sleepy-Doll\
   sleepy-doll.exe        主程序
-  BgiBridge.*            桥组件，必须与主程序同目录
-  bridge.config.json     首次启动由程序填入 token
+  bridge\                桥组件：9 个 BgiBridge.* 文件与 bridge.config.json
+  skills\                随产品分发的能力包
+  user\                  用户数据，构建不碰它
 ```
+
+`bridge\` 必须整目录保持在一起，主程序按同样的相对位置查找桥组件。`bridge.config.json`
+首次连接时由程序写入 token。桥的运行期数据（日志、配置改动记录）不落在 `bridge\` 下，
+统一在 `user\` 里，重装后仍然可用。
 
 分发时压缩该目录，解压后直接得到上述文件夹。`target\` 是 Cargo 的中间目录，不参与分发。
 
-每次构建都会重建整个 `dist\`，其中的 `user\`（配置、模型密钥、会话数据库）会一并清除。
+组装是**原地覆盖写入**，不先清空目录：`user\`（配置、模型密钥、会话数据库、日志）
+是用户自己的数据，重新构建不会动它。
+
+## 安装
+
+安装程序与主程序是同一套外壳，外观一致。它由 `build-desktop.cmd` 一并产出，没有单独的命令：
+
+```cmd
+build-desktop.cmd
+```
+
+输出 `dist\Sleepy-Doll-<版本>-setup.exe`。`D:` 是固定磁盘时默认装到 `D:\Sleepy Doll`，否则装到
+`%LOCALAPPDATA%\Programs\Sleepy Doll`；用户选的目录若不以产品名结尾，安装程序会补上
+`Sleepy Doll`。安装程序只打包上面列出的产品文件：`user\` 不在其列，覆盖安装不会动它，
+卸载时会另行询问是否连同它一起删除，默认保留。
 
 ## 运行
 
-1. 运行 `dist\Sleepy-Doll\sleepy-doll.exe`，接受启动时的 Windows 管理员权限提示。
-   该提示仅在首次出现，之后注入 BetterGI 不再提权。
+1. 运行安装程序创建的快捷方式，或直接运行 `dist\Sleepy-Doll\sleepy-doll.exe`，
+   接受启动时的 Windows 管理员权限提示。该提示仅在首次出现，之后注入 BetterGI 不再提权。
 2. 启动 BetterGI。
 3. 在界面「BetterGI」页面点击「连接 BetterGI」。
 
 地址与凭据自动配置。关闭开关后桥拒绝新操作，已启动的 BetterGI 任务可能继续运行；
 BetterGI 重启后点击「重新连接」。
 
-配置、模型密钥和会话数据库位于 `dist\Sleepy-Doll\user\`，解析顺序见
+配置、模型密钥、会话数据库和日志位于 `dist\Sleepy-Doll\user\`，解析顺序见
 [配置与数据存放](./docs/configuration.md)。
 
 ## 注意事项
@@ -55,7 +74,8 @@ BetterGI 重启后点击「重新连接」。
 - 仓库里没有 BGI 本体，因此无法进行实机键鼠、截图或路线验收。
 - 界面里填写的模型密钥会**明文**写入 `user/config.json`，该文件不做权限加固。
   长期使用建议改用 `${ENV:...}` 引用，并确认目录不对其他账户开放。
-- 插件自述的 `readOnly` 被当作可信输入，会跳过授权询问。不要启用来源不明的插件。
+- 插件自述的 `readOnly` 被当作可信输入，会跳过授权询问。不要启用来源不明的插件，
+  详见 [Skill 与 Plugin 格式](./docs/extensions.md)。
 
 其余边界见 [架构与实施边界](./docs/architecture.md)。
 
@@ -69,9 +89,8 @@ BetterGI 重启后点击「重新连接」。
 | [Agent Runtime v2](./docs/runtime-v2.md) | 执行、存储与恢复语义 |
 | [Agent Kernel](./docs/agent-kernel.md) | 领域 Plugin 的 Adapter 协议 |
 | [架构与实施边界](./docs/architecture.md) | 进程模型、决策执行、能力边界 |
-| [实施总览](./docs/bgi-implementation-plan.md) | BGI 侧需要提供的接口 |
+| [BGI 宿主契约](./docs/bgi-host-contracts.md) | 宿主约束、Job 与错误协议、并发与取消 |
 | [BGI 源码观察](./docs/bgi-source-observations.md) | BetterGI 源码静态观察记录 |
-| [验证记录](./docs/runtime-validation.md) | 自动化验证结果 |
 
 ## 许可
 

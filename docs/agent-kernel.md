@@ -42,10 +42,9 @@ Adapter 使用一行一帧的 JSON-RPC 2.0 stdio，协商版本
 - `strategy/validate`
 - `shutdown`
 
-Adapter 进程不继承模型密钥或 Bridge Token；Windows 上还会进入带
-`KILL_ON_JOB_CLOSE` 与 512 MiB 单进程内存上限的 Job Object。它公开的 Tool 必须为只读；写入
-Tool 会导致整个 Plugin 启用失败。Adapter 通过 `MutationPlan` 请求副作用，不能
-用 Tool 返回值冒充提交完成。
+Adapter 子进程与 MCP 子进程使用同一套隔离，见
+[Skill 与 Plugin 格式](./extensions.md)。它公开的 Tool 必须为只读；写入 Tool 会导致整个
+Plugin 启用失败。Adapter 通过 `MutationPlan` 请求副作用，不能用 Tool 返回值冒充提交完成。
 
 资源内容以 `ResourceSnapshot + contentBase64` 发送给 Adapter。Core 使用内容寻址
 Artifact Store 保存原始与 staged bytes，领域结构保持不透明。`mutations/plan`
@@ -72,7 +71,8 @@ Artifact Store 保存原始与 staged bytes，领域结构保持不透明。`mut
 
 所有 Tool 和 Workflow Step 统一声明：effect、risk、concurrency、lease scope、
 idempotency、cancellation、verification、compensation、timeout、result budget 和
-unattended policy。缺失元数据按最保守方式处理。
+unattended policy；插件清单里这些字段的写法见
+[Skill 与 Plugin 格式](./extensions.md)。缺失元数据按最保守方式处理。
 
 模型只能提议操作。权限、重试、提交、验证、回退以及运行是否成功均由程序状态
 决定。已验证 Workflow 固定 Tool Contract、Provider Version 和 Resource Version，

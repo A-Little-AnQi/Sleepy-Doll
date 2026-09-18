@@ -17,30 +17,60 @@ build-desktop.cmd      # 桥 + 界面 + release EXE，组装到 dist\Sleepy-Doll
 
 `build-desktop.cmd` 是唯一的发布构建入口，产物落在 `dist\Sleepy-Doll\`。它内部依次执行
 `bgi-bridge/build.cmd`、`npm run check`（含 `vite build`，release 二进制靠 `rust-embed`
-把 `ui-dist/` 编进去）和 `cargo build --release`，最后把 EXE 与桥组件组装到一起。
+把 `target/ui/` 编进去）和 `cargo build --release`，最后组装出交付目录：
+
+```text
+dist\Sleepy-Doll\
+  sleepy-doll.exe        主程序
+  bridge\                9 个 BgiBridge.* 文件与 bridge.config.json
+  skills\                随产品分发的能力包
+```
+
+桥组件收在 `bridge\` 子目录里并保持整目录在一起，运行期数据不落在那里。
 
 组装是**原地覆盖写入，不先清空产物目录**：桥的 DLL 被运行中的 BetterGI 加载时删不掉，
 先删会留下半个不可用的安装目录。构建失败时逐个列出没替换成的文件，其余组件保持可用。
-`dist\Sleepy-Doll\user\` 是用户自己的数据，构建不碰它；只有早先误落在 `dist\` 根目录的散落
-文件会被清掉。
+`dist\Sleepy-Doll\user\` 是用户自己的数据，构建不碰它。
 
-`target\` 是 Cargo 的中间目录，`bgi-bridge\.build\` 是桥各 .NET 项目的中间目录，都不参与分发。
+中间产物只有一个落点：仓库的 `target\`。Cargo 输出在 `target\release\` 与 `target\debug\`，
+桥组件在 `target\bridge\`，.NET 中间目录在 `target\dotnet\`，界面构建在 `target\ui\`。
+除交付目录 `dist\Sleepy-Doll\` 外都不参与分发。
 
 单独构建桥执行 `bgi-bridge/build.cmd`。桥组件被宿主加载时会锁定文件，重新构建前必须先退出
 BetterGI；`bgi-bridge/dev/dev-rebuild.cmd` 已包含该步骤。
 
-开发时 `cargo run` 的可执行文件在 `target/<profile>/` 下，找不到旁边的桥组件，会自动回退到
-仓库的 `bgi-bridge/dist`。debug 与 release 各自使用独立的 `user/` 目录，配置解析规则见
-[配置与数据存放](./configuration.md)。
+开发时 `cargo run` 的可执行文件在 `target/<profile>/` 下，同级没有交付布局的 `bridge\`，
+会自动回退到仓库的 `target\bridge`。debug 与 release 各自使用独立的 `user/` 目录，配置解析
+规则见 [配置与数据存放](./configuration.md)。
 
 桌面 EXE 通过 Windows manifest 在启动时请求管理员权限，桥的开关不另外提权。
 打包使用 `bridge.config.example.json`，不带开发凭据。
 
-实际连接测试：先运行 `cargo test --no-default-features --test bridge_control --no-run`，
-然后以管理员权限执行输出的测试 EXE，参数为 `--ignored --exact real_bridge_switch_round_trip`。
-可用 `bgi-bridge/dev/test-desktop.ps1` 指定测试 EXE、BetterGI 成品路径和已有结果目录。
-测试覆盖宿主识别、状态读取、错误 token、关闭后拒绝旧客户端、工具目录热更新和反复开关，
-不执行游戏操作。默认测试套件会跳过这项实机测试。
+## 安装包与发布
+
+安装程序与产品共用一套外壳（tao + wry + React，界面在 `web/src/setup/`），外观与主程序一致。
+它由 `build-desktop.cmd` 一并产出，没有单独的命令：
+
+```cmd
+build-desktop.cmd
+```
+
+产出两个东西：`dist\Sleepy-Doll\`（便携目录）与 `dist\Sleepy-Doll-<版本>-setup.exe`。
+安装程序把交付目录打成压缩载荷（`installer/pack-payload.ps1`，排除 `user\`）并嵌进
+`sleepy-doll-setup.exe`。安装器是独立的 feature，普通 `cargo build --release` 不会编译到它。
+
+安装行为：
+
+- 默认装到 `D:\Sleepy Doll`（D 盘存在且为固定磁盘时），否则 `%LOCALAPPDATA%\Programs\Sleepy Doll`。
+- 用户选择的目录若最后一段不是产品名，补上 `Sleepy Doll` 并把结果写回界面；静默安装同样追加。
+- 系统目录被拒绝；目标目录非空且没有 `sleepy-doll.exe` 时先征求确认。
+- 覆盖安装不覆盖 `bridge\bridge.config.json`（里面是本机 token，程序把同一个 token 也写进了
+  `user\config.json`，两者必须相等）。旧的平铺布局升级时先把该文件迁进 `bridge\`。
+- `user\` 在安装与覆盖安装时都不动；卸载默认保留，只有用户显式勾选才删。
+
+发布由 `.github/workflows/release.yml` 执行，推 `v*` tag 或手动触发。它先以 `workflow_call`
+调用 `check.yml` 并要求发布作业依赖它，然后构建、打包便携 zip，最后创建 GitHub Release。
+tag 的版本号必须与 `Cargo.toml` 的 `package.version` 一致，安装程序按这个版本号判断新旧。
 
 ## 测试
 
@@ -61,7 +91,7 @@ cargo test --no-default-features   # 全部测试
 cargo test --lib --no-default-features   # 仅单元测试
 ```
 
-CI 还会跑 `cargo fmt --all -- --check`、`cargo check` 和
+CI 还会执行 `cargo fmt --all -- --check`、`cargo check` 和
 `cargo check --no-default-features`。
 
 ## 浏览器预览
@@ -78,13 +108,23 @@ npm run dev       # Vite http://127.0.0.1:5173/
 
 修改桥或宿主版本后，重新生成源码文档索引并运行契约测试：
 
-    dotnet run --project bgi-bridge/dev/MetadataBuilder.csproj -- E:/BetterGIProject/better-genshin-impact E:/BetterGIProject/Sleepy-Doll/bgi-bridge/managed/Catalog/host-documentation.json
-    dotnet run --project bgi-bridge/dev/ContractTests.csproj
+```bash
+dotnet run --project bgi-bridge/dev/MetadataBuilder.csproj -- <BetterGI 源码根目录> <输出 JSON 路径>
+dotnet run --project bgi-bridge/dev/ContractTests.csproj
+```
+
+第一个参数是 BetterGI 源码树的根目录，第二个参数是索引的输出路径；仓库内的索引固定在
+`bgi-bridge/managed/generated/host-documentation.json`，重新生成时要写回该路径（它作为嵌入资源
+编进桥）。
 
 索引识别嵌套类型、RelayCommand 命名转换、源码注释、实际 XAML 绑定、快捷键及样式设置说明。
 人工补充说明位于 SettingDocumentation.cs / CommandDocumentation.cs；新增接口没有业务说明时，
 真实宿主审计必须失败，不能仅用字段名或占位文案通过。
 
-忽略的 real_bridge_switch_round_trip 集成测试仅用于指定测试安装、管理员环境。
-它逐页核对全部目录项及示例，读取所有配置项，并对日志详细程度开关做预览、提交、回退，
-检查配置值整体恢复；不执行游戏命令。离线恢复测试使用临时假安装，要求真实 BetterGI 已退出。
+实机回归（`tests/bridge_control.rs`，标了 `#[ignore]`，默认套件跳过）只用于指定测试安装、管理员
+环境：先执行 `cargo test --no-default-features --test bridge_control --no-run`，再以管理员权限
+运行输出的测试 EXE，参数为 `--ignored --exact real_bridge_switch_round_trip`；
+`bgi-bridge/dev/test-desktop.ps1` 可指定测试 EXE、BetterGI 成品路径和已有结果目录。它覆盖宿主
+识别、状态读取、错误 token、关闭后拒绝旧客户端、工具目录热更新与反复开关，逐页核对全部目录项
+及示例，读取所有配置项，并对日志详细程度开关做预览、提交、回退，检查配置值整体恢复；不执行
+游戏命令。离线恢复测试使用临时假安装，要求真实 BetterGI 已退出。

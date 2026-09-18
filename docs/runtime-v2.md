@@ -1,8 +1,8 @@
 # Agent Runtime v2
 
-The desktop controller uses the Rust Supervisor. The old
-in-memory Agent and TaskRunner have been replaced; `agent.rs` contains compatibility
-exports only. Images and multimodal model input are intentionally out of scope.
+The desktop controller uses the Rust Supervisor (`src/runtime/`). Runs are persisted in
+SQLite and dispatched by the Supervisor; there is no in-memory agent loop separate from
+it. Images and multimodal model input are intentionally out of scope.
 
 ## Execution
 
@@ -18,19 +18,19 @@ Job waiting and postcondition verification. A user supplement yields at the next
 step boundary. Previously attempted steps cannot be removed or rewritten.
 
 Small independent read-only tool batches run concurrently, four at a time. Scheduling
-comes from the shared tool execution contract rather than a tool-name allowlist. The
-contract records effect, concurrency safety, result limit and
-deferred exposure. Missing or inconsistent plugin metadata fails closed: unknown
-effects are serial, require authorization and take the same persistent game lease as
-BGI writes. A completed plugin call without authoritative game verification is not
-promoted to game success.
+comes from the shared tool execution contract rather than a tool-name allowlist (the
+declared fields are listed in [extensions.md](./extensions.md)). Missing or inconsistent
+plugin metadata fails closed: unknown effects are serial, require authorization and take
+the same persistent game lease as BGI writes. A completed plugin call without
+authoritative game verification is not promoted to game success.
 
 Terminal states distinguish `answered` (text delivered), `succeeded` (game effects
 verified), `partial`, `failed`, `cancelled`, and `needsReview`. A provider completion
 marker by itself cannot establish game success. Limits default to 32 model decisions,
-128 tool calls, two plan revisions after the initial plan, 30 minutes, and 100,000
-reported/estimated tokens. A context character budget is also applied. Missing model
-usage is marked estimated; it is not represented as zero usage.
+128 tool calls, two plan revisions after the initial plan and 30 minutes. Both budgets
+are derived from the current model's window, minus an output reserve and a trim buffer,
+unless `runtime.contextChars` / `runtime.maxTokens` override them. Missing model usage
+is marked estimated; it is not represented as zero usage.
 
 ## Storage and recovery
 
@@ -38,8 +38,9 @@ SQLite stores runs, revisioned plans, attempts, approvals, artifacts, input mess
 events and game leases alongside the legacy transcript. A pre-migration SQLite
 backup is made with `VACUUM INTO`, including WAL content. Legacy active tasks become
 interrupted; old success records do not receive invented verification evidence.
-Configuration v1 is backed up and migrated to v2 while retaining environment-variable
-references. Configuration writes use a synchronized temporary file and rename.
+Configuration is migrated forward in place (v1 → v2 → v3, with a `config.v1.backup.json`
+left behind) while keeping environment-variable references.
+Configuration writes use a synchronized temporary file and rename.
 
 State changes use compare-and-swap revisions and append the corresponding event in
 the same transaction. Each BGI attempt is persisted before transmission. Its original
@@ -88,7 +89,9 @@ The gateway handles OpenAI Responses, Chat Completions, Anthropic Messages, Gemi
 and Ollama. It decodes public text deltas, complete tool calls, finish reasons and
 usage. Truncated streams, refusals, invalid argument JSON and missing completion
 markers fail before tool execution. Tool names are mapped to portable provider names.
-No fallback model or secondary model is selected.
+The configured `agent.fallbackModels` are tried in order only when a provider fails
+before any streamed content was produced (HTTP or timeout error) and no external
+attempt exists; each switch emits a `model.fallback` event.
 
 Large tool outputs become run-scoped artifacts at the per-tool declared limit, with
 bounded previews and the original character count. Context
@@ -107,16 +110,17 @@ replacement retain old files under the plugin directory's `.retired/`. Registry
 construction is transactional in memory: a failed plugin cannot leave partial tools.
 Enable/disable refreshes the registry; running calls keep their own references. HTTP
 tools declare execution policy in their own manifest entry; MCP policies are keyed by
-the server's original tool name. Only explicitly read-only, concurrency-safe tools
-skip write authorization and participate in parallel batches. Deferred tools are
+the server's original tool name. The trust assumption behind the read-only declaration
+and the fields it is read from are documented once in [extensions.md](./extensions.md);
+the runtime only relies on it to schedule parallel batches. Deferred tools are
 found through `tools.search`, including their optional search hints. HTTP tools may
 also declare an output schema, which is checked before a result reaches the model.
 
 MCP uses Tokio processes, one stdout dispatcher, correlated replies, bounded request
-timeouts, cancellation notifications and paginated discovery. Unsupported
-server-initiated sampling/filesystem requests receive a method-not-found response.
-When an MCP tool declares `outputSchema`, validation is applied to its
-`structuredContent` rather than to the surrounding protocol result.
+timeouts and cancellation notifications; the wire protocol and process isolation are
+described in [extensions.md](./extensions.md). When an MCP tool declares `outputSchema`,
+validation is applied to its `structuredContent` rather than to the surrounding
+protocol result.
 HTTP plugins retain their bounded synchronous compatibility adapter; cancellation
 of a call whose termination cannot be established leaves an unknown outcome.
 
@@ -156,8 +160,11 @@ limits, resource changes, observation freshness, restart reconciliation, determi
 multi-step execution, and out-of-order/paginated MCP replies.
 
 Real-model API validation and real BetterGI contracts still require configured services.
-Bridge SSE is a negotiated wake-up/reconnect channel; authoritative Job reads remain
-the reconciliation source. Unsupported features fall back to bounded polling.
+Authoritative Job reads remain the reconciliation source. The client opens the bridge's
+event stream only when the bridge advertises `events` in `info.features`; the current
+bridge does not, so the wait loop polls `/bridge/v1/jobs/{id}`, and the stream only ever
+serves as a wake-up channel with cursor-based reconnect.
 Windows cross-compilation validates the tray code, but does not substitute for running
-the native window and tray on Windows. No distribution or automatic update workflow
-is included in this runtime change.
+the native window and tray on Windows. Packaging and distribution are handled by
+`build-desktop.cmd` and the release workflow; the application itself still has no
+automatic update.

@@ -84,6 +84,8 @@ Skill 文件上限为 128 KiB，默认最多自动装入 4 个。目录中存在
 ### MCP
 
 使用 newline-delimited JSON-RPC stdio，完成 `initialize`、`notifications/initialized`、
-分页 `tools/list` 与按请求 ID 分发的 `tools/call`。子进程会清空继承的环境变量，并套上
-Windows Job Object 限制。不向第三方 Server 提供采样、任意文件访问或客户端资源能力，
-这类服务端发起的请求会收到 method-not-found。
+分页 `tools/list` 与按请求 ID 分发的 `tools/call`。不向第三方 Server 提供采样、任意文件访问或
+客户端资源能力，这类服务端发起的请求会收到 method-not-found。
+
+插件拉起的子进程（MCP Server 与 Adapter）共用同一套隔离：清空继承的环境变量、套上带
+`KILL_ON_JOB_CLOSE` 与 512 MiB 单进程内存上限的 Windows Job Object。

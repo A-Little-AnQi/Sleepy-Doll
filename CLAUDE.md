@@ -20,6 +20,11 @@ build-desktop.cmd          # 唯一的发布构建入口，产物在 dist\Sleepy
 | `cargo clippy --all-targets --no-default-features -- -D warnings` | **CI 不执行 clippy，本地必须执行** |
 | `cargo fmt --all -- --check` | 格式 |
 
+安装程序是自绘的：`src/bin/sleepy-doll-setup.rs` 用与应用同一套 tao + wry + React 外壳起窗口，
+界面在 `web/src/setup/`，外观与主程序一致。`build-desktop.cmd` 会先把交付目录打成压缩载荷
+（`installer/pack-payload.ps1`），再编译这个 bin，产物在 `dist\Sleepy-Doll-<版本>-setup.exe`。
+推 `v*` tag 时 `.github/workflows/release.yml` 自动执行整串。
+
 `tests/live.rs` 是实机测试：用本机真实模型配置与真实桥执行一次完整问答，会消耗真实额度。
 它标了 `#[ignore]`，**不要让它进 CI**。手动执行：
 
@@ -33,7 +38,8 @@ cargo test --no-default-features --test live -- --ignored --nocapture
   （`build-desktop.cmd` 头部写着这条，违反过一次：中文注释让 `(` `)` 解析崩掉）。
 - **构建是覆盖写入，不先清空目录。** 桥的 DLL 被运行中的 BetterGI 加载时删不掉，先删会留下
   半个不可用的安装目录。构建失败时逐个列出没替换成的文件，其余保持可用。
-- 产物目录不进版本库：`dist/`、`bgi-bridge/dist/`、`bgi-bridge/.build/`、`target/`、`ui-dist/`。
+- 产物只有两个落点，都不进版本库：中间产物统一在 `target/`（`target/bridge`、`target/dotnet`、
+  `target/ui`、`target/release`），交付物在 `dist/Sleepy-Doll/`。
 - **注释只说明代码做什么、为什么必须这样，不叙述它以前是什么样。** 改动的来龙去脉属于提交信息，
   不属于源码；一条注释写三五行的辩解同样是噪音。
 - 文档与提交信息用标准技术文体：动词用「执行」不用「跑」、产品名不译（Build Tools、token）。
@@ -80,6 +86,7 @@ src/
   model/      五个模型协议 —— mod.rs（共享类型与 Model 抽象）/ protocol.rs（编解码）
   bridge/     BGI 接触面 —— mod.rs（客户端与 bgi.* 工具）/ control.rs（桥进程生命周期）
   extension/  工具契约，以及技能、插件、MCP 三类扩展来源
+  setup/      安装引擎：解包、目录规则、快捷方式、注册表、卸载
   runtime/    Agent 运行时
     store/      持久化：journal、migrations、artifacts
     operation/  事务操作
@@ -96,7 +103,22 @@ bgi-bridge/
   managed/    C# 桥本体，运行在 BetterGI 进程内
   recovery/   离线恢复工具
   dev/        开发期专用：契约测试、元数据生成器、本地脚本
+installer/    安装器载荷打包脚本
+assets/       程序图标、.rc 与 UAC manifest，由 build.rs 编进 sleepy-doll.exe
 ```
+
+交付目录的形态：
+
+```text
+dist/Sleepy-Doll/
+  sleepy-doll.exe
+  bridge/      9 个 BgiBridge.* 文件与 bridge.config.json，必须整组同目录
+  skills/      随产品分发的能力包
+  user/        用户数据，构建、安装、卸载都不动它
+```
+
+桥的运行期数据（日志、配置改动记录）与主程序共用安装根下的 `user/`。组件目录与数据根是两件事，
+`src/bridge/control.rs` 把数据根写进 `bridge.config.json` 的 `userDirectory`。
 
 ## 领域知识
 
@@ -123,5 +145,8 @@ BetterGI 的领域知识随能力包分发，放在 `skills/` 下，由 `build-d
   要用提权方式终止。
 - **Anthropic 兼容端点要求把 `content[].thinking` 原样回传，包括 `signature`。** 丢掉这些块会让
   下一轮请求直接 400；各协议对推理载荷的要求不同，见 `src/model/protocol.rs`。
-- **交付的是 `dist/Sleepy-Doll/`**，`bgi-bridge/dist/` 只是桥的中间产物。
+- **交付的是 `dist/Sleepy-Doll/`**，`target/bridge/` 只是桥的中间产物。
 - 用户的配置与密钥在 `<安装目录>\user\` 下，构建不会碰它（但 `rmdir` 式的清空会）。
+- **`[profile.release]` 用 `panic = "abort"` + `opt-level = "s"` 换体积**（exe 8.5 MB，两者合计省 7.6 MB）。
+  代价是没有展开清理路径，且 Rust 侧代码生成偏体积；若发现界面卡顿，删掉 `opt-level` 一行即可退回
+  11.4 MB。
