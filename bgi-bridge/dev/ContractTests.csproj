@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
-    <BaseIntermediateOutputPath>../.build/contracts-obj/</BaseIntermediateOutputPath>
-    <MSBuildProjectExtensionsPath>../.build/contracts-obj/</MSBuildProjectExtensionsPath>
+    <BaseIntermediateOutputPath>../../target/dotnet/contracts-obj/</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>../../target/dotnet/contracts-obj/</MSBuildProjectExtensionsPath>
   </PropertyGroup>
   <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
   <PropertyGroup>
@@ -11,7 +11,7 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <OutputPath>../.build/contracts/</OutputPath>
+    <OutputPath>../../target/dotnet/contracts/</OutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="ContractTests.cs" />

@@ -5,20 +5,22 @@ rem BgiBridge build script.
 rem   native/  -> MSVC (cl.exe), needs VS 2022 or Build Tools with the C++ workload
 rem   managed/ -> dotnet SDK
 rem
-rem Everything lands in dist/. The injector uses absolute paths, so nothing is
-rem ever written into the BetterGI install directory.
+rem Everything lands under the repository's target/, next to Cargo's own output.
+rem The injector uses absolute paths, so nothing is ever written into the
+rem BetterGI install directory.
 rem
 rem NOTE: keep this file ASCII-only. cmd.exe reads .cmd in the OEM codepage and
 rem non-ASCII text corrupts command parsing on non-UTF8 locales.
 
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
-set "DIST=%ROOT%\dist"
+set "DIST=%ROOT%\..\target\bridge"
+set "SCRATCH=%ROOT%\..\target\dotnet"
 set "NATIVE=%ROOT%\native"
 set "MANAGED=%ROOT%\managed"
 
-rem Existing dist config contains credentials and group settings; preserve it.
-rem The tool-root config is only a seed for the first build.
+rem An existing bridge.config.json contains credentials and group settings and is
+rem preserved. The tool-root config is only a seed for the first build.
 set "CFG=%ROOT%\bridge.config.json"
 
 echo [1/4] Locating MSVC...
@@ -45,6 +47,8 @@ if errorlevel 1 (
 
 if not exist "%DIST%" mkdir "%DIST%"
 if errorlevel 1 exit /b 1
+if not exist "%SCRATCH%" mkdir "%SCRATCH%"
+if errorlevel 1 exit /b 1
 
 echo [2/4] Building native bootstrap DLL...
 pushd "%NATIVE%"
@@ -70,7 +74,7 @@ echo [4/4] Building managed bridge...
 rem Pin the output directory. Letting the SDK choose gives bin\<platform>\Release\...
 rem and the platform segment varies with the environment - which once made this
 rem script silently copy a stale DLL from a path the build no longer used.
-set "MROOT=%ROOT%\.build\managed"
+set "MROOT=%SCRATCH%\managed"
 pushd "%MANAGED%"
 dotnet build -c Release -v quiet --nologo -o "%MROOT%"
 set "RC=%errorlevel%"

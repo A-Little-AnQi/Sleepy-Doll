@@ -21,20 +21,33 @@ namespace {
 
 constexpr wchar_t kBootstrapDll[] = L"BgiBridge.Bootstrap.dll";
 
+// 目录之外还要接上 "\log\injector.log" 这样的尾巴，MAX_PATH 里得留够。
+constexpr DWORD kPathHeadroom = 40;
+
 std::wstring DirectoryOf(const std::wstring& path);
 
+// 数据根：安装目录的 user\。注入器住在 <安装目录>\bridge 下，从自己所在
+// 目录推不出安装目录，所以由调用方用 --user 指定；缺省是自己目录下的 user\，
+// 那是开发构建的布局。产品目录里绝不留第二份 user\ —— 升级会整包替换它。
+std::wstring g_userDir;
+
 // 提权后的实例在另一个控制台里跑，父进程看不到它的输出。
-// 所以同时写一份日志到自己目录下——排查问题时这是唯一的线索。
-// 注意：写的是注入器自己的目录，不是 BetterGI 的。
+// 所以同时写一份日志到数据根的 log 下——排查问题时这是唯一的线索。
+// 注意：写的是 Sleepy Doll 自己的目录，不是 BetterGI 的。
 void Log(bool toStderr, const std::wstring& message) {
     FILE* console = toStderr ? stderr : stdout;
     fwprintf(console, L"%ls\n", message.c_str());
     fflush(console);
 
-    wchar_t exe[MAX_PATH]{};
-    if (::GetModuleFileNameW(nullptr, exe, MAX_PATH) == 0) return;
+    if (g_userDir.empty()) return;
 
-    const std::wstring log = DirectoryOf(exe) + L"\\injector.log";
+    // 产品目录里只放产品文件，运行期产物一律进数据根。
+    // 只依赖 kernel32，所以逐级建目录而不是用 SHCreateDirectoryExW。
+    ::CreateDirectoryW(g_userDir.c_str(), nullptr);
+    const std::wstring logDir = g_userDir + L"\\log";
+    ::CreateDirectoryW(logDir.c_str(), nullptr);
+
+    const std::wstring log = logDir + L"\\injector.log";
     FILE* file = nullptr;
     if (_wfopen_s(&file, log.c_str(), L"a, ccs=UTF-8") != 0 || !file) return;
 
@@ -209,11 +222,14 @@ int BootstrapLoaded(DWORD pid) {
 }
 
 std::wstring Usage() {
-    return L"用法：BgiBridge.Injector.exe [--process <名称>] [--pid <PID>] [--bridge <桥目录>] [--list]\n"
+    return L"用法：BgiBridge.Injector.exe [--process <名称>] [--pid <PID>] [--bridge <桥目录>]\n"
+           L"       [--user <数据目录>] [--list]\n"
            L"\n"
            L"  --process   目标进程名，默认 BetterGI.exe\n"
            L"  --bridge    桥所在目录（含 BgiBridge.Bootstrap.dll 与 bridge.config.json），\n"
            L"              默认是注入器自己所在的目录\n"
+           L"  --user      运行期数据的落点（日志），默认是注入器自己目录下的 user\n"
+           L"              产品布局里由调用方指定成安装目录下的 user\n"
            L"  --list      只列出匹配的进程，不注入\n"
            L"\n"
            L"注入后桥在目标进程内监听 bridge.config.json 里配的地址。\n"
@@ -308,7 +324,7 @@ int Inject(const std::wstring& processName, DWORD requestedPid, const std::wstri
         }
 
         Say(L"加载线程已结束；桥是否就绪须由 /bridge/v1/info 确认。");
-        Say(L"运行日志：" + bridgeDir + L"\\bootstrap.log");
+        Say(L"运行日志：" + g_userDir + L"\\log\\injector.log 与 bootstrap.log");
     } while (false);
 
     ::CloseHandle(target.process);
@@ -348,6 +364,10 @@ int wmain(int argc, wchar_t** argv) {
     bool listOnly = false;
     DWORD requestedPid = 0;
 
+    // 先定下缺省值：参数解析失败也要有地方写日志。
+    const std::wstring selfDir = DirectoryOf(ModulePath(nullptr));
+    g_userDir = selfDir + L"\\user";
+
     for (int i = 1; i < argc; ++i) {
         const std::wstring argument = argv[i];
         if (argument == L"--help" || argument == L"-h") {
@@ -373,18 +393,32 @@ int wmain(int argc, wchar_t** argv) {
             bridgeDir = argv[++i];
             continue;
         }
+        if (argument == L"--user" && i + 1 < argc) {
+            g_userDir = argv[++i];
+            continue;
+        }
         Fail(L"无法识别的参数：" + argument + L"\n\n" + Usage());
         return 1;
     }
 
-    if (bridgeDir.empty()) bridgeDir = DirectoryOf(ModulePath(nullptr));
+    if (bridgeDir.empty()) bridgeDir = selfDir;
     wchar_t absolute[MAX_PATH]{};
     const DWORD length = ::GetFullPathNameW(bridgeDir.c_str(), MAX_PATH, absolute, nullptr);
-    if (!length || length + 40 >= MAX_PATH) {
+    if (!length || length + kPathHeadroom >= MAX_PATH) {
         Fail(L"桥目录路径过长或无效，请使用较短的绝对路径。");
         return 1;
     }
     bridgeDir = absolute;
+
+    // 数据根同样绝对化：它会跟着当前目录跑就没法排查了。
+    wchar_t userAbsolute[MAX_PATH]{};
+    const DWORD userLength =
+        ::GetFullPathNameW(g_userDir.c_str(), MAX_PATH, userAbsolute, nullptr);
+    if (!userLength || userLength + kPathHeadroom >= MAX_PATH) {
+        Fail(L"数据目录路径过长或无效，请用 --user 指定较短的绝对路径。");
+        return 1;
+    }
+    g_userDir = userAbsolute;
 
     if (listOnly) return List(processName);
 

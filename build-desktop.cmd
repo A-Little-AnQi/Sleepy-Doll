@@ -4,10 +4,11 @@ cd /d "%~dp0"
 
 rem One-command build. Produces dist\Sleepy-Doll\ with only the files that ship.
 rem
-rem The bridge components have to sit beside sleepy-doll.exe (bridge_control.rs
-rem looks for them there), so they are copied next to it rather than left in
-rem bgi-bridge\dist. Nothing goes into target\release - that directory belongs to
-rem Cargo and is full of intermediate output.
+rem dist\Sleepy-Doll is the only product output; every intermediate lands under
+rem target\ (target\bridge, target\dotnet, target\ui, target\release). The bridge
+rem components are copied into a bridge\ subdirectory of the product (bridge\
+rem control.rs looks for them there), so the product folder keeps the executable
+rem on its own instead of carrying eleven bridge files beside it.
 rem
 rem The product folder is what gets handed out, so unzipping it yields a folder
 rem instead of a pile of loose files.
@@ -29,15 +30,23 @@ if errorlevel 1 (
   echo    using %CARGO%
 )
 
-echo [1/3] Building bridge components...
+rem The installer filename carries the package version, and the release workflow
+rem refuses a tag that disagrees with Cargo.toml. Read it from the same place.
+for /f "tokens=2 delims== " %%V in ('findstr /b /c:"version = " Cargo.toml') do set "VERSION=%%~V"
+if not defined VERSION (
+  echo    could not read package.version from Cargo.toml.
+  exit /b 1
+)
+
+echo [1/4] Building bridge components...
 call bgi-bridge\build.cmd
 if errorlevel 1 exit /b 1
 
-echo [2/3] Building interface...
+echo [2/4] Building interface...
 call npm run check
 if errorlevel 1 exit /b 1
 
-echo [3/3] Building desktop binary...
+echo [3/4] Building desktop binary...
 "%CARGO%" build --release
 if errorlevel 1 exit /b 1
 
@@ -48,10 +57,19 @@ rem loaded inside a running BetterGI and cannot be deleted, so clearing first
 rem leaves a half-destroyed install with no EXE. Unreplaced files are listed
 rem individually and everything else stays usable.
 if not exist "%OUT%" mkdir "%OUT%"
+if not exist "%OUT%\bridge" mkdir "%OUT%\bridge"
 set "FAILED="
 
 copy /y "target\release\sleepy-doll.exe" "%OUT%\" >nul
 if errorlevel 1 set "FAILED=%FAILED% sleepy-doll.exe"
+
+rem Earlier packages kept the bridge components flat beside the executable. Carry
+rem the config over first - it holds the per-install token - then drop the stale
+rem copies so the new layout is what the folder shows.
+if exist "%OUT%\bridge.config.json" if not exist "%OUT%\bridge\bridge.config.json" (
+  move /y "%OUT%\bridge.config.json" "%OUT%\bridge\bridge.config.json" >nul
+)
+if exist "%OUT%\BgiBridge.*" del /q "%OUT%\BgiBridge.*" >nul 2>&1
 
 for %%F in (
   BgiBridge.Injector.exe
@@ -64,15 +82,15 @@ for %%F in (
   BgiBridge.Recovery.runtimeconfig.json
   BgiBridge.Recovery.deps.json
 ) do (
-  copy /y "bgi-bridge\dist\%%F" "%OUT%\" >nul
-  if errorlevel 1 set "FAILED=%FAILED% %%F"
+  copy /y "target\bridge\%%F" "%OUT%\bridge\" >nul
+  if errorlevel 1 set "FAILED=%FAILED% bridge\%%F"
 )
 
 rem Existing bridge.config.json contains the per-install authentication token.
 rem Replacing it with the empty template breaks the next connection. Seed only
 rem a brand-new package; normal rebuilds preserve the existing install config.
-if not exist "%OUT%\bridge.config.json" (
-  copy /y "bgi-bridge\bridge.config.example.json" "%OUT%\bridge.config.json" >nul
+if not exist "%OUT%\bridge\bridge.config.json" (
+  copy /y "bgi-bridge\bridge.config.example.json" "%OUT%\bridge\bridge.config.json" >nul
   if errorlevel 1 set "FAILED=%FAILED% bridge.config.json"
 )
 
@@ -94,11 +112,26 @@ if defined FAILED (
   exit /b 1
 )
 
-rem An earlier layout dropped the package straight into dist\; those loose files
-rem must not survive next to the product folder.
-for %%F in ("%~dp0dist\*") do if /i not "%%~nxF"=="Sleepy-Doll" del /q "%%~fF" >nul 2>&1
+echo.
+echo [4/4] Building installer...
+rem The payload is the folder just assembled, so this has to run after it. The
+rem setup binary embeds the packed result, which is why it is a separate feature:
+rem an ordinary cargo build must not try to compile it.
+powershell -NoProfile -ExecutionPolicy Bypass -File "installer\pack-payload.ps1"
+if errorlevel 1 exit /b 1
+"%CARGO%" build --release --features setup --bin sleepy-doll-setup
+if errorlevel 1 exit /b 1
+set "SETUP=%~dp0dist\Sleepy-Doll-%VERSION%-setup.exe"
+copy /y "target\release\sleepy-doll-setup.exe" "%SETUP%" >nul
+if errorlevel 1 (
+  echo    could not write %SETUP%
+  exit /b 1
+)
 
 echo.
 echo Done: %OUT%
 for %%F in ("%OUT%\*") do echo    %%~nxF
+for %%F in ("%OUT%\bridge\*") do echo    bridge\%%~nxF
+echo.
+echo Done: %SETUP%
 endlocal

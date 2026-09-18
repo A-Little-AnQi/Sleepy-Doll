@@ -9,6 +9,8 @@ license = "MIT"
 default = ["desktop"]
 desktop = ["dep:tao", "dep:wry", "dep:rust-embed", "dep:mime_guess"]
 dev-ipc = ["dep:tiny_http"]
+# 安装程序自带界面，因此它同时要桌面壳那套窗口与 WebView。
+setup = ["dep:flate2", "desktop"]
 
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
@@ -24,6 +26,7 @@ sha2 = "0.10"
 url = "2.5"
 base64 = "0.22"
 futures-util = "0.3"
+log = { version = "0.4", features = ["std"] }
 jsonschema = { version = "0.33", default-features = false }
 time = { version = "0.3.44", features = ["formatting", "parsing"] }
 tiny_http = { version = "0.12.0", optional = true }
@@ -31,18 +34,40 @@ tao = { version = "0.37.0", optional = true }
 wry = { version = "0.56.1", optional = true }
 rust-embed = { version = "8.12.0", optional = true }
 mime_guess = { version = "2.0.5", optional = true }
+# 安装程序读嵌入的载荷；默认后端是纯 Rust 的 miniz_oxide。
+flate2 = { version = "1.1", optional = true }
 
 [dev-dependencies]
 tempfile = "3.23.0"
 
+[build-dependencies]
+embed-resource = "3.0"
+
 [target.'cfg(target_os = "windows")'.dependencies]
 tray-icon = "0.21"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_JobObjects"] }
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_LibraryLoader",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_Shell_Common",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_System_Com",
+  "Win32_System_Registry",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+] }
 
 [profile.release]
-lto = "thin"
+# 交付体积优先：panic = "abort" 去掉展开清理路径，opt-level = "s" 以少量速度换体积。
+lto = "fat"
 strip = true
 codegen-units = 1
+panic = "abort"
+opt-level = "s"
 
 [[bin]]
 name = "sleepy-doll"
@@ -53,3 +78,10 @@ required-features = ["desktop"]
 name = "sleepy-doll-dev"
 path = "src/bin/sleepy-doll-dev.rs"
 required-features = ["dev-ipc"]
+
+# 只在显式 --features setup 时编译：它 include_bytes! 构建期生成的载荷，
+# 普通构建下那个文件不存在。
+[[bin]]
+name = "sleepy-doll-setup"
+path = "src/bin/sleepy-doll-setup.rs"
+required-features = ["setup"]

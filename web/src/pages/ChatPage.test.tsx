@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-vi.mock("../assets/moon-character.png", () => ({ default: "mascot.png" }));
+vi.mock("../assets/moon-character.webp", () => ({ default: "mascot.png" }));
 vi.mock("../api", () => ({
   api: {
     conversation: vi.fn(),

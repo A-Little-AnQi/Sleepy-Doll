@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
-    <BaseIntermediateOutputPath>../.build/recovery-obj/</BaseIntermediateOutputPath>
-    <MSBuildProjectExtensionsPath>../.build/recovery-obj/</MSBuildProjectExtensionsPath>
+    <BaseIntermediateOutputPath>../../target/dotnet/recovery-obj/</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>../../target/dotnet/recovery-obj/</MSBuildProjectExtensionsPath>
   </PropertyGroup>
   <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
   <PropertyGroup>
@@ -12,7 +12,7 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <OutputPath>../.build/recovery/</OutputPath>
+    <OutputPath>../../target/dotnet/recovery/</OutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="RecoveryProgram.cs" />

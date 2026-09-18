@@ -51,6 +51,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let config = PathBuf::from(CONFIG);
     sleepy_doll::config::seed(&config)?;
+    if let Some(directory) = config.parent()
+        && let Err(error) = sleepy_doll::logging::init(directory)
+    {
+        eprintln!("无法写入日志（{error}），本次运行的记录只有标准错误。");
+    }
     let controller = Arc::new(AppController::load(&config)?);
     let server = Server::http(BIND).map_err(|error| error.to_string())?;
     println!("Sleepy Doll dev backend: http://{BIND}/ipc");

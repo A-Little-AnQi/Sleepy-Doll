@@ -1,10 +1,10 @@
 <Project>
-  <!-- 中间产物收到 .build/ 下，源码目录里不留 obj/ 和 bin/ —— 另三个项目也一样，
+  <!-- 中间产物收到仓库的 target/dotnet/ 下，源码目录里不留 obj/ 和 bin/ —— 另三个项目也一样，
        build.cmd 的 -o 指向同一处。
        必须在 Sdk.props 之前设置，所以要写成显式 Import 而不是 Project Sdk="..."。 -->
   <PropertyGroup>
-    <BaseIntermediateOutputPath>../.build/managed-obj/</BaseIntermediateOutputPath>
-    <MSBuildProjectExtensionsPath>../.build/managed-obj/</MSBuildProjectExtensionsPath>
+    <BaseIntermediateOutputPath>../../target/dotnet/managed-obj/</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>../../target/dotnet/managed-obj/</MSBuildProjectExtensionsPath>
   </PropertyGroup>
   <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
 
@@ -19,7 +19,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>BgiBridge</AssemblyName>
     <RootNamespace>BgiBridge</RootNamespace>
-    <OutputPath>../.build/managed/</OutputPath>
+    <OutputPath>../../target/dotnet/managed/</OutputPath>
 
     <!-- 零第三方依赖：宿主是框架依赖应用，嵌入的 deps.json 不可编辑，
          我们的依赖加不进它的依赖图。只用 TPA 里已有的 BCL。 -->
@@ -41,7 +41,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Catalog/host-documentation.json" />
+    <EmbeddedResource Include="generated/host-documentation.json" />
   </ItemGroup>
 
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />

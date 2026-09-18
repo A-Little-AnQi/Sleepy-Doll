@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
-    <BaseIntermediateOutputPath>../.build/metadata-obj/</BaseIntermediateOutputPath>
-    <MSBuildProjectExtensionsPath>../.build/metadata-obj/</MSBuildProjectExtensionsPath>
+    <BaseIntermediateOutputPath>../../target/dotnet/metadata-obj/</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>../../target/dotnet/metadata-obj/</MSBuildProjectExtensionsPath>
   </PropertyGroup>
   <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
   <PropertyGroup>
@@ -11,7 +11,7 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <OutputPath>../.build/metadata/</OutputPath>
+    <OutputPath>../../target/dotnet/metadata/</OutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="MetadataBuilder.cs" />

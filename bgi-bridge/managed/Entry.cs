@@ -31,6 +31,7 @@ public static class Entry
             // 原生侧传进来的是桥目录的纯路径。先接日志，后面每一步失败都看得见。
             var bridgeDir = Marshal.PtrToStringUni(parameters) ?? "";
             Diagnostics.Attach(bridgeDir);
+            InstallPaths.Ensure(bridgeDir);
             Diagnostics.Write($"Entry.Start 被调用。bridgeDir={bridgeDir}");
 
             if (string.IsNullOrWhiteSpace(bridgeDir))
@@ -67,7 +68,7 @@ public static class Entry
                 Diagnostics.Write($"未处理异常（不会终止宿主，仅记录）：{e.ExceptionObject}");
 
             var registry = new MethodRegistry();
-            SettingsTransactions.Configure(bridgeDir);
+            SettingsTransactions.Configure(InstallPaths.ChangeRecordDirectory(bridgeDir));
             StatusTools.Register(registry);
             CatalogTools.Register(registry);
             // 两组自动发现：命令与设置项数量随宿主版本变化，不写死。

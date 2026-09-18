@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { useState } from "react";
 
 vi.mock("../api", () => ({
+  // 测试跑在浏览器环境里，没有无边框窗口，标题栏不渲染。
+  framelessWindow: false,
   api: {
     saveConversationGroups: vi.fn(),
     deleteConversation: vi.fn(),

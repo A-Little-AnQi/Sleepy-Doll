@@ -1,8 +1,12 @@
 name: check
 
 on:
+  # 分支推送与 PR 各自跑一次。tag 不在这里触发：发布流程会以 workflow_call
+  # 调它一次并要求发布作业依赖它，否则同一个 tag 会跑两遍。
   push:
+    branches: ["**"]
   pull_request:
+  workflow_call:
 
 jobs:
   windows:

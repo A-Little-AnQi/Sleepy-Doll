@@ -55,18 +55,128 @@ void AppendVersion(WCHAR* buffer, int major, int minor, int patch) {
     AppendNumber(buffer, static_cast<unsigned>(patch));
 }
 
+// ---------- 数据根 ----------
+
+// 运行期数据的落点，安装目录的 user\。交付包里本 DLL 住在 <安装目录>\bridge 下，
+// 直接用自己的目录会在产品目录里造出第二份 user\ —— 那份会被升级整包替换。
+// 所以从 bridge.config.json 的 userDirectory 读（Sleepy Doll 每次连接时写入），
+// 没有这个字段就用桥目录下的 user\：开发构建与旧版平铺包正是这样。
+WCHAR g_dataRoot[MAX_PATH]{};
+
+// bridge.config.json 是 UTF-8，这里只用 kernel32，所以按字节扫这一个键。
+// 路径里只会出现 \\ \" \/ 三种转义，其余原样搬。
+bool FindJsonString(const char* text, DWORD size, const char* key, WCHAR* out, int capacity) {
+    const int keyLength = lstrlenA(key);
+    for (DWORD at = 0; at + static_cast<DWORD>(keyLength) < size; ++at) {
+        bool match = true;
+        for (int i = 0; i < keyLength; ++i) {
+            if (text[at + i] != key[i]) {
+                match = false;
+                break;
+            }
+        }
+        if (!match) continue;
+
+        DWORD cursor = at + static_cast<DWORD>(keyLength);
+        while (cursor < size && (text[cursor] == ' ' || text[cursor] == '\t')) ++cursor;
+        if (cursor >= size || text[cursor] != ':') continue;
+        ++cursor;
+        while (cursor < size && (text[cursor] == ' ' || text[cursor] == '\t')) ++cursor;
+        if (cursor >= size || text[cursor] != '"') continue;
+        ++cursor;
+
+        char value[MAX_PATH * 4]{};
+        int length = 0;
+        for (; cursor < size && text[cursor] != '"'; ++cursor) {
+            if (length >= static_cast<int>(sizeof(value)) - 1) return false;
+            if (text[cursor] == '\\' && cursor + 1 < size) {
+                const char escaped = text[cursor + 1];
+                if (escaped == '\\' || escaped == '"' || escaped == '/') {
+                    value[length++] = escaped;
+                    ++cursor;
+                    continue;
+                }
+            }
+            value[length++] = text[cursor];
+        }
+        if (cursor >= size || length == 0) return false;
+        // 显式长度不写结束符，自己补一个：后面全靠 C 字符串处理。
+        const int written = ::MultiByteToWideChar(CP_UTF8, 0, value, length, out, capacity - 1);
+        if (written <= 0) return false;
+        out[written] = 0;
+        return true;
+    }
+    return false;
+}
+
+// 相对路径会跟着宿主进程的当前目录跑，那不可预期。
+bool AbsolutePath(const WCHAR* path) {
+    if (path[0] == 0) return false;
+    if (path[0] == L'\\' && path[1] == L'\\') return true;
+    return path[1] == L':' && (path[2] == L'\\' || path[2] == L'/');
+}
+
+// 读不到就返回 false，由调用方用缺省——数据落点不该成为引导失败的原因。
+bool ReadConfiguredDataRoot(WCHAR* out, int capacity) {
+    WCHAR path[MAX_PATH + 32]{};
+    lstrcpynW(path, g_bridgeDir, MAX_PATH);
+    AppendText(path, L"\\bridge.config.json");
+
+    // 允许删除共享：Sleepy Doll 重写这份配置时是整份替换，不能被这个读句柄挡住。
+    HANDLE file = ::CreateFileW(path, GENERIC_READ,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+
+    // 这份配置只有几 KB。读不满说明它大得反常，那就退回缺省，不猜半个路径。
+    static char text[32768];
+    DWORD size = 0;
+    const BOOL read = ::ReadFile(file, text, static_cast<DWORD>(sizeof(text)), &size, nullptr);
+    ::CloseHandle(file);
+    if (!read || size == 0) return false;
+
+    return FindJsonString(text, size, "\"userDirectory\"", out, capacity) && AbsolutePath(out);
+}
+
+// 只在 Worker 线程里调用：DllMain 里不能做文件 I/O。
+void ResolveDataRoot() {
+    if (g_bridgeDir[0] == 0) return;
+    if (ReadConfiguredDataRoot(g_dataRoot, MAX_PATH)) return;
+
+    lstrcpynW(g_dataRoot, g_bridgeDir, MAX_PATH);
+    AppendText(g_dataRoot, L"\\user");
+}
+
 // ---------- 日志 ----------
 
-void LogLine(const WCHAR* text) {
-    if (g_bridgeDir[0] == 0) return;
+// 日志落在数据根的 log 下：产品目录里只放产品文件，重装与分发包会整包替换，
+// 运行期产物堆在那里会让包越用越脏。只用 kernel32，所以逐级建目录。
+void EnsureLogDirectory() {
+    static bool created = false;
+    if (created) return;
+    created = true;
 
-    WCHAR path[MAX_PATH]{};
-    lstrcpynW(path, g_bridgeDir, MAX_PATH);
-    AppendText(path, L"\\bootstrap.log");
+    ::CreateDirectoryW(g_dataRoot, nullptr);
+    WCHAR path[MAX_PATH + 32]{};
+    lstrcpynW(path, g_dataRoot, MAX_PATH);
+    AppendText(path, L"\\log");
+    ::CreateDirectoryW(path, nullptr);
+}
 
+bool AppendLine(const WCHAR* path, const WCHAR* line) {
     HANDLE file = ::CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                 nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE) return;
+    if (file == INVALID_HANDLE_VALUE) return false;
+
+    DWORD written = 0;
+    const BOOL ok =
+        ::WriteFile(file, line, static_cast<DWORD>(lstrlenW(line)) * sizeof(WCHAR), &written, nullptr);
+    ::CloseHandle(file);
+    return ok != 0;
+}
+
+void LogLine(const WCHAR* text) {
+    if (g_dataRoot[0] == 0) return;
 
     SYSTEMTIME now{};
     ::GetLocalTime(&now);
@@ -83,9 +193,20 @@ void LogLine(const WCHAR* text) {
     lstrcpynW(line + lstrlenW(line), text, 512);
     AppendText(line, L"\r\n");
 
-    DWORD written = 0;
-    ::WriteFile(file, line, static_cast<DWORD>(lstrlenW(line)) * sizeof(WCHAR), &written, nullptr);
-    ::CloseHandle(file);
+    EnsureLogDirectory();
+    WCHAR path[MAX_PATH + 32]{};
+    lstrcpynW(path, g_dataRoot, MAX_PATH);
+    AppendText(path, L"\\log\\bootstrap.log");
+    if (AppendLine(path, line)) return;
+
+    // 数据根写不出去（只读安装等）时退回 %TEMP%：日志是唯一的诊断手段，
+    // 不能因为一个目录就整条丢掉。
+    WCHAR temp[MAX_PATH]{};
+    const DWORD length = ::GetTempPathW(MAX_PATH, temp);
+    if (length == 0 || length >= MAX_PATH) return;
+    lstrcpynW(path, temp, MAX_PATH);
+    AppendText(path, L"bgi-bridge-bootstrap.log");
+    AppendLine(path, line);
 }
 
 void LogWithCode(const WCHAR* step, int32_t code) {
@@ -283,6 +404,9 @@ int32_t ResolveEntry(const WCHAR* bridgeDir, const WCHAR* methodName, void** out
 // ---------- 线程体 ----------
 
 DWORD WINAPI Worker(LPVOID) {
+    // 定下数据根。文件 I/O 只能在这里做：DllMain 里会卡在 loader lock 上。
+    ResolveDataRoot();
+
     LogLine(L"--- 引导开始 ---");
 
     WCHAR bridgeDir[MAX_PATH]{};

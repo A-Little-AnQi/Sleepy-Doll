@@ -598,7 +598,7 @@ impl Supervisor {
                     && !run.state.terminal()
                 {
                     if let Error::Storage(storage) = &e {
-                        eprintln!("Run {} storage failure: {storage}", run.id);
+                        log::error!("Run {} storage failure: {storage}", run.id);
                     }
                     let unknown = s
                         .journal
@@ -618,7 +618,7 @@ impl Supervisor {
                     };
                     run.error = Some(e.user_message());
                     if let Err(storage) = s.journal.save(&mut run, next) {
-                        eprintln!("Unable to persist failed run: {storage}");
+                        log::error!("Unable to persist failed run: {storage}");
                     }
                 }
                 let kind = if run.state == RunState::NeedsReview {

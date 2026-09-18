@@ -10,7 +10,7 @@ import {
 } from "react";
 import { createPortal, flushSync } from "react-dom";
 import type { Page } from "../App";
-import { api } from "../api";
+import { api, framelessWindow } from "../api";
 import {
   isRunning,
   needsConfirmation,
@@ -20,7 +20,6 @@ import {
 import type { Bootstrap, ConversationInfo } from "../types";
 import { hostPluginEnabled } from "../providers";
 import {
-  BrandIcon,
   BridgeIcon,
   EditIcon,
   FolderIcon,
@@ -33,6 +32,7 @@ import {
   TrashIcon,
 } from "./icons";
 import { SidebarAccount } from "./SidebarAccount";
+import { TitleBar } from "./TitleBar";
 import { InlineRename } from "./InlineRename";
 import { DisclosureChevron } from "./DisclosureChevron";
 import { Toast } from "./Toast";
@@ -540,7 +540,6 @@ export function AppShell({
       onPointerLeave={!docked ? hidePeek : undefined}
     >
       <div className="app-brand">
-        <BrandIcon className="brand-mark" />
         <strong>Sleepy Doll</strong>
         <button
           className="icon-button"
@@ -712,6 +711,7 @@ export function AppShell({
           onPointerLeave={hidePeek}
         />
       )}
+      {framelessWindow && <TitleBar />}
       {aside}
       {!wide && !collapsed && (
         <button

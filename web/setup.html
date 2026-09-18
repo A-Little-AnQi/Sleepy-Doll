@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>安装 Sleepy Doll</title>
+    <script>
+      // 首帧之前定好主题，深色窗口先闪一下白底会很难看。
+      document.documentElement.dataset.theme =
+        localStorage.getItem("sleepy-doll-theme") === "light"
+          ? "light"
+          : "dark";
+    </script>
+    <style>
+      /* 样式表到位之前的窗口底色，取 --surface 的同一个值。 */
+      html {
+        background: #1b1b1b;
+      }
+      html[data-theme="light"] {
+        background: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/setup/main.tsx"></script>
+  </body>
+</html>

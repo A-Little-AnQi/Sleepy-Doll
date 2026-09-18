@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import mascot from "../assets/moon-character.png";
+import mascot from "../assets/moon-character.webp";
 import "./ChatPage.css";
 import { Transcript } from "../components/Transcript";
 import { api } from "../api";

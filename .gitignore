@@ -1,16 +1,11 @@
 node_modules/
 target/
-ui-dist/
 # Shipping output assembled by build-desktop.cmd
 /dist/
 .sleepy-doll/
 .retired/
 .staging-*/
 *.runtime.lock
-# Design exploration assets. They are ~23 MB of unreferenced PNGs — roughly 90%
-# of the repository pack — and neither the application nor the documentation
-# loads them, so they live on disk rather than in version control.
-/docs/design/
 # User configuration belongs in <installation>/user/ and must never be committed.
 # The rules below only stop accidental commits of local copies.
 /user/
@@ -41,4 +36,3 @@ pnpm-debug.log*
 coverage/
 .DS_Store
 Thumbs.db
-BGI-Agent-Implementation-Plan.md:Zone.Identifier

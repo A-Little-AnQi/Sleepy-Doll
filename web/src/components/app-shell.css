@@ -5,6 +5,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   height: 100%;
+  /* 自绘标题栏是固定层，这里让出它的高度。 */
+  padding-top: var(--title-bar-height);
   overflow: hidden;
   color: var(--text);
   background: var(--surface);
@@ -15,7 +17,7 @@
 }
 .app-sidebar-peek {
   position: fixed;
-  inset: 0 auto 0 0;
+  inset: var(--title-bar-height) auto 0 0;
   width: 10px;
   z-index: 40;
 }
@@ -45,7 +47,7 @@
 }
 .app-scrim {
   position: fixed;
-  inset: 0;
+  inset: var(--title-bar-height) 0 0 0;
   z-index: 45;
   padding: 0;
   border: 0;
@@ -54,7 +56,7 @@
 .app-sidebar {
   /* 停靠和悬浮都用同一层固定侧栏 + translateX，避免切换 position 时无法插值。 */
   position: fixed;
-  inset: 0 auto 0 0;
+  inset: var(--title-bar-height) auto 0 0;
   z-index: 80;
   width: min(var(--sidebar-user-width), 88vw);
   display: flex;
@@ -418,13 +420,12 @@
   width: 24px;
   height: 24px;
   flex-shrink: 0;
-  border-radius: 50%;
-  background: var(--selected);
-  color: var(--text);
 }
-.app-account-avatar svg {
-  width: 14px;
-  height: 14px;
+.app-account-avatar svg,
+.app-account-avatar img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
 }
 .app-account-copy {
   display: grid;

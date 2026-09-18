@@ -1,6 +1,5 @@
-# 构建产物
-/dist/
-/.build/
+# 构建产物统一落在仓库的 target/ 下（target/bridge 是桥组件，target/dotnet 是
+# .NET 中间目录），这里只需要挡住误落在源码目录里的东西。
 /managed/bin/
 /managed/obj/
 /obj/

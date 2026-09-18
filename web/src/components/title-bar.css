@@ -1,0 +1,70 @@
+/* 自绘标题栏。高度记在 :root 上（默认 0），侧栏和遮罩按同一个变量让位，
+   这样浏览器预览里这些规则自然失效。 */
+:root[data-frameless="true"] {
+  --title-bar-height: 32px;
+  /* 窗口的圆角在页面之外，页面自己不能画到圆角外面去。 */
+  background: transparent;
+}
+
+/* 最大化时窗口铺满屏幕，原生侧不再切圆角。 */
+:root[data-frameless="true"][data-maximized="true"] {
+  --window-radius: 0px;
+}
+
+/* 贴着窗口上缘的两层是这里和 .app-shell，圆角要一起给。 */
+:root[data-frameless="true"] .title-bar,
+:root[data-frameless="true"] .app-shell {
+  border-radius: var(--window-radius) var(--window-radius) 0 0;
+}
+
+.title-bar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 85;
+  height: var(--title-bar-height);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  /* 用内阴影而不是下边框：下边框占掉 32px 里的一像素，控制按钮和图标就只剩 31px。 */
+  box-shadow: inset 0 -1px 0 var(--border);
+  background: var(--surface);
+  /* 按钮的悬停底色是方的，不裁掉就会盖住窗口的圆角。 */
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.title-bar-controls {
+  display: flex;
+  height: 100%;
+  flex-shrink: 0;
+}
+
+.title-bar-button {
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--secondary);
+}
+
+.title-bar-button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.title-bar-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.title-bar-glyph {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+}

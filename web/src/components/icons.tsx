@@ -1,26 +1,15 @@
+import brandMark from "../assets/brand.png";
+
 /** Shared 24×24 stroke icons. They inherit `currentColor` so callers control the
  * colour, and they are always paired with a visible text label — an icon alone
- * tells a first-time user nothing. */
+ * tells a first-time user nothing. `BrandIcon` is the exception: it is the
+ * product mark, a raster illustration that carries its own colours. */
 type IconProps = { className?: string };
 
+/** The product mark: the character illustration, wherever the interface refers
+ * to the application itself. Callers size it with a class, like the glyphs. */
 export function BrandIcon({ className }: IconProps) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 32 32"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M23.8 21.7A11.4 11.4 0 0 1 10.3 8.2 11.5 11.5 0 1 0 23.8 21.7Z"
-        fill="currentColor"
-      />
-      <path
-        d="m23 5 .9 3.1L27 9l-3.1.9L23 13l-.9-3.1L19 9l3.1-.9Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
+  return <img className={className} src={brandMark} alt="" />;
 }
 export function SidebarIcon(p: IconProps) {
   return (

@@ -1,29 +1,57 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{sync::Arc, thread};
+mod window_chrome;
+
+use std::{path::Path, sync::Arc, thread};
 
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sleepy_doll::{app::AppController, runtime::types::Event as AgentEvent};
+use sleepy_doll::{app::AppController, logging, runtime::types::Event as AgentEvent};
+#[cfg(target_os = "windows")]
+use tao::platform::windows::{IconExtWindows, WindowBuilderExtWindows};
 use tao::{
-    dpi::{LogicalSize, Size},
+    dpi::{LogicalSize, PhysicalSize, Size},
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
-    window::WindowBuilder,
+    window::{Window, WindowBuilder},
 };
 use wry::{
-    WebViewBuilder,
+    WebContext, WebViewBuilder,
     http::{Request, Response, header::CONTENT_TYPE},
 };
 
+/// `assets/sleepy-doll.rc` 里的图标编号。
+#[cfg(target_os = "windows")]
+const APP_ICON: u16 = 1;
+
+/// 窗口图标与任务栏图标取 exe 资源里的同一份；取不到只影响外观，不该拦住启动。
+#[cfg(target_os = "windows")]
+fn shell_icon(size: u32) -> Option<tao::window::Icon> {
+    match tao::window::Icon::from_resource(APP_ICON, Some(PhysicalSize::new(size, size))) {
+        Ok(icon) => Some(icon),
+        Err(error) => {
+            log::warn!("窗口图标不可用: {error}");
+            None
+        }
+    }
+}
+
 #[derive(RustEmbed)]
-#[folder = "ui-dist/"]
+#[folder = "target/ui/"]
 struct UiAssets;
+
+/// 界面靠这两个标记判断自己跑在桌面壳里、以及标题栏要不要自绘。
+#[cfg(target_os = "windows")]
+const INITIALIZATION_SCRIPT: &str = "window.__SLEEPY_DOLL_DESKTOP__ = true;\n\
+     window.__SLEEPY_DOLL_FRAMELESS__ = true;";
+#[cfg(not(target_os = "windows"))]
+const INITIALIZATION_SCRIPT: &str = "window.__SLEEPY_DOLL_DESKTOP__ = true;";
 
 #[derive(Debug)]
 enum UserEvent {
     ToWeb(Value),
+    Window(window_chrome::Action),
     #[cfg(target_os = "windows")]
     ShowWindow,
     #[cfg(target_os = "windows")]
@@ -67,6 +95,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     sleepy_doll::config::seed(&config_path)?;
+    // 用户目录是配置文件的所在目录：日志和 WebView2 的缓存都放进去，安装目录里
+    // 就只剩程序本身，升级覆盖时不会连带清掉它们。
+    let user_directory = config_path
+        .parent()
+        .ok_or("配置路径没有所在目录，无法定位用户目录")?
+        .to_path_buf();
+    if let Err(error) = logging::init(&user_directory) {
+        // 日志是诊断手段，不是运行前提。
+        eprintln!("无法写入日志（{error}），本次运行的记录只有标准错误。");
+    }
     let controller = Arc::new(AppController::load(&config_path)?);
     let startup_config = sleepy_doll::AppConfig::load(&config_path)?;
     if startup_config.host_plugin_enabled() && startup_config.bridge.enabled {
@@ -83,15 +121,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let proxy = event_loop.create_proxy();
     #[cfg(target_os = "windows")]
     let _tray = create_tray(proxy.clone())?;
-    let window = WindowBuilder::new()
+    let builder = WindowBuilder::new()
         .with_title("Sleepy Doll")
         .with_inner_size(Size::Logical(LogicalSize::new(1360.0, 860.0)))
-        .with_min_inner_size(Size::Logical(LogicalSize::new(900.0, 620.0)))
-        .build(&event_loop)?;
+        .with_min_inner_size(Size::Logical(LogicalSize::new(900.0, 620.0)));
+    // 两个图标要在窗口创建时就设上：tao 建窗口的过程中会把它们置空，
+    // 而 window_chrome::install() 要等 WebView2 启动完。
+    #[cfg(target_os = "windows")]
+    let builder = builder
+        .with_window_icon(shell_icon(16))
+        .with_taskbar_icon(shell_icon(32));
+    // 标题栏由界面自绘（见 window_chrome），系统那一条要先摘掉。
+    #[cfg(target_os = "windows")]
+    let builder = builder.with_decorations(false);
+    let window = builder.build(&event_loop)?;
 
+    // WebView2 默认把用户数据放在 exe 旁边，那是安装目录里会被升级覆盖的位置。
+    let mut web_context = WebContext::new(Some(webview_data_directory(&user_directory)));
     let ipc_controller = controller.clone();
     let ipc_proxy = proxy.clone();
-    let webview = WebViewBuilder::new()
+    let webview = WebViewBuilder::new_with_web_context(&mut web_context)
         .with_asynchronous_custom_protocol(
             "sleepy".into(),
             move |_webview_id, request, responder| {
@@ -101,7 +150,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_ipc_handler(move |request| {
             dispatch_ipc(request, ipc_controller.clone(), ipc_proxy.clone())
         })
-        .with_initialization_script("window.__SLEEPY_DOLL_DESKTOP__ = true;")
+        .with_initialization_script(INITIALIZATION_SCRIPT)
         .with_navigation_handler(|destination| {
             if is_application_url(&destination) {
                 return true;
@@ -127,6 +176,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_devtools(cfg!(debug_assertions))
         .build(&window)?;
 
+    // 子窗口这时才存在：WebView2 的边缘命中测试要交给它让出来。
+    window_chrome::install(&window);
+    let mut maximized = window.is_maximized();
+
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
@@ -141,12 +194,36 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } => {
                 #[cfg(target_os = "windows")]
-                window.set_visible(false);
+                fold_into_tray(&window);
                 #[cfg(not(target_os = "windows"))]
                 {
                     controller.shutdown();
                     *control_flow = ControlFlow::Exit;
                 }
+            }
+            Event::WindowEvent {
+                event: WindowEvent::Resized(_),
+                ..
+            } => {
+                // 只有真正变了才通知：缩放过程里这个事件很密集。
+                let current = window.is_maximized();
+                if current != maximized {
+                    maximized = current;
+                    let _ = webview.evaluate_script(&format!(
+                        "window.__sleepyDollWindow?.({});",
+                        json!({ "maximized": current })
+                    ));
+                }
+            }
+            Event::UserEvent(UserEvent::Window(action)) => {
+                #[cfg(target_os = "windows")]
+                if action == window_chrome::Action::Close {
+                    fold_into_tray(&window);
+                } else {
+                    window_chrome::perform(&window, action);
+                }
+                #[cfg(not(target_os = "windows"))]
+                window_chrome::perform(&window, action);
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::ShowWindow) => {
@@ -167,6 +244,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             _ => {}
         }
     });
+}
+
+/// WebView2 的用户数据目录。放进用户目录，与配置、日志同级。
+fn webview_data_directory(user_directory: &Path) -> std::path::PathBuf {
+    user_directory.join(".sleepy-doll").join("webview2")
+}
+
+/// 关闭窗口只把界面收起来：任务可能还在跑，退出的入口在托盘菜单里。
+#[cfg(target_os = "windows")]
+fn fold_into_tray(window: &Window) {
+    window.set_visible(false);
 }
 
 #[cfg(target_os = "windows")]
@@ -191,24 +279,17 @@ fn create_tray(
             let _ = proxy.send_event(UserEvent::Quit);
         }
     }));
-    let mut rgba = vec![0u8; 32 * 32 * 4];
-    for y in 0..32i32 {
-        for x in 0..32i32 {
-            let radius = (x - 16).pow(2) + (y - 16).pow(2);
-            if radius < 196 && (x - 20).pow(2) + (y - 12).pow(2) > 100 {
-                let color = [128, 128, 128, 255];
-                rgba[((y * 32 + x) * 4) as usize..((y * 32 + x) * 4 + 4) as usize]
-                    .copy_from_slice(&color);
-            }
-        }
-    }
-    Ok(TrayIconBuilder::new()
+    let mut builder = TrayIconBuilder::new()
         .with_tooltip("Sleepy Doll · 关闭窗口后继续运行")
-        .with_icon(Icon::from_rgba(rgba, 32, 32)?)
-        .with_menu(Box::new(menu))
-        .build()?)
+        .with_menu(Box::new(menu));
+    // 图标编在 exe 的资源里，界面、窗口和托盘用的是同一份。取不到只影响外观，
+    // 不该拦住启动。
+    match Icon::from_resource(APP_ICON, Some((32, 32))) {
+        Ok(icon) => builder = builder.with_icon(icon),
+        Err(error) => log::warn!("托盘图标不可用: {error}"),
+    }
+    Ok(builder.build()?)
 }
-
 fn dispatch_ipc(
     request: Request<String>,
     controller: Arc<AppController>,
@@ -218,6 +299,13 @@ fn dispatch_ipc(
         return;
     }
     let parsed = serde_json::from_str::<IpcRequest>(request.body());
+    // 窗口控制不进控制器：它不认识窗口，而且这些请求要回到事件循环所在线程执行。
+    if let Ok(request) = &parsed
+        && let Some(action) = window_chrome::Action::from_method(&request.method)
+    {
+        let _ = proxy.send_event(UserEvent::Window(action));
+        return;
+    }
     thread::spawn(move || match parsed {
         Ok(request) => {
             let event_proxy = proxy.clone();

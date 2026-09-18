@@ -1,6 +1,9 @@
 //! Local bridge lifecycle. Only the desktop IPC invokes the injector; this is
 //! deliberately not exposed as an agent tool.
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use serde_json::{Value, json};
 
@@ -9,16 +12,24 @@ use crate::{
     error::{Error, Result},
 };
 
+fn exe_dir() -> Result<PathBuf> {
+    Ok(std::env::current_exe()?.parent().unwrap().to_path_buf())
+}
+
 pub fn directory() -> Result<PathBuf> {
-    let beside_exe = std::env::current_exe()?.parent().unwrap().to_path_buf();
-    if beside_exe.join("BgiBridge.Injector.exe").is_file() {
-        return Ok(beside_exe);
+    let beside_exe = exe_dir()?;
+    // Shipping packages keep the components in a `bridge` subdirectory; earlier
+    // packages put them directly beside the executable.
+    for candidate in [beside_exe.join("bridge"), beside_exe.clone()] {
+        if candidate.join("BgiBridge.Injector.exe").is_file() {
+            return Ok(candidate);
+        }
     }
     // Cargo writes to <manifest>/target in both profiles, so a binary running
-    // from there is a development build even in release. Shipping builds land in
-    // dist/Sleepy-Doll/ and find the bridge beside themselves, above.
+    // from there is a development build even in release. The bridge lands in
+    // target/bridge, laid out flat, beside Cargo's own output.
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let development = manifest.join("bgi-bridge").join("dist");
+    let development = manifest.join("target").join("bridge");
     if beside_exe.starts_with(manifest.join("target"))
         && development.join("BgiBridge.Injector.exe").is_file()
     {
@@ -27,6 +38,19 @@ pub fn directory() -> Result<PathBuf> {
     Err(Error::Config(
         "无法连接 BetterGI：安装不完整。请重新安装 Sleepy Doll。".into(),
     ))
+}
+
+/// The one data root, `<install>/user`. Components live in `<install>/bridge`
+/// and would otherwise put their logs and recovery records in a second `user`
+/// directory inside the product folder, which an upgrade replaces wholesale.
+/// Anything else — a flat package, the development layout — keeps the root the
+/// bridge itself resolves, so `None` here means "do not override it".
+fn data_root(install: &Path, bridge_dir: &Path) -> Option<PathBuf> {
+    if bridge_dir == install.join("bridge").as_path() {
+        Some(install.join("user"))
+    } else {
+        None
+    }
 }
 
 fn host_running() -> bool {
@@ -178,6 +202,11 @@ pub fn prepare(config: &mut BridgeConfig) -> Result<()> {
     settings["enabled"] = json!(true);
     settings["listen"] = json!(listen);
     settings["token"] = json!(config.token);
+    // The native and managed sides take their data root from here, because the
+    // bridge directory is no longer the installation directory.
+    if let Some(root) = data_root(&exe_dir()?, &dir) {
+        settings["userDirectory"] = json!(root.to_string_lossy());
+    }
     crate::config::atomic_write(&path, &settings)
 }
 
@@ -245,11 +274,15 @@ pub fn recovery(action: &str, arguments: &[&str]) -> Result<Value> {
 fn inject() -> Result<()> {
     use std::os::windows::process::CommandExt;
     let dir = directory()?;
+    let install = exe_dir()?;
+    let user = data_root(&install, &dir).unwrap_or_else(|| dir.join("user"));
     let mut child = std::process::Command::new(dir.join("BgiBridge.Injector.exe"))
         .arg("--process")
         .arg("BetterGI.exe")
         .arg("--bridge")
         .arg(&dir)
+        .arg("--user")
+        .arg(&user)
         .current_dir(&dir)
         .creation_flags(0x08000000)
         .stdin(std::process::Stdio::null())
@@ -291,6 +324,24 @@ fn inject() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_the_packaged_layout_repins_the_data_root() {
+        let install = Path::new(r"C:\Program Files\Sleepy Doll");
+        assert_eq!(
+            data_root(install, &install.join("bridge")),
+            Some(install.join("user"))
+        );
+        // A flat package and the development layout resolve their own root.
+        assert_eq!(data_root(install, install), None);
+        assert_eq!(
+            data_root(
+                Path::new(r"C:\repo\target\debug"),
+                &PathBuf::from(r"C:\repo\target\bridge")
+            ),
+            None
+        );
+    }
+
     #[test]
     fn injection_endpoint_is_local_and_unambiguous() {
         let mut config = BridgeConfig {

@@ -32,9 +32,11 @@
   background: var(--subtle);
 }
 
-.assistant-avatar svg {
-  width: 19px;
-  height: 19px;
+.assistant-avatar svg,
+.assistant-avatar img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
 }
 
 .message-content {

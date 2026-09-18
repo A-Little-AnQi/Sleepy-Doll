@@ -4,7 +4,8 @@ namespace BgiBridge;
 
 /// <summary>
 /// 日志落文件。不能用 Console：宿主是 WPF 应用，没有属于我们的控制台。
-/// 写在桥自己的目录，不碰宿主目录。
+/// 写在数据根（安装目录的 user\，见 InstallPaths）的 log 下，不碰宿主目录，
+/// 也不让安装目录里堆运行期产物。
 /// </summary>
 public static class Diagnostics
 {
@@ -15,7 +16,7 @@ public static class Diagnostics
     {
         try
         {
-            _logPath = Path.Combine(bridgeDir, "bridge.log");
+            _logPath = Path.Combine(InstallPaths.LogDirectory(bridgeDir), "bridge.log");
         }
         catch
         {

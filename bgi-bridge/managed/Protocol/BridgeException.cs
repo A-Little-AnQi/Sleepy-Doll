@@ -1,6 +1,6 @@
 namespace BgiBridge.Protocol;
 
-/// <summary>桥的错误类型，code 对齐 docs/bgi-implementation-plan.md §5.5。</summary>
+/// <summary>桥的错误类型，code 对齐 docs/bgi-host-contracts.md 的「错误协议」。</summary>
 public sealed class BridgeException(string code, string message, int httpStatus = 400)
     : Exception(message)
 {

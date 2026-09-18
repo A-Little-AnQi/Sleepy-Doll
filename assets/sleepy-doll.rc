@@ -1,0 +1,3 @@
+// 程序图标。编号 1 同时被窗口（WM_SETICON）与托盘
+// （tray_icon::Icon::from_resource）按序号取用，改这里要一并改 src/main.rs。
+1 ICON "sleepy-doll.ico"

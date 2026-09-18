@@ -20,8 +20,22 @@ declare global {
   interface Window {
     ipc?: { postMessage(message: string): void };
     __SLEEPY_DOLL_DESKTOP__?: boolean;
+    __SLEEPY_DOLL_FRAMELESS__?: boolean;
     __sleepyDollReceive?: (message: NativeMessage) => void;
+    __sleepyDollWindow?: (state: WindowState) => void;
   }
+}
+
+/** 窗口是否由界面自绘标题栏 —— 去掉系统标题栏与边框的桌面窗口才成立。 */
+export const framelessWindow =
+  typeof window !== "undefined" &&
+  (Boolean(window.__SLEEPY_DOLL_FRAMELESS__) ||
+    // 开发期用 ?frameless=1 在浏览器里预览标题栏；生产构建里这段被静态消除。
+    (import.meta.env.DEV &&
+      new URLSearchParams(window.location.search).has("frameless")));
+
+export interface WindowState {
+  maximized: boolean;
 }
 
 interface NativeMessage {
@@ -138,6 +152,15 @@ function invoke<T>(
       reject(error);
     }
   });
+}
+
+/** 窗口控制没有回执可等。拖动期间原生主线程在系统的移动循环里，回执要等循环结束
+ * 才发得出来，用 invoke 会先撞上请求期限。这些请求也不需要结果：不生效就是没有
+ * 无边框窗口（浏览器预览），界面上那条标题栏此时也不存在。 */
+function sendWindow(method: string) {
+  window.ipc?.postMessage(
+    JSON.stringify({ id: crypto.randomUUID(), method, params: {} }),
+  );
 }
 
 export const api = {
@@ -321,4 +344,9 @@ export const api = {
       { id },
     ),
   copyWorkflow: (id: string) => invoke<{ id: string }>("workflow.copy", { id }),
+
+  windowDrag: () => sendWindow("window.drag"),
+  windowMinimize: () => sendWindow("window.minimize"),
+  windowToggleMaximize: () => sendWindow("window.toggleMaximize"),
+  windowClose: () => sendWindow("window.close"),
 };

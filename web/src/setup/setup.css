@@ -1,0 +1,342 @@
+/* 安装与卸载窗口。原生窗口固定 720×460，布局按这个尺寸排，不做响应式。 */
+
+.setup-shell {
+  /* 插画后面的一层柔光，取插画自己的蓝。 */
+  --setup-glow: #6e96e629;
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  height: 100%;
+  /* 让出自绘标题栏。 */
+  padding-top: var(--title-bar-height);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+:root[data-theme="dark"] .setup-shell {
+  --setup-glow: #5a8cdc33;
+}
+
+/* 无边框窗口的圆角由原生侧切，页面自己也要把顶角画上，否则窗口角上是透明的。 */
+:root[data-frameless="true"] .setup-shell {
+  border-radius: var(--window-radius) var(--window-radius) 0 0;
+}
+
+/* 窗口固定大小，没有最大化可言。 */
+.setup-shell .title-bar-controls button:nth-child(2) {
+  display: none;
+}
+
+.setup-aside {
+  position: relative;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 20px 18px;
+  overflow: hidden;
+  background: var(--sidebar);
+  /* 分隔线用内阴影，不占标题栏那一列的高度。 */
+  box-shadow: inset -1px 0 0 var(--border);
+}
+
+.setup-aside::before {
+  content: "";
+  position: absolute;
+  top: -14%;
+  left: 50%;
+  width: 300px;
+  height: 300px;
+  translate: -50% 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--setup-glow), transparent 68%);
+  pointer-events: none;
+}
+
+.setup-art {
+  position: relative;
+  width: 178px;
+  height: 178px;
+  object-fit: contain;
+}
+
+.setup-brand {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+}
+
+.setup-brand h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+}
+
+.setup-brand span {
+  color: var(--muted);
+  font-size: var(--font-label);
+}
+
+.setup-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+  padding: 22px 26px 18px;
+  overflow: auto;
+}
+
+.setup-head h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+}
+
+.setup-head p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.7;
+}
+
+.setup-body {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+}
+
+.setup-field {
+  display: grid;
+  gap: 7px;
+}
+
+.setup-field-label {
+  font-size: var(--font-meta);
+  color: var(--secondary);
+}
+
+.setup-path {
+  display: flex;
+  gap: 8px;
+}
+
+.setup-path input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 与输入框同高，两个控件并排才齐。 */
+.setup-path .secondary-action {
+  flex-shrink: 0;
+  min-height: var(--control-height);
+}
+
+.setup-path input:disabled {
+  opacity: 0.5;
+}
+
+.setup-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-label);
+  line-height: 1.7;
+}
+
+.setup-mono {
+  font-family: "Cascadia Code", Consolas, monospace;
+  color: var(--secondary);
+  overflow-wrap: anywhere;
+}
+
+.setup-choice {
+  display: grid;
+  gap: 6px;
+}
+
+.setup-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: var(--font-body);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.setup-check input {
+  appearance: none;
+  display: grid;
+  place-content: center;
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.setup-check input:hover {
+  border-color: var(--secondary);
+}
+
+.setup-check input:checked {
+  border-color: var(--solid);
+  background: var(--solid);
+}
+
+.setup-check input:checked::after {
+  content: "";
+  width: 8px;
+  height: 4px;
+  border-left: 2px solid var(--inverse);
+  border-bottom: 2px solid var(--inverse);
+  rotate: -45deg;
+  translate: 0 -1px;
+}
+
+.setup-check input:focus-visible {
+  outline: 2px solid var(--secondary);
+  outline-offset: 2px;
+}
+
+.setup-check input:disabled {
+  opacity: 0.5;
+}
+
+/* 勾上就等于同意删掉 user\ 目录，说明文字跟着提亮一档。 */
+.setup-check:has(input:checked) ~ .setup-note {
+  color: var(--text);
+}
+
+.setup-choice .setup-note {
+  padding-left: 24px;
+}
+
+.setup-meta {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--subtle);
+}
+
+.setup-meta-row {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+}
+
+.setup-meta dt {
+  color: var(--muted);
+  font-size: var(--font-label);
+}
+
+.setup-meta dd {
+  margin: 0;
+  font-size: var(--font-meta);
+}
+
+.setup-progress {
+  display: grid;
+  gap: 9px;
+}
+
+.setup-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--font-body);
+}
+
+.setup-progress-head span:last-child {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.setup-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--well);
+  box-shadow: var(--well-inset);
+  overflow: hidden;
+}
+
+.setup-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--solid);
+  transition: width var(--motion-base) var(--ease-standard);
+}
+
+.setup-result {
+  display: grid;
+  justify-items: start;
+  gap: 9px;
+}
+
+.setup-badge {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 4px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--subtle);
+  color: var(--text);
+}
+
+.setup-badge .button-icon {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.6;
+}
+
+/* 安装位置这类长路径单独占一行，放在句子里会被折成两截。 */
+.setup-result .setup-target {
+  justify-self: stretch;
+  /* 让出一行的宽度，别被正文的行长上限截短。 */
+  max-width: none;
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--subtle);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: var(--font-meta);
+  color: var(--secondary);
+  overflow-wrap: anywhere;
+}
+
+.setup-result h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.setup-result p {
+  max-width: 42ch;
+  margin: 0;
+  color: var(--secondary);
+  font-size: var(--font-body);
+  line-height: 1.7;
+}
+
+.setup-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}

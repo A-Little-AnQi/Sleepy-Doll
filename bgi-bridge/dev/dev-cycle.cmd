@@ -27,15 +27,16 @@ start "" "%TESTDIR%\BetterGI.exe"
 timeout /t 15 /nobreak >nul
 
 echo [4/5] Injecting...
-cd /d "%~dp0..\dist"
-del /q bootstrap.log bridge.log injector.log >nul 2>&1
+cd /d "%~dp0..\..\target\bridge"
+rem Logs append, so clear them first; otherwise this run's output is buried.
+del /q user\log\*.log >nul 2>&1
 BgiBridge.Injector.exe --process BetterGI.exe
 timeout /t 8 /nobreak >nul
 
 echo [5/5] Done. Logs:
-echo   %~dp0..\dist\bootstrap.log
-echo   %~dp0..\dist\bridge.log
-echo   %~dp0..\dist\injector.log
+echo   %~dp0..\..\target\bridge\user\log\bootstrap.log
+echo   %~dp0..\..\target\bridge\user\log\bridge.log
+echo   %~dp0..\..\target\bridge\user\log\injector.log
 echo.
 echo Bridge should now answer on the address in bridge.config.json.
 exit /b 0
