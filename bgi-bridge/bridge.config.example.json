@@ -27,6 +27,9 @@
   "//disabledMethods": "单方法级黑名单，优先级最高。例如 [\"bgi.delete_script_group\"]",
   "disabledMethods": [],
 
+  "//userDirectory": "产品布局由安装程序写成安装根下的 user\\。缺了这个字段时，恢复和引导会在 bridge\\user\\ 另建一棵树。",
+  "userDirectory": "",
+
   "//requireConfirmation": "写类方法是否强制带 requiresConfirmation 元数据，交给 Sleepy Doll 的审批界面拦。",
   "requireConfirmation": true
 }

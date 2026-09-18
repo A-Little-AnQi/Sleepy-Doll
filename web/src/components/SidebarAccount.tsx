@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BrandIcon } from "./icons";
+import { BrandIcon, HelpIcon, SettingsIcon } from "./icons";
 import { ThemeSwitch } from "./ThemeSwitch";
 import { SettingRow } from "./SettingRow";
 import { Select } from "./Select";
@@ -122,6 +122,7 @@ export function SidebarAccount({
                 onHelp();
               }}
             >
+              <HelpIcon className="button-icon" />
               使用说明
             </button>
             <button
@@ -133,6 +134,7 @@ export function SidebarAccount({
                 onSettings();
               }}
             >
+              <SettingsIcon className="button-icon" />
               设置
             </button>
           </div>

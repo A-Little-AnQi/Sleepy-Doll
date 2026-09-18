@@ -3,7 +3,7 @@ import mascot from "../assets/moon-character.webp";
 import "./ChatPage.css";
 import { Transcript } from "../components/Transcript";
 import { api } from "../api";
-import { CheckIcon, SendIcon, StopIcon } from "../components/icons";
+import { CheckIcon, HelpIcon, SendIcon, StopIcon } from "../components/icons";
 import { Select } from "../components/Select";
 import {
   isRunning,
@@ -220,6 +220,7 @@ export function ChatPage({
             )}
             {onOpenHelp && (
               <button type="button" className="subtle-action" onClick={onOpenHelp}>
+                <HelpIcon className="button-icon" />
                 使用说明
               </button>
             )}

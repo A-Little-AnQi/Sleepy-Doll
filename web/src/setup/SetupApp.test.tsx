@@ -81,6 +81,7 @@ function userDataBox() {
 afterEach(() => {
   cleanup();
   delete window.ipc;
+  delete window.__SLEEPY_DOLL_FRAMELESS__;
   vi.clearAllMocks();
 });
 
@@ -89,6 +90,9 @@ it("appends the product directory unless it is already there", () => {
   expect(installedDirectory("D:\\Games\\")).toBe("D:\\Games\\Sleepy Doll");
   expect(installedDirectory("D:\\Games\\Sleepy Doll")).toBe(
     "D:\\Games\\Sleepy Doll",
+  );
+  expect(installedDirectory("D:\\Games\\Sleepy-Doll")).toBe(
+    "D:\\Games\\Sleepy-Doll",
   );
   expect(installedDirectory("  ")).toBe("");
 });
@@ -105,6 +109,7 @@ it("still renders the form when no native host answers", () => {
   expect(directoryField().value).toBe("D:\\Sleepy Doll");
   expect(screen.getByRole("button", { name: "安装" })).toBeTruthy();
   expect(screen.getByText("版本 0.1.0")).toBeTruthy();
+  expect(document.querySelector(".title-bar")).toBeNull();
 });
 
 it("shows where the chosen directory ends up and installs into it", async () => {
@@ -128,6 +133,18 @@ it("shows where the chosen directory ends up and installs into it", async () => 
   );
 });
 
+it("refuses to install into an empty path", async () => {
+  host();
+  render(<SetupApp />);
+  await waitFor(() => expect(directoryField().value).toBe(DEFAULT_DIRECTORY));
+  fireEvent.change(directoryField(), { target: { value: "   " } });
+  expect(screen.queryByText(/最终会装到/)).toBeNull();
+  expect(screen.getByRole("button", { name: "安装" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+});
+
 it("prefills the existing install so overwriting keeps its place", async () => {
   host({
     installed: true,
@@ -138,7 +155,14 @@ it("prefills the existing install so overwriting keeps its place", async () => {
   await waitFor(() =>
     expect(directoryField().value).toBe("D:\\Games\\Sleepy Doll"),
   );
-  expect(screen.getByText(/已安装/)).toBeTruthy();
+  expect(
+    screen.getByText("所有文件与数据均会保存在安装目录下"),
+  ).toBeTruthy();
+  expect(directoryField().disabled).toBe(true);
+  expect(screen.getByRole("button", { name: "浏览" })).toHaveProperty(
+    "disabled",
+    true,
+  );
   expect(screen.getByText(/最终会装到/).textContent).toBe(
     "最终会装到 D:\\Games\\Sleepy Doll",
   );
@@ -175,6 +199,21 @@ it("locks every control and moves the bar while running", async () => {
   expect(
     screen.getByRole("button", { name: "取消" }).hasAttribute("disabled"),
   ).toBe(true);
+  expect(screen.queryByLabelText("关闭")).toBeNull();
+});
+
+it("disables the window close button while writing files", async () => {
+  window.__SLEEPY_DOLL_FRAMELESS__ = true;
+  host();
+  render(<SetupApp />);
+  fireEvent.click(screen.getByRole("button", { name: "安装" }));
+  push({
+    phase: "running",
+    progress: 0.42,
+    message: "正在复制程序文件…",
+    error: null,
+  });
+  expect(screen.getByLabelText("关闭")).toHaveProperty("disabled", true);
 });
 
 it("reports the failure and lets the user go back and retry", async () => {

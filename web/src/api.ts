@@ -26,13 +26,12 @@ declare global {
   }
 }
 
-/** 窗口是否由界面自绘标题栏 —— 去掉系统标题栏与边框的桌面窗口才成立。 */
-export const framelessWindow =
-  typeof window !== "undefined" &&
-  (Boolean(window.__SLEEPY_DOLL_FRAMELESS__) ||
-    // 开发期用 ?frameless=1 在浏览器里预览标题栏；生产构建里这段被静态消除。
-    (import.meta.env.DEV &&
-      new URLSearchParams(window.location.search).has("frameless")));
+/** 窗口是否由界面自绘标题栏。只有桌面壳注入了无边框标记才成立；浏览器页面不画。 */
+export function framelessWindow() {
+  return (
+    typeof window !== "undefined" && Boolean(window.__SLEEPY_DOLL_FRAMELESS__)
+  );
+}
 
 export interface WindowState {
   maximized: boolean;
@@ -349,4 +348,5 @@ export const api = {
   windowMinimize: () => sendWindow("window.minimize"),
   windowToggleMaximize: () => sendWindow("window.toggleMaximize"),
   windowClose: () => sendWindow("window.close"),
+  windowState: () => sendWindow("window.state"),
 };

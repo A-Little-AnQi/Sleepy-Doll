@@ -38,7 +38,7 @@ pub fn uninstall(
             }
         }
     }
-    remove_empty_directories(&removed);
+    remove_empty_directories(&removed, directory);
 
     progress(0.6, "正在删除快捷方式…");
     remove_shortcuts();
@@ -53,6 +53,11 @@ pub fn uninstall(
         if user.is_dir() {
             let _ = fs::remove_dir_all(&user);
         }
+        // 旧布局或未写入 userDirectory 时，桥会在自己旁边另建一棵 user\。
+        let nested = directory.join("bridge").join(USER_DIRECTORY);
+        if nested.is_dir() {
+            let _ = fs::remove_dir_all(&nested);
+        }
     }
 
     progress(0.95, "正在收尾…");
@@ -63,14 +68,30 @@ pub fn uninstall(
     Ok(())
 }
 
-/// 删掉因文件移除而空掉的目录。`remove_dir` 只删得掉空目录，别人的东西不会被带走。
-fn remove_empty_directories(removed: &[PathBuf]) {
-    let mut directories: Vec<&Path> = removed.iter().filter_map(|path| path.parent()).collect();
-    // 深的先删：父目录要等子目录空了才删得掉。
+/// 删掉因文件移除而空掉的目录。从每个文件所在目录往上收到安装目录为止，
+/// `remove_dir` 只删得掉空目录，别人的东西不会被带走。
+fn remove_empty_directories(removed: &[PathBuf], root: &Path) {
+    let mut directories: Vec<PathBuf> = removed
+        .iter()
+        .filter_map(|path| path.parent().map(Path::to_path_buf))
+        .collect();
     directories.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
     directories.dedup();
     for directory in directories {
-        let _ = fs::remove_dir(directory);
+        let mut current = Some(directory.as_path());
+        while let Some(path) = current {
+            if path == root {
+                let _ = fs::remove_dir(path);
+                break;
+            }
+            if !path.starts_with(root) {
+                break;
+            }
+            if fs::remove_dir(path).is_err() {
+                break;
+            }
+            current = path.parent();
+        }
     }
 }
 
@@ -149,6 +170,24 @@ mod tests {
     }
 
     #[test]
+    fn nested_skill_directories_are_collected() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("Sleepy Doll");
+        fs::create_dir_all(target.join("skills/bgi-assistant/references")).unwrap();
+        fs::write(
+            target.join("skills/bgi-assistant/references/a.md"),
+            b"skill",
+        )
+        .unwrap();
+        let archive = archive(&[("skills/bgi-assistant/references/a.md", b"skill")]);
+
+        uninstall(&archive, &target, false, &mut |_, _| {}).unwrap();
+
+        assert!(!target.join("skills").exists());
+        assert!(!target.exists());
+    }
+
+    #[test]
     fn bridge_config_and_user_data_survive() {
         let root = tempfile::tempdir().unwrap();
         let target = root.path().join("Sleepy Doll");
@@ -184,6 +223,19 @@ mod tests {
         uninstall(&archive, &target, true, &mut |_, _| {}).unwrap();
 
         assert!(!target.join("user").exists());
+    }
+
+    #[test]
+    fn leftover_bridge_user_goes_away_with_user_data() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("Sleepy Doll");
+        fs::create_dir_all(target.join("bridge/user")).unwrap();
+        fs::write(target.join("bridge/user/log.txt"), b"log").unwrap();
+        let archive = archive(&[("sleepy-doll.exe", b"exe")]);
+
+        uninstall(&archive, &target, true, &mut |_, _| {}).unwrap();
+
+        assert!(!target.join("bridge/user").exists());
     }
 
     #[test]

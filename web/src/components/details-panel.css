@@ -109,7 +109,7 @@
 /* 窄窗口下详情改抽屉，不挤压聊天正文。 */
 .details-drawer {
   position: fixed;
-  inset: 0 0 0 auto;
+  inset: var(--title-bar-height) 0 0 auto;
   width: min(360px, 92vw);
   z-index: 60;
   background: var(--surface);
@@ -120,7 +120,7 @@
 }
 .details-scrim {
   position: fixed;
-  inset: 0;
+  inset: var(--title-bar-height) 0 0 0;
   z-index: 55;
   background: #0006;
   border: 0;

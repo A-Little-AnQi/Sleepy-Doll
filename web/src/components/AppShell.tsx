@@ -30,6 +30,7 @@ import {
   SidebarIcon,
   ToolIcon,
   TrashIcon,
+  Wordmark,
 } from "./icons";
 import { SidebarAccount } from "./SidebarAccount";
 import { TitleBar } from "./TitleBar";
@@ -540,7 +541,7 @@ export function AppShell({
       onPointerLeave={!docked ? hidePeek : undefined}
     >
       <div className="app-brand">
-        <strong>Sleepy Doll</strong>
+        <Wordmark />
         <button
           className="icon-button"
           title={wide ? "收起侧栏" : "关闭侧栏"}
@@ -690,19 +691,21 @@ export function AppShell({
   );
 
   return (
-    <div
-      className="app-shell"
-      data-collapsed={!docked}
-      data-drawer={overlayOpen}
-      data-resizing={resizing}
-      data-details={detailsPane && roomForDetails}
-      style={
-        {
-          "--sidebar-user-width": `${sidebarWidth}px`,
-          "--sidebar-width": `${docked ? sidebarWidth : 0}px`,
-        } as CSSProperties
-      }
-    >
+    <>
+      {framelessWindow() && <TitleBar />}
+      <div
+        className="app-shell"
+        data-collapsed={!docked}
+        data-drawer={overlayOpen}
+        data-resizing={resizing}
+        data-details={detailsPane && roomForDetails}
+        style={
+          {
+            "--sidebar-user-width": `${sidebarWidth}px`,
+            "--sidebar-width": `${docked ? sidebarWidth : 0}px`,
+          } as CSSProperties
+        }
+      >
       {!docked && (
         <div
           className="app-sidebar-peek"
@@ -711,7 +714,6 @@ export function AppShell({
           onPointerLeave={hidePeek}
         />
       )}
-      {framelessWindow && <TitleBar />}
       {aside}
       {!wide && !collapsed && (
         <button
@@ -798,6 +800,7 @@ export function AppShell({
           )
         : null}
     </div>
+    </>
   );
 }
 

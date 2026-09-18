@@ -8,9 +8,15 @@ import {
 import { api } from "../api";
 import "./title-bar.css";
 
-/** 自绘的窗口标题栏。无边框窗口里系统不再画标题栏，这条替代它；浏览器预览和
- * 其它平台上系统已经有一条，再画就是重复，所以只在标记了 frameless 时渲染。 */
-export function TitleBar() {
+/** 自绘的窗口标题栏。无边框窗口里系统不再画标题栏，这条替代它。
+ * 只在桌面壳注入了 frameless 标记时由调用方挂上。 */
+export function TitleBar({
+  canMaximize = true,
+  closeDisabled = false,
+}: {
+  canMaximize?: boolean;
+  closeDisabled?: boolean;
+} = {}) {
   const [maximized, setMaximized] = useState(false);
 
   useLayoutEffect(() => {
@@ -23,6 +29,7 @@ export function TitleBar() {
 
   useEffect(() => {
     window.__sleepyDollWindow = (state) => setMaximized(state.maximized);
+    void api.windowState();
     return () => {
       delete window.__sleepyDollWindow;
     };
@@ -45,6 +52,7 @@ export function TitleBar() {
   };
 
   const onDragDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!canMaximize) return;
     if (isControl(event.target)) return;
     void api.windowToggleMaximize();
   };
@@ -67,29 +75,32 @@ export function TitleBar() {
             <path d="M1 6h10" />
           </Glyph>
         </button>
-        <button
-          type="button"
-          className="title-bar-button"
-          title={maximized ? "向下还原" : "最大化"}
-          aria-label={maximized ? "向下还原" : "最大化"}
-          onClick={() => void api.windowToggleMaximize()}
-        >
-          {maximized ? (
-            <Glyph>
-              <path d="M3.5 3.5v-2h7v7h-2" />
-              <rect x="1.5" y="3.5" width="7" height="7" />
-            </Glyph>
-          ) : (
-            <Glyph>
-              <rect x="1.5" y="1.5" width="9" height="9" />
-            </Glyph>
-          )}
-        </button>
+        {canMaximize ? (
+          <button
+            type="button"
+            className="title-bar-button"
+            title={maximized ? "向下还原" : "最大化"}
+            aria-label={maximized ? "向下还原" : "最大化"}
+            onClick={() => void api.windowToggleMaximize()}
+          >
+            {maximized ? (
+              <Glyph>
+                <path d="M3.5 3.5v-2h7v7h-2" />
+                <rect x="1.5" y="3.5" width="7" height="7" />
+              </Glyph>
+            ) : (
+              <Glyph>
+                <rect x="1.5" y="1.5" width="9" height="9" />
+              </Glyph>
+            )}
+          </button>
+        ) : null}
         <button
           type="button"
           className="title-bar-button title-bar-close"
           title="关闭"
           aria-label="关闭"
+          disabled={closeDisabled}
           onClick={() => void api.windowClose()}
         >
           <Glyph>

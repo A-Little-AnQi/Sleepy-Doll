@@ -4,7 +4,7 @@ import { useState } from "react";
 
 vi.mock("../api", () => ({
   // 测试跑在浏览器环境里，没有无边框窗口，标题栏不渲染。
-  framelessWindow: false,
+  framelessWindow: () => false,
   api: {
     saveConversationGroups: vi.fn(),
     deleteConversation: vi.fn(),
@@ -312,12 +312,13 @@ it("opens theme choices and settings from the local user slot", async () => {
       reload={async () => undefined}
     />,
   );
+  expect(screen.getByRole("img", { name: "Sleepy Doll" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "设置" })).toBeNull();
   expect(screen.queryByRole("button", { name: "使用说明" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /本地用户/ }));
   expect(screen.getByRole("menu", { name: "账户菜单" })).toBeTruthy();
-  expect(screen.getByRole("menuitem", { name: "使用说明" })).toBeTruthy();
-  expect(screen.getByRole("menuitem", { name: "设置" })).toBeTruthy();
+  expect(screen.getByRole("menuitem", { name: "使用说明" }).querySelector("svg")).toBeTruthy();
+  expect(screen.getByRole("menuitem", { name: "设置" }).querySelector("svg")).toBeTruthy();
   const menu = screen.getByRole("menu", { name: "账户菜单" });
   expect(menu.querySelector(".app-account-menu-prefs")).toBeTruthy();
   expect(menu.querySelector(".app-account-menu-links")).toBeTruthy();

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { api } from "./api";
+import { Wordmark } from "./components/icons";
 import { AppShell } from "./components/AppShell";
 import { DetailsPanel } from "./components/DetailsPanel";
 import { MotionSwitch } from "./components/MotionSwitch";
@@ -96,7 +97,9 @@ export default function App() {
   if (!bootstrap) {
     return (
       <div className="product-loading">
-        <h1>Sleepy Doll</h1>
+        <h1>
+          <Wordmark />
+        </h1>
         <p>{error || "正在载入…"}</p>
         {error && (
           <button

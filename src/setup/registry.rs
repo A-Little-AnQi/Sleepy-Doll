@@ -36,7 +36,7 @@ mod platform {
         key.set_text("DisplayVersion", version())?;
         key.set_text("Publisher", NAME)?;
         // 图标取主程序资源里的第一个，与开始菜单快捷方式用的是同一份。
-        key.set_text("DisplayIcon", &format!("{},0", executable.display()))?;
+        key.set_text("DisplayIcon", &format!("\"{}\",0", executable.display()))?;
         // 结尾保留分隔符：控制面板把它当目录用。
         let location = format!("{}\\", directory.display());
         key.set_text("InstallLocation", &location)?;

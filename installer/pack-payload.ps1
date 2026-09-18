@@ -37,6 +37,7 @@ if (-not $Output) { $Output = Join-Path $PSScriptRoot '..\target\setup' }
 
 function Test-Included([string]$relative) {
     if ($relative -like 'user/*') { return $false }
+    if ($relative -like 'bridge/user/*') { return $false }
     if ($relative -like '*.log') { return $false }
     return $true
 }

@@ -114,7 +114,7 @@ dist/Sleepy-Doll/
   sleepy-doll.exe
   bridge/      9 个 BgiBridge.* 文件与 bridge.config.json，必须整组同目录
   skills/      随产品分发的能力包
-  user/        用户数据，构建、安装、卸载都不动它
+  user/        用户数据，构建和安装都不动它；卸载默认保留，只有显式勾选才删
 ```
 
 桥的运行期数据（日志、配置改动记录）与主程序共用安装根下的 `user/`。组件目录与数据根是两件事，

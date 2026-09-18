@@ -132,6 +132,11 @@ fn is_product_name(directory: &str) -> bool {
 /// 系统目录一律拒绝：配置、模型密钥与会话数据库放在安装位置旁边的 `user` 目录里，
 /// 那里普通程序写不进去，装进去只会得到一个起不来的程序。
 pub fn validate_directory(directory: &str) -> Result<(), Error> {
+    if directory.is_empty() || !is_absolute(directory) {
+        return Err(Error::message(
+            "请选择一个安装位置。空路径和相对路径会装到安装程序当前所在的目录里。",
+        ));
+    }
     if let Some(root) = system_directories()
         .into_iter()
         .find(|root| is_same_or_under(directory, root))
@@ -204,6 +209,21 @@ pub(crate) fn is_bridge_config(path: &str) -> bool {
             | "bridge/bridge.config.json"
             | "bridge/bridge.config.example.json"
     )
+}
+
+/// `D:\Games`、`D:\`、`\\srv\share` 算绝对路径。`Sleepy Doll` 这种相对路径会落到
+/// 安装程序当时的工作目录，通常是「下载」。
+fn is_absolute(directory: &str) -> bool {
+    let normalized = normalize(directory);
+    if normalized.len() >= 2 {
+        let mut characters = normalized.chars();
+        if characters.next().is_some_and(|c| c.is_ascii_alphabetic())
+            && characters.next() == Some(':')
+        {
+            return normalized.len() == 2 || normalized.as_bytes().get(2) == Some(&b'\\');
+        }
+    }
+    normalized.starts_with("\\\\")
 }
 
 /// 不允许写入的目录根：Windows 目录、System32，以及两个 Program Files 与各自的
@@ -325,6 +345,18 @@ mod tests {
                 "{directory}"
             );
         }
+    }
+
+    #[test]
+    fn empty_and_relative_paths_are_refused() {
+        for requested in ["", "Sleepy Doll", "Sleepy-Doll", "Games"] {
+            assert!(
+                validate_directory(&resolve_directory(requested)).is_err(),
+                "{requested}"
+            );
+        }
+        assert!(validate_directory(&resolve_directory("E:\\Games")).is_ok());
+        assert!(validate_directory(&resolve_directory("D:\\")).is_ok());
     }
 
     #[test]

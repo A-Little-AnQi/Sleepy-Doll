@@ -1,8 +1,11 @@
 /* 安装与卸载窗口。原生窗口固定 720×460，布局按这个尺寸排，不做响应式。 */
 
+.setup-root {
+  height: 100%;
+}
+
 .setup-shell {
-  /* 插画后面的一层柔光，取插画自己的蓝。 */
-  --setup-glow: #6e96e629;
+  --setup-glow: color-mix(in srgb, var(--gold) 22%, transparent);
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
   height: 100%;
@@ -13,7 +16,7 @@
 }
 
 :root[data-theme="dark"] .setup-shell {
-  --setup-glow: #5a8cdc33;
+  --setup-glow: color-mix(in srgb, var(--gold) 28%, transparent);
 }
 
 /* 无边框窗口的圆角由原生侧切，页面自己也要把顶角画上，否则窗口角上是透明的。 */
@@ -21,17 +24,12 @@
   border-radius: var(--window-radius) var(--window-radius) 0 0;
 }
 
-/* 窗口固定大小，没有最大化可言。 */
-.setup-shell .title-bar-controls button:nth-child(2) {
-  display: none;
-}
-
 .setup-aside {
   position: relative;
   display: grid;
   align-content: center;
   justify-items: center;
-  gap: 8px;
+  gap: 12px;
   padding: 20px 18px;
   overflow: hidden;
   background: var(--sidebar);
@@ -52,11 +50,10 @@
   pointer-events: none;
 }
 
-.setup-art {
+.setup-mark {
   position: relative;
-  width: 178px;
-  height: 178px;
-  object-fit: contain;
+  width: 96px;
+  height: 96px;
 }
 
 .setup-brand {
@@ -68,8 +65,8 @@
 
 .setup-brand h1 {
   margin: 0;
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 650;
   letter-spacing: -0.4px;
 }
 

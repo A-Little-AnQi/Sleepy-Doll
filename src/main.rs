@@ -53,6 +53,8 @@ enum UserEvent {
     ToWeb(Value),
     Window(window_chrome::Action),
     #[cfg(target_os = "windows")]
+    SyncChrome,
+    #[cfg(target_os = "windows")]
     ShowWindow,
     #[cfg(target_os = "windows")]
     Quit,
@@ -226,6 +228,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 window_chrome::perform(&window, action);
             }
             #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::SyncChrome) => {
+                let _ = webview.evaluate_script(&format!(
+                    "window.__sleepyDollWindow?.({});",
+                    json!({ "maximized": window.is_maximized() })
+                ));
+            }
+            #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::ShowWindow) => {
                 window.set_visible(true);
                 window.set_focus();
@@ -299,12 +308,16 @@ fn dispatch_ipc(
         return;
     }
     let parsed = serde_json::from_str::<IpcRequest>(request.body());
-    // 窗口控制不进控制器：它不认识窗口，而且这些请求要回到事件循环所在线程执行。
-    if let Ok(request) = &parsed
-        && let Some(action) = window_chrome::Action::from_method(&request.method)
-    {
-        let _ = proxy.send_event(UserEvent::Window(action));
-        return;
+    if let Ok(request) = &parsed {
+        if request.method == "window.state" {
+            #[cfg(target_os = "windows")]
+            let _ = proxy.send_event(UserEvent::SyncChrome);
+            return;
+        }
+        if let Some(action) = window_chrome::Action::from_method(&request.method) {
+            let _ = proxy.send_event(UserEvent::Window(action));
+            return;
+        }
     }
     thread::spawn(move || match parsed {
         Ok(request) => {

@@ -10,6 +10,7 @@ use crate::setup::{
     EXECUTABLE, Error, NAME, Progress, UNINSTALLER, failed, is_bridge_config, payload::Archive,
     registry, shell,
 };
+use serde_json::{Value, json};
 
 /// 桥组件里定位布局用的那一个：它在哪，桥的配置就该在哪。
 const BRIDGE_INJECTOR: &str = "BgiBridge.Injector.exe";
@@ -34,6 +35,7 @@ pub fn install(
     migrate(archive, directory)?;
     let outcome =
         propagate(&staging.0, directory, archive, &mut written, progress).and_then(|()| {
+            pin_data_root(directory, archive)?;
             progress(0.9, "正在创建快捷方式…");
             integrate(directory, desktop_shortcut)
         });
@@ -247,6 +249,31 @@ fn propagate(
     Ok(())
 }
 
+/// 产品布局里桥在 `bridge\` 下，数据根必须是安装根的 `user\`。
+/// 配置里没有这个字段时，恢复工具和引导 DLL 会在 `bridge\user\` 另建一棵树。
+fn pin_data_root(directory: &Path, archive: &Archive) -> Result<(), Error> {
+    if bridge_directory(archive).is_none() {
+        return Ok(());
+    }
+    let path = directory.join(bridge_config_path(archive));
+    let Ok(text) = fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    let Ok(mut settings) = serde_json::from_str::<Value>(&text) else {
+        return Ok(());
+    };
+    if !settings.is_object() {
+        return Ok(());
+    }
+    let wanted = directory.join("user").to_string_lossy().to_string();
+    if settings.get("userDirectory").and_then(Value::as_str) == Some(wanted.as_str()) {
+        return Ok(());
+    }
+    settings["userDirectory"] = json!(wanted);
+    crate::config::atomic_write(&path, &settings)
+        .map_err(|error| Error::message(format!("无法写入 {}：{error}", path.display())))
+}
+
 /// 安装目录之外的集成：卸载入口、快捷方式、注册表登记。
 fn integrate(directory: &Path, desktop_shortcut: bool) -> Result<(), Error> {
     let executable = directory.join(EXECUTABLE);
@@ -331,6 +358,64 @@ mod tests {
             b"token"
         );
         assert_eq!(written.created.len(), 1);
+    }
+
+    #[test]
+    fn packaged_layout_pins_the_install_user_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let staging = Staging::create().unwrap();
+        let target = root.path().join("Sleepy Doll");
+        let archive = archive(&[
+            ("bridge/BgiBridge.Injector.exe", b"exe"),
+            (
+                "bridge/bridge.config.json",
+                br#"{"enabled":true,"token":""}"#,
+            ),
+        ]);
+        extract(&staging.0, &archive).unwrap();
+
+        let mut written = Written::new(&target);
+        propagate(&staging.0, &target, &archive, &mut written, &mut |_, _| {}).unwrap();
+        pin_data_root(&target, &archive).unwrap();
+
+        let settings: Value =
+            serde_json::from_slice(&fs::read(target.join("bridge/bridge.config.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            settings["userDirectory"].as_str(),
+            Some(target.join("user").to_string_lossy().as_ref())
+        );
+    }
+
+    #[test]
+    fn kept_token_configs_also_get_the_data_root() {
+        let root = tempfile::tempdir().unwrap();
+        let staging = Staging::create().unwrap();
+        let target = root.path().join("Sleepy Doll");
+        fs::create_dir_all(target.join("bridge")).unwrap();
+        fs::write(
+            target.join("bridge/bridge.config.json"),
+            br#"{"token":"keep"}"#,
+        )
+        .unwrap();
+        let archive = archive(&[
+            ("bridge/BgiBridge.Injector.exe", b"exe"),
+            ("bridge/bridge.config.json", br#"{"token":"template"}"#),
+        ]);
+        extract(&staging.0, &archive).unwrap();
+
+        let mut written = Written::new(&target);
+        propagate(&staging.0, &target, &archive, &mut written, &mut |_, _| {}).unwrap();
+        pin_data_root(&target, &archive).unwrap();
+
+        let settings: Value =
+            serde_json::from_slice(&fs::read(target.join("bridge/bridge.config.json")).unwrap())
+                .unwrap();
+        assert_eq!(settings["token"], "keep");
+        assert_eq!(
+            settings["userDirectory"].as_str(),
+            Some(target.join("user").to_string_lossy().as_ref())
+        );
     }
 
     #[test]

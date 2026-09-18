@@ -4,7 +4,7 @@
   inset: auto;
   left: 50%;
   /* 贴在顶栏下方：底部是输入区和发送键，不能被一条不会自动消失的提示长期压住。 */
-  top: calc(var(--header-height, 52px) + 12px);
+  top: calc(var(--title-bar-height) + var(--header-height, 52px) + 12px);
   width: fit-content;
   height: fit-content;
   margin: 0;

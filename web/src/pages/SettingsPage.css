@@ -24,6 +24,11 @@
   width: 100%;
 }
 
+.settings-nav .app-brand-icon {
+  width: 18px;
+  height: 18px;
+}
+
 .settings-content {
   flex: 1 1 auto;
   min-width: 0;

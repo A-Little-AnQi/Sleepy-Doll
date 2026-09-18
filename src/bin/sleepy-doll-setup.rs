@@ -7,7 +7,12 @@
 #[path = "../window_chrome.rs"]
 mod window_chrome;
 
-use std::{io::Read, path::PathBuf, thread};
+use std::{
+    io::Read,
+    path::PathBuf,
+    sync::atomic::{AtomicBool, Ordering},
+    thread,
+};
 
 use flate2::read::DeflateDecoder;
 use rust_embed::RustEmbed;
@@ -35,6 +40,9 @@ const PAYLOAD: &[u8] = include_bytes!("../../target/setup/payload.bin");
 const TITLE: &str = "Sleepy Doll 安装程序";
 const WIDTH: f64 = 720.0;
 const HEIGHT: f64 = 460.0;
+
+/// 写入过程中关掉窗口会留下半截目录，原生侧在这段时间里忽略关闭。
+static BUSY: AtomicBool = AtomicBool::new(false);
 
 #[derive(RustEmbed)]
 #[folder = "target/ui/"]
@@ -165,7 +173,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             Event::UserEvent(UserEvent::Window(action)) => {
                 if action == window_chrome::Action::Close {
-                    *control_flow = ControlFlow::Exit;
+                    if !BUSY.load(Ordering::SeqCst) {
+                        *control_flow = ControlFlow::Exit;
+                    }
                 } else {
                     window_chrome::perform(&window, action);
                 }
@@ -189,7 +199,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
-            } => *control_flow = ControlFlow::Exit,
+            } => {
+                if !BUSY.load(Ordering::SeqCst) {
+                    *control_flow = ControlFlow::Exit;
+                }
+            }
             _ => {}
         }
     });
@@ -255,6 +269,9 @@ fn dispatch_ipc(request: Request<String>, proxy: EventLoopProxy<UserEvent>) {
             reply(&proxy, &id, json!({}));
             match setup::uninstall_directory() {
                 Some(directory) => {
+                    if BUSY.swap(true, Ordering::SeqCst) {
+                        return;
+                    }
                     thread::spawn(move || {
                         let outcome = open_archive().and_then(|archive| {
                             let mut report = |progress: f64, message: &str| {
@@ -262,6 +279,7 @@ fn dispatch_ipc(request: Request<String>, proxy: EventLoopProxy<UserEvent>) {
                             };
                             setup::uninstall(&archive, &directory, remove_user_data, &mut report)
                         });
+                        BUSY.store(false, Ordering::SeqCst);
                         finish(&proxy, outcome);
                     });
                 }
@@ -285,6 +303,9 @@ fn start(proxy: EventLoopProxy<UserEvent>, directory: PathBuf, desktop_shortcut:
         state(&proxy, State::failed("这是卸载程序，不能用来安装"));
         return;
     }
+    if BUSY.swap(true, Ordering::SeqCst) {
+        return;
+    }
     thread::spawn(move || {
         let outcome = open_archive().and_then(|archive| {
             let mut report = |progress: f64, message: &str| {
@@ -292,6 +313,7 @@ fn start(proxy: EventLoopProxy<UserEvent>, directory: PathBuf, desktop_shortcut:
             };
             setup::install(&archive, &directory, desktop_shortcut, &mut report)
         });
+        BUSY.store(false, Ordering::SeqCst);
         finish(&proxy, outcome);
     });
 }
@@ -317,17 +339,25 @@ fn state(proxy: &EventLoopProxy<UserEvent>, value: State) {
 }
 
 fn info_payload() -> Value {
+    let uninstall = setup::is_uninstall_mode();
     let installed = setup::installed();
-    json!({
-        "version": setup::version(),
-        "directory": installed
+    let directory = if uninstall {
+        setup::uninstall_directory()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(setup::default_directory)
+    } else {
+        installed
             .as_ref()
             .map(|installed| installed.directory.display().to_string())
-            .unwrap_or_else(setup::default_directory),
+            .unwrap_or_else(setup::default_directory)
+    };
+    json!({
+        "version": setup::version(),
+        "directory": directory,
         "defaultDirectory": setup::default_directory(),
         "installed": installed.is_some(),
         "installedVersion": installed.and_then(|installed| installed.version),
-        "uninstallMode": setup::is_uninstall_mode(),
+        "uninstallMode": uninstall,
     })
 }
 

@@ -76,7 +76,7 @@ export function SettingsPage({
                 ]
               : []),
             { id: "help", name: "使用说明", icon: <HelpIcon className="button-icon" /> },
-            { id: "sponsor", name: "赞助作者", icon: <BrandIcon className="button-icon" /> },
+            { id: "sponsor", name: "赞助作者", icon: <BrandIcon /> },
           ]}
         />
       </div>

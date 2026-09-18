@@ -83,15 +83,18 @@
   padding: 0 var(--sidebar-pad-x);
   flex-shrink: 0;
 }
+.app-wordmark {
+  display: block;
+  height: 30px;
+  width: auto;
+  flex: 0 0 auto;
+  overflow: visible;
+  color: var(--text);
+}
 .brand-mark {
   width: 22px;
   height: 22px;
-  flex-shrink: 0;
-}
-.app-brand strong {
-  font-size: var(--font-body);
-  letter-spacing: -0.3px;
-  font-weight: 600;
+  overflow: visible;
 }
 .app-brand .icon-button {
   margin-left: auto;
@@ -485,6 +488,7 @@
 .app-account-more {
   display: flex;
   align-items: center;
+  gap: 8px;
   width: 100%;
   min-height: var(--control-height);
   margin: 0;
@@ -495,6 +499,11 @@
   color: var(--text);
   font-size: var(--font-body);
   text-align: left;
+}
+.app-account-more .button-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--secondary);
 }
 .app-account-more:hover {
   background: var(--hover);

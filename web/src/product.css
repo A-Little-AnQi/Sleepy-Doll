@@ -38,6 +38,8 @@
   --font-body: 13px;
   --font-meta: 12px;
   --font-label: 11px;
+  --gold: #c9a227;
+  --gold-bright: #f0d36a;
   color-scheme: light;
   font-family:
     Inter, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
@@ -66,6 +68,8 @@
   --well-inset: inset 0 1px 3px #000000b3, inset 0 0 0 1px #ffffff12;
   --knob: #2c2c2c;
   --knob-shadow: 0 1px 2px #000a, 0 4px 10px #0007, inset 0 1px 0 #ffffff18;
+  --gold: #e4bc4a;
+  --gold-bright: #f6e19a;
   color-scheme: dark;
 }
 
@@ -218,6 +222,25 @@ a {
   stroke-width: 1.7;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.app-brand-icon {
+  display: block;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  overflow: visible;
+  color: var(--text);
+}
+
+.app-brand-icon.button-icon {
+  width: 18px;
+  height: 18px;
+  fill: unset;
+  stroke: unset;
+  stroke-width: unset;
+  stroke-linecap: unset;
+  stroke-linejoin: unset;
 }
 
 .icon-button:hover {
@@ -865,6 +888,10 @@ details > pre {
   font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.4px;
+}
+
+.product-loading h1 .app-wordmark {
+  height: 36px;
 }
 
 .product-loading p {

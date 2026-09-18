@@ -181,10 +181,15 @@ pub fn prepare(config: &mut BridgeConfig) -> Result<()> {
                 }),
         );
     }
-    // An existing listener must be authenticated before changing its settings.
+    // An existing listener must be authenticated before changing listen/token.
+    // The data root is not a live setting of that listener: Recovery and the
+    // bootstrap DLL read it from disk, so pin it even when the port is busy.
     if port_busy {
         info(config)
             .map_err(|_| Error::Tool("BetterGI 端口已被占用。请退出 BetterGI 后重试。".into()))?;
+        if pin_configured_root(&mut settings, &exe_dir()?, &dir) {
+            crate::config::atomic_write(&path, &settings)?;
+        }
         return Ok(());
     }
     for file in [
@@ -202,12 +207,20 @@ pub fn prepare(config: &mut BridgeConfig) -> Result<()> {
     settings["enabled"] = json!(true);
     settings["listen"] = json!(listen);
     settings["token"] = json!(config.token);
-    // The native and managed sides take their data root from here, because the
-    // bridge directory is no longer the installation directory.
-    if let Some(root) = data_root(&exe_dir()?, &dir) {
-        settings["userDirectory"] = json!(root.to_string_lossy());
-    }
+    pin_configured_root(&mut settings, &exe_dir()?, &dir);
     crate::config::atomic_write(&path, &settings)
+}
+
+fn pin_configured_root(settings: &mut Value, install: &Path, dir: &Path) -> bool {
+    let Some(root) = data_root(install, dir) else {
+        return false;
+    };
+    let wanted = root.to_string_lossy().to_string();
+    if settings.get("userDirectory").and_then(Value::as_str) == Some(wanted.as_str()) {
+        return false;
+    }
+    settings["userDirectory"] = json!(wanted);
+    true
 }
 
 pub fn enable(config: &BridgeConfig) -> Result<()> {
@@ -340,6 +353,21 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn pin_configured_root_only_writes_when_the_value_changes() {
+        let install = Path::new(r"D:\Sleepy Doll");
+        let dir = install.join("bridge");
+        let mut settings = json!({"token": "keep"});
+        assert!(pin_configured_root(&mut settings, install, &dir));
+        assert_eq!(
+            settings["userDirectory"],
+            install.join("user").to_string_lossy().as_ref()
+        );
+        assert!(!pin_configured_root(&mut settings, install, &dir));
+        assert_eq!(settings["token"], "keep");
+        assert!(!pin_configured_root(&mut settings, install, install));
     }
 
     #[test]

@@ -8,6 +8,7 @@ vi.mock("../api", async (importOriginal) => ({
     windowMinimize: vi.fn(),
     windowToggleMaximize: vi.fn(),
     windowClose: vi.fn(),
+    windowState: vi.fn(),
   },
 }));
 
@@ -30,7 +31,9 @@ it("leaves the left side empty so the sidebar carries the product name", () => {
   render(<TitleBar />);
   const bar = document.querySelector(".title-bar")!;
   expect(bar.textContent).toBe("");
-  expect(bar.firstElementChild).toBe(document.querySelector(".title-bar-controls"));
+  expect(bar.firstElementChild).toBe(
+    document.querySelector(".title-bar-controls"),
+  );
 });
 
 it("drags the window from the empty area beside the controls", () => {
@@ -81,4 +84,21 @@ it("offers restore instead of maximize while the window is maximized", () => {
   expect(screen.queryByLabelText("最大化")).toBeNull();
   fireEvent.click(screen.getByLabelText("向下还原"));
   expect(api.windowToggleMaximize).toHaveBeenCalled();
+});
+
+it("asks native for the current maximized state on mount", () => {
+  render(<TitleBar />);
+  expect(api.windowState).toHaveBeenCalled();
+});
+
+it("hides maximize when the window cannot be resized", () => {
+  render(<TitleBar canMaximize={false} />);
+  expect(screen.queryByLabelText("最大化")).toBeNull();
+  fireEvent.doubleClick(document.querySelector(".title-bar")!);
+  expect(api.windowToggleMaximize).not.toHaveBeenCalled();
+});
+
+it("disables close while a write is in progress", () => {
+  render(<TitleBar closeDisabled />);
+  expect(screen.getByLabelText("关闭")).toHaveProperty("disabled", true);
 });

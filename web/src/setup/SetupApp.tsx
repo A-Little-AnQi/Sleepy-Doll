@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api";
+import { api, framelessWindow } from "../api";
 import { readError } from "../session";
 import { TitleBar } from "../components/TitleBar";
-import { AlertIcon, CheckIcon, FolderIcon } from "../components/icons";
-import moonCharacter from "../assets/moon-character.webp";
+import { AlertIcon, BrandIcon, CheckIcon, FolderIcon } from "../components/icons";
 import { setupApi, type SetupInfo, type SetupState } from "./api";
 import "./setup.css";
 
@@ -30,7 +29,8 @@ const IDLE: SetupState = {
 export function installedDirectory(chosen: string) {
   const base = chosen.trim().replace(/[\\/]+$/, "");
   if (!base) return "";
-  return base.split(/[\\/]/).pop()?.toLowerCase() === "sleepy doll"
+  const last = base.split(/[\\/]/).pop()?.toLowerCase();
+  return last === "sleepy doll" || last === "sleepy-doll"
     ? base
     : `${base}\\Sleepy Doll`;
 }
@@ -122,10 +122,13 @@ export function SetupApp() {
   const resting = view === "form" || view === "running";
 
   return (
-    <div className="setup-shell">
-      <TitleBar />
+    <div className="setup-root">
+      {framelessWindow() && (
+        <TitleBar canMaximize={false} closeDisabled={busy} />
+      )}
+      <div className="setup-shell">
       <aside className="setup-aside">
-        <img className="setup-art" src={moonCharacter} alt="" />
+        <BrandIcon className="setup-mark" />
         <div className="setup-brand">
           <h1>Sleepy Doll</h1>
           <span>版本 {info.version}</span>
@@ -138,9 +141,7 @@ export function SetupApp() {
             <p>
               {uninstall
                 ? "卸载会删掉程序文件；user\\ 目录是否一起删由你决定。"
-                : info.installed
-                  ? `已安装${info.installedVersion ? ` ${info.installedVersion}` : ""}，继续会覆盖程序文件，user\\ 目录里的配置和会话会保留。`
-                  : "选好安装位置，点「安装」开始复制文件。"}
+                : "所有文件与数据均会保存在安装目录下"}
             </p>
           ) : null}
         </header>
@@ -167,7 +168,7 @@ export function SetupApp() {
                   <input
                     id="setup-directory"
                     value={directory}
-                    disabled={busy}
+                    disabled={busy || info.installed}
                     spellCheck={false}
                     autoComplete="off"
                     onChange={(event) => {
@@ -178,7 +179,7 @@ export function SetupApp() {
                   <button
                     type="button"
                     className="secondary-action"
-                    disabled={busy}
+                    disabled={busy || info.installed}
                     onClick={() => void browse()}
                   >
                     <FolderIcon className="button-icon" />
@@ -321,7 +322,7 @@ export function SetupApp() {
               <button
                 type="button"
                 className="primary-action"
-                disabled={busy}
+                disabled={busy || (!uninstall && !target)}
                 onClick={() => void start()}
               >
                 {action}
@@ -330,6 +331,7 @@ export function SetupApp() {
           )}
         </footer>
       </main>
+    </div>
     </div>
   );
 }
