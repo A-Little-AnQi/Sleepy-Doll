@@ -54,7 +54,7 @@
   background: #0005;
 }
 .app-sidebar {
-  /* 停靠和悬浮都用同一层固定侧栏 + translateX，避免切换 position 时无法插值。 */
+  /* 停靠与悬浮用同一层固定侧栏加 translateX 定位。 */
   position: fixed;
   inset: var(--title-bar-height) auto 0 0;
   z-index: 80;
@@ -336,7 +336,7 @@
   user-select: none !important;
 }
 
-/* 行背景由 li 统一给出，按钮和浮层用同一个变量，hover 与选中态不会脱节。
+/* 行背景变量由 li 给出，按钮与浮层共用。
    只选直接子按钮：操作区的 icon-button 不能吃到 width: 100%。 */
 .app-conversations li > button {
   display: flex;
@@ -598,8 +598,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  /* 页面本身是网格容器。默认的 align-content: stretch 会把剩余高度摊到每一行上，
-     块与块之间被撑出上百像素的空隙 —— 按内容排，多余的留在底部。 */
+  /* 网格默认的 align-content: stretch 会把剩余高度摊到每一行上，这里按内容排。 */
   align-content: start;
 }
 .app-nav-badge {
@@ -631,8 +630,7 @@
 .app-conversations li.app-group.is-current:hover {
   --row-bg: transparent;
 }
-/* 操作按钮浮在标题之上，不占布局宽度 —— 否则 hover 会把整行撑宽，
-   在固定宽度的侧栏里变成横向溢出。 */
+/* 操作按钮绝对定位，不占布局宽度。 */
 .app-conversation-actions {
   position: absolute;
   inset-inline-end: 2px;
@@ -744,10 +742,7 @@ html[data-theme-reveal="true"]::view-transition-new(root) {
 html[data-theme-reveal="true"]::view-transition-group(root) {
   animation-duration: 560ms;
 }
-html[data-theme-reveal="true"]::view-transition-group(.sd-theme-move) {
-  animation-duration: var(--motion-base);
-  animation-timing-function: var(--ease-enter);
-}
+/* 主题揭示期间去掉列表项的 view-transition-name，让它们跟随整页一起换。 */
 html[data-theme-reveal="true"] .app-conversations li,
 html[data-theme-reveal="true"] .app-group {
   view-transition-name: none !important;

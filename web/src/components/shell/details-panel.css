@@ -106,7 +106,7 @@
   color: var(--text);
 }
 
-/* 窄窗口下详情改抽屉，不挤压聊天正文。 */
+/* 窄窗口下详情改用抽屉。 */
 .details-drawer {
   position: fixed;
   inset: var(--title-bar-height) 0 0 auto;

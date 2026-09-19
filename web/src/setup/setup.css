@@ -277,12 +277,19 @@
   gap: 9px;
 }
 
+/* 图标与结论同一行。 */
+.setup-result-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .setup-badge {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
-  margin-bottom: 4px;
+  flex: none;
+  width: 28px;
+  height: 28px;
   border: 1px solid var(--border);
   border-radius: 50%;
   background: var(--subtle);
@@ -290,15 +297,15 @@
 }
 
 .setup-badge .button-icon {
-  width: 20px;
-  height: 20px;
-  stroke-width: 1.6;
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.8;
 }
 
-/* 安装位置这类长路径单独占一行，放在句子里会被折成两截。 */
+/* 安装位置这类长路径单独占一行。 */
 .setup-result .setup-target {
   justify-self: stretch;
-  /* 让出一行的宽度，别被正文的行长上限截短。 */
+  /* 覆盖正文的行长上限。 */
   max-width: none;
   margin: 0;
   padding: 9px 12px;

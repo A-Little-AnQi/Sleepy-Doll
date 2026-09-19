@@ -1,6 +1,4 @@
-/** Shared 24×24 stroke icons. They inherit `currentColor` so callers control the
- * colour, and they are always paired with a visible text label — an icon alone
- * tells a first-time user nothing. */
+/** 24×24 的描边图标，颜色取 `currentColor`。 */
 type IconProps = { className?: string };
 
 export function SidebarIcon(p: IconProps) {

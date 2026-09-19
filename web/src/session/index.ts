@@ -2,25 +2,18 @@ import { useEffect, useSyncExternalStore } from "react";
 import { api } from "../ipc/api";
 import type { MessageInfo, RunApproval, TaskInfo } from "../ipc/types";
 
-/**
- * 把任意抛出物变成给人看的一句话。
- *
- * `String(error)` 会带上 `Error: ` 前缀，那不是给用户读的内容。
- */
+/** 把任意抛出物变成给人看的一句话。 */
 export function readError(reason: unknown): string {
   if (reason instanceof Error) return reason.message;
   return String(reason);
 }
 
-/**
- * 删除这类动作要不要先问一句。用户选了「完全控制」就不再拦第二遍 —— 后端已经
- * 按同一级别放行，界面再弹一次只会让人觉得设置没生效。
- */
+/** 删除这类动作要不要先问一句。 */
 export function needsConfirmation(mode?: string): boolean {
   return mode !== "fullAccess";
 }
 
-/** 运行状态文案。与运行时 `RunState::label` 一一对应，界面不另立一套。 */
+/** 运行状态文案，与运行时 `RunState::label` 一一对应。 */
 export const taskLabels: Record<string, string> = {
   queued: "排队中",
   preflighting: "检查运行条件",
@@ -55,7 +48,7 @@ export const isRunning = (task?: TaskInfo) =>
     "blocked",
   ].includes(task.state);
 
-/** 阶段文案：让等待显示具体在哪一步，而不是一律「思考中」。 */
+/** 阶段文案：显示当前在哪一步。 */
 export function phaseLabel(task?: TaskInfo): string | undefined {
   if (!isRunning(task) || !task) return undefined;
   switch (task.state) {
@@ -137,7 +130,7 @@ class Session {
     let failures = 0;
     let needsHistory = true;
     try {
-      // The session owns its subscription. Unmounting a page never aborts a run.
+      // 卸载页面不中断运行。
       do {
         try {
           if (needsHistory) {
@@ -147,8 +140,7 @@ class Session {
           }
           const batch = await api.events(this.id, this.cursor);
           if (batch.snapshotRequired) {
-            // 事件窗口被裁过，游标已经对不上。先重取消息快照，再从头续流，
-            // 否则终态 run.changed 会静默丢，界面一直停在进行中。
+            // 事件窗口被裁过，游标已经对不上：重取消息快照并从头续流。
             this.cursor = 0;
             this.streams.clear();
             this.completedStreams.clear();
@@ -289,7 +281,7 @@ function emitRun(task: TaskInfo) {
   runListeners.forEach((listener) => listener(task));
 }
 
-/** 运行状态变化时通知壳层，用来更新列表，而不是定时拉 task.list。 */
+/** 运行状态变化时通知壳层，用于更新列表。 */
 export function subscribeRuns(listener: (task: TaskInfo) => void) {
   runListeners.add(listener);
   return () => {

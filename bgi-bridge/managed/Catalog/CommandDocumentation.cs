@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace BgiBridge.Catalog;
 
-/// <summary>Domain-aware explanations supplement source comments and localized UI captions.</summary>
+/// <summary>命令的领域说明：标题、用途、副作用、核验与回退。</summary>
 public static class CommandDocumentation
 {
     private static readonly Dictionary<string, string> Titles = new(StringComparer.Ordinal)
@@ -69,7 +69,7 @@ public static class CommandDocumentation
     {
         ["StartTrigger"]="启动截图器、识别调度和已启用触发器；要求已选定游戏窗口。",
         ["StopTrigger"]="停止截图调度并请求取消独立任务，同时隐藏相关遮罩。",
-        ["StopSoloTask"]="向宿主独立任务发送取消请求并重置任务开关；需要继续观测任务是否已停止。",
+        ["StopSoloTask"]="向 BetterGI 独立任务发送取消请求并重置任务开关；需要继续观测任务是否已停止。",
         ["SOneDragonFlow"]="执行当前选中的一条龙配置；未选中配置时不会启动。",
         ["OneKeyExecute"]="按当前一条龙配置依次执行任务；需先核对任务列表和资源。",
         ["StartMultiScriptGroup"]="按界面选中列表启动多个脚本组。",
@@ -78,7 +78,7 @@ public static class CommandDocumentation
         ["StartRun"]="运行所选 JavaScript 脚本，可能产生脚本定义的游戏和文件副作用。",
         ["StartPlay"]="回放所选键鼠录制脚本，将向目标窗口发送输入。",
         ["StartRecord"]="开始录制键盘和鼠标操作，结束后需要保存录制结果。",
-        ["StopRecord"]="停止当前键鼠录制，把已录制的键鼠事件序列化为 JSON，并在宿主界面打开保存窗口；未处于录制状态时拒绝执行。",
+        ["StopRecord"]="停止当前键鼠录制，把已录制的键鼠事件序列化为 JSON，并在 BetterGI 界面打开保存窗口；未处于录制状态时拒绝执行。",
         ["ManualPickWindow"]="打开目标窗口选择器；用户选定窗口后立即将它设为捕获目标并启动 BetterGI 截图器。用户取消选择时不修改当前目标。",
         ["RefreshMaskSettings"]="通知遮罩重新读取设置并计算控件位置。",
         ["ResetMaskOverlayLayout"]="恢复遮罩布局默认值，会修改相关配置。",
@@ -86,7 +86,7 @@ public static class CommandDocumentation
         ["SwitchBackdrop"]="切换主窗口背景材质或背景显示模式。",
         ["Hide"]="隐藏主窗口，不等于退出或停止后台任务。",
         ["ShowOrHide"]="切换主窗口显示状态，不停止后台任务。",
-        ["Exit"]="退出 BetterGI，桥随宿主退出；不能把连接断开当成可重试错误。",
+        ["Exit"]="退出 BetterGI，桥随它一起退出；不能把连接断开当成可重试错误。",
         ["CheckUpdate"]="检查 BetterGI 更新信息，可能访问网络并打开更新界面。",
         ["OpenFeed"]="打开动态订阅窗口。",
         ["DismissRedeemCode"]="只关闭主窗口中的兑换码更新提示卡片；不打开动态窗口、不读取兑换码，也不执行兑换。",
@@ -118,9 +118,9 @@ public static class CommandDocumentation
         ["CyclePlaybackMode"]="轮换音乐顺序播放、循环等播放模式。",
         ["PlaySelected"]="播放当前选中的音乐轨道。",
         ["UpdateTrackSelection"]="同步音乐轨道选择。",
-        ["TestWebhook"]="向配置的 Webhook 接收方发送测试通知，并更新宿主测试状态；可能包含截图，需用户授权接收方。",
-        ["QuestionButtonOnClick"]="打开内置日志分析网页窗口，显示由宿主生成的统计内容；不修改游戏状态。",
-        ["ConfigDropDownChanged"]="把一条龙页面切换到当前 SelectedConfig，并清空已选任务；依赖宿主下拉框已经设置选择。",
+        ["TestWebhook"]="向配置的 Webhook 接收方发送测试通知，并更新 BetterGI 的测试状态；可能包含截图，需用户授权接收方。",
+        ["QuestionButtonOnClick"]="打开内置日志分析网页窗口，显示由 BetterGI 生成的统计内容；不修改游戏状态。",
+        ["ConfigDropDownChanged"]="把一条龙页面切换到当前 SelectedConfig，并清空已选任务；依赖 BetterGI 界面下拉框已经设置选择。",
         ["RunInventoryCountComparison"]="按当前选择的对比目标启动背包数量 OCR 对比独立任务；运行期间临时打开背包图标采集状态，结束后关闭。",
         ["BindQq"]="连接 QQ 网关并等待用户发送验证码，成功后自动回填 QQ 用户 OpenID；要求已配置 AppID 与 AppSecret，可等待最多 60 秒。",
         ["CancelBindQq"]="取消正在等待的 QQ 用户绑定 WebSocket 流程；没有绑定流程时不执行其他操作。",
@@ -138,7 +138,7 @@ public static class CommandDocumentation
         ["SaveCustomHtmlMask"]="保存 HTML 遮罩编辑内容到文件。",
         ["ToggleCustomHtmlMaskPreview"]="切换 HTML 遮罩预览。",
         ["NormalizeTemplateFileName"]="按识别模板规则规范化文件名。",
-        ["SubmitWebImageUrl"]="提交图片 URL 供宿主加载或校验；可能访问网络。",
+        ["SubmitWebImageUrl"]="提交图片 URL 供 BetterGI 加载或校验；可能访问网络。",
     };
 
     public static string Title(string viewModel, string command, SourceEntry? source)
@@ -160,7 +160,7 @@ public static class CommandDocumentation
         var name = Normalize(command);
         if (!InternalUiEvents.Contains(name)) return null;
         var owner = viewModel.Replace("ViewModel", "");
-        return $"{Terms.GetValueOrDefault(owner, owner)}的 {name} 是宿主控件生命周期/输入事件，参数和调用顺序由 WPF 维护；目录保留真实说明供审计，但 Agent 不得脱离界面事件模拟调用。";
+        return $"{Terms.GetValueOrDefault(owner, owner)}的 {name} 是 BetterGI 界面控件生命周期/输入事件，参数和调用顺序由 WPF 维护；目录保留真实说明供审计，但 Agent 不得脱离界面事件模拟调用。";
     }
 
     public static bool RequiresGameReady(string viewModel, string command)
@@ -225,7 +225,7 @@ public static class CommandDocumentation
 
     public static string Purpose(string viewModel, string command, SourceEntry? source)
     {
-        if (source?.HasImplementation == false) return "此命令在当前宿主源码中为空实现，不执行任何业务操作；仅保留目录记录，不应安排调用。";
+        if (source?.HasImplementation == false) return "此命令在当前 BetterGI 版本中为空实现，不执行任何业务操作；仅保留目录记录，不应安排调用。";
         var name = Normalize(command);
         var scope = Terms.GetValueOrDefault(viewModel.Replace("ViewModel", ""), viewModel.Replace("ViewModel", ""));
         var owner = viewModel.Replace("ViewModel", "");
@@ -242,15 +242,15 @@ public static class CommandDocumentation
         if (owner == "MaskWindow" && name == "WindowSizeChanged")
             return "同步新的遮罩窗口宽高，并重新计算相对 1080p 的缩放比例，使日志字号随游戏分辨率变化。参数来自 WPF SizeChangedEventArgs。";
         if (owner == "MaskWindow" && name == "PointClick")
-            return "在游戏大地图界面点击遮罩点位时打开该点位详情弹窗；参数包含宿主地图点位对象和锚点位置。";
+            return "在游戏大地图界面点击遮罩点位时打开该点位详情弹窗；参数包含 BetterGI 的地图点位对象和锚点位置。";
         if (owner == "MaskWindow" && name == "PointRightClick")
-            return "右键点击遮罩地图点位时切换该点位的隐藏状态；参数是宿主加载的完整地图点位对象。";
+            return "右键点击遮罩地图点位时切换该点位的隐藏状态；参数是 BetterGI 加载的完整地图点位对象。";
         if (owner == "MaskWindow" && name == "PointHover")
-            return "接收遮罩地图点位悬停事件；当前宿主实现不执行实际业务操作。";
+            return "接收遮罩地图点位悬停事件；当前 BetterGI 实现不执行实际业务操作。";
         if (name == "Hide") return $"隐藏{scope}窗口，不等于退出或停止后台任务。";
         if (Actions.TryGetValue(name, out var action)) return action;
         if (name.StartsWith("Switch") && Terms.TryGetValue(name[6..], out var task))
-            return $"使用宿主当前配置启动{task}任务；需要游戏和截图器就绪、独立任务空闲。命令返回不等于目标已验证完成。";
+            return $"使用 BetterGI 当前配置启动{task}任务；需要游戏和截图器就绪、独立任务空闲。命令返回不等于目标已验证完成。";
         if (name.StartsWith("GoTo") && name.EndsWith("Url"))
             return $"在浏览器打开{Terms.GetValueOrDefault(name[4..^3], name[4..^3])}的使用文档，不执行游戏操作。";
         if (name.StartsWith("Test") && name.EndsWith("Notification"))
@@ -260,12 +260,12 @@ public static class CommandDocumentation
             return $"{scope}：{source.Summary}";
         if (name is "Loaded" or "Activated" or "Closing" or "WindowSizeChanged" or "OverlayLayoutCommitted"
             or "PointClick" or "PointHover" or "PointRightClick" or "DropDownChanged" or "ConfigDropDownChanged")
-            return $"{scope}的 {name} 由宿主界面事件触发；当前源码未提供足以支持脱离控件上下文调用的业务契约，因此只保留接口记录，不安排 Agent 调用。";
+            return $"{scope}的 {name} 由 BetterGI 界面事件触发；当前源码未提供足以支持脱离控件上下文调用的业务契约，因此只保留接口记录，不安排 Agent 调用。";
         if (name is "Initialize") return $"初始化{scope}的数据和界面状态；不应在已运行的页面中反复触发。";
         if (name == "Refresh") return $"重新加载{scope}的数据来源并更新界面列表；完成后应重新读取列表确认变化。";
         if (name is "Save" or "EditAt" or "RemoveAt") return name switch
         {
-            "Save" => $"将{scope}当前编辑内容保存到宿主管理的数据位置；可能覆盖原文件。",
+            "Save" => $"将{scope}当前编辑内容保存到 BetterGI 管理的数据位置；可能覆盖原文件。",
             "EditAt" => $"编辑{scope}中指定位置的条目，依赖当前表单数据。",
             _ => $"删除{scope}中指定位置的条目，依赖当前表单数据。",
         };
@@ -276,9 +276,9 @@ public static class CommandDocumentation
                 var target = name[verb.Length..];
                 var nouns = new Dictionary<string,string> { ["ScriptGroup"]="脚本组",["JsScript"]="JavaScript 脚本",["KmScript"]="键鼠脚本",["Pathing"]="地图追踪路线",["Shell"]="Shell 动作",["Script"]="脚本",["Config"]="配置",["ScriptsFolder"]="脚本目录",["ScriptFolder"]="脚本目录",["ScriptProjectFolder"]="脚本项目目录",["LocalScriptRepo"]="本地脚本仓库",["Settings"]="设置窗口",["ChildSessionWindow"]="桌面分身窗口",["FightFolder"]="战斗策略目录",["HotKeyPage"]="快捷键设置页",["LogFolder"]="日志目录",["CustomHtmlMaskFolder"]="HTML 遮罩目录",["CustomHtmlMaskEditor"]="HTML 遮罩编辑器",["ScriptGroupSettings"]="脚本组设置",["PathingDetail"]="路线详情",["ScriptDetailDrawer"]="脚本详情抽屉",["DevTools"]="开发者工具",["CacheFolder"]="缓存目录",["AvatarConditionConfig"]="角色条件",["PartyConditionConfig"]="队伍条件",["JsScriptSettings"]="JavaScript 脚本设置",["ScriptCommon"]="脚本通用设置",["AvatarMacro"]="角色宏",["SkillCdConfig"]="技能冷却显示配置",["BlacklistModeConfig"]="拾取黑名单配置",["WhitelistModeConfig"]="拾取白名单配置",["Drawer"]="详情抽屉" };
                 var targetLabel = nouns.GetValueOrDefault(target, Regex.Replace(target, "([a-z])([A-Z])", "$1 $2"));
-                return $"在{scope}中{translated}{targetLabel}。依赖该页面当前选择；如出现文件或输入对话框，需要用户在宿主完成交互。";
+                return $"在{scope}中{translated}{targetLabel}。依赖该页面当前选择；如出现文件或输入对话框，需要用户在 BetterGI 界面完成交互。";
             }
-        return $"{scope}中的 {Humanize(name)} 命令。当前宿主没有提供足以确定目标、副作用和结果的业务说明；目录保留该真实命令供审计，不安排自动调用。";
+        return $"{scope}中的 {Humanize(name)} 命令。BetterGI 没有提供足以确定目标、副作用和结果的业务说明；目录保留该真实命令供审计，不安排自动调用。";
     }
 
     private static string Normalize(string command)

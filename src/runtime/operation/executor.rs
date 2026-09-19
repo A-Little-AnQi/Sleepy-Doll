@@ -1,9 +1,7 @@
 //! 确定性执行器：只解释通过验证的修订。
 //!
-//! 依赖图里没有模型网关 —— 预检、执行、等待、核验、失败分支、取消与重启恢复
-//! 全程不调用语言模型；结果文案来自模板与结构化结果。恢复靠已落库的尝试记录：
-//! 已核验成功的步骤直接复用证据，不重新提交外部写入；结果未知的步骤保留锁并
-//! 转入待核对，绝不换一个新请求键重做。
+//! 全程不调用语言模型；结果文案来自模板与结构化结果。恢复按已落库的尝试记录
+//! 进行：核验成功的步骤复用证据，未确认的步骤保留锁并转入待核对。
 
 use std::collections::{HashMap, HashSet};
 
@@ -44,7 +42,7 @@ impl StepResult {
             Self::Unknown => "unknown",
         }
     }
-    /// 落库的尝试结果 → 步骤结果。未知的结果不能被当成成功或失败。
+    /// 落库的尝试结果转为步骤结果；未确认的结果归为 unknown。
     fn from_attempt(outcome: &str) -> Self {
         match outcome {
             "verifiedSucceeded" | "completed" => Self::Succeeded,
@@ -61,7 +59,7 @@ struct NodeReport {
     detail: String,
 }
 
-/// 运行期记账。上限来自修订自带的 limits，超限即显式失败。
+/// 运行期记账：调用次数、循环展开与期限，上限来自修订自带的 limits。
 struct Budget {
     attempts: u32,
     expansions: u32,
@@ -104,7 +102,7 @@ pub struct TaskExecutor<'a> {
     scope: Scope,
     exposed: HashSet<String>,
     budget: Budget,
-    /// 循环作用域键，逐层拼接。重启后同键直接命中已落库的尝试。
+    /// 循环作用域键，逐层拼接；重启后同键命中已落库的尝试。
     loop_key: String,
 }
 
@@ -139,7 +137,7 @@ impl<'a> TaskExecutor<'a> {
         }
     }
 
-    /// 预检只读检查依赖与契约版本，不提交任何外部写入。
+    /// 预检：检查依赖与契约版本，不做任何外部写入。
     pub async fn preflight(&self) -> Result<()> {
         let definitions = self.supervisor.tool_definitions();
         let mut missing: Vec<String> = Vec::new();
@@ -222,7 +220,7 @@ impl<'a> TaskExecutor<'a> {
                 return Err(Error::Cancelled);
             }
             if stopped.is_some() {
-                // 前一步没有达到要求时，依赖它的后续步骤一律跳过并如实记账。
+                // 前一步未达要求，后续步骤跳过并记账。
                 self.report(
                     node.id(),
                     node.title(),
@@ -240,9 +238,8 @@ impl<'a> TaskExecutor<'a> {
                     self.fail(node.id(), message.clone())?;
                     self.report(node.id(), node.title(), StepResult::Failed, message)?;
                     match failure_of(node) {
-                        // 独立的分支继续跑；整体按部分完成收场。
+                        // 独立分支继续执行。
                         FailurePolicy::ContinueIndependent => continue,
-                        // 补偿是新的一次操作，可能同样失败；如实记录，不假造回滚。
                         FailurePolicy::Compensate {
                             tool: Some(tool), ..
                         } if !tool.trim().is_empty() => {
@@ -332,7 +329,7 @@ impl<'a> TaskExecutor<'a> {
                     "使用本次运行已核验的结果".into(),
                 );
             }
-            // 已有未成功的尝试：不再重放，交给上层按未知/失败收场。
+            // 已有未成功的尝试：不再重放。
             return Err(match result {
                 StepResult::Unknown => {
                     Error::Conflict("该步骤先前的结果未确认，已保留执行锁等待核对".into())
@@ -384,7 +381,7 @@ impl<'a> TaskExecutor<'a> {
             )));
         };
         if items.is_empty() {
-            // 空列表合法完成，并说明没有目标。
+            // 空列表按合法完成处理。
             return self.report(
                 &node.id,
                 &node.title,
@@ -478,7 +475,7 @@ impl<'a> TaskExecutor<'a> {
     async fn wait(&mut self, node: &WaitNode) -> Result<()> {
         let key = self.loop_key.clone();
         let attempt_id = format!("wait-{}", node.id);
-        // 期限在第一次进入时落库：重启后按原期限继续，不重新计时。
+        // 期限在第一次进入时落库；重启后按原期限继续。
         let deadline = match self.replay(&attempt_id, &key)? {
             Some((StepResult::Succeeded, _)) => return Ok(()),
             Some((_, evidence)) => evidence
@@ -545,7 +542,7 @@ impl<'a> TaskExecutor<'a> {
             self.sleep(node.check_seconds.min(remaining)).await?;
         }
         if node.until.is_some() && node.seconds.is_none() {
-            // 条件一直不满足：有限轮询后给出等待超时，不无限循环，也不去问模型。
+            // 条件一直不满足：按等待超时结束。
             return Err(Error::Conflict("等待的条件在期限内没有满足".into()));
         }
         self.close_wait(&attempt_id)?;
@@ -569,19 +566,19 @@ impl<'a> TaskExecutor<'a> {
         Ok(())
     }
 
-    /// 供调用方在预检失败时写回状态，避免执行器与运行对象被重复借用。
+    /// 预检失败时供调用方写回运行状态。
     pub fn run_mut(&mut self) -> &mut Run {
         self.run
     }
 
-    /// 中止时是否已有结果未知的步骤：决定收场是待核对还是失败。
+    /// 是否已有结果未知的步骤。
     pub fn reports_have_unknown(&self) -> bool {
         self.reports
             .iter()
             .any(|report| report.result == StepResult::Unknown)
     }
 
-    /// 已落库的尝试：核验成功复用证据，其余不重放。
+    /// 已落库的尝试：核验成功的复用证据，其余不重放。
     fn replay(&self, node_id: &str, key: &str) -> Result<Option<(StepResult, Value)>> {
         for attempt in self.supervisor.journal.attempts(&self.run.id)? {
             if attempt.request["stepId"] != json!(node_id)
@@ -603,7 +600,6 @@ impl<'a> TaskExecutor<'a> {
         key: &str,
         attempt: u32,
     ) -> Result<Value> {
-        // 运行记账要反映真实发生的调用，否则「这次跑了多少步」只能靠猜。
         self.run.tool_calls += 1;
         let call = ToolCall {
             id: format!("task-{}-{}-{}-{}", self.run.id, node_id, key, attempt),
@@ -637,7 +633,7 @@ impl<'a> TaskExecutor<'a> {
             .emit(self.run, "step.failed", json!({"id":id,"error":message}))
     }
 
-    /// 补偿是一次新的操作，也可能失败；失败按未知收场，不宣称已恢复。
+    /// 执行补偿步骤；失败按未知收场。
     async fn compensate(&mut self, tool: &str) -> Result<()> {
         self.supervisor.journal.emit(
             self.run,
@@ -682,7 +678,7 @@ impl<'a> TaskExecutor<'a> {
     }
 }
 
-/// 只有「外部影响或停止状态未确认」这一种冲突不重试。
+/// 是否为外部影响或停止状态未确认的冲突。
 fn is_unconfirmed(error: &Error) -> bool {
     matches!(error, Error::Conflict(message) if message.contains("未确认"))
 }
@@ -694,7 +690,7 @@ fn failure_of(node: &TaskNode) -> FailurePolicy {
     }
 }
 
-/// 工具返回带业务核验结论时以它为准；没有结论的只读结果按成功计。
+/// 取工具返回的业务核验结论；没有结论时按成功计。
 fn verification_of(output: &Value) -> StepResult {
     match output
         .pointer("/verification/status")
@@ -744,7 +740,7 @@ fn summary(
     text
 }
 
-/// 编译期可达的全部节点，用于预检与依赖盘点。
+/// 编译期可达的全部节点。
 pub fn flatten(nodes: &[TaskNode]) -> Vec<&TaskNode> {
     let mut flat = Vec::new();
     collect(nodes, &mut flat);

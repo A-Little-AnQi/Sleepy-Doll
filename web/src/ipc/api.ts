@@ -26,7 +26,7 @@ declare global {
   }
 }
 
-/** 窗口是否由界面自绘标题栏。只有桌面壳注入了无边框标记才成立；浏览器页面不画。 */
+/** 窗口是否由界面自绘标题栏：读桌面壳注入的无边框标记。 */
 export function framelessWindow() {
   return (
     typeof window !== "undefined" && Boolean(window.__SLEEPY_DOLL_FRAMELESS__)
@@ -153,9 +153,7 @@ function invoke<T>(
   });
 }
 
-/** 窗口控制没有回执可等。拖动期间原生主线程在系统的移动循环里，回执要等循环结束
- * 才发得出来，用 invoke 会先撞上请求期限。这些请求也不需要结果：不生效就是没有
- * 无边框窗口（浏览器预览），界面上那条标题栏此时也不存在。 */
+/** 窗口控制不等回执：拖动期间原生主线程在系统的移动循环里，回执要等循环结束才发得出来。 */
 function sendWindow(method: string) {
   window.ipc?.postMessage(
     JSON.stringify({ id: crypto.randomUUID(), method, params: {} }),

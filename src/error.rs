@@ -2,25 +2,25 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("configuration error: {0}")]
+    #[error("配置错误：{0}")]
     Config(String),
-    #[error("I/O error: {0}")]
+    #[error("I/O 错误：{0}")]
     Io(#[from] std::io::Error),
-    #[error("JSON error: {0}")]
+    #[error("JSON 错误：{0}")]
     Json(#[from] serde_json::Error),
-    #[error("HTTP error: {0}")]
+    #[error("HTTP 错误：{0}")]
     Http(String),
-    #[error("request timed out: {0}")]
+    #[error("请求超时：{0}")]
     Timeout(String),
-    #[error("model protocol error: {0}")]
+    #[error("模型协议错误：{0}")]
     ModelProtocol(String),
-    #[error("tool error: {0}")]
+    #[error("工具错误：{0}")]
     Tool(String),
-    #[error("storage error: {0}")]
+    #[error("存储错误：{0}")]
     Storage(#[from] rusqlite::Error),
-    #[error("operation cancelled")]
+    #[error("操作已取消")]
     Cancelled,
-    #[error("runtime conflict: {0}")]
+    #[error("运行时冲突：{0}")]
     Conflict(String),
 }
 

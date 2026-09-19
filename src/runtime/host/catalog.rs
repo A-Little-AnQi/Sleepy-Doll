@@ -69,7 +69,7 @@ impl Catalog {
                     continue;
                 }
                 if fs::metadata(&path)?.len() > 1024 * 1024 {
-                    return Err(Error::Config("catalog descriptor too large".into()));
+                    return Err(Error::Config("目录描述文件过大".into()));
                 }
                 let data = fs::read_to_string(path)?;
                 if is_capability {
@@ -78,20 +78,16 @@ impl Catalog {
                         || c.catalog_version.is_empty()
                         || catalog.capabilities.insert(c.id.clone(), c).is_some()
                     {
-                        return Err(Error::Config(
-                            "invalid or duplicate semantic capability".into(),
-                        ));
+                        return Err(Error::Config("语义能力标识无效或重复".into()));
                     }
                 } else {
                     let mut r: Resource = serde_json::from_str(&data)?;
                     r.path = root.join(&r.path).canonicalize()?;
                     if !r.path.starts_with(root.canonicalize()?) {
-                        return Err(Error::Config(
-                            "resource outside configured catalog root".into(),
-                        ));
+                        return Err(Error::Config("资源位于目录根之外".into()));
                     }
                     if catalog.resources.insert(r.id.clone(), r).is_some() {
-                        return Err(Error::Config("duplicate resource".into()));
+                        return Err(Error::Config("资源重复".into()));
                     }
                 }
             }

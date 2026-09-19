@@ -1,9 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! 安装程序的窗口与 IPC。界面是自绘的，这里只负责把它挂起来、把请求转给
-//! `sleepy_doll::setup`，再把进度推回去。
+//! 安装程序的窗口与 IPC：把界面挂起来，请求转给 `sleepy_doll::setup`，进度推回去。
 
-// 与桌面壳共用同一份窗口改造；它属于壳而不是库，用路径直接引进来。
+// 桌面壳的窗口改造，按路径引入。
 #[path = "../window_chrome.rs"]
 mod window_chrome;
 
@@ -32,8 +31,7 @@ use wry::{
     http::{Request, Response, header::CONTENT_TYPE},
 };
 
-/// 构建期由 `installer/pack-payload.ps1` 生成，只有 `--features setup` 会读它们。
-/// 路径相对本文件所在目录，也就是仓库根下的 `target/setup/`。
+/// 由 `installer/pack-payload.ps1` 在构建期生成，路径相对本文件所在目录。
 const MANIFEST: &[u8] = include_bytes!("../../target/setup/payload.json");
 const PAYLOAD: &[u8] = include_bytes!("../../target/setup/payload.bin");
 
@@ -41,14 +39,14 @@ const TITLE: &str = "Sleepy Doll 安装程序";
 const WIDTH: f64 = 720.0;
 const HEIGHT: f64 = 460.0;
 
-/// 写入过程中关掉窗口会留下半截目录，原生侧在这段时间里忽略关闭。
+/// 写入期间为 true，此时忽略关闭请求。
 static BUSY: AtomicBool = AtomicBool::new(false);
 
 #[derive(RustEmbed)]
 #[folder = "target/ui/"]
 struct UiAssets;
 
-/// 界面靠这两个标记判断自己跑在桌面壳里、以及标题栏要不要自绘。
+/// 界面用这两个标记判断自己运行在桌面壳里、标题栏是否自绘。
 const INITIALIZATION_SCRIPT: &str = "window.__SLEEPY_DOLL_DESKTOP__ = true;\n\
      window.__SLEEPY_DOLL_FRAMELESS__ = true;";
 
@@ -64,7 +62,7 @@ enum Push {
 enum UserEvent {
     ToWeb(Push),
     Window(window_chrome::Action),
-    /// 文件夹选择框与目录确认都必须弹在主线程上，才挂得住安装窗口。
+    /// 文件夹选择框与目录确认要在主线程上弹。
     Browse {
         id: String,
     },
@@ -87,7 +85,7 @@ struct IpcRequest {
 #[serde(rename_all = "camelCase")]
 struct State {
     phase: &'static str,
-    /// 0..1。取三位小数，免得 JSON 里出现 0.6200000000000001 这种数字。
+    /// 0..1，取三位小数。
     progress: f64,
     message: String,
     error: Option<String>,
@@ -115,7 +113,7 @@ impl State {
 
 fn main() {
     if let Err(error) = run() {
-        // 窗口还没起来时失败没有别的去处，只能弹一个系统对话框。
+        // 窗口还没起来，只能弹系统对话框。
         native_message(&format!("安装程序无法启动：{error}"));
         std::process::exit(1);
     }
@@ -127,17 +125,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let window = WindowBuilder::new()
         .with_title(TITLE)
         .with_inner_size(Size::Logical(LogicalSize::new(WIDTH, HEIGHT)))
-        // window_chrome::install 会加回 WS_THICKFRAME，尺寸靠上下限钉死。
+        // window_chrome::install 会加回 WS_THICKFRAME，尺寸用上下限钉死。
         .with_min_inner_size(Size::Logical(LogicalSize::new(WIDTH, HEIGHT)))
         .with_max_inner_size(Size::Logical(LogicalSize::new(WIDTH, HEIGHT)))
         .with_resizable(false)
         .with_decorations(false)
         .build(&event_loop)?;
 
-    // 安装程序不该在用户目录里留 WebView2 的缓存，放到系统临时目录下。
-    let mut web_context = WebContext::new(Some(
-        std::env::temp_dir().join("sleepy-doll-setup-webview2"),
-    ));
+    let mut web_context = WebContext::new(Some(webview_cache()));
     let owner = window.hwnd();
     let ipc_proxy = proxy.clone();
     let ipc_hwnd = window_chrome::hwnd_id(&window);
@@ -174,8 +169,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             Event::UserEvent(UserEvent::Window(action)) => {
                 match (action, BUSY.load(Ordering::SeqCst)) {
-                    // 写入过程中关掉窗口会留下半截目录，BUSY 期间忽略关闭。
-                    (window_chrome::Action::Close, false) => *control_flow = ControlFlow::Exit,
+                    // 写入期间忽略关闭。
+                    (window_chrome::Action::Close, false) => quit(control_flow),
                     (window_chrome::Action::Close, true) => {}
                     (action, _) => window_chrome::perform(&window, action),
                 }
@@ -199,15 +194,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
-            } if !BUSY.load(Ordering::SeqCst) => {
-                *control_flow = ControlFlow::Exit;
-            }
+            } if !BUSY.load(Ordering::SeqCst) => quit(control_flow),
             _ => {}
         }
     });
 }
 
-/// 处理一条界面请求。窗口动作不回执，其余都要回。
+/// 安装程序的 WebView2 缓存目录，放在系统临时目录里。
+fn webview_cache() -> PathBuf {
+    std::env::temp_dir().join("sleepy-doll-setup-webview2")
+}
+
+/// 关窗口，退出前安排好清理。
+fn quit(control_flow: &mut ControlFlow) {
+    setup::cleanup_after_exit(&[setup::Removal::Tree(webview_cache())]);
+    *control_flow = ControlFlow::Exit;
+}
+
+/// 处理一条界面请求。窗口动作不回执。
 fn dispatch_ipc(request: Request<String>, proxy: EventLoopProxy<UserEvent>, hwnd: isize) {
     if !is_application_url(&request.uri().to_string()) {
         return;
@@ -217,7 +221,7 @@ fn dispatch_ipc(request: Request<String>, proxy: EventLoopProxy<UserEvent>, hwnd
     };
     match request.method.as_str() {
         "window.drag" => {
-            // 与主程序一致：拖动要在指针还按着时进入系统移动循环。
+            // 与主程序一致：拖动在指针按下时进入系统移动循环。
             #[cfg(target_os = "windows")]
             window_chrome::begin_system_drag(hwnd);
             return;
@@ -233,7 +237,7 @@ fn dispatch_ipc(request: Request<String>, proxy: EventLoopProxy<UserEvent>, hwnd
         _ => {}
     }
     if let Some(action) = window_chrome::Action::from_method(&request.method) {
-        // 安装器窗口的尺寸是钉死的，最大化只会让界面空出一大片。
+        // 窗口尺寸是固定的，不接受最大化。
         if action != window_chrome::Action::ToggleMaximize {
             let _ = proxy.send_event(UserEvent::Window(action));
         }
@@ -259,8 +263,7 @@ fn dispatch_ipc(request: Request<String>, proxy: EventLoopProxy<UserEvent>, hwnd
                 .get("desktopShortcut")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
-            // 归一化与追加产品名都在这里做：界面送来的可能是 `D:\` 这种没有目录名的路径，
-            // 校验看的是追加之后的结果。
+            // 校验的是追加产品名之后的路径。
             let resolved = setup::resolve_directory(&requested);
             let directory = PathBuf::from(&resolved);
             reply(&proxy, &id, json!({}));
@@ -274,6 +277,14 @@ fn dispatch_ipc(request: Request<String>, proxy: EventLoopProxy<UserEvent>, hwnd
             } else {
                 start(proxy.clone(), directory, desktop_shortcut);
             }
+        }
+        // 位置以注册表为准，不用界面送来的路径。
+        "setup.launch" => {
+            let started = setup::installed()
+                .map(|installed| installed.directory.join(setup::EXECUTABLE))
+                .filter(|executable| executable.is_file())
+                .is_some_and(|executable| setup::launch(&executable).is_ok());
+            reply(&proxy, &id, json!({"started": started}));
         }
         "setup.uninstall" => {
             let remove_user_data = request
@@ -312,7 +323,7 @@ fn reply(proxy: &EventLoopProxy<UserEvent>, id: &str, result: Value) {
     )));
 }
 
-/// 起一个工作线程跑安装：界面不能停在写文件上。
+/// 起工作线程执行安装。
 fn start(proxy: EventLoopProxy<UserEvent>, directory: PathBuf, desktop_shortcut: bool) {
     if setup::is_uninstall_mode() {
         state(&proxy, State::failed("这是卸载程序，不能用来安装"));
@@ -340,7 +351,7 @@ fn finish(proxy: &EventLoopProxy<UserEvent>, outcome: Result<(), setup::Error>) 
     }
 }
 
-/// 解压嵌入的载荷。整段十几兆，一次性放进内存。
+/// 解压嵌入的载荷，整段一次性放进内存。
 fn open_archive() -> Result<Archive, setup::Error> {
     let mut data = Vec::new();
     DeflateDecoder::new(PAYLOAD)
@@ -376,12 +387,11 @@ fn info_payload() -> Value {
     })
 }
 
-/// 目录里已经有别人的东西时问一次，默认按钮是「否」。
+/// 目录里已有别的东西时问一次，默认按钮是「否」。
 fn confirm_foreign(window: &Window, directory: &std::path::Path) -> bool {
     let message = format!(
-        "{} 里已经有别的东西，也没有 Sleepy Doll 的程序文件。\n\n\
-         继续安装不会删掉里面的文件，但两套东西混在同一个目录里，以后不好分辨哪些属于谁。\n\n\
-         确定要装到这里吗？",
+        "{} 里已经有别的东西，没有 Sleepy Doll 的程序文件。\n\n\
+         继续安装不会删除已有文件。确定要装到这里吗？",
         directory.display()
     );
     #[cfg(target_os = "windows")]

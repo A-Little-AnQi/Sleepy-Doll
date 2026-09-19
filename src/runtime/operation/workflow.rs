@@ -1,5 +1,5 @@
-//! 旧版「已验证运行提取」的存储结构。新写入一律走 [`super::task`] 的修订模型；
-//! 这里只保留读取旧行并把它们转换成修订的能力，避免两套定义长期并存。
+//! 旧版「已验证运行提取」的存储结构。新写入走 [`super::task`] 的修订模型，
+//! 这里只把旧行转换成修订。
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -44,7 +44,7 @@ pub struct Workflow {
 }
 
 impl Workflow {
-    /// 旧结构的依赖约束强于新结构，转换后仍是一条顺序链，语义不变。
+    /// 按依赖顺序展开成一条顺序链；没有步骤或依赖成环时返回 `None`。
     pub fn to_revision(&self) -> Option<WorkflowRevision> {
         if self.steps.is_empty() {
             return None;

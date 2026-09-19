@@ -32,7 +32,7 @@ it("runs the action instead of just closing when one is given", () => {
   expect(button?.textContent).toBe("重试");
   act(() => button?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
   expect(onAction).toHaveBeenCalled();
-  // 动作按钮只跑动作，不额外触发一次「点哪都关」。
+  // 动作按钮不触发整条的点击关闭。
   expect(onDismiss).toHaveBeenCalledTimes(1);
 });
 
@@ -42,7 +42,7 @@ it("dismisses on its own after the duration", async () => {
   render(
     <Toast message="稍后自动消失" onDismiss={onDismiss} duration={1000} />,
   );
-  // 调用方传的是内联箭头函数，计时器不能被每次渲染重置 —— 它在 1 秒后必须触发。
+  // 计时器不因重新渲染而重置。
   await act(async () => {
     vi.advanceTimersByTime(1000);
   });

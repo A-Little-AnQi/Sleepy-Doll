@@ -4,8 +4,7 @@
 //   1. 不要再用第二个远程线程去调 DLL 的导出函数。宿主是启用 CFG 的 .NET 程序，
 //      CreateRemoteThread 指向刚映射进来的模块会以 0xC0000409/0xA 杀掉宿主。
 //      DllMain 是加载器调的，不受这条限制，所以入口放在那里。
-//   2. 目标是提权运行的 BetterGI 时，本进程也必须提权，否则写不进去。
-//      刻意不自己 runas —— 开关是常规操作，不该每次弹 UAC。
+//   2. 目标是提权运行的 BetterGI 时，本进程也必须提权：低权限进程写不进去。
 //
 // 不向宿主目录写任何文件。
 
@@ -26,14 +25,12 @@ constexpr DWORD kPathHeadroom = 40;
 
 std::wstring DirectoryOf(const std::wstring& path);
 
-// 数据根：安装目录的 user\。注入器住在 <安装目录>\bridge 下，从自己所在
-// 目录推不出安装目录，所以由调用方用 --user 指定；缺省是自己目录下的 user\，
-// 那是开发构建的布局。产品目录里绝不留第二份 user\ —— 升级会整包替换它。
+// 数据根：由调用方用 --user 指定，缺省是自己目录下的 user\（开发构建的布局）。
+// 注入器住在 <安装目录>\bridge 下，从自己所在目录推不出安装目录。
 std::wstring g_userDir;
 
-// 提权后的实例在另一个控制台里跑，父进程看不到它的输出。
-// 所以同时写一份日志到数据根的 log 下——排查问题时这是唯一的线索。
-// 注意：写的是 Sleepy Doll 自己的目录，不是 BetterGI 的。
+// 提权后的实例在另一个控制台里运行，父进程看不到它的输出，所以同时写一份到数据根的 log 下。
+// 写的是 Sleepy Doll 自己的目录，不是 BetterGI 的。
 void Log(bool toStderr, const std::wstring& message) {
     FILE* console = toStderr ? stderr : stdout;
     fwprintf(console, L"%ls\n", message.c_str());
@@ -41,8 +38,7 @@ void Log(bool toStderr, const std::wstring& message) {
 
     if (g_userDir.empty()) return;
 
-    // 产品目录里只放产品文件，运行期产物一律进数据根。
-    // 只依赖 kernel32，所以逐级建目录而不是用 SHCreateDirectoryExW。
+    // 逐级建目录，不用 shell32 的 SHCreateDirectoryExW。
     ::CreateDirectoryW(g_userDir.c_str(), nullptr);
     const std::wstring logDir = g_userDir + L"\\log";
     ::CreateDirectoryW(logDir.c_str(), nullptr);
@@ -153,7 +149,7 @@ bool FindTarget(const std::wstring& processName, DWORD requestedPid, Target& tar
     ::CloseHandle(snapshot);
 
     if (candidates.empty()) {
-        error = L"没有找到 " + processName + L" 进程，或者它跑在更高的完整性级别上。";
+        error = L"没有找到 " + processName + L" 进程，或者它运行在更高的完整性级别上。";
         return false;
     }
 
@@ -204,8 +200,7 @@ void* WriteRemoteString(HANDLE process, const std::wstring& text) {
     return remote;
 }
 
-// -1: could not inspect, 0: absent, 1: already loaded. A second LoadLibrary
-// only increments the reference count and cannot rerun DllMain.
+// 返回 -1 检查不了，0 未加载，1 已加载。重复 LoadLibrary 只加引用计数，不会重新执行 DllMain。
 int BootstrapLoaded(DWORD pid) {
     HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid);
     if (snapshot == INVALID_HANDLE_VALUE) return -1;
@@ -299,13 +294,11 @@ int Inject(const std::wstring& processName, DWORD requestedPid, const std::wstri
             break;
         }
 
-        // 必须等远程线程读完参数再释放那块内存。
-        // CreateRemoteThread 只是创建线程，它还没开始跑；提前 VirtualFreeEx 会让
-        // LoadLibraryW 读到已解映射的页——访问违例，直接崩掉宿主。
+        // 必须等远程线程读完参数再释放那块内存：CreateRemoteThread 返回时线程还没开始执行，
+        // 提前 VirtualFreeEx 会让 LoadLibraryW 读到已解映射的页，访问违例崩掉宿主。
         const DWORD wait = ::WaitForSingleObject(thread, 60'000);
         if (wait != WAIT_OBJECT_0) {
-            // The loader may still be reading this memory. Leave it allocated
-            // until process exit instead of turning a timeout into a crash.
+            // 加载器可能还在读这块内存，留到进程退出再释放，不让超时变成崩溃。
             ::CloseHandle(thread);
             Fail(L"等待加载超时或失败，结果尚未确认。请检查桥日志，勿重复注入。");
             result = 10;
@@ -410,7 +403,7 @@ int wmain(int argc, wchar_t** argv) {
     }
     bridgeDir = absolute;
 
-    // 数据根同样绝对化：它会跟着当前目录跑就没法排查了。
+    // 数据根同样绝对化：相对路径随当前目录变化。
     wchar_t userAbsolute[MAX_PATH]{};
     const DWORD userLength =
         ::GetFullPathNameW(g_userDir.c_str(), MAX_PATH, userAbsolute, nullptr);
@@ -422,13 +415,8 @@ int wmain(int argc, wchar_t** argv) {
 
     if (listOnly) return List(processName);
 
-    // 刻意**不**自己提权。
-    //
-    // 自己 runas 会让用户每注入一次就点一次 UAC，而注入是开关的常规操作，
-    // 不该有这种打断。提权由调用方负责——最终封装 Sleepy Doll 的那层软件
-    // 以管理员身份运行，这里就天然有权限了。
-    //
-    // 没有权限时给出可操作的错误，而不是弹一个窗。
+    // 不自己提权：注入由以管理员身份运行的调用方发起，这里天然有权限。
+    // 没有权限时给出可操作的错误，不弹窗。
     if (!IsElevated()) {
         Fail(L"需要管理员权限才能注入：BetterGI 自身以管理员身份运行，"
              L"低权限进程无法向它写入。请以管理员身份运行本程序，"

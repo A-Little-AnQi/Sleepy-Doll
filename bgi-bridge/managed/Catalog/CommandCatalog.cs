@@ -24,10 +24,7 @@ public sealed record CommandDescriptor(
     public bool RequiresGameReady { get; init; }
 }
 
-/// <summary>
-/// 命令目录：把已注册 ViewModel 的 ICommand 属性暴露成 cmd.&lt;view_model&gt;.&lt;command&gt;。
-/// 源码里约 290 个 [RelayCommand]，手写不现实且版本一变就烂。
-/// </summary>
+/// <summary>命令目录：把已注册 ViewModel 的 ICommand 属性暴露成 cmd.&lt;view_model&gt;.&lt;command&gt;。</summary>
 public static partial class CommandCatalog
 {
     private static BridgeConfig? _config;
@@ -53,9 +50,7 @@ public static partial class CommandCatalog
         var marker = Reflect.FindType("BetterGenshinImpact.ViewModel.IViewModel");
         if (marker is null) return result;
 
-        // 为什么不用 IServiceCollection：宿主已经 build 完了，注册表拿不到。
-        // 改成扫已加载程序集里的 IViewModel 实现，再用容器过滤掉没注册的——
-        // 语义等价，且不依赖 DI 的内部结构。
+        // 宿主容器已构建，IServiceCollection 注册表不可读；扫已加载程序集的实现，再用容器过滤。
         foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
         {
             Type[] types;
@@ -85,7 +80,7 @@ public static partial class CommandCatalog
                     var viewModelName = TrimSuffix(type.Name, "ViewModel");
                     var commandName = TrimSuffix(property.Name, "Command");
                     var name = $"{ToSnakeCase(viewModelName)}.{ToSnakeCase(commandName)}";
-                    if (!seen.Add(name)) continue;  // 重名保留第一个，后面的同义命令没差别
+                    if (!seen.Add(name)) continue;  // 重名保留第一个
                     var parameterType = FindParameterType(property.PropertyType);
                     var source = SourceDocumentation.Find("C", type, property.Name);
                     var purpose = CommandDocumentation.Purpose(type.Name, property.Name, source);
@@ -93,15 +88,15 @@ public static partial class CommandCatalog
                     var parameterSchema = parameterType is null
                         ? (JsonElement?)null
                         : DescribeParameter(ValueContract.Schema(parameterType), title, parameterType);
-                    var unavailable = source?.HasImplementation == false ? "宿主当前版本该命令为空实现。"
-                        : purpose.Contains("不安排自动调用", StringComparison.Ordinal) ? "宿主没有提供足以确定目标、副作用和结果的业务说明。"
-                        : parameterType is not null && parameterSchema is null ? $"需要宿主 {parameterType.Name} 对象，不能从任意 JSON 重建；应在宿主界面完成该交互。"
+                    var unavailable = source?.HasImplementation == false ? "当前 BetterGI 版本该命令为空实现。"
+                        : purpose.Contains("不安排自动调用", StringComparison.Ordinal) ? "BetterGI 没有提供足以确定目标、副作用和结果的业务说明。"
+                        : parameterType is not null && parameterSchema is null ? $"需要 BetterGI 的 {parameterType.Name} 对象，不能从任意 JSON 重建；应在 BetterGI 界面完成该交互。"
                         : CommandDocumentation.UnavailableReason(type.Name, property.Name);
                     var guide = new AgentGuide(
                         title, purpose,
                         unavailable is null
                             ? [$"需要执行“{title}”，且目标就是 {viewModelName} 当前界面上下文时。"]
-                            : ["仅用于审计宿主行为或理解相关界面；当前接口不安排直接调用。"],
+                            : ["仅用于审计 BetterGI 行为或理解相关界面；当前接口不安排直接调用。"],
                         unavailable is null
                             ? ["命令可调用且 CanExecute=true。", "用途依赖当前选择时，已确认 BetterGI 界面选择就是目标对象。", parameterType is null ? "arguments 为空对象。" : $"argument 满足 parameterSchema（{parameterType.FullName}）。"]
                             : [$"不可调用：{unavailable}"],
@@ -138,7 +133,7 @@ public static partial class CommandCatalog
         return result;
     }
 
-    /// <summary>切 UI 线程执行：这些命令碰的都是绑在界面上的 ObservableObject。</summary>
+    /// <summary>在 UI 线程执行；这些命令操作绑定到界面的对象。</summary>
     public static async Task<object?> Invoke(string name, JsonElement? argument, CancellationToken cancellation)
     {
         if (_config is null || !_config.IsMethodEnabled($"cmd.{name}", "command"))
@@ -152,15 +147,15 @@ public static partial class CommandCatalog
             throw BridgeException.GameNotReady("该命令要求截图器和游戏环境已就绪。");
 
         var services = Host.Services()
-            ?? throw BridgeException.Missing("拿不到宿主的服务容器。");
+            ?? throw BridgeException.Missing("拿不到 BetterGI 的服务容器。");
 
-        // 参数转换在进 UI 线程之前做完，转换失败就不必去打扰界面线程。
+        // 参数转换在进 UI 线程之前完成。
         var parameter = ConvertArgument(argument, entry.Parameter);
 
         return await Ui.InvokeAsync(async () =>
         {
             cancellation.ThrowIfCancellationRequested();
-            // Resolving a ViewModel can run configuration migrations in its constructor.
+            // 解析 ViewModel 可能在其构造函数里执行配置迁移。
             var checkpoint = SettingsTransactions.Engine.Checkpoint($"cmd.{name}");
             var viewModel = services.GetService(entry.ViewModel)
                 ?? throw BridgeException.Missing($"ViewModel 未注册：{entry.ViewModel.Name}");
@@ -229,7 +224,7 @@ public static partial class CommandCatalog
         return JsonSerializer.SerializeToElement(node);
     }
 
-    /// <summary>按接口名探测，不引用 CommunityToolkit 类型。</summary>
+    /// <summary>按接口名判断是否为异步命令。</summary>
     private static bool IsAsyncCommand(Type commandType) =>
         commandType.GetInterfaces().Append(commandType).Any(i =>
             i.Name is "IAsyncRelayCommand" or "IAsyncRelayCommand`1")
@@ -247,7 +242,7 @@ public static partial class CommandCatalog
     private static string TrimSuffix(string value, string suffix) =>
         value.EndsWith(suffix, StringComparison.Ordinal) ? value[..^suffix.Length] : value;
 
-    /// <summary>驼峰转下划线。规则与 mcp 分支一致，保证命令名可预期。</summary>
+    /// <summary>驼峰转下划线。</summary>
     private static string ToSnakeCase(string value) =>
         SnakeBoundary().Replace(value, "$1_$2").ToLowerInvariant();
 

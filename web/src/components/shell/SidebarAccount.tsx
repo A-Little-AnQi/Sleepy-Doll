@@ -3,15 +3,10 @@ import { BrandIcon, HelpIcon, SettingsIcon } from "../icons";
 import { ThemeSwitch } from "../controls/ThemeSwitch";
 import { SettingRow } from "../controls/SettingRow";
 import { Select } from "../controls/Select";
-import {
-  readTheme,
-  writeTheme,
-  type ThemeId,
-  type ThemeOrigin,
-} from "../../appearance";
+import { useTheme, writeTheme } from "../../appearance";
 import {
   LOCALE_OPTIONS,
-  readLocale,
+  useLocale,
   writeLocale,
   type LocaleId,
 } from "../../appearance/locale";
@@ -24,8 +19,8 @@ export function SidebarAccount({
   onHelp(): void;
 }) {
   const [open, setOpen] = useState(false);
-  const [theme, setTheme] = useState(readTheme);
-  const [locale, setLocale] = useState(readLocale);
+  const theme = useTheme();
+  const locale = useLocale();
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -53,11 +48,6 @@ export function SidebarAccount({
     };
   }, [open]);
 
-  const applyTheme = (next: ThemeId, origin: ThemeOrigin) => {
-    setTheme(next);
-    return writeTheme(next, origin);
-  };
-
   return (
     <div className="app-account-row" ref={root}>
       <div className="app-account-slot">
@@ -68,16 +58,7 @@ export function SidebarAccount({
           aria-haspopup="menu"
           aria-expanded={open}
           aria-controls="app-account-menu"
-          onClick={() => {
-            setOpen((value) => {
-              const next = !value;
-              if (next) {
-                setTheme(readTheme());
-                setLocale(readLocale());
-              }
-              return next;
-            });
-          }}
+          onClick={() => setOpen((value) => !value)}
         >
           <span className="app-account-avatar">
             <BrandIcon />
@@ -97,18 +78,14 @@ export function SidebarAccount({
         >
           <div className="app-account-menu-prefs">
             <SettingRow label="主题" compact>
-              <ThemeSwitch theme={theme} onChange={applyTheme} />
+              <ThemeSwitch theme={theme} onChange={writeTheme} />
             </SettingRow>
             <SettingRow label="语言" compact>
               <Select
                 label="语言"
                 value={locale}
                 options={LOCALE_OPTIONS}
-                onChange={(value) => {
-                  const next = value as LocaleId;
-                  setLocale(next);
-                  writeLocale(next);
-                }}
+                onChange={(value) => writeLocale(value as LocaleId)}
               />
             </SettingRow>
           </div>

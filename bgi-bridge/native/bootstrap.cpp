@@ -1,10 +1,10 @@
-// BgiBridge 引导 DLL：被注入后用 hostfxr 接上宿主**已有的** .NET 运行时，
+// BgiBridge 引导 DLL：被注入后用 hostfxr 接上宿主已有的 .NET 运行时，
 // 载入托管控制面。
 //
 // 入口必须在 DllMain 起的线程里，不能靠注入器远程调导出函数——
 // 详见 injector.cpp 顶部的说明。
 //
-// 只用 kernel32：宿主是别人的进程，少一个依赖少一处故障点。
+// 只用 kernel32。
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -13,8 +13,7 @@
 namespace {
 
 // 本 DLL 自己的模块句柄与目录，DllMain 里填。
-// 不能用 GetModuleFileName(nullptr) —— 那拿到的是 BetterGI.exe 的路径，
-// 我们的程序集和配置都在自己目录下，用错了就什么都找不到。
+// 不能用 GetModuleFileName(nullptr)：那拿到的是宿主进程 exe 的路径。
 HMODULE g_self = nullptr;
 WCHAR g_bridgeDir[MAX_PATH]{};
 
@@ -57,13 +56,13 @@ void AppendVersion(WCHAR* buffer, int major, int minor, int patch) {
 
 // ---------- 数据根 ----------
 
-// 运行期数据的落点，安装目录的 user\。交付包里本 DLL 住在 <安装目录>\bridge 下，
-// 直接用自己的目录会在产品目录里造出第二份 user\ —— 那份会被升级整包替换。
-// 所以从 bridge.config.json 的 userDirectory 读（Sleepy Doll 每次连接时写入），
-// 没有这个字段就用桥目录下的 user\：开发构建与旧版平铺包正是这样。
+// 运行期数据的落点。交付包里本 DLL 住在 <安装目录>\bridge 下，
+// 数据根是 <安装目录>\user，由 bridge.config.json 的 userDirectory 指出
+// （Sleepy Doll 每次连接时写入）；没有这个字段就用桥目录下的 user\，
+// 开发构建与旧版平铺包正是这样。
 WCHAR g_dataRoot[MAX_PATH]{};
 
-// bridge.config.json 是 UTF-8，这里只用 kernel32，所以按字节扫这一个键。
+// bridge.config.json 是 UTF-8，只用 kernel32，所以按字节扫这一个键。
 // 路径里只会出现 \\ \" \/ 三种转义，其余原样搬。
 bool FindJsonString(const char* text, DWORD size, const char* key, WCHAR* out, int capacity) {
     const int keyLength = lstrlenA(key);
@@ -109,26 +108,26 @@ bool FindJsonString(const char* text, DWORD size, const char* key, WCHAR* out, i
     return false;
 }
 
-// 相对路径会跟着宿主进程的当前目录跑，那不可预期。
+// 相对路径随宿主进程的当前目录变化。
 bool AbsolutePath(const WCHAR* path) {
     if (path[0] == 0) return false;
     if (path[0] == L'\\' && path[1] == L'\\') return true;
     return path[1] == L':' && (path[2] == L'\\' || path[2] == L'/');
 }
 
-// 读不到就返回 false，由调用方用缺省——数据落点不该成为引导失败的原因。
+// 读不到就返回 false，由调用方用缺省。
 bool ReadConfiguredDataRoot(WCHAR* out, int capacity) {
     WCHAR path[MAX_PATH + 32]{};
     lstrcpynW(path, g_bridgeDir, MAX_PATH);
     AppendText(path, L"\\bridge.config.json");
 
-    // 允许删除共享：Sleepy Doll 重写这份配置时是整份替换，不能被这个读句柄挡住。
+    // 允许删除共享：Sleepy Doll 重写这份配置时是整份替换。
     HANDLE file = ::CreateFileW(path, GENERIC_READ,
                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) return false;
 
-    // 这份配置只有几 KB。读不满说明它大得反常，那就退回缺省，不猜半个路径。
+    // 这份配置只有几 KB；读不满说明它大得反常，退回缺省。
     static char text[32768];
     DWORD size = 0;
     const BOOL read = ::ReadFile(file, text, static_cast<DWORD>(sizeof(text)), &size, nullptr);
@@ -149,8 +148,7 @@ void ResolveDataRoot() {
 
 // ---------- 日志 ----------
 
-// 日志落在数据根的 log 下：产品目录里只放产品文件，重装与分发包会整包替换，
-// 运行期产物堆在那里会让包越用越脏。只用 kernel32，所以逐级建目录。
+// 日志落在数据根的 log 下。只用 kernel32，所以逐级建目录。
 void EnsureLogDirectory() {
     static bool created = false;
     if (created) return;
@@ -199,8 +197,7 @@ void LogLine(const WCHAR* text) {
     AppendText(path, L"\\log\\bootstrap.log");
     if (AppendLine(path, line)) return;
 
-    // 数据根写不出去（只读安装等）时退回 %TEMP%：日志是唯一的诊断手段，
-    // 不能因为一个目录就整条丢掉。
+    // 数据根写不出去（只读安装等）时退回 %TEMP%。
     WCHAR temp[MAX_PATH]{};
     const DWORD length = ::GetTempPathW(MAX_PATH, temp);
     if (length == 0 || length >= MAX_PATH) return;
@@ -228,7 +225,7 @@ struct hostfxr_initialize_parameters {
     const wchar_t* dotnet_root;
 };
 
-// hostfxr_delegate_type 里我们只要这一个
+// hostfxr_delegate_type 里只用这一个
 constexpr int32_t hdt_load_assembly_and_get_function_pointer = 5;
 
 // 传给 load_assembly_and_get_function_pointer 表示"目标方法是 [UnmanagedCallersOnly]"。
@@ -333,7 +330,7 @@ HMODULE LoadHostfxr() {
 
 // ---------- 载入托管入口 ----------
 
-// 返回 0 成功。bridgeDir 是我们的目录，不是 BetterGI 的。
+// 返回 0 成功。bridgeDir 是桥目录，不是 BetterGI 的。
 int32_t ResolveEntry(const WCHAR* bridgeDir, const WCHAR* methodName, void** out) {
     *out = nullptr;
 
@@ -362,7 +359,7 @@ int32_t ResolveEntry(const WCHAR* bridgeDir, const WCHAR* methodName, void** out
 
     hostfxr_handle context = nullptr;
     // 返回值 >= 0 都算成功：0=Success，1=Success_HostAlreadyInitialized，
-    // 2=Success_DifferentRuntimeProperties。我们要的正是 1 —— 复用宿主已有的运行时。
+    // 2=Success_DifferentRuntimeProperties。复用宿主已有的运行时走的是 1。
     const int32_t initStatus = initialize(runtimeConfig, nullptr, &context);
     LogWithCode(L"hostfxr_initialize_for_runtime_config", initStatus);
     if (initStatus < 0) {
@@ -424,8 +421,7 @@ DWORD WINAPI Worker(LPVOID) {
         return 2;
     }
 
-    // 只传桥目录这个纯路径。不包 JSON —— 托管侧少一层解析就少一个失败点，
-    // 而且日志能在解析之前就接上，出问题时才看得见原因。
+    // 只传桥目录这个纯路径。
     LogLine(L"调用托管 Entry.Start");
     const int32_t startStatus = reinterpret_cast<bridge_start_fn>(entry)(bridgeDir);
     LogWithCode(L"托管 Entry.Start 返回", startStatus);
@@ -435,10 +431,10 @@ DWORD WINAPI Worker(LPVOID) {
 
 }  // namespace
 
-// 入口就在这里。**不要**改成由注入器直接 CreateRemoteThread 调导出函数：
+// 入口就在这里。不要改成由注入器直接 CreateRemoteThread 调导出函数：
 // 在启用了 CFG 的 .NET 宿主（BetterGI 就是）里，那种间接调用会以
 // FAST_FAIL_GUARD_ICALL_CHECK_FAILURE (0xC0000409 / 参数 0xA) 失败并杀掉宿主进程。
-// DllMain 是加载器调的，不受这条限制。实测：同样的 DLL，DllMain 能跑，导出调用必崩。
+// DllMain 是加载器调用的，不受这条限制。实测：同样的 DLL，DllMain 可用，导出调用必崩。
 //
 // DllMain 里可以 CreateThread，但不能 LoadLibrary / 等待其他线程——loader lock 会死锁。
 // 所以这里只起线程，真正的活交给 Worker。
@@ -465,7 +461,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     return TRUE;
 }
 
-// 保留导出：供宿主内其它代码显式释放端口。注入器不再远程调用它（见上面的原因）。
+// 保留导出：供宿主内其它代码显式释放端口。注入器不再远程调用它（原因见 injector.cpp）。
 extern "C" __declspec(dllexport) DWORD WINAPI BgiBridgeShutdown(LPVOID) {
     if (g_bridgeDir[0] == 0) return 1;
 

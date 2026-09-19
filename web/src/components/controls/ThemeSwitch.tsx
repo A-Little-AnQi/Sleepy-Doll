@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import { MoonIcon, SunIcon } from "../icons";
 import type { ThemeId, ThemeOrigin } from "../../appearance";
 
@@ -12,7 +12,6 @@ export function ThemeSwitch({
   const dark = theme === "dark";
   const next: ThemeId = dark ? "light" : "dark";
   const [hot, setHot] = useState(false);
-  const vt = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   return (
     <button
       type="button"
@@ -36,15 +35,9 @@ export function ThemeSwitch({
         });
       }}
     >
-      <span
-        className="app-theme-switch-knob"
-        style={{ viewTransitionName: `sd-theme-knob-${vt}` }}
-        aria-hidden="true"
-      />
-      <span
-        className="app-theme-switch-copy"
-        style={{ viewTransitionName: `sd-theme-copy-${vt}` }}
-      >
+      {/* 旋钮与文案不参与视图过渡。 */}
+      <span className="app-theme-switch-knob" aria-hidden="true" />
+      <span className="app-theme-switch-copy">
         {dark ? <MoonIcon /> : <SunIcon />}
         <span className="app-theme-switch-label">{dark ? "黑夜" : "白昼"}</span>
       </span>

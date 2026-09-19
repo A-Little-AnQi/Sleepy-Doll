@@ -6,8 +6,7 @@ using BgiBridge.Protocol;
 
 Console.OutputEncoding = new UTF8Encoding(false);
 var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-// 本程序与桥组件同目录，所以从自己的目录读出同一个数据根；
-// 记录写在那里，与桥本体看到的是同一处。
+// 本程序与桥组件同目录，所以从自己的目录读出同一个数据根。
 var bridgeDir = AppContext.BaseDirectory;
 InstallPaths.Ensure(bridgeDir);
 var records = InstallPaths.ChangeRecordDirectory(bridgeDir);

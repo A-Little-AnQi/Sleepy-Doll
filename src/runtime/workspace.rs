@@ -1,8 +1,8 @@
-//! 软件目录内的本机操作。用户没有 Node / Python / Git 等开发环境，
-//! 命令只通过 PowerShell；文件工具是同一只笼子上的直接入口，不是让用户装中间件。
+//! 软件目录内的本机操作。用户没有 Node / Python / Git 等开发环境，命令只通过
+//! PowerShell；文件工具在同一套边界内直接读写。
 //!
-//! BetterGI 的安装目录与 User 目录即使碰巧落在软件目录里，也一律拒绝：
-//! 宿主配置只能走桥的设置事务。
+//! BetterGI 的安装目录与 User 目录即使落在软件目录里也一律拒绝：宿主配置
+//! 只能走桥的设置事务。
 
 use std::{
     fs,
@@ -299,6 +299,7 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
             "core:workspace",
             move |arguments| files.list(arguments["path"].as_str().unwrap_or("")),
         )
+        .with_label("查看软件目录")
         .with_execution(read.clone()),
     )?;
     let files = workspace.clone();
@@ -310,6 +311,7 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
             "core:workspace",
             move |arguments| files.read(arguments["path"].as_str().unwrap_or("")),
         )
+        .with_label("读取软件目录文件")
         .with_execution(read),
     )?;
     let files = workspace.clone();
@@ -331,6 +333,7 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
                 )
             },
         )
+        .with_label("写入软件目录文件")
         .with_execution(ToolExecution {
             effect: ToolEffect::LocalWrite,
             risk: RiskLevel::Standard,
@@ -354,6 +357,7 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
             "core:workspace",
             move |arguments| files.delete(arguments["path"].as_str().unwrap_or("")),
         )
+        .with_label("删除软件目录文件")
         .with_execution(ToolExecution {
             effect: ToolEffect::LocalWrite,
             risk: RiskLevel::High,
@@ -379,6 +383,7 @@ impl Tool for WorkspaceShellTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "workspace.shell".into(),
+            label: "执行 PowerShell".into(),
             description: "在软件目录内执行 PowerShell。用户没有 Node、Python、Git 或其他开发环境，本机命令只走这一条；不要让用户安装中间件。工作目录固定为软件目录，不能访问目录外的路径，也不能改宿主软件配置。".into(),
             input_schema: json!({"type":"object","properties":{"command":{"type":"string","description":"一段 PowerShell。工作目录已是软件目录，用相对路径。"}},"required":["command"],"additionalProperties":false}),
             output_schema: None,

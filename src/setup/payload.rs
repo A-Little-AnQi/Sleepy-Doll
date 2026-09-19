@@ -1,8 +1,7 @@
 //! 嵌入载荷的清单与切分。
 //!
-//! `installer/pack-payload.ps1` 把交付目录里的文件按相对路径排序后依次拼接，
-//! 整段用裸 deflate 压缩成 `payload.bin`，清单落在 `payload.json`。解压由调用方
-//! 用 flate2 完成，这里只处理解压之后的字节。
+//! `payload.bin` 是全部文件按路径排序拼接后的裸 deflate 流，`payload.json` 是清单。
+//! 解压由调用方完成，这里只处理解压之后的字节。
 
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +21,7 @@ pub struct Archive {
 }
 
 impl std::fmt::Debug for Archive {
-    /// 载荷有十几兆，整段打出来没有意义，只报条目数与字节数。
+    /// 只报条目数与字节数。
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("Archive")
@@ -72,7 +71,7 @@ impl Archive {
     }
 }
 
-/// 只接受 `a/b/c` 形式的相对路径。绝对路径、盘符和 `..` 会把文件写到安装目录外面。
+/// 只接受 `a/b/c` 形式的相对路径：绝对路径、盘符和 `..` 会写到安装目录外面。
 fn is_safe_relative_path(path: &str) -> bool {
     !path.is_empty()
         && !path.contains('\\')

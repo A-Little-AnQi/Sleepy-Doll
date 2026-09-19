@@ -1,8 +1,8 @@
-//! Windows 外壳接触面：`.lnk` 快捷方式、已知文件夹与系统文件夹选择框。
-//!
-//! 走原始 COM 与 Win32 调用：不引入新依赖，也不起子进程。
+//! Windows 外壳接触面：`.lnk` 快捷方式、已知文件夹与系统文件夹选择框。走原始 COM 与 Win32 调用。
 
-pub use platform::{browse_for_directory, create_shortcut, desktop_directory, programs_directory};
+pub use platform::{
+    browse_for_directory, create_shortcut, desktop_directory, launch, programs_directory,
+};
 
 #[cfg(windows)]
 mod platform {
@@ -23,8 +23,9 @@ mod platform {
             UI::Shell::{
                 BIF_EDITBOX, BIF_NEWDIALOGSTYLE, BIF_RETURNONLYFSDIRS, BROWSEINFOW,
                 FOLDERID_Desktop, FOLDERID_Programs, SHBrowseForFolderW, SHGetKnownFolderPath,
-                SHGetPathFromIDListW,
+                SHGetPathFromIDListW, ShellExecuteW,
             },
+            UI::WindowsAndMessaging::SW_SHOWNORMAL,
         },
         core::GUID,
     };
@@ -35,7 +36,7 @@ mod platform {
     const IID_SHELL_LINK_W: GUID = GUID::from_u128(0x000214f9_0000_0000_c000_000000000046);
     const IID_PERSIST_FILE: GUID = GUID::from_u128(0x0000010b_0000_0000_c000_000000000046);
 
-    /// 线程上的 COM 初始化。`.lnk` 与文件夹对话框都要求线程已初始化 COM。
+    /// 线程上的 COM 初始化。
     struct Apartment;
 
     impl Apartment {
@@ -55,7 +56,7 @@ mod platform {
         }
     }
 
-    /// COM 接口指针。离开作用域时按 IUnknown 的第 3 个槽位调 Release。
+    /// COM 接口指针，离开作用域时调 Release。
     struct Interface(*mut c_void);
 
     impl Drop for Interface {
@@ -69,10 +70,7 @@ mod platform {
         }
     }
 
-    /// `IShellLinkW` 的虚表。
-    ///
-    /// windows-sys 不导出 COM 接口定义，这里按 SDK 里的方法顺序自己声明。槽位顺序
-    /// 不能改，调用不到的也必须占位，否则后面所有偏移都会错位。
+    /// `IShellLinkW` 的虚表，按 SDK 里的方法顺序自己声明，调用不到的也必须占位。
     #[allow(dead_code)]
     #[repr(C)]
     struct ShellLinkVtable {
@@ -175,12 +173,33 @@ mod platform {
         Ok(())
     }
 
+    /// 经外壳启动一个程序，由系统弹 UAC。
+    pub fn launch(executable: &Path) -> Result<(), Error> {
+        let path = wide(executable.as_os_str());
+        let open = wide(OsStr::new("open"));
+        // 返回值 ≤ 32 才是错误码，成功时是一个大于 32 的伪句柄。
+        let result = unsafe {
+            ShellExecuteW(
+                ptr::null_mut(),
+                open.as_ptr(),
+                path.as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        } as isize;
+        if result <= 32 {
+            return Err(Error::message(format!("启动失败（错误码 {result}）")));
+        }
+        Ok(())
+    }
+
     /// 开始菜单里「所有程序」那层。
     pub fn programs_directory() -> Option<PathBuf> {
         known_folder(&FOLDERID_Programs)
     }
 
-    /// 用户的桌面。可能被重定向到 OneDrive，所以要问系统而不是拼 `%USERPROFILE%`。
+    /// 用户的桌面，可能被重定向到 OneDrive。
     pub fn desktop_directory() -> Option<PathBuf> {
         known_folder(&FOLDERID_Desktop)
     }
@@ -250,6 +269,10 @@ mod platform {
     use crate::setup::Error;
 
     pub fn create_shortcut(_link: &Path, _target: &Path, _arguments: &str) -> Result<(), Error> {
+        Ok(())
+    }
+
+    pub fn launch(_executable: &Path) -> Result<(), Error> {
         Ok(())
     }
 

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "id": "bgi",
+  "name": "BetterGI",
+  "version": "0.1.0",
+  "description": "BetterGI 的配置、任务与界面命令，以及配套的领域说明。",
+  "skills": ["./skills"]
+}

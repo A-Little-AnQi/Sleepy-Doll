@@ -18,10 +18,10 @@ import { SettingRow } from "../../components/controls/SettingRow";
 import { SlidingTabs } from "../../components/controls/SlidingTabs";
 import { ConfigEditor } from "../../components/bridge/ConfigEditor";
 import { api, framelessWindow } from "../../ipc/api";
-import { readTheme, writeTheme } from "../../appearance";
+import { useTheme, writeTheme } from "../../appearance";
 import {
   LOCALE_OPTIONS,
-  readLocale,
+  useLocale,
   writeLocale,
   type LocaleId,
 } from "../../appearance/locale";
@@ -39,12 +39,12 @@ export function SettingsPage({
   onSection(section: Section | HelpOpen): void;
   reload(): Promise<void>;
 }) {
-  const [theme, setTheme] = useState(readTheme);
-  const [locale, setLocale] = useState(readLocale);
+  const theme = useTheme();
+  const locale = useLocale();
   const [sendKey, setSendKey] = useState(
     () => localStorage.getItem("sleepy-doll-send-key") ?? "enter",
   );
-  // 托盘开关只在桌面壳里有意义；浏览器预览拿不到，相应分组也不显示。
+  // 托盘开关只在桌面壳里可用，浏览器预览下不显示这个分组。
   const [trayEnabled, setTrayEnabled] = useState<boolean | null>(null);
   useEffect(() => {
     if (!framelessWindow()) return;
@@ -119,24 +119,14 @@ export function SettingsPage({
             <h2>通用</h2>
             <section className="settings-group">
               <SettingRow label="主题">
-                <ThemeSwitch
-                  theme={theme}
-                  onChange={(next, origin) => {
-                    setTheme(next);
-                    return writeTheme(next, origin);
-                  }}
-                />
+                <ThemeSwitch theme={theme} onChange={writeTheme} />
               </SettingRow>
               <SettingRow label="语言">
                 <Select
                   label="语言"
                   value={locale}
                   options={LOCALE_OPTIONS}
-                  onChange={(value) => {
-                    const next = value as LocaleId;
-                    setLocale(next);
-                    writeLocale(next);
-                  }}
+                  onChange={(value) => writeLocale(value as LocaleId)}
                 />
               </SettingRow>
             </section>

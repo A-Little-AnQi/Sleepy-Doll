@@ -1,11 +1,8 @@
 @echo off
 rem Development helper: full rebuild-and-inject cycle against the test instance.
 rem
-rem Runs the whole thing from ONE elevated shell so the user only sees a single
-rem UAC prompt: a loaded DLL locks its file, BetterGI runs elevated, and the
-rem injector needs elevation too - doing it any other way means three prompts.
-rem
-rem Dev convenience only; shipping users never need this.
+rem Must run from one elevated shell: a loaded DLL locks its file, BetterGI runs
+rem elevated, and the injector needs elevation too.
 
 set "TESTDIR=E:\tools\test\BetterGI"
 
@@ -28,7 +25,7 @@ timeout /t 15 /nobreak >nul
 
 echo [4/5] Injecting...
 cd /d "%~dp0..\..\target\bridge"
-rem Logs append, so clear them first; otherwise this run's output is buried.
+rem Logs append, so clear them first.
 del /q user\log\*.log >nul 2>&1
 BgiBridge.Injector.exe --process BetterGI.exe
 timeout /t 8 /nobreak >nul

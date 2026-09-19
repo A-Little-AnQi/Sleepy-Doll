@@ -50,10 +50,7 @@ public sealed record JobSnapshot(
     };
 }
 
-/// <summary>
-/// 内存 Job 表。已知精度损失：mcp 分支能在 TaskRunner 里精确感知「本次启动真的拿到锁」，
-/// 那需要改源码；这里只能轮询 TaskSemaphore 近似，不区分 running 是否已确认。
-/// </summary>
+/// <summary>内存 Job 表。是否真的拿到锁只有宿主 TaskRunner 内部知道，这里轮询 TaskSemaphore 近似。</summary>
 public sealed class JobStore(int keep = 200)
 {
     private readonly ConcurrentDictionary<string, JobSnapshot> _jobs = new(StringComparer.Ordinal);

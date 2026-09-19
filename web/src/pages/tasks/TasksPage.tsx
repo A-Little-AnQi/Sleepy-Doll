@@ -38,10 +38,7 @@ function matches(task: TaskSummary, filter: Filter) {
 }
 
 /**
- * 快捷任务页：默认「快捷任务」，第二标签「运行记录」。
- *
- * 任务是可以复用的小工具，运行记录是它跑过的每一次 —— 两者不能混成一个列表，
- * 否则「运行」和「做过的某件事」会看起来像同一类东西。
+ * 快捷任务页：「快捷任务」与「运行记录」两个标签。
  */
 export function TasksPage({
   bootstrap,
@@ -265,9 +262,9 @@ export function TasksPage({
         {pendingRemove ? (
           <>
             <p>删除「{pendingRemove.name}」。</p>
-            <p>已经跑过的运行记录和它改过的文件都会保留。</p>
+            <p>已执行过的运行记录和它改过的文件都会保留。</p>
             {pendingRemove.runnable ? (
-              <p>如果有运行正在进行，那一次会继续跑完。</p>
+              <p>如果有运行正在进行，那一次会继续执行完。</p>
             ) : null}
           </>
         ) : null}

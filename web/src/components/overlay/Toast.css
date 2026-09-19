@@ -1,9 +1,9 @@
 .toast {
   position: fixed;
-  /* popover 的 UA 样式会先铺满视口，这里全部收回再自己定位。 */
+  /* 清掉 popover 的 UA 默认样式，改用下面的定位。 */
   inset: auto;
   left: 50%;
-  /* 贴在顶栏下方：底部是输入区和发送键，不能被一条不会自动消失的提示长期压住。 */
+  /* 贴在顶栏下方。 */
   top: calc(var(--title-bar-height) + var(--header-height, 52px) + 12px);
   width: fit-content;
   height: fit-content;
@@ -53,7 +53,7 @@
   }
 }
 
-/* 尊重系统的减少动态效果设置，也跟随应用内的开关。 */
+/* 系统的减少动态效果设置与应用内开关都关闭动画。 */
 @media (prefers-reduced-motion: reduce) {
   .toast {
     animation: none;

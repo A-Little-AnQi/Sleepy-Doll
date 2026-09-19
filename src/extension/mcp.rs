@@ -35,9 +35,8 @@ impl McpClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
-        // An MCP server is a plugin-supplied binary. Without this it would
-        // inherit the whole environment, including any `${ENV:...}` model API
-        // key or bridge token the configuration keeps there.
+        // MCP 服务是插件提供的可执行文件，不能让它继承本进程的环境变量
+        // （含 `${ENV:...}` 引用的 API key 与桥 token）。
         crate::runtime::host::process::isolate_environment(&mut command);
         crate::runtime::host::process::hide_console(&mut command);
         let mut child = command.spawn()?;
@@ -46,12 +45,12 @@ impl McpClient {
             child
                 .stdin
                 .take()
-                .ok_or_else(|| Error::Tool("MCP stdin unavailable".into()))?,
+                .ok_or_else(|| Error::Tool("MCP 进程的 stdin 不可用".into()))?,
         ));
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| Error::Tool("MCP stdout unavailable".into()))?;
+            .ok_or_else(|| Error::Tool("MCP 进程的 stdout 不可用".into()))?;
         let pending: PendingReplies = Arc::new(Mutex::new(HashMap::new()));
         let dispatcher = pending.clone();
         let writer = stdin.clone();
@@ -67,18 +66,18 @@ impl McpClient {
                 let Ok(message)=serde_json::from_slice::<Value>(&frame)else{break};frame.clear();
                 if message.get("method").is_some(){
                     if message.get("id").is_some(){
-                        let reply=json!({"jsonrpc":"2.0","id":message["id"],"error":{"code":-32601,"message":"Client-initiated sampling and filesystem access are not supported"}});
+                        let reply=json!({"jsonrpc":"2.0","id":message["id"],"error":{"code":-32601,"message":"不支持服务端发起的 sampling 与文件系统访问"}});
                         let mut writer=writer.lock().await;
                         if writer.write_all(format!("{reply}\n").as_bytes()).await.is_err(){break;}
                     }
                     continue;
                 }
                 if let Some(id)=message["id"].as_u64() && let Some(sender)=dispatcher.lock().unwrap().remove(&id){
-                    let result=if message["error"].is_null(){Ok(message["result"].clone())}else{Err("MCP request rejected".into())};
+                    let result=if message["error"].is_null(){Ok(message["result"].clone())}else{Err("MCP 请求被拒绝".into())};
                     let _=sender.send(result);
                 }
             }
-            for (_,sender) in dispatcher.lock().unwrap().drain(){let _=sender.send(Err("MCP server exited or emitted invalid JSON".into()));}
+            for (_,sender) in dispatcher.lock().unwrap().drain(){let _=sender.send(Err("MCP 服务已退出或返回了无效 JSON".into()));}
         });
         let client = Arc::new(Self {
             stdin,
@@ -92,7 +91,7 @@ impl McpClient {
             response["protocolVersion"].as_str(),
             Some("2025-06-18" | "2025-03-26" | "2024-11-05")
         ) {
-            return Err(Error::Tool("Unsupported MCP protocol version".into()));
+            return Err(Error::Tool("不支持的 MCP 协议版本".into()));
         }
         crate::runtime::executor().block_on(
             client.write(json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}})),
@@ -119,11 +118,11 @@ impl McpClient {
             )?;
             for value in result["tools"]
                 .as_array()
-                .ok_or_else(|| Error::Tool("MCP omitted tools".into()))?
+                .ok_or_else(|| Error::Tool("MCP 未返回 tools".into()))?
             {
                 let remote_name = value["name"]
                     .as_str()
-                    .ok_or_else(|| Error::Tool("MCP tool missing name".into()))?
+                    .ok_or_else(|| Error::Tool("MCP 工具缺少 name".into()))?
                     .to_owned();
                 let remote_output_schema = value
                     .get("outputSchema")
@@ -131,11 +130,13 @@ impl McpClient {
                     .cloned();
                 if let Some(schema) = &remote_output_schema {
                     jsonschema::validator_for(schema)
-                        .map_err(|_| Error::Tool("MCP tool output schema is invalid".into()))?;
+                        .map_err(|_| Error::Tool("MCP 工具的 outputSchema 无效".into()))?;
                 }
                 let definition = ToolDefinition {
                     name: sanitize(&format!("{plugin_id}.{server_id}.{remote_name}")),
-                    description: value["description"].as_str().unwrap_or("MCP tool").into(),
+                    // MCP 的 `title` 是给用户看的名字，缺省退回工具名。
+                    label: value["title"].as_str().unwrap_or_default().into(),
+                    description: value["description"].as_str().unwrap_or("MCP 工具").into(),
                     input_schema: value["inputSchema"].clone(),
                     output_schema: None,
                     source: format!("plugin:{plugin_id}:mcp:{server_id}"),
@@ -152,7 +153,7 @@ impl McpClient {
             cursor = result["nextCursor"].as_str().map(str::to_owned);
             if let Some(c) = &cursor {
                 if !seen.insert(c.clone()) || seen.len() > 100 {
-                    return Err(Error::Tool("MCP pagination loop".into()));
+                    return Err(Error::Tool("MCP 分页游标成环".into()));
                 }
             } else {
                 break;
@@ -183,7 +184,7 @@ impl McpClient {
         self.pending.lock().unwrap().insert(id, sender);
         let sent = tokio::select! {
             _ = cancel.cancelled()=>Err(Error::Cancelled),
-            result=tokio::time::timeout(Duration::from_secs(5),self.write(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params})))=>result.unwrap_or_else(|_|Err(Error::Tool("MCP input stalled".into())))
+            result=tokio::time::timeout(Duration::from_secs(5),self.write(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params})))=>result.unwrap_or_else(|_|Err(Error::Tool("MCP 请求写入超时".into())))
         };
         if let Err(e) = sent {
             self.pending.lock().unwrap().remove(&id);
@@ -194,7 +195,7 @@ impl McpClient {
         match response {
             Some(Ok(value)) => {
                 if value["isError"] == true {
-                    Err(Error::Tool("MCP tool reported a failure".into()))
+                    Err(Error::Tool("MCP 工具返回失败".into()))
                 } else {
                     Ok(value)
                 }
@@ -260,11 +261,9 @@ fn validate_mcp_output(value: Value, schema: Option<&Value>) -> Result<Value> {
     if let Some(schema) = schema {
         let structured = value
             .get("structuredContent")
-            .ok_or_else(|| Error::Tool("MCP tool omitted structured output".into()))?;
+            .ok_or_else(|| Error::Tool("MCP 工具未返回 structuredContent".into()))?;
         if !crate::extension::validate(structured, schema, "$.structuredContent").is_empty() {
-            return Err(Error::Tool(
-                "MCP tool returned invalid structured output".into(),
-            ));
+            return Err(Error::Tool("MCP 工具返回的 structuredContent 无效".into()));
         }
     }
     Ok(value)

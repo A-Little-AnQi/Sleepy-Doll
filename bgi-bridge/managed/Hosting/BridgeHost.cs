@@ -12,8 +12,8 @@ using BgiBridge.Protocol;
 namespace BgiBridge.Hosting;
 
 /// <summary>
-/// /bridge/v1 的 HTTP 宿主。用 HttpListener 而非 ASP.NET Core：宿主是框架依赖应用，
-/// TPA 里没有 Microsoft.AspNetCore.*，而 HttpListener 在 Microsoft.NETCore.App 里。
+/// /bridge/v1 的 HTTP 宿主。宿主是框架依赖应用，TPA 里没有 Microsoft.AspNetCore.*，
+/// 只能用 Microsoft.NETCore.App 自带的 HttpListener。
 /// </summary>
 public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, JobStore jobs, string version)
 {
@@ -72,12 +72,12 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
                 return;
             }
 
-            // 每个请求独立处理，任何一个请求的失败都不能影响监听循环。
+            // 每个请求独立处理。
             _ = Task.Run(() => HandleSafelyAsync(context));
         }
     }
 
-    /// <summary>跑在别人进程里，任何逃逸的异常都可能带崩宿主，所以这里吞掉一切。</summary>
+    /// <summary>运行在宿主进程里，逃逸的异常会带崩宿主；这里吞掉一切。</summary>
     private async Task HandleSafelyAsync(HttpListenerContext context)
     {
         try
@@ -113,7 +113,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
         var request = context.Request;
         var path = request.Url?.AbsolutePath ?? "/";
 
-        // 本地控制面：拒绝一切非回环来源。浏览器页面无论同源与否都不该驱动它。
+        // 本地控制面：只接受回环来源。
         if (!IPAddress.IsLoopback(request.RemoteEndPoint.Address))
             throw new BridgeException("FORBIDDEN", "只接受回环地址的请求。", 403);
 
@@ -226,7 +226,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
         enabled = Volatile.Read(ref _enabled) != 0,
         features = new[] { "catalog", "invoke", "jobs", "state", "control", "idempotency", "agentGuides", "settingsTransactions" },
         methods = registry.Count,
-        // 如实报告能力损失的边界，别让上层以为有精确的启动信号。
+        // 已知的能力边界。
         limitations = new[]
         {
             "detached-start-signal-approximate",
@@ -249,9 +249,8 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
     }
 
     /// <summary>
-    /// 宿主安装目录与用户目录。桥跑在 BetterGI 进程内，<c>AppContext.BaseDirectory</c>
-    /// 就是安装目录，用户自己配置的内容都在 <c>User\</c> 下。
-    /// 不触碰任何宿主类型，因此不依赖游戏状态，可随时调用。
+    /// 宿主安装目录与用户目录：桥运行在 BetterGI 进程内，<c>AppContext.BaseDirectory</c>
+    /// 就是安装目录，用户配置在 <c>User\</c> 下。
     /// </summary>
     private static object HostPaths()
     {
@@ -277,9 +276,9 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
             .Where(method => string.IsNullOrEmpty(group) || method.Group.Equals(group, StringComparison.OrdinalIgnoreCase)).ToArray();
         var items = all.Skip(offset).Take(limit)
             .Select(method => method.Discovery(Unavailable(method) is null, Unavailable(method), _catalogVersion)).ToArray();
-        // 空结果明确要求检查证据源，避免模型连续更换同义词。
+        // 空结果时提示调用方先确认证据源。
         var hint = all.Length == 0 && !string.IsNullOrWhiteSpace(query) && string.IsNullOrEmpty(group)
-            ? "没有接口命中。先判断目标是否其实是 User 目录中的配置组、路线或脚本；若确定属于宿主接口，只用一个核心词重试一次。"
+            ? "没有接口命中。先判断目标是否其实是 User 目录中的配置组、路线或脚本；若确定属于 BetterGI 接口，只用一个核心词重试一次。"
             : null;
         return new
         {
@@ -329,7 +328,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
         var arguments = root.TryGetProperty("arguments", out var supplied) ? supplied.Clone() : ArgumentSchema.Parse("{}");
         ArgumentSchema.Validate(arguments, descriptor.InputSchema);
         if (root.TryGetProperty("instanceId", out var instance) && instance.ValueKind == JsonValueKind.String && instance.GetString() != _instanceId)
-            throw new BridgeException("INSTANCE_MISMATCH", "宿主实例已变化，请重新读取目录。", 409);
+            throw new BridgeException("INSTANCE_MISMATCH", "BetterGI 实例已变化，请重新读取目录。", 409);
         if (root.TryGetProperty("catalogVersion", out var catalog) && catalog.ValueKind == JsonValueKind.String && catalog.GetString() != _catalogVersion)
             throw new BridgeException("CATALOG_MISMATCH", "接口契约版本已变化，请重新读取说明。", 409);
 
@@ -358,7 +357,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
             }
             else
             {
-                if (_requests.Count >= 10000) throw new BridgeException("QUEUE_FULL", "当前实例请求记录已达上限，请核对并重启宿主。", 429);
+                if (_requests.Count >= 10000) throw new BridgeException("QUEUE_FULL", "当前实例请求记录已达上限，请核对并重启 BetterGI。", 429);
                 job = jobs.Create(methodId);
                 _requests.Add(key, (fingerprint, job.JobId));
                 created = true;
@@ -397,7 +396,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
         return new
         {
             jobId = id, state = jobs.Get(id)?.State, cancelled = false, cancellationRequested = true,
-            note = "请求仅作用于此桥 Job；已开始的宿主命令可能继续运行，必须继续查询终态。",
+            note = "请求仅作用于此桥 Job；已开始的 BetterGI 命令可能继续运行，必须继续查询终态。",
         };
     }
 
@@ -405,7 +404,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
 
     private async Task<JsonDocument> ReadJsonAsync(HttpListenerRequest request)
     {
-        // 限制请求体大小，避免一条畸形请求把宿主内存打满。
+        // 限制请求体大小。
         const int MaxBody = 4 * 1024 * 1024;
         using var buffer = new MemoryStream();
         var chunk = new byte[8192];
@@ -445,7 +444,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
 
-    /// <summary>不写宿主的日志文件；走 stdout 与自己的日志。</summary>
+    /// <summary>只写 stdout，不写宿主日志文件。</summary>
     internal static void Log(string message)
     {
         try
@@ -464,7 +463,7 @@ internal static class BridgeExceptionTranslator
     public static string Describe(Exception ex) => ex switch
     {
         BridgeException bridge => $"{bridge.Code}: {bridge.Message}",
-        // 宿主命令的异常经反射调用后是 TargetInvocationException：报内层才有可读的原因。
+        // 反射调用宿主命令时异常被包成 TargetInvocationException，报内层的原因。
         TargetInvocationException wrapped => Describe(Reflect.Root(wrapped)),
         _ => $"{ex.GetType().Name}: {ex.Message}",
     };

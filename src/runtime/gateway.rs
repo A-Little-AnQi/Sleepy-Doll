@@ -12,7 +12,40 @@ use serde_json::{Value, json};
 use std::{collections::BTreeMap, time::Duration};
 use tokio_util::sync::CancellationToken;
 
+/// 每一次模型调用都从这里过，请求与结果的记录放在这一层。
 pub async fn complete(
+    config: ModelConfig,
+    messages: &[Message],
+    tools: &[ToolDefinition],
+    cancel: &CancellationToken,
+    emit: impl FnMut(&str) -> Result<()>,
+) -> Result<ModelResponse> {
+    let started = std::time::Instant::now();
+    let logged = format!("{}（{}）", config.model, config.protocol);
+    log::info!(
+        "请求模型 {logged}：{} 条消息，{} 个工具",
+        messages.len(),
+        tools.len()
+    );
+    let result = complete_inner(config, messages, tools, cancel, emit).await;
+    match &result {
+        Ok(response) => log::info!(
+            "模型 {logged} 返回：{} 字，{} 个调用，输入 {} / 输出 {} token，{:.1}s",
+            response.text.chars().count(),
+            response.tool_calls.len(),
+            response.usage.input_tokens.unwrap_or(0),
+            response.usage.output_tokens.unwrap_or(0),
+            started.elapsed().as_secs_f64()
+        ),
+        Err(error) => log::warn!(
+            "模型 {logged} 失败（{:.1}s）：{error}",
+            started.elapsed().as_secs_f64()
+        ),
+    }
+    result
+}
+
+async fn complete_inner(
     mut config: ModelConfig,
     messages: &[Message],
     tools: &[ToolDefinition],
@@ -53,9 +86,7 @@ pub async fn complete(
     if config.protocol == ModelProtocol::OpenaiChat {
         body["stream_options"] = json!({"include_usage":true});
     }
-    // `timeoutMs` bounds connection setup and the silence between stream frames.
-    // A whole-response deadline on the client would abort long streamed answers
-    // mid-sentence; the run deadline already bounds the total turn.
+    // `timeoutMs` 限制连接建立与流式帧之间的静默时间；整轮时限由运行预算约束。
     let idle = Duration::from_millis(config.options.timeout_ms.max(1000));
     let client = reqwest::Client::builder()
         .connect_timeout(idle.min(Duration::from_secs(30)))
@@ -65,8 +96,7 @@ pub async fn complete(
     for (key, value) in model.headers() {
         req = req.header(key, value);
     }
-    // Retry only before receiving a response body. Never replay a partial
-    // stream: its tool arguments and public text may already have been observed.
+    // 只在收到响应体之前重试。已经开始的流不重放：它的工具参数与正文可能已被观测。
     let mut attempt = 0;
     let response = loop {
         let request = req
@@ -225,8 +255,8 @@ pub(crate) async fn read_json(
     serde_json::from_slice(&buffer).map_err(|_| Error::Http("response is not valid JSON".into()))
 }
 
-/// Gemini and Ollama may deliver tool arguments either as an object or as an
-/// already-serialized JSON string. Both are normalized to JSON text here.
+/// Gemini 与 Ollama 的 tool 参数可能是对象，也可能是已序列化的 JSON 字符串，
+/// 这里统一成 JSON 文本。
 fn arguments_text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
@@ -234,7 +264,7 @@ fn arguments_text(value: &Value) -> String {
     }
 }
 
-/// Accepts the JSON object itself, or one level of string wrapping around it.
+/// 接受 JSON 对象本身，或包一层字符串的形态。
 fn parse_arguments(text: &str) -> Result<Value> {
     if text.trim().is_empty() {
         return Ok(json!({}));
@@ -248,7 +278,7 @@ fn parse_arguments(text: &str) -> Result<Value> {
 
 /// 内部工具名 → 发给提供方的名字。
 ///
-/// 库里存的是内部名（`bgi.user.list`），回包必须带 wire 名，运行时才映射得回来。
+/// 库里存的是内部名（`bgi.user.list`），回包必须带 wire 名。
 pub(crate) fn wire_name(name: &str) -> String {
     let readable = name
         .chars()
@@ -281,7 +311,6 @@ pub fn validate(r: &ModelResponse) -> Result<()> {
         ));
     }
     if r.text.trim().is_empty() && r.tool_calls.is_empty() {
-        // 不降级为成功：调用方会据此结束该轮，界面只剩一个空气泡。
         return Err(Error::ModelProtocol(
             if truncated && r.reasoning.is_some() {
                 "模型在思考阶段耗尽输出预算，本轮没有产生可见回复".into()
@@ -305,8 +334,8 @@ pub fn validate(r: &ModelResponse) -> Result<()> {
 
 /// 正在拼装的独立推理块（Anthropic 内容块、Responses 输出项）。
 ///
-/// `block` 保留提供方起始帧的原样载荷，拼装时只补文本与签名，这样私有键
-/// （如 `redacted_thinking` 的 `data`）不会在回传时丢失。
+/// `block` 保留提供方起始帧的原样载荷，拼装时只补文本与签名；私有键
+/// （如 `redacted_thinking` 的 `data`）原样回传。
 struct ReasoningBlock {
     block: Value,
     text: String,
@@ -518,8 +547,7 @@ impl Decoder {
                     self.usage
                         .merge(usage_from_anthropic(&v["message"]["usage"]));
                 }
-                // 按块类型分派，不能用 `if ... type == "tool_use"` 守卫：
-                // 那会把思考块的起始帧一起吞掉。
+                // 按块类型分派：用 `if ... type == "tool_use"` 守卫会吞掉思考块的起始帧。
                 "content_block_start" => {
                     let index = v["index"].as_u64().unwrap_or(0) as usize;
                     let b = &v["content_block"];
@@ -547,8 +575,7 @@ impl Decoder {
                     let index = v["index"].as_u64().unwrap_or(0) as usize;
                     // 提供方可能不带 `delta.type`，此分支兜底。
                     match v["delta"]["type"].as_str().unwrap_or("") {
-                        // 推理分支不碰 `delta`，所以不会经 `push` 的返回值
-                        // 流进 assistant.delta。
+                        // 推理分支不写 `delta`，不会流进 assistant.delta。
                         "thinking_delta" => {
                             if let (Some(text), Some(blocks)) =
                                 (v["delta"]["thinking"].as_str(), self.blocks())
@@ -589,7 +616,7 @@ impl Decoder {
             ModelProtocol::Gemini => {
                 let c = &v["candidates"][0];
                 for p in c["content"]["parts"].as_array().into_iter().flatten() {
-                    // 思考文本不进 `delta`，只留给界面，不回流到 assistant.delta。
+                    // 思考文本不进 `delta`，只留给界面。
                     if p["thought"] == true {
                         if let (Some(s), Pending::Gemini { text, .. }) =
                             (p["text"].as_str(), &mut self.pending)

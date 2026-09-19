@@ -1,6 +1,6 @@
 //! 文件日志：把记录写进用户目录下的 `log/sleepy-doll.log`。
 //!
-//! 库只通过 `log` 门面发记录，落到哪个文件由外壳在启动时用 [`init`] 决定。
+//! 库只通过 `log` 门面发记录，写到哪里由外壳在启动时用 [`init`] 决定。
 
 use std::{
     fs::{self, File, OpenOptions},
@@ -21,8 +21,6 @@ const FILE_NAME: &str = "sleepy-doll.log";
 const MAX_BYTES: u64 = 4 * 1024 * 1024;
 
 /// 在 `user_directory` 下准备日志目录并接管全局日志与 panic。
-///
-/// 日志是诊断手段，不是运行前提：拿不到文件就让记录退回 stderr，启动照常继续。
 pub fn init(user_directory: &Path) -> Result<(), std::io::Error> {
     let directory = user_directory.join(DIRECTORY);
     fs::create_dir_all(&directory)?;
@@ -43,8 +41,7 @@ pub fn init(user_directory: &Path) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-/// 记录一次 panic 再交给原来的处理过程：stderr 上的输出在 release 里没有去处，
-/// 但 debug 下它仍然是最先被看到的那一份。
+/// 记录一次 panic 再交给原来的处理过程。
 fn install_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -102,12 +99,12 @@ impl Log for Sink {
             record.level(),
             record.args()
         );
-        // 写日志失败没有可报告的对象——报告本身也是写日志——所以只能丢掉。
+        // 写日志失败时只能丢掉。
         let Ok(mut state) = self.state.lock() else {
             return;
         };
         if state.written + line.len() as u64 > MAX_BYTES {
-            // 轮转失败也照常往下写：让文件继续变大，好过丢掉这条记录。
+            // 轮转失败时继续往原文件写。
             let _ = rotate(&state.path);
             if let Ok(file) = OpenOptions::new()
                 .create(true)

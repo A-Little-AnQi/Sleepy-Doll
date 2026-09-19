@@ -318,9 +318,7 @@ export function ExtensionsPage({
                     <pre>{current.detail || "无内容"}</pre>
                   </section>
                 ) : current.host ? (
-                  <p className="muted">
-                    随产品提供。开启后会出现在侧栏和设置里。
-                  </p>
+                  <p className="muted">随产品提供，不能移除。</p>
                 ) : (
                   <section className="page-block">
                     <h3>提供的工具</h3>

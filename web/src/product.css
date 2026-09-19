@@ -1,5 +1,4 @@
-/* Shared design tokens, document defaults and reusable controls.
-   Page layouts live next to their React components. */
+/* 共用设计变量、文档默认样式与可复用控件。页面布局在各自的页面组件旁边。 */
 
 :root {
   --surface: #fff;
@@ -189,7 +188,7 @@ a {
   border-radius: 10px;
 }
 
-/* 选中态要一眼看出来选了什么。--selected 是给背景块用的浅灰，压在正文上等于没有。 */
+/* 文本选中背景单独设色，--selected 是给背景块用的浅灰。 */
 ::selection {
   background: #b7d3f5;
   color: #10131a;
@@ -322,7 +321,7 @@ a {
 
 .search-field {
   position: relative;
-  /* 必须是块盒：行内盒的高度来自行高而不含输入框，图标按它定位会整个偏下。 */
+  /* 必须是块盒：行内盒的高度来自行高，不含输入框。 */
   display: block;
   max-width: 300px;
   flex: 1;
@@ -346,7 +345,7 @@ a {
 .search-field svg {
   position: absolute;
   left: 11px;
-  /* 按输入框实高居中，不写死像素 —— 紧凑和常规两种高度都对齐。 */
+  /* 按输入框实高居中，不写死像素。 */
   top: 50%;
   translate: 0 -50%;
   width: 15px;
@@ -664,7 +663,6 @@ a {
   background: var(--knob);
   box-shadow: var(--knob-shadow);
   pointer-events: none;
-  view-transition-class: sd-theme-move;
   transition: left var(--theme-move);
 }
 .app-theme-switch.is-dark .app-theme-switch-knob {
@@ -686,7 +684,6 @@ a {
   text-align: center;
   white-space: nowrap;
   pointer-events: none;
-  view-transition-class: sd-theme-move;
   transition:
     left var(--theme-move),
     right var(--theme-move);

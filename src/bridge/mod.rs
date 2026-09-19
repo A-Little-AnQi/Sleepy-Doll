@@ -22,16 +22,15 @@ use crate::{
 };
 
 type BridgeToolFn = Arc<dyn Fn(&Value) -> Result<Value> + Send + Sync>;
-type BridgeToolDefinition<'a> = (&'a str, &'a str, Value, BridgeToolFn);
+/// 名字、界面用名、给模型看的说明、输入 Schema、实现。
+type BridgeToolDefinition<'a> = (&'a str, &'a str, &'a str, Value, BridgeToolFn);
 
-/// 单次读取的上限。超出部分截断并告知调用方，避免把整个文件塞进上下文。
+/// 单次读取的上限，超出部分截断并告知调用方。
 const USER_READ_LIMIT: usize = 128 * 1024;
 
 /// 按顶层字段裁剪一段 JSON 文本，返回裁剪结果与被丢掉的字段名。
 ///
-/// 不是 JSON 对象时返回 `None`，调用方退回全文。BetterGI 的配置文件里，一个
-/// 配置组的 `config`（多为 `pathingConfig`）能占全文八成以上，而梳理任务构成
-/// 只需要 `name` 与 `projects`。
+/// 不是 JSON 对象时返回 `None`，调用方退回全文。
 fn select_keys(text: &str, keys: &[&str]) -> Option<(String, Vec<String>)> {
     let Value::Object(map) = serde_json::from_str::<Value>(text).ok()? else {
         return None;
@@ -94,8 +93,8 @@ fn backup_path(path: &Path) -> PathBuf {
     path.with_file_name(format!("{name}.sleepy-doll.{}.bak", Uuid::new_v4()))
 }
 
-/// Flush a sibling temporary file, then atomically replace the destination.
-/// Existing content is moved to a unique sibling backup by the same operation.
+/// 落盘同目录的临时文件后原子替换目标。
+/// 原内容在同一步移到唯一命名的同目录备份。
 fn replace_resource(path: &Path, content: &[u8]) -> Result<Option<PathBuf>> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -189,8 +188,7 @@ fn replace_file(path: &Path, temporary: &Path, backup: Option<&Path>) -> Result<
 
 /// 把请求路径解析到 `<BGI 用户目录>` 之下。
 ///
-/// 绝对路径、盘符和 `..` 一律拒绝，而不是「先拼接再检查」：拼接后的路径可能被
-/// 规范化成目录之外，检查时机就晚了。目录穿越必须在这一步挡掉。
+/// 绝对路径、盘符和 `..` 一律拒绝。目录穿越在这一步挡掉。
 fn user_path(root: &Path, relative: &str) -> Result<PathBuf> {
     let cleaned = relative.replace('\\', "/");
     if cleaned.starts_with('/') || cleaned.contains(':') {
@@ -246,7 +244,7 @@ impl BgiClient {
     pub fn host(&self) -> Result<Value> {
         self.request("GET", "/bridge/v1/host", None, None)
     }
-    /// BGI 安装目录下的 `User\`，用户自己配置的内容都在这里。
+    /// BGI 安装目录下的 `User\`。
     pub fn user_root(&self) -> Result<PathBuf> {
         self.host()?["userPath"]
             .as_str()
@@ -310,7 +308,7 @@ impl BgiClient {
         idempotency_key: Option<&str>,
     ) -> Result<Value> {
         if !self.config.enabled {
-            return Err(Error::Tool("BGI Bridge is disabled".into()));
+            return Err(Error::Tool("BGI Bridge 未启用".into()));
         }
         let url = format!("{}{}", self.config.base_url.trim_end_matches('/'), path);
         let token = self.config.token.as_deref().unwrap_or_default();
@@ -337,6 +335,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
     let mut definitions: Vec<BridgeToolDefinition<'_>> = vec![
         (
             "bgi.state.get",
+            "读取游戏状态",
             "读取一次 BetterGI、截图器、游戏窗口和任务锁状态。仅在准备执行、执行后核验或排障时使用；查询和编辑 User 文件不需要先调它。",
             json!({"type":"object","properties":{},"additionalProperties":false}),
             {
@@ -346,6 +345,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
         (
             "bgi.capability.search",
+            "检索插件能力",
             "搜索已安装扩展登记的语义能力和资源。它不包含 BetterGI 自身接口，也不用于查用户配置；没有扩展时调用一次空结果即结束。",
             json!({"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}),
             {
@@ -355,6 +355,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
         (
             "bgi.capability.describe",
+            "读取能力定义",
             "读取已由 capability.search 找到的扩展能力契约。BetterGI 原生接口使用 bgi.api.describe。",
             json!({"type":"object","properties":{"methodId":{"type":"string"}},"required":["methodId"],"additionalProperties":false}),
             {
@@ -364,6 +365,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
         (
             "bgi.capability.invoke",
+            "执行游戏操作",
             "执行已读取契约的扩展能力。只使用 capability.search 返回的精确 ID，并继续核验 Job 结果。",
             json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object"}},"required":["methodId","arguments"],"additionalProperties":false}),
             {
@@ -375,6 +377,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
         (
             "bgi.job.get",
+            "查询执行结果",
             "仅在已有 Job ID、但原调用没有返回终态证据时查询 Job。bgi.api.invoke 已返回 completed/failed/cancelled 时不要重复查询。verification 才表示业务是否已核验。",
             json!({"type":"object","properties":{"jobId":{"type":"string"}},"required":["jobId"],"additionalProperties":false}),
             {
@@ -384,6 +387,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
         (
             "bgi.job.cancel",
+            "取消正在执行的任务",
             "请求取消指定 Job。cancellationRequested 不等于宿主任务已经停止，继续查询同一 Job。",
             json!({"type":"object","properties":{"jobId":{"type":"string"}},"required":["jobId"],"additionalProperties":false}),
             {
@@ -393,22 +397,23 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
     ];
     definitions.extend([
-        ("bgi.api.search", "在当前 BetterGI 宿主中发现设置或动作。它不搜索配置组、路线、脚本等用户资源。group 必须来自目录实际返回的分组；用一个业务词查询，一次零结果后检查证据源。", json!({"type":"object","properties":{"query":{"type":"string","description":"一个核心业务词、动作词或精确 methodId；空字符串用于浏览分组"},"group":{"type":"string","description":"可选；使用目录实际返回的分组，例如 settings、command、scheduler、repository"},"offset":{"type":"integer","minimum":0,"description":"仅在响应给出 nextOffset 时继续"},"limit":{"type":"integer","minimum":1,"maximum":50,"default":8,"description":"候选数量；默认 8，只有响应给出 nextOffset 且确有必要时增加"}},"required":["query"],"additionalProperties":false}), {
+        ("bgi.api.search", "检索 BetterGI 接口", "在当前 BetterGI 宿主中发现设置或动作。它不搜索配置组、路线、脚本等用户资源。group 必须来自目录实际返回的分组；用一个业务词查询，一次零结果后检查证据源。", json!({"type":"object","properties":{"query":{"type":"string","description":"一个核心业务词、动作词或精确 methodId；空字符串用于浏览分组"},"group":{"type":"string","description":"可选；使用目录实际返回的分组，例如 settings、command、scheduler、repository"},"offset":{"type":"integer","minimum":0,"description":"仅在响应给出 nextOffset 时继续"},"limit":{"type":"integer","minimum":1,"maximum":50,"default":8,"description":"候选数量；默认 8，只有响应给出 nextOffset 且确有必要时增加"}},"required":["query"],"additionalProperties":false}), {
             let client = client.clone();
             Arc::new(move |a: &Value| client.catalog_page_with_limit(a["query"].as_str().unwrap_or(""),a["group"].as_str(),a["offset"].as_u64().unwrap_or(0),a["limit"].as_u64().unwrap_or(8))) as BridgeToolFn
         }),
-        ("bgi.api.describe", "读取一个精确 methodId 的用途、参数、前置条件、副作用、结果判定和回退边界。每个候选读一次；callable=false 时以 unavailableReason 为最终结论。", json!({"type":"object","properties":{"methodId":{"type":"string","description":"来自 api.search 的精确 ID"}},"required":["methodId"],"additionalProperties":false}), {
+        ("bgi.api.describe", "读取接口说明", "读取一个精确 methodId 的用途、参数、前置条件、副作用、结果判定和回退边界。每个候选读一次；callable=false 时以 unavailableReason 为最终结论。", json!({"type":"object","properties":{"methodId":{"type":"string","description":"来自 api.search 的精确 ID"}},"required":["methodId"],"additionalProperties":false}), {
             let client = client.clone();
             Arc::new(move |a: &Value| client.describe(a["methodId"].as_str().unwrap_or(""))) as BridgeToolFn
         }),
-        ("bgi.api.read", "调用刚通过 api.describe 确认的只读接口。用于读取宿主当前设置或诊断；不用于读取 User 文件。arguments 必须满足该接口 inputSchema。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"无参数接口传空对象"}},"required":["methodId","arguments"],"additionalProperties":false}), {
+        ("bgi.api.read", "读取 BetterGI 状态", "调用刚通过 api.describe 确认的只读接口。用于读取宿主当前设置或诊断；不用于读取 User 文件。arguments 必须满足该接口 inputSchema。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"无参数接口传空对象"}},"required":["methodId","arguments"],"additionalProperties":false}), {
             Arc::new(move |_: &Value| Err(Error::Tool("该接口必须通过运行时的契约检查调用".into()))) as BridgeToolFn
         }),
-        ("bgi.api.invoke", "调用刚通过 api.describe 确认的写接口。运行时显示审批并跟踪 Job 到终态；返回 outcome/evidence 后直接按契约核验，不重复调用 job.get。不能把 completed 或处理器返回自动当成业务成功。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"严格满足已读取的 inputSchema"}},"required":["methodId","arguments"],"additionalProperties":false}), {
+        ("bgi.api.invoke", "执行 BetterGI 操作", "调用刚通过 api.describe 确认的写接口。运行时显示审批并跟踪 Job 到终态；返回 outcome/evidence 后直接按契约核验，不重复调用 job.get。不能把 completed 或处理器返回自动当成业务成功。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"严格满足已读取的 inputSchema"}},"required":["methodId","arguments"],"additionalProperties":false}), {
             Arc::new(move |_: &Value| Err(Error::Tool("该接口必须通过运行时的授权与 Job 跟踪调用".into()))) as BridgeToolFn
         }),
         (
             "bgi.user.list",
+            "查看用户资源",
             "列出 BetterGI User 目录下指定位置的一层真实文件和目录。jsonKeys 可在同一次调用中投影每个 JSON 文件的顶层字段，避免逐文件读取；不用于发现宿主接口。",
             json!({"type":"object","properties":{
                 "path":{"type":"string","description":"相对 User 目录；空字符串表示根目录"},
@@ -459,6 +464,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
         (
             "bgi.user.read",
+            "读取配置文件",
             "读取 BetterGI User 目录中的一个文本文件。JSON 可用 keys 投影所需顶层字段；查询配置组通常读取 name、index、projects，只有修改整个文件时才读取全文。多个独立文件应在同一轮并行读取。",
             json!({"type":"object","properties":{
                 "path":{"type":"string","description":"由 user.list 或已读文件得到的相对 User 路径"},
@@ -476,8 +482,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
                         .as_array()
                         .map(|keys| keys.iter().filter_map(Value::as_str).collect::<Vec<_>>())
                         .filter(|keys| !keys.is_empty());
-                    // 裁剪失败就退回全文：宁可多给，也不能因为格式不匹配让调用方
-                    // 什么都拿不到。
+                    // 裁剪失败时退回全文。
                     if let Some((out, dropped)) = selected.and_then(|keys| select_keys(&text, &keys))
                     {
                         return Ok(json!({
@@ -503,6 +508,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
         (
             "bgi.user.inspect_script",
+            "读取脚本说明",
             "一次读取一个已知 JS 脚本包的 manifest、README、settings 参数定义、目录条目和 settings 下的账户配置。folderName 必须来自配置组任务或 User/JsScript 目录；不要再分别 list/read 同一脚本。",
             json!({"type":"object","properties":{"folderName":{"type":"string","minLength":1,"description":"配置组 Javascript 任务中的精确 folderName"}},"required":["folderName"],"additionalProperties":false}),
             {
@@ -553,6 +559,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
         (
             "bgi.user.resolve",
+            "查找可运行任务",
             "一次判定采集或运行目标：查配置组、核验引用路径是否还在、只按目录名找 AutoPathing 父节点。不要用 list/read 扫路线 JSON。按 verdict 行动：run 直接运行该配置组；repair 只补 missing；create 用 candidates 父节点建组；ambiguous 才提问；notFound 再考虑更新仓库。",
             json!({"type":"object","properties":{"query":{"type":"string","minLength":1,"description":"用户原话或材料/配置组名称"}},"required":["query"],"additionalProperties":false}),
             {
@@ -568,6 +575,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
         (
             "bgi.user.write",
+            "写入配置文件",
             "原子创建或替换 BetterGI User 资源文件。已有文件必须提交 user.read 返回的 sha256，写入前校验 JSON、比较版本并保留独立备份；写后自动核验。不得修改 User/config.json。",
             json!({"type":"object","properties":{"path":{"type":"string","description":"相对 User 路径；不得是 config.json"},"content":{"type":"string","description":"保留未知字段后的完整文件内容"},"expectedSha256":{"type":"string","pattern":"^[0-9a-f]{64}$","description":"替换已有文件时必填，使用最近一次 user.read 返回的 sha256；新建文件省略"}},"required":["path","content"],"additionalProperties":false}),
             {
@@ -630,6 +638,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
         (
             "bgi.user.restore",
+            "恢复备份",
             "把 bgi.user.write 返回的独立备份恢复到原资源。恢复前比较当前 sha256，避免覆盖写入后的其他修改；恢复本身也为当前版本创建新备份并核验。",
             json!({"type":"object","properties":{"path":{"type":"string","description":"原资源的相对 User 路径"},"backup":{"type":"string","description":"user.write 返回的相对 backup 路径"},"expectedSha256":{"type":"string","pattern":"^[0-9a-f]{64}$","description":"当前原资源最近一次 user.read 或 user.write 返回的 sha256"}},"required":["path","backup","expectedSha256"],"additionalProperties":false}),
             {
@@ -672,7 +681,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             },
         ),
     ]);
-    for (name, description, schema, function) in definitions {
+    for (name, label, description, schema, function) in definitions {
         let execution = if matches!(
             name,
             "bgi.capability.invoke" | "bgi.job.cancel" | "bgi.api.invoke"
@@ -689,8 +698,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
                 ..ToolExecution::default()
             }
         } else if matches!(name, "bgi.user.write" | "bgi.user.restore") {
-            // 改的是用户自己的文件，不是游戏动作。串行执行以免两个写互相覆盖，
-            // 需要授权（不能归入只读批次）。
+            // 改的是用户文件而不是游戏动作：串行执行，需要授权。
             ToolExecution {
                 effect: ToolEffect::LocalWrite,
                 risk: crate::extension::RiskLevel::High,
@@ -698,7 +706,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
                 deferred: false,
                 always_load: true,
                 search_hint: Some("修改用户的 BGI 配置文件".into()),
-                // 影响按真实差异计：写整份文件不等于改了整份配置。
+                // 影响按真实差异计。
                 scope: crate::extension::ScopeKind::Fields,
                 scope_target: Some("path".into()),
                 scope_reader: Some("bgi.user.read".into()),
@@ -727,6 +735,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             FunctionTool::new(name, description, schema, "core:bgi", move |arguments| {
                 function(arguments)
             })
+            .with_label(label)
             .with_execution(execution),
         )?;
     }
@@ -755,7 +764,7 @@ mod tests {
         );
     }
 
-    /// 目录穿越必须在解析阶段挡掉，不能等到拼接后再检查。
+    /// 目录穿越必须在解析阶段挡掉。
     #[test]
     fn user_path_rejects_escapes() {
         let root = Path::new(r"C:\BGI\User");
@@ -772,10 +781,10 @@ mod tests {
         }
     }
 
-    /// 按需取字段：配置组的 `config` 占全文八成以上，梳理任务只要 name/projects。
+    /// 按需取字段。
     #[test]
     fn select_keys_keeps_only_the_requested_top_level_fields() {
-        // 真实配置组里 config 段占了绝大部分，样例按同样比例给。
+        // 按真实比例：config 段占绝大部分。
         let text = format!(
             r#"{{"index":9,"name":"test","config":{{"pathingConfig":{{"a":"{}"}}}},"projects":[{{"name":"p"}}]}}"#,
             "x".repeat(600)
@@ -786,7 +795,6 @@ mod tests {
         assert_eq!(value["index"], 9);
         assert!(value.get("config").is_none());
         assert_eq!(dropped, vec!["config".to_string()]);
-        // 这就是它存在的理由：真实的组文件从几千字降到几十字。
         assert!(kept.chars().count() < text.chars().count() / 10);
 
         // 请求了不存在的字段不算错，只是拿不到。
@@ -794,7 +802,7 @@ mod tests {
         assert_eq!(kept, r#"{"name":"test"}"#);
     }
 
-    /// 不是 JSON 对象时不得裁剪，调用方要能退回全文。
+    /// 不是 JSON 对象时不裁剪，调用方退回全文。
     #[test]
     fn select_keys_declines_non_json_input() {
         assert!(select_keys("不是 JSON", &["name"]).is_none());
@@ -867,7 +875,7 @@ mod tests {
         assert!(restore.description.contains("恢复"));
     }
 
-    /// 替换必须是原子的、可核验的，并为每次修改留下独立恢复文件。
+    /// 替换是原子的、可核验的，每次修改留下独立备份。
     #[test]
     fn resource_replace_is_verified_and_recoverable() {
         let directory = tempfile::tempdir().unwrap();

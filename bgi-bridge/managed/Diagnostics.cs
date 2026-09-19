@@ -2,11 +2,7 @@ using System.Text;
 
 namespace BgiBridge;
 
-/// <summary>
-/// 日志落文件。不能用 Console：宿主是 WPF 应用，没有属于我们的控制台。
-/// 写在数据根（安装目录的 user\，见 InstallPaths）的 log 下，不碰宿主目录，
-/// 也不让安装目录里堆运行期产物。
-/// </summary>
+/// <summary>日志落文件。不能用 Console：宿主是 WPF 应用，没有控制台。写在数据根（安装目录的 user\，见 InstallPaths）的 log 下。</summary>
 public static class Diagnostics
 {
     private static readonly object Gate = new();
@@ -52,11 +48,11 @@ public static class Diagnostics
                 {
                     File.AppendAllText(path, line, Encoding.UTF8);
                 }
-                return;  // 写成功一处就够了，不要两份重复
+                return;  // 写成功一处就够
             }
             catch
             {
-                // 换下一个候选；全都写不出去也不能成为新的故障源。
+                // 换下一个候选；全都写不出去也不抛。
             }
         }
     }

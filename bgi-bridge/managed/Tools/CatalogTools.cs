@@ -14,7 +14,7 @@ public static class CatalogTools
         {
             var item = command;
             var schema = item.ParameterType is null ? ArgumentSchema.Empty
-                : AgentSchemas.Object(("argument", item.ParameterSchema ?? ArgumentSchema.Parse("""{"description":"需要宿主对象，当前不能通过 JSON 提供。"}"""), true));
+                : AgentSchemas.Object(("argument", item.ParameterSchema ?? ArgumentSchema.Parse("""{"description":"需要 BetterGI 对象，当前不能通过 JSON 提供。"}"""), true));
             registry.Register($"cmd.{item.Name}", "command", item.Guide.Purpose,
                 (arguments, cancellation) => CommandCatalog.Invoke(item.Name,
                     arguments.TryGetProperty("argument", out var value) ? value : null, cancellation),

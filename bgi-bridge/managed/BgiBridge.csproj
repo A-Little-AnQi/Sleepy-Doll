@@ -22,21 +22,20 @@
     <OutputPath>../../target/dotnet/managed/</OutputPath>
 
     <!-- 零第三方依赖：宿主是框架依赖应用，嵌入的 deps.json 不可编辑，
-         我们的依赖加不进它的依赖图。只用 TPA 里已有的 BCL。 -->
+         依赖加不进它的依赖图，只用 TPA 里已有的 BCL。 -->
     <EnableDefaultItems>true</EnableDefaultItems>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <DebugType>none</DebugType>
 
-    <!-- 我们要的是能被 load_assembly_and_get_function_pointer 加载的普通程序集，
+    <!-- 产物是能被 load_assembly_and_get_function_pointer 加载的普通程序集，
          不生成 apphost，也不参与单文件打包。 -->
     <UseAppHost>false</UseAppHost>
     <SelfContained>false</SelfContained>
     <PublishSingleFile>false</PublishSingleFile>
 
-    <!-- 关键：类库默认不生成 runtimeconfig.json，而原生引导 DLL 正是靠它
-         调 hostfxr_initialize_for_runtime_config 去接上进程里已有的运行时。
-         没有这个文件整条注入链就是断的。 -->
+    <!-- 类库默认不生成 runtimeconfig.json，原生引导 DLL 靠它调
+         hostfxr_initialize_for_runtime_config 接上进程里已有的运行时。 -->
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
 

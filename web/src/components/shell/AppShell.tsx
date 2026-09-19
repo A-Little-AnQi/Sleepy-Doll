@@ -151,7 +151,7 @@ interface Props {
   onConversation(id: string): void;
   onToggleDetails(): void;
   reload(): Promise<void>;
-  /** 输入框已有内容时，在侧栏放一条未落库的新会话。点新建由壳自己落行。 */
+  /** 输入框已有内容时，在侧栏放一条未落库的新会话。 */
   composingNewChat?: boolean;
 }
 
@@ -436,7 +436,7 @@ export function AppShell({
     window.addEventListener("pointercancel", stop);
   };
 
-  // 宽窗口未折叠时侧栏占布局列；否则不占列，靠左缘悬停唤出悬浮抽屉。
+  // 宽窗口未折叠时侧栏占布局列，其余情况靠左缘悬停唤出悬浮抽屉。
   const docked = wide && !collapsed;
   const overlayOpen = !docked && (peek || !collapsed);
   const sidebarVisible = docked || overlayOpen;
@@ -446,7 +446,7 @@ export function AppShell({
   };
   const hidePeek = (event?: { relatedTarget: EventTarget | null }) => {
     if (resizingRef.current || draggingRef.current) return;
-    // 指针移出浏览器窗口时 relatedTarget 为空。这时收起，回窗会撞上左缘热区再播一遍入场。
+    // 指针移出浏览器窗口时 relatedTarget 为空，此时不收起。
     if (event && event.relatedTarget == null) return;
     if (
       event?.relatedTarget instanceof Element &&
@@ -517,8 +517,7 @@ export function AppShell({
     window.addEventListener("pointerup", stop);
     window.addEventListener("pointercancel", stop);
   };
-  // 详情栏讲的是当前对话里的快捷任务。快捷任务页自己就是那张列表，
-  // 顶栏再放一个「显示详情」等于同一入口出现两次。
+  // 只有对话页显示详情开关。
   const detailsToggle = page === "chat";
   const detailsPane = detailsOpen && (page === "chat" || page === "tasks");
   const showHeader = page === "chat" || collapsed;

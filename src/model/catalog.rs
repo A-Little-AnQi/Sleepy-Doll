@@ -1,4 +1,4 @@
-//! 从模型服务拉可用模型名。走本机 HTTP，避免浏览器 CORS。
+//! 从模型服务拉可用模型名。走本机 HTTP。
 
 use std::time::Duration;
 

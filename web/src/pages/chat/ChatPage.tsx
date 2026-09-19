@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import mascot from "../../brand/mascot.webp";
 import "./ChatPage.css";
 import { Transcript } from "../../components/chat/Transcript";
@@ -58,6 +58,16 @@ export function ChatPage({
   const [notice, setNotice] = useState("");
   const [unread, setUnread] = useState(false);
   const [sending, setSending] = useState(false);
+  // 工具名取自工具定义里的 label，没有 label 的不进表。
+  const toolLabels = useMemo(
+    () =>
+      Object.fromEntries(
+        bootstrap.tools
+          .filter((tool) => tool.label)
+          .map((tool) => [tool.name, tool.label] as const),
+      ),
+    [bootstrap.tools],
+  );
   const [error, setError] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -133,7 +143,7 @@ export function ChatPage({
       pending =
         JSON.parse(sessionStorage.getItem(retryKey) ?? "null") ?? undefined;
     } catch {
-      /* invalid saved state */
+      /* 存的内容不是合法 JSON。 */
     }
     const clientKey =
       pending?.prompt === value ? pending.key : crypto.randomUUID();
@@ -155,7 +165,7 @@ export function ChatPage({
     try {
       if (supplementRun) {
         await api.supplement(supplementRun, value, clientKey);
-        // 已经提交出去的外部动作不会因为这句话被撤销，只能等到下一个边界。
+        // 补充说明在当前步骤结束后处理。
         setNotice("已收到，将在当前步骤结束后处理。");
       } else {
         const run = await api.submitTask(
@@ -243,6 +253,7 @@ export function ChatPage({
                   stream={stream}
                   phase={phase}
                   seconds={elapsed}
+                  toolLabels={toolLabels}
                 />
                 {plan && (
                   <details className="run-plan">
@@ -377,7 +388,7 @@ export function ChatPage({
         {(error || data.error) && (
           <Toast
             message={error || data.error}
-            // 连接断了是个持续状态，不自动消失，免得用户还没看清就没了。
+            // 连接断开是持续状态，提示不自动消失。
             duration={data.error ? 0 : 4000}
             onDismiss={() => setError("")}
           />

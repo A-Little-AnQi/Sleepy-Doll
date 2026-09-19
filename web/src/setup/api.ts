@@ -1,5 +1,4 @@
-/** 安装窗口的原生接口。请求写法与产品主程序的窗口控制一致，回复和状态推送走
- * 初始化脚本装上的两个全局回调。 */
+/** 安装窗口的原生接口。回复和状态推送走初始化脚本装上的两个全局回调。 */
 
 export interface SetupInfo {
   version: string;
@@ -30,7 +29,7 @@ declare global {
   }
 }
 
-/** 目录选择是模态对话框，用户可能停留很久；info 短一些，超时就用界面里的默认值。 */
+/** 目录选择是模态对话框，用户可能停留很久。 */
 const DIALOG_TIMEOUT = 600_000;
 const INFO_TIMEOUT = 5_000;
 
@@ -79,4 +78,6 @@ export const setupApi = {
     invoke("setup.install", { directory, desktopShortcut }, DIALOG_TIMEOUT),
   uninstall: (removeUserData: boolean) =>
     invoke("setup.uninstall", { removeUserData }, DIALOG_TIMEOUT),
+  launch: () =>
+    invoke<{ started: boolean }>("setup.launch", {}, DIALOG_TIMEOUT),
 };

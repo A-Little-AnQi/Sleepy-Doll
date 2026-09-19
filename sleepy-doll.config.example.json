@@ -1,27 +1,28 @@
 {
-  "version": 3,
+  "version": 4,
   "activeModel": "",
   "models": [],
   "agent": {
     "maxTurns": 16,
     "maxToolCallsPerTurn": 16,
-    "systemPrompt": "使用简体中文，保持结论清楚、过程紧凑。优先完成用户已经明确要求的工作；涉及不可逆结果时说明实际影响。",
-    "skillDirectories": ["../skills", "./skills"],
+    "systemPrompt": "",
+    "skillDirectories": ["./skills"],
     "autoLoadSkills": true,
     "maxLoadedSkills": 4,
     "disabledSkills": [],
     "fallbackModels": []
   },
   "bridge": {
-    "enabled": false,
+    "enabled": true,
     "baseUrl": "http://127.0.0.1:26101",
     "token": "${ENV:BGI_BRIDGE_TOKEN}",
     "instanceId": "",
     "timeoutMs": 30000
   },
   "plugins": {
-    "directories": ["./plugins"],
-    "enabled": []
+    "directories": ["../plugins", "./plugins"],
+    "enabled": [],
+    "disabled": []
   },
   "storage": {
     "database": "./.sleepy-doll/sleepy-doll.db"

@@ -22,8 +22,8 @@ interface Request {
 
 let sent: Request[] = [];
 
-/** 顶替原生侧：记下请求，并按方法给出回复。 */
-function host(overrides: Partial<SetupInfo> = {}) {
+/** 顶替原生侧：记下请求，并按方法给出回复。`launch` 是启动请求的回复。 */
+function host(overrides: Partial<SetupInfo> = {}, launch = true) {
   sent = [];
   const info: SetupInfo = {
     version: "0.1.0",
@@ -42,7 +42,9 @@ function host(overrides: Partial<SetupInfo> = {}) {
           ? info
           : request.method === "setup.browse"
             ? { directory: "D:\\Picked" }
-            : {};
+            : request.method === "setup.launch"
+              ? { started: launch }
+              : {};
       window.__setupReceive?.({ id: request.id, result });
     },
   };
@@ -75,7 +77,9 @@ function uninstallHost() {
 }
 
 function userDataBox() {
-  return screen.getByRole("checkbox", { name: /user\\/ }) as HTMLInputElement;
+  return screen.getByRole("checkbox", {
+    name: /同时删除数据/,
+  }) as HTMLInputElement;
 }
 
 afterEach(() => {
@@ -155,7 +159,7 @@ it("prefills the existing install so overwriting keeps its place", async () => {
   await waitFor(() =>
     expect(directoryField().value).toBe("D:\\Games\\Sleepy Doll"),
   );
-  expect(screen.getByText("所有文件与数据均会保存在安装目录下")).toBeTruthy();
+  expect(screen.getByText("程序与数据都装在所选目录下。")).toBeTruthy();
   expect(directoryField().disabled).toBe(true);
   expect(screen.getByRole("button", { name: "浏览" })).toHaveProperty(
     "disabled",
@@ -244,17 +248,44 @@ it("says where the program went once it is installed", async () => {
   push({ phase: "done", progress: 1, message: "", error: null });
 
   expect(screen.getByText("安装完成")).toBeTruthy();
-  expect(screen.getByText("已安装到")).toBeTruthy();
+  // 结论文本与图标同属一行：图标标的是这句结论。
+  expect(
+    document.querySelector(".setup-result-head")?.textContent?.trim(),
+  ).toBe("安装完成");
   expect(document.querySelector(".setup-target")?.textContent).toBe(
     "D:\\Games\\Sleepy Doll",
   );
   expect(footer().getByRole("button", { name: "关闭" })).toBeTruthy();
 });
 
-it("keeps user\\ by default when uninstalling", async () => {
+it("starts the program it just installed and closes the installer", async () => {
+  host();
+  render(<SetupApp />);
+  fireEvent.change(directoryField(), { target: { value: "D:\\Games" } });
+  fireEvent.click(screen.getByRole("button", { name: "安装" }));
+  push({ phase: "done", progress: 1, message: "", error: null });
+
+  fireEvent.click(footer().getByRole("button", { name: "启动" }));
+  await waitFor(() => expect(lastRequest("setup.launch")).toBeTruthy());
+  await waitFor(() => expect(lastRequest("window.close")).toBeTruthy());
+});
+
+it("keeps the installer open and says so when the program did not start", async () => {
+  host({}, false);
+  render(<SetupApp />);
+  fireEvent.click(screen.getByRole("button", { name: "安装" }));
+  push({ phase: "done", progress: 1, message: "", error: null });
+
+  fireEvent.click(footer().getByRole("button", { name: "启动" }));
+  await waitFor(() => expect(screen.getByText(/没有启动/)).toBeTruthy());
+  expect(lastRequest("window.close")).toBeUndefined();
+  expect(screen.getByText("安装完成")).toBeTruthy();
+});
+
+it("keeps the user's data by default when uninstalling", async () => {
   uninstallHost();
   render(<SetupApp />);
-  await screen.findByRole("checkbox", { name: /user\\/ });
+  await screen.findByRole("checkbox", { name: /同时删除数据/ });
   expect(userDataBox().checked).toBe(false);
   expect(screen.getByText("D:\\Games\\Sleepy Doll")).toBeTruthy();
   expect(
@@ -269,10 +300,10 @@ it("keeps user\\ by default when uninstalling", async () => {
   );
 });
 
-it("deletes user\\ only after the box is ticked", async () => {
+it("deletes the data only after the box is ticked", async () => {
   uninstallHost();
   render(<SetupApp />);
-  await screen.findByRole("checkbox", { name: /user\\/ });
+  await screen.findByRole("checkbox", { name: /同时删除数据/ });
   fireEvent.click(userDataBox());
   expect(userDataBox().checked).toBe(true);
 
@@ -284,7 +315,7 @@ it("deletes user\\ only after the box is ticked", async () => {
   );
 });
 
-it("says what happened to user\\ when the uninstall finishes", async () => {
+it("says what happened to the data when the uninstall finishes", async () => {
   uninstallHost();
   render(<SetupApp />);
   fireEvent.click(await screen.findByRole("button", { name: "卸载" }));
@@ -294,5 +325,7 @@ it("says what happened to user\\ when the uninstall finishes", async () => {
   expect(document.querySelector(".setup-target")?.textContent).toBe(
     "D:\\Games\\Sleepy Doll",
   );
-  expect(screen.getByText(/user\\ 目录保留在/)).toBeTruthy();
+  expect(screen.getByText(/数据已保留/)).toBeTruthy();
+  // 卸载没有可启动的东西。
+  expect(footer().queryByRole("button", { name: "启动" })).toBeNull();
 });

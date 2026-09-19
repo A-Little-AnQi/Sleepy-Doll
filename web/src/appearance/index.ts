@@ -1,15 +1,25 @@
+import { preference } from "./preference";
+
 export type ThemeId = "light" | "dark";
 export type ThemeOrigin = { x: number; y: number };
 
 const THEME_KEY = "sleepy-doll-theme";
 
-export function readTheme(): ThemeId {
-  return localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
-}
+const theme = preference<ThemeId>(
+  THEME_KEY,
+  (stored) => (stored === "dark" ? "dark" : "light"),
+  (value) => {
+    document.documentElement.dataset.theme = value;
+  },
+);
 
-function applyTheme(theme: ThemeId) {
-  document.documentElement.dataset.theme = theme;
-  localStorage.setItem(THEME_KEY, theme);
+export const readTheme = theme.read;
+export const subscribeTheme = theme.subscribe;
+export const restoreTheme = theme.restore;
+
+/** 当前主题。 */
+export function useTheme(): ThemeId {
+  return theme.use();
 }
 
 let lastPointer: ThemeOrigin | undefined;
@@ -44,24 +54,18 @@ function revealRadius(x: number, y: number) {
   );
 }
 
-export function writeTheme(
-  theme: ThemeId,
-  origin?: ThemeOrigin,
-): Promise<void> {
-  if (document.documentElement.dataset.theme === theme) {
-    localStorage.setItem(THEME_KEY, theme);
-    return Promise.resolve();
-  }
+export function writeTheme(next: ThemeId, origin?: ThemeOrigin): Promise<void> {
   const start = document.startViewTransition?.bind(document);
-  if (!start) {
-    applyTheme(theme);
+  // 已经是这个主题时不放动画，仍走一次写入。
+  if (!start || document.documentElement.dataset.theme === next) {
+    theme.write(next);
     return Promise.resolve();
   }
   const point = resolveOrigin(origin);
   const radius = revealRadius(point.x, point.y);
   const root = document.documentElement;
   root.dataset.themeReveal = "true";
-  const transition = start(() => applyTheme(theme));
+  const transition = start(() => theme.write(next));
   void transition.ready
     .then(() => {
       root.animate(

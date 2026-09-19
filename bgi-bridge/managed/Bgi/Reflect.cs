@@ -4,14 +4,7 @@ using BgiBridge.Protocol;
 
 namespace BgiBridge.Bgi;
 
-/// <summary>
-/// 与宿主的唯一接触面，全部走反射。
-///
-/// 两条约束：
-/// 1. 我们的程序集在隔离的 ALC 里，按默认 ALC 的类型标识拿不到宿主类型。
-///    所以先用 AppDomain.CurrentDomain.GetAssemblies() 定位，再取类型。
-/// 2. 这是别人进程：找不到成员要返回明确错误，不能让 TargetInvocationException 冒泡。
-/// </summary>
+/// <summary>与宿主的唯一接触面，全部走反射。桥的程序集在隔离的 ALC 里，按类型标识取不到宿主类型，只能按已加载程序集定位。</summary>
 public static class Reflect
 {
     private static readonly ConcurrentDictionary<string, Type?> TypeCache = new(StringComparer.Ordinal);
@@ -23,18 +16,16 @@ public static class Reflect
 
     // ---------- 程序集与类型 ----------
 
-    /// <summary>按简单名在**所有已加载程序集**里查找（含其它 ALC 的）。</summary>
+    /// <summary>按简单名在所有已加载程序集里查找（含其它 ALC 的）。</summary>
     public static Assembly? FindAssembly(string simpleName) =>
         AppDomain.CurrentDomain.GetAssemblies()
             .FirstOrDefault(a =>
                 string.Equals(a.GetName().Name, simpleName, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>按已知类型判断，比比对程序集名可靠。</summary>
+    /// <summary>按已知类型判断宿主是否就绪。</summary>
     public static bool HostReady => FindType("BetterGenshinImpact.GameTask.TaskContext") is not null;
 
-    /// <summary>
-    /// 只按完整类型名匹配；宿主命名空间变化应明确报错，不能绑定同名的其他类型。
-    /// </summary>
+    /// <summary>只按完整类型名匹配，不绑定同名的其他类型。</summary>
     public static Type? FindType(string fullName)
     {
         if (TypeCache.TryGetValue(fullName, out var cached) && cached is not null) return cached;
@@ -52,15 +43,11 @@ public static class Reflect
             }
             catch { }
         }
-        // Do not cache absence: assemblies and the UI can become available later.
-        // Do not bind another assembly's same-short-name type by accident.
+        // 不缓存缺失：程序集可能稍后才加载。
         return null;
     }
 
-    /// <summary>
-    /// 按公开行为而不是页面类的完整名称定位宿主类型。稳定桥操作用它降低
-    /// BetterGI 重构命名空间或移动 ViewModel 时的耦合；方法本身消失时才视为不兼容。
-    /// </summary>
+    /// <summary>按「类型上有这个方法」定位宿主类型，不依赖页面类的完整名称。</summary>
     public static Type? FindHostTypeWithMethod(
         string method,
         params Type[] parameterTypes)
@@ -88,10 +75,10 @@ public static class Reflect
         }));
     }
 
-    /// <summary>取宿主类型；缺失时给出版本不匹配的明确提示，而不是 NullReference。</summary>
+    /// <summary>取宿主类型，缺失时抛出提示版本不匹配的错误。</summary>
     public static Type RequireType(string fullName) =>
         FindType(fullName) ?? throw BridgeException.Missing(
-            $"宿主里找不到类型 {fullName}。通常是 BetterGI 版本与桥不匹配。");
+            $"BetterGI 里找不到类型 {fullName}。通常是 BetterGI 版本与桥不匹配。");
 
     // ---------- 成员查找 ----------
 
@@ -112,10 +99,7 @@ public static class Reflect
             return null;
         });
 
-    /// <summary>
-    /// 容忍同名重载：GetProperty(name, flags) 遇到多个同名会抛 AmbiguousMatchException，
-    /// 宿主的 App.ServiceProvider 就是这种。退化为优先静态、其次可读。
-    /// </summary>
+    /// <summary>容忍同名重载（宿主的 App.ServiceProvider 就是这种）：GetProperty(name, flags) 遇多个同名会抛 AmbiguousMatchException，退化为优先静态、其次可读。</summary>
     private static PropertyInfo? FindProperty(Type type, string name, BindingFlags flags)
     {
         try
@@ -141,7 +125,7 @@ public static class Reflect
             ?? matches[0];
     }
 
-    /// <summary>按名字与参数个数取方法：先精确匹配，再忽略大小写。容忍同名重载。</summary>
+    /// <summary>按名字与参数个数取方法：先精确匹配，再忽略大小写。</summary>
     public static MethodInfo? FindMethod(Type type, string name, int argCount) =>
         MethodCache.GetOrAdd((type, name, argCount), static key =>
         {
@@ -208,7 +192,6 @@ public static class Reflect
     /// <summary>按已发现的宿主类型取得静态 Instance 属性或 Instance() 方法。</summary>
     public static object? Singleton(Type type)
     {
-
         var property = FindMember(type, "Instance");
         if (property is not null)
         {
@@ -264,7 +247,7 @@ public static class Reflect
         }
         catch (TargetInvocationException ex)
         {
-            // 宿主内部的异常翻译成桥的错误，不让它继续往上冒。
+            // 宿主内部的异常翻译成桥的错误。
             throw Translate(Root(ex));
         }
     }

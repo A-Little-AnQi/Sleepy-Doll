@@ -7,18 +7,15 @@ use std::{
 };
 
 use crate::setup::{
-    EXECUTABLE, Error, NAME, Progress, UNINSTALLER, failed, is_bridge_config, payload::Archive,
-    registry, shell,
+    DATA_DIRECTORY, EXECUTABLE, Error, NAME, Progress, UNINSTALLER, failed, is_bridge_config,
+    payload::Archive, registry, shell,
 };
 use serde_json::{Value, json};
 
 /// 桥组件里定位布局用的那一个：它在哪，桥的配置就该在哪。
 const BRIDGE_INJECTOR: &str = "BgiBridge.Injector.exe";
 
-/// 把载荷装到 `directory`。
-///
-/// 失败时不留半个目录：本次新建的文件会被删掉，此前就存在、已被覆盖的那些
-/// 没有留底，只能在错误信息里列出。
+/// 把载荷装到 `directory`。失败时删掉本次新建的文件，已被覆盖的只能在错误信息里列出。
 pub fn install(
     archive: &Archive,
     directory: &Path,
@@ -48,7 +45,7 @@ pub fn install(
     Ok(())
 }
 
-/// 解包的临时目录。安装结束后删掉，中途出错也一样。
+/// 解包的临时目录，安装结束后删掉。
 struct Staging(PathBuf);
 
 impl Staging {
@@ -75,11 +72,11 @@ impl Drop for Staging {
     }
 }
 
-/// 本次写入的文件。覆盖安装要区分新建与覆盖：回滚只撤得掉新建的那些。
+/// 本次写入的文件。回滚只撤得掉新建的那些。
 struct Written {
     /// 安装目录。回滚往上删到它为止。
     root: PathBuf,
-    /// 安装目录原本就存在时不能删：它可能是用户自己建的空目录。
+    /// 安装目录原本就存在时不能删。
     root_created: bool,
     created: Vec<PathBuf>,
     replaced: Vec<PathBuf>,
@@ -95,7 +92,7 @@ impl Written {
         }
     }
 
-    /// 删掉本次新建的文件与随之空掉的目录。只删得掉空目录，别人的东西不会被带走。
+    /// 删掉本次新建的文件与随之空掉的目录。
     fn rollback(&self) {
         for path in self.created.iter().rev() {
             let _ = fs::remove_file(path);
@@ -120,7 +117,7 @@ impl Written {
         }
     }
 
-    /// 把写入痕迹并进错误信息，用户照着就能清干净。
+    /// 把写入痕迹并进错误信息。
     fn describe(&self, error: Error) -> Error {
         if self.created.is_empty() && self.replaced.is_empty() {
             return error;
@@ -139,15 +136,16 @@ impl Written {
     }
 }
 
-/// 旧版把桥的文件平铺在安装目录根下，收进 `bridge\` 的包要把它们归位，否则根下会
-/// 同时留下旧的一份和 `bridge\` 里新的一份。载荷自己还是平铺布局时不动。
+/// 旧版把桥的文件平铺在根下、技能放在根下的 `skills\`，装载新布局的包时把它们归位。
+/// 载荷自己还是旧布局时不动。
 fn migrate(archive: &Archive, directory: &Path) -> Result<(), Error> {
+    super::remove_retired_skills(archive, directory);
     if bridge_directory(archive).is_none() {
         return Ok(());
     }
     let flat = directory.join("bridge.config.json");
     let nested = directory.join(bridge_config_path(archive));
-    // 先搬到 `bridge\` 再让下面的写入跳过它，token 就这样保住了。
+    // 先搬到 `bridge\`，下面的写入会跳过它。
     if flat.is_file() && !nested.is_file() {
         if let Some(parent) = nested.parent() {
             fs::create_dir_all(parent).map_err(failed(format!("无法创建 {}", parent.display())))?;
@@ -161,8 +159,7 @@ fn migrate(archive: &Archive, directory: &Path) -> Result<(), Error> {
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
         if name.starts_with("bgibridge.") {
-            // 新包会把桥重新写到 `bridge\` 下；旧文件被 BetterGI 加载着删不掉就留着，
-            // 不影响这次安装。
+            // 新包会把桥重新写到 `bridge\` 下；旧文件删不掉就留着。
             let _ = fs::remove_file(entry.path());
         }
     }
@@ -170,8 +167,6 @@ fn migrate(archive: &Archive, directory: &Path) -> Result<(), Error> {
 }
 
 /// 桥组件在载荷里的目录。返回 `None` 表示平铺在安装目录根下。
-///
-/// 桥的配置必须跟组件待在同一个目录里：程序按组件所在目录去找 `bridge.config.json`。
 fn bridge_directory(archive: &Archive) -> Option<&str> {
     archive.entries().iter().find_map(|entry| {
         let (directory, name) = entry.path.rsplit_once('/')?;
@@ -187,9 +182,8 @@ fn bridge_config_path(archive: &Archive) -> PathBuf {
     }
 }
 
-/// 清单里的路径在安装目录里的落点。桥配置的模板可能叫别的名字、放在别的层级，
-/// 落点都归到 `bridge_config_path`。
-fn destination(directory: &Path, archive: &Archive, path: &str) -> PathBuf {
+/// 清单里的路径在安装目录里的落点。桥配置的模板名一律归到 `bridge_config_path`。
+pub(super) fn destination(directory: &Path, archive: &Archive, path: &str) -> PathBuf {
     if is_bridge_config(path) {
         directory.join(bridge_config_path(archive))
     } else {
@@ -197,7 +191,7 @@ fn destination(directory: &Path, archive: &Archive, path: &str) -> PathBuf {
     }
 }
 
-/// 把载荷写进临时目录。这一步不碰安装目录，写不进去可以原样退出。
+/// 把载荷写进临时目录。这一步不碰安装目录。
 fn extract(staging: &Path, archive: &Archive) -> Result<(), Error> {
     for (path, bytes) in archive.files() {
         let destination = staging.join(relative(path));
@@ -221,8 +215,7 @@ fn propagate(
     let files = archive.files();
     for (index, (path, _)) in files.iter().enumerate() {
         let destination = destination(directory, archive, path);
-        // 桥的配置存着本机 token，程序把同一个值也写进了 user\config.json：
-        // 覆盖安装留着旧的那份，换成新包里的模板会让两边对不上。
+        // 覆盖安装保留已有的桥配置，不换成包里的模板。
         if is_bridge_config(path) && destination.is_file() {
             continue;
         }
@@ -249,8 +242,8 @@ fn propagate(
     Ok(())
 }
 
-/// 产品布局里桥在 `bridge\` 下，数据根必须是安装根的 `user\`。
-/// 配置里没有这个字段时，恢复工具和引导 DLL 会在 `bridge\user\` 另建一棵树。
+/// 数据根固定为安装根的 `user\`：配置里没有这个字段时，恢复工具和引导 DLL 会在
+/// `bridge\user\` 另建一棵树。
 fn pin_data_root(directory: &Path, archive: &Archive) -> Result<(), Error> {
     if bridge_directory(archive).is_none() {
         return Ok(());
@@ -265,7 +258,7 @@ fn pin_data_root(directory: &Path, archive: &Archive) -> Result<(), Error> {
     if !settings.is_object() {
         return Ok(());
     }
-    let wanted = directory.join("user").to_string_lossy().to_string();
+    let wanted = directory.join(DATA_DIRECTORY).to_string_lossy().to_string();
     if settings.get("userDirectory").and_then(Value::as_str) == Some(wanted.as_str()) {
         return Ok(());
     }
@@ -278,7 +271,7 @@ fn pin_data_root(directory: &Path, archive: &Archive) -> Result<(), Error> {
 fn integrate(directory: &Path, desktop_shortcut: bool) -> Result<(), Error> {
     let executable = directory.join(EXECUTABLE);
     let uninstaller = directory.join(UNINSTALLER);
-    // 卸载入口是安装程序自己的副本：运行它就进卸载流程。
+    // 卸载入口是安装程序自己的副本。
     let current = std::env::current_exe().map_err(failed("无法定位安装程序自身"))?;
     fs::copy(&current, &uninstaller)
         .map_err(failed(format!("无法写入 {}", uninstaller.display())))?;
@@ -423,7 +416,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let staging = Staging::create().unwrap();
         let target = root.path().join("Sleepy Doll");
-        // 包里有组件和模板，没有真正的配置：装出来要有一份能用的。
+        // 包里有组件和模板，没有真正的配置。
         let archive = archive(&[
             ("bridge/BgiBridge.Injector.exe", b"exe"),
             ("bridge/bridge.config.example.json", b"template"),
@@ -466,6 +459,38 @@ mod tests {
     }
 
     #[test]
+    fn the_retired_root_skills_are_dropped() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("Sleepy Doll");
+        fs::create_dir_all(target.join("skills/bgi-assistant")).unwrap();
+        fs::write(target.join("skills/bgi-assistant/SKILL.md"), b"old").unwrap();
+        let archive = archive(&[
+            ("bridge/BgiBridge.Injector.exe", b"exe"),
+            ("plugins/bgi/skills/bgi-assistant/SKILL.md", b"new"),
+        ]);
+
+        migrate(&archive, &target).unwrap();
+
+        assert!(!target.join("skills").exists());
+    }
+
+    #[test]
+    fn a_payload_that_still_ships_root_skills_keeps_them() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("Sleepy Doll");
+        fs::create_dir_all(target.join("skills")).unwrap();
+        fs::write(target.join("skills/a.md"), b"old").unwrap();
+        let archive = archive(&[
+            ("bridge/BgiBridge.Injector.exe", b"exe"),
+            ("skills/a.md", b"skill"),
+        ]);
+
+        migrate(&archive, &target).unwrap();
+
+        assert_eq!(fs::read(target.join("skills/a.md")).unwrap(), b"old");
+    }
+
+    #[test]
     fn migration_never_replaces_an_existing_bridge_config() {
         let root = tempfile::tempdir().unwrap();
         let target = root.path().join("Sleepy Doll");
@@ -489,7 +514,7 @@ mod tests {
         fs::create_dir_all(&target).unwrap();
         fs::write(target.join("bridge.config.json"), b"token").unwrap();
         fs::write(target.join("BgiBridge.dll"), b"old").unwrap();
-        // 平铺的包配平铺的桥，配置要留在组件旁边。
+        // 平铺的包配平铺的桥，配置留在组件旁边。
         let archive = archive(&[
             ("BgiBridge.Injector.exe", b"exe"),
             ("bridge.config.json", b"template"),

@@ -2,8 +2,7 @@ import { useEffect, useRef } from "react";
 import "./Toast.css";
 
 /**
- * 悬浮提示。用于操作失败或一句性的告知，不占页面版面 —— 页面正文只放状态。
- * 到时自动消失，点击立即消失；`duration` 为 0 表示要一直留到用户处理。
+ * 悬浮提示。到时自动消失，点击立即消失；`duration` 为 0 表示一直留到用户处理。
  */
 export function Toast({
   message,
@@ -14,10 +13,10 @@ export function Toast({
   message: string;
   onDismiss(): void;
   duration?: number;
-  /** 需要一个明确动作才能继续的错误（例如重连）时给出，不留一个只能干看的提示。 */
+  /** 需要用户执行明确动作（例如重连）时给出的按钮。 */
   action?: { label: string; onAction(): void };
 }) {
-  // 调用方通常传内联箭头函数，直接进依赖会让计时器每次渲染都重置、永远不触发。
+  // 回调存进 ref，计时器不受重新渲染影响。
   const dismiss = useRef(onDismiss);
   dismiss.current = onDismiss;
   const host = useRef<HTMLDivElement>(null);
@@ -37,8 +36,7 @@ export function Toast({
   return (
     <div
       ref={host}
-      // 用顶层 popover 而不是 z-index：模态 <dialog> 打开时它属于顶层，
-      // 再高的 z-index 也压不过，提示会被静默吞掉。
+      // 模态 <dialog> 位于顶层，用 popover 才能浮在它上面。
       popover="manual"
       className="toast"
       role="alert"
@@ -49,7 +47,7 @@ export function Toast({
         <button
           className="toast-action"
           onClick={(event) => {
-            // 点动作按钮就是处理它，不要再走一遍「点哪都关」。
+            // 动作按钮自己处理，不触发整条的点击关闭。
             event.stopPropagation();
             action.onAction();
             dismiss.current();

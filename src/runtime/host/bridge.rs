@@ -9,15 +9,14 @@ use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
 
-/// How old a Bridge observation may be before an execution may rely on it.
+/// Bridge 观测可以作为执行依据的最大年龄（秒）。
 const OBSERVATION_MAX_AGE_SEC: i64 = 15;
 
 #[derive(Clone)]
 pub struct Bridge {
     config: BridgeConfig,
     client: reqwest::Client,
-    /// Short calls use a total deadline; the Job event stream instead relies on an
-    /// idle timeout so a long-lived subscription is not severed mid-flight.
+    /// Job 事件流专用：用空闲超时，不用总超时。
     stream_client: reqwest::Client,
 }
 pub struct Invocation<'a> {
@@ -73,13 +72,12 @@ impl Bridge {
         let status = response.status();
         let value = crate::runtime::gateway::read_json(response, cancel).await?;
         if !status.is_success() {
-            // 桥的错误体是 {code, message}。5xx 里带着桥自己的错误码，说明桥已经处理并
-            // 确认了结果；INTERNAL 是未处理异常的兜底，REQUEST_FAILED 表示响应根本不是
-            // 桥写的 —— 这两种才无法判断执行到哪一步。
+            // 桥的错误体是 {code, message}；INTERNAL 是未处理异常的兜底，
+            // REQUEST_FAILED 表示响应不是桥写的。
             let code = value["code"].as_str().unwrap_or("REQUEST_FAILED");
             if status.is_server_error() && matches!(code, "INTERNAL" | "REQUEST_FAILED") {
                 return Err(Error::Http(format!(
-                    "Bridge server response {} cannot confirm execution outcome",
+                    "Bridge 响应 {} 无法确认执行结果",
                     status.as_u16()
                 )));
             }
@@ -105,7 +103,7 @@ impl Bridge {
             }
             tokio::select! {_ = cancel.cancelled()=>return Err(Error::Cancelled),_ = tokio::time::sleep(Duration::from_millis(250*(1<<attempt)))=>{}}
         }
-        Err(last.unwrap_or_else(|| Error::Http("Bridge request failed".into())))
+        Err(last.unwrap_or_else(|| Error::Http("Bridge 请求失败".into())))
     }
     pub async fn search(&self, query: &str, cancel: &CancellationToken) -> Result<Value> {
         let encoded: String = reqwest::Url::parse_with_params("http://localhost", [("q", query)])
@@ -118,7 +116,7 @@ impl Bridge {
     }
     pub async fn describe(&self, id: &str, cancel: &CancellationToken) -> Result<Value> {
         if id.is_empty() || id.contains(['/', '?', '#', '%']) {
-            return Err(Error::Tool("invalid capability identifier".into()));
+            return Err(Error::Tool("能力标识不合法".into()));
         }
         self.get(&format!("/bridge/v1/catalog/{id}"), cancel).await
     }
@@ -149,21 +147,21 @@ impl Bridge {
         }
         let instance = info["instanceId"]
             .as_str()
-            .ok_or_else(|| Error::Tool("Bridge omitted instance identity".into()))?;
+            .ok_or_else(|| Error::Tool("Bridge 未返回实例标识".into()))?;
         if self
             .config
             .instance_id
             .as_deref()
             .is_some_and(|expected| expected != instance)
         {
-            return Err(Error::Tool("BGI instance changed".into()));
+            return Err(Error::Tool("BGI 实例已变化".into()));
         }
         let descriptor = self.describe(id, cancel).await?;
         if descriptor["callable"] != true
             || descriptor["methodId"] != *id
             || descriptor["catalogVersion"] != binding.catalog_version
         {
-            return Err(Error::Tool("capability is unavailable or changed".into()));
+            return Err(Error::Tool("能力不可用或已变化".into()));
         }
         let issues = validate(args, &descriptor["inputSchema"], "$");
         if !issues.is_empty() {
@@ -216,8 +214,6 @@ impl Bridge {
             step_id = Some(next.id.clone());
         }
         let mut request = json!({"instanceId":instance,"methodId":id,"capabilityId":binding.id,"stepId":step_id,"binding":binding,"resources":resources,"bridgeFeatures":info["features"],"catalogVersion":version,"arguments":args,"planRevision":plan.map(|p|p.revision).unwrap_or(0)});
-        // 审批级别是用户选定的，宿主动作同样按它决定要不要问。这里曾经只看精确
-        // 授权，等于把「完全控制」挡在门外 —— 选了也不生效。
         let effect =
             serde_json::from_value::<crate::extension::ToolEffect>(descriptor["effect"].clone())
                 .unwrap_or(crate::extension::ToolEffect::Unknown);
@@ -226,11 +222,11 @@ impl Bridge {
             resource_ids: &[],
             resource_kinds: &[],
             effect,
-            // 契约没有声明风险等级时按标准处理，由审批级别决定去留。
+            // 契约未声明风险等级时按标准处理。
             risk: serde_json::from_value(descriptor["risk"].clone())
                 .unwrap_or(crate::extension::RiskLevel::Standard),
             unattended: crate::extension::UnattendedPolicy::Forbidden,
-            // 这一层看不到字段级差异，按未界定处理；差异由设置事务负责。
+            // 这一层看不到字段级差异，按未界定处理。
             scope: None,
         };
         let decision = crate::runtime::operation::permissions::PermissionEngine::decide(
@@ -241,9 +237,7 @@ impl Bridge {
         if decision == crate::runtime::operation::permissions::PermissionDecision::Deny {
             return Err(Error::Tool("当前为只读级别，不能修改配置或执行命令".into()));
         }
-        // 放行的依据可能是审批结果、精确授权，或用户选定的审批级别。复核时必须
-        // 按同一条依据重查 —— 拿「有没有弹过审批」当唯一线索，会把按级别放行的
-        // 调用全部误判成授权已撤销。
+        // 复核时按放行的同一条依据重查。
         let mut approval_expires = None;
         let mut allowed_by_mode = false;
         if decision == crate::runtime::operation::permissions::PermissionDecision::Ask
@@ -281,7 +275,7 @@ impl Bridge {
                         return Err(Error::Tool("用户拒绝了此操作".into()));
                     }
                     if result.request_hash != hash(&request) {
-                        return Err(Error::Conflict("approval binding changed".into()));
+                        return Err(Error::Conflict("审批所绑定的请求已变化".into()));
                     }
                     break;
                 }
@@ -294,7 +288,7 @@ impl Bridge {
         } else if decision == crate::runtime::operation::permissions::PermissionDecision::Allow {
             allowed_by_mode = true;
         }
-        // Recheck mutable state after potentially long approval wait.
+        // 审批等待结束后重新核对可变状态。
         if self.describe(id, cancel).await? != descriptor {
             return Err(Error::Tool("能力契约已变化，请重新确认".into()));
         }
@@ -381,9 +375,7 @@ impl Bridge {
                         .ok()
                 })
                 .map(|t| t.unix_timestamp());
-            // A Bridge may serve a cached capture state, so this window is wider
-            // than the poll interval to avoid rejecting a fresh-enough snapshot.
-            // Verification predicates still enforce their own age limits.
+            // 桥可能返回缓存的截图状态。
             let age = stamp.map(|t| unix_now() - t).unwrap_or(i64::MAX);
             if !stamp.is_some_and(|t| t <= unix_now() + 2 && age <= OBSERVATION_MAX_AGE_SEC) {
                 return Err(Error::Tool(format!("游戏观测已过期（{age} 秒前）")));
@@ -411,8 +403,7 @@ impl Bridge {
             .request("POST", "/bridge/v1/invoke", Some(&wire), cancel)
             .await;
         for retry in 0..3u32 {
-            // BUSY / GAME_BUSY：有互斥执行（例如独立任务持锁）；QUEUE_FULL：容量已满。
-            // 两者都按契约做有界退避重试，原键重发由幂等保证。
+            // BUSY / GAME_BUSY：有互斥执行；QUEUE_FULL：容量已满。按契约有界退避重试。
             if !matches!(&accepted,Err(Error::Tool(message)) if message.contains("BUSY")||message.contains("QUEUE_FULL"))
             {
                 break;
@@ -434,7 +425,7 @@ impl Bridge {
             .as_array()
             .is_some_and(|f| f.iter().any(|f| f == "idempotency"));
         if deduplicates && matches!(&accepted, Err(Error::Http(_))) && !cancel.is_cancelled() {
-            // Only a negotiated deduplication capability permits retransmission.
+            // 只有协商出幂等能力时才允许重发。
             accepted = self
                 .request("POST", "/bridge/v1/invoke", Some(&wire), cancel)
                 .await;
@@ -449,10 +440,11 @@ impl Bridge {
                 a.evidence = json!({"reason":e});
                 journal.attempt(&a)?;
                 journal.release(&a)?;
-                return Err(Error::Tool("Bridge 拒绝执行，请检查能力与权限".into()));
+                // 桥的 message 带缺项与拒绝原因，原样交给模型。
+                return Err(Error::Tool(format!("Bridge 拒绝执行：{e}")));
             }
             Err(e) => {
-                // A transport failure, including cancellation during send, is ambiguous.
+                // 传输失败（含发送期间取消）的结果无法判断。
                 a.outcome = "unknown".into();
                 a.evidence = json!({"reason":e.to_string()});
                 journal.attempt(&a)?;
@@ -490,7 +482,7 @@ impl Bridge {
         let job_id = a
             .job_id
             .clone()
-            .ok_or_else(|| Error::Conflict("Job identity unknown".into()))?;
+            .ok_or_else(|| Error::Conflict("Job 标识未知".into()))?;
         loop {
             if (cancel.is_cancelled() || unix_now() > run.deadline) && !cancelling {
                 cancelling = true;

@@ -34,33 +34,31 @@ export interface Turn {
   parts: Part[];
 }
 
-const labels: Record<string, string> = {
-  "bgi.state.get": "读取游戏状态",
-  "bgi.user.resolve": "查找可运行任务",
-  "bgi.user.list": "查看用户资源",
-  "bgi.user.read": "读取配置文件",
-  "bgi.user.write": "写入配置文件",
-  "bgi.user.inspect_script": "读取脚本说明",
-  "bgi.api.search": "检索宿主接口",
-  "bgi.api.describe": "读取接口说明",
-  "bgi.api.read": "读取宿主状态",
-  "bgi.api.invoke": "执行宿主操作",
-  "bgi.capability.search": "检索插件能力",
-  "bgi.capability.describe": "读取能力定义",
-  "bgi.capability.invoke": "执行游戏操作",
-  "bgi.job.get": "查询执行结果",
-  "skills.read": "读取技能",
-  "skills.reference": "读取技能说明",
-  "skills.search": "检索技能",
-  "plugins.list": "读取插件列表",
-  "tools.search": "检索工具",
-  "resource.search": "查找资源",
-  "workspace.list": "查看软件目录",
-  "workspace.read": "读取软件目录文件",
-  "workspace.write": "写入软件目录文件",
-  "workspace.delete": "删除软件目录文件",
-  "workspace.shell": "执行 PowerShell",
-};
+/** 工具在界面上显示的名字。 */
+type ToolLabels = Record<string, string>;
+
+/** 参数里最能说明「动了哪个对象」的那个值。 */
+const subjectKeys = [
+  "path",
+  "name",
+  "query",
+  "command",
+  "methodId",
+  "folderName",
+  "id",
+];
+
+function subjectOf(args: unknown) {
+  if (!args || typeof args !== "object") return "";
+  const record = args as Record<string, unknown>;
+  for (const key of subjectKeys) {
+    const value = record[key];
+    if (typeof value !== "string" || !value.trim()) continue;
+    const text = value.trim().replace(/\s+/g, " ");
+    return text.length > 56 ? `${text.slice(0, 55)}…` : text;
+  }
+  return "";
+}
 
 function pushReasoning(turn: Turn, text: string) {
   const existing = turn.parts.find((part) => part.kind === "reasoning");
@@ -71,7 +69,7 @@ function pushReasoning(turn: Turn, text: string) {
   turn.parts.unshift({ kind: "reasoning", text });
 }
 
-/** Results are attached by call ID, never displayed as a second independent card. */
+/** 把消息组装成对话轮次。 */
 export function buildTurns(messages: MessageInfo[], stream: string): Turn[] {
   const results = new Map(
     messages
@@ -84,7 +82,7 @@ export function buildTurns(messages: MessageInfo[], stream: string): Turn[] {
     const calls = (message.toolCalls ?? []).filter(
       (call) => !["plan.update", "user.ask"].includes(call.name),
     );
-    // 纯推理轮也要显示，否则整轮被静默丢掉。
+    // 只有推理的轮次也保留。
     const reasoning = message.reasoning?.text ?? "";
     if (!message.content && !calls.length && !reasoning) continue;
     let turn = turns.at(-1);
@@ -129,7 +127,7 @@ export function turnCopyText(turn: Turn) {
     .trim();
 }
 
-/** Close a dangling fence so streaming markdown still paints as a code block. */
+/** 补上未闭合的代码围栏。 */
 export function stabilizeMarkdown(text: string) {
   const fences = text.match(/^```/gm)?.length ?? 0;
   return fences % 2 === 1 ? `${text}\n\`\`\`` : text;
@@ -144,37 +142,43 @@ function outcome(activity: Activity) {
   }
 }
 
-function ActivityGroup({ activities }: { activities: Activity[] }) {
+function ActivityGroup({
+  activities,
+  labels,
+}: {
+  activities: Activity[];
+  labels: ToolLabels;
+}) {
   const running = activities.some(
     (activity) => outcome(activity) === "running",
   );
   const failed = activities.some((activity) => outcome(activity) === "failed");
-  const label =
-    activities.length === 1
-      ? (labels[activities[0]!.name] ?? activities[0]!.name)
-      : [
-          ...new Set(
-            activities.map(
-              (activity) => labels[activity.name] ?? activity.name,
-            ),
-          ),
-        ]
-          .slice(0, 3)
-          .join(" · ");
+  const label = [
+    ...new Set(
+      activities.map((activity) => labels[activity.name] ?? activity.name),
+    ),
+  ]
+    .slice(0, 3)
+    .join(" · ");
+  const subject =
+    activities.length === 1 ? subjectOf(activities[0]!.arguments) : "";
   return (
     <details className="activity-group">
       <summary>
         {running ? (
           <span className="activity-spinner" />
         ) : failed ? (
-          <AlertIcon className="activity-check" />
+          <AlertIcon className="activity-icon" />
         ) : (
-          <CheckIcon className="activity-check" />
+          <CheckIcon className="activity-icon" />
         )}
         <span className="activity-label">{label}</span>
-        <span className="activity-outcome">
-          {running ? "进行中" : failed ? "调用失败" : "已返回"}
-        </span>
+        {subject && <span className="activity-subject">{subject}</span>}
+        {(running || failed) && (
+          <span className="activity-outcome">
+            {running ? "进行中" : "调用失败"}
+          </span>
+        )}
         <ChevronIcon className="activity-expand" />
       </summary>
       <div className="activity-detail">
@@ -198,7 +202,7 @@ function ActivityGroup({ activities }: { activities: Activity[] }) {
   );
 }
 
-/** 默认折叠，与工具调用明细一致。推理文本通常很长，不该占满正文。 */
+/** 推理文本，默认折叠。 */
 function ReasoningDisclosure({ text }: { text: string }) {
   return (
     <details className="activity-group reasoning-group">
@@ -313,11 +317,13 @@ export const Transcript = memo(function Transcript({
   stream,
   phase,
   seconds,
+  toolLabels,
 }: {
   messages: MessageInfo[];
   stream: string;
   phase?: string | undefined;
   seconds: number;
+  toolLabels: ToolLabels;
 }) {
   const turns = buildTurns(messages, stream);
   const last = turns.at(-1);
@@ -358,7 +364,11 @@ export const Transcript = memo(function Transcript({
                     <MarkdownText text={part.text} streaming />
                   </div>
                 ) : (
-                  <ActivityGroup key={partIndex} activities={part.activities} />
+                  <ActivityGroup
+                    key={partIndex}
+                    activities={part.activities}
+                    labels={toolLabels}
+                  />
                 ),
               )}
               {turn.role === "assistant" &&

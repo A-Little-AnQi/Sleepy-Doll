@@ -5,7 +5,7 @@ import "../product.css";
 import "../motion.css";
 import "./setup.css";
 
-/** 安装窗口出问题时也要留下能看的一句话，空白窗口没法排查。 */
+/** 出错时显示错误信息。 */
 class ErrorBoundary extends Component<
   { children: ReactNode },
   { error?: Error }

@@ -180,11 +180,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
         CREATE INDEX IF NOT EXISTS runtime_artifact_refs_owner ON runtime_artifact_refs(owner_kind,owner_id);
     "#,
     ),
-    // Conversation storage used to live in a separate module that had to be
-    // opened before the journal, because the journal reads and writes these
-    // tables (and declares a foreign key to `messages`) but did not own them.
-    // Owning them here removes that ordering requirement. `tasks` and its index
-    // are dropped: no code path ever read them back.
+    // 会话、消息与工具调用表；删除已废弃的 tasks 表。
     (
         9,
         r#"
@@ -217,18 +213,14 @@ const MIGRATIONS: &[(i64, &str)] = &[
     "#,
     ),
     // 模型返回的推理载荷必须原样回传，否则 Anthropic、Gemini、Responses 会在
-    // 下一轮拒绝请求。它随消息一起持久化，所以单独一列。
-    //
-    // 不要把这列加进迁移 9 的建表语句：那样新库建表时已带该列，迁移 10 再
-    // ALTER 会以 `duplicate column name` 失败。
+    // 下一轮拒绝请求。它随消息一起持久化，单独一列；该列只在迁移 10 添加。
     (
         10,
         r#"
         ALTER TABLE messages ADD COLUMN reasoning_json TEXT;
     "#,
     ),
-    // 快捷任务：定义与不可变修订分表。发布只改定义的指针，修订本体的行一旦写入
-    // 就不再更新，这样正在运行的旧版本始终有完整快照可读。
+    // 快捷任务：定义与不可变修订分表。发布只改定义的指针，修订写入后不再更新。
     (
         11,
         r#"
@@ -262,8 +254,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
         CREATE INDEX IF NOT EXISTS task_runs_task ON task_runs(task_id, created_at);
     "#,
     ),
-    // 会话列表要支持置顶、归档、搜索，以及「每个会话选择模型」。归档是可撤销的
-    // 可见性变化，不是删除；删除会话另走确认后的明确动作。
+    // 会话置顶、归档与按会话选择模型。
     (
         12,
         r#"
@@ -310,10 +301,7 @@ mod tests {
         assert_eq!(distinct, MIGRATIONS.len() as i64);
     }
 
-    /// A database written by the previous release already has the conversation
-    /// tables (created by the removed `store` module) and the never-read `tasks`
-    /// table. Upgrading must adopt the data and retire the dead table without
-    /// touching conversations or messages.
+    /// 旧库留下的会话表与 tasks 表：迁移保留会话与消息，删掉 tasks 表。
     #[test]
     fn legacy_conversation_storage_is_adopted_and_the_dead_task_table_is_dropped() {
         let directory = tempfile::tempdir().unwrap();
@@ -367,8 +355,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(version, LATEST_SCHEMA_VERSION);
-        // 迁移 10 给 messages 加了推理列。断言它确实落地，而不是被
-        // `CREATE TABLE IF NOT EXISTS` 静默跳过。
+        // 迁移 10 给 messages 加了推理列。
         let reasoning_column: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='reasoning_json'",

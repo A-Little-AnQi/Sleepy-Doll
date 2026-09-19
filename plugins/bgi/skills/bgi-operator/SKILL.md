@@ -3,7 +3,6 @@ name: bgi-operator
 description: BetterGI 用户资源、宿主设置与执行命令的统一操作手册。用于查询、修改、创建和运行 BGI 内容。
 tags: BetterGI, 原神, 配置组, 调度器, 路线, 脚本, 设置, 查询, 修改, 创建, 运行
 alwaysLoad: true
-requiresProviders: bgi
 ---
 
 # BGI 操作规范
@@ -20,6 +19,7 @@ requiresProviders: bgi
 | 插件声明的语义能力或资源 | 已安装插件目录 | `bgi.capability.*` / `resource.search` |
 | 理解某个 JS 脚本的参数 | 该脚本自己的清单和说明 | `manifest.json`、`README.md`、`settings.json` |
 | 更新脚本仓库或已订阅脚本 | User 订阅清单 + 宿主仓库更新接口 | `bgi.user.list/read` + `bgi.update_subscribed_scripts` |
+| 脚本报错、任务中途失败 | 宿主按天写的运行日志 | `bgi.get_script_errors`，要过程时再 `bgi.read_host_log` |
 
 `bgi.api.search` 列的是“BetterGI 能做什么”；`bgi.user.list` 列的是“这个用户实际装了什么、配了什么”。两者不能互相替代。没有安装插件时，不调用 `bgi.capability.search` 作为兜底。
 
@@ -80,7 +80,7 @@ requiresProviders: bgi
 ## 执行任务
 
 1. 运行现有配置组或采集材料时，先调用一次 `bgi.user.resolve`。不要先 `bgi.api.search`，也不要列 AutoPathing 或逐条读取路线 JSON。
-2. `verdict=run` 时直接读取 `bgi.run_script_group` 契约并传入精确 `name`。路径缺失时运行时会拒绝空跑；不要在 `repair` 状态下调用它。
+2. `verdict=run` 时直接读取 `bgi.run_script_group` 契约并传入精确 `name`。路径缺失时运行时会拒绝执行；不要在 `repair` 状态下调用它。
 3. `verdict=repair` 时只处理 `missing` 列出的路径：更新仓库或订阅后再次 `resolve`。
 4. 只有准备提交执行时才调用一次 `bgi.state.get`，检查截图器、游戏句柄、任务锁和窗口状态。纯查询或文件编辑不需要状态快照。
 5. 其他动作若已知道精确 `methodId`，直接 `bgi.api.describe`；否则只在 `command` 组按一个动作词搜索一次。
@@ -97,6 +97,21 @@ requiresProviders: bgi
 4. 仓库/脚本更新不依赖截图器、游戏句柄或前台窗口，不调用 `bgi.state.get`，也不读取自动更新周期、上次更新时间等设置来代替执行。
 5. 更新会覆盖订阅资源的程序文件，但沿用 BetterGI 自带的脚本配置保留逻辑。Job 完成后回读目标脚本的 manifest 或关键文件；不要只凭“处理器返回”声称版本已更新。
 6. `bgi.api.invoke` 已跟踪 Job 到终态。返回中已经有 completed、failed 或 cancelled 时直接处理 evidence，不再调用 `bgi.job.get`；只有恢复中断任务且手里只有 Job ID 时才查询。
+
+## 排查脚本报错
+
+宿主把脚本失败写进按天日志，报错原文、出错脚本名和涉及的文件都能直接取到。不要先让用户复制日志或截图。
+
+1. `bgi.get_script_errors` 是固定稳定接口，直接 `bgi.api.describe` 后 `bgi.api.read`，不先 `bgi.api.search`。默认读当天的日志；失败发生在更早的日期时传 `date`，可用日期在 `availableDates` 里。
+2. 每条 `failure` 已经归并过：`error` 是宿主给出的一手报错原文，`jsError` 非空表示错误由 JS 引擎抛出，`script` 是从同一次运行的日志里读到的脚本名，`context` 是这次运行前后的记录。
+3. 按 `locations` 逐项核对，不再搜索接口：
+   - `kind=userFile` 是相对 `User\` 的路径，直接交给 `bgi.user.read`。缺失的路线、数据或配置文件通常出现在这里，报错原文会说它找不到什么。
+   - `kind=hostSource` 是宿主源码位置（`BetterGenshinImpact/Service/ScriptService.cs:548`），与 `bgi.api.describe` 返回的 source 字段同一形式。它说明失败发生在宿主哪一步，不是用户能改的文件，别把它当成要修的对象。
+   - `kind=absolute` 是打包机路径，本机不一定存在。
+4. 报错指向脚本本身时读源码：`bgi.user.read` 读 `User\JsScript\<folderName>\main.js`，`folderName` 取配置组任务里的字段，不按显示名猜目录。参数与运行前提以 `README.md`、`manifest.json`、`settings.json` 为准。
+5. 需要这一次运行的完整过程时，用 `bgi.read_host_log` 传 `failure.thread` 读出同一线程的记录：脚本自己的 `log()` 输出、开始与结束行、宿主异常都在其中。
+6. `script` 为空表示日志里没有能对上号的脚本名，不要猜：按 `thread` 读原始日志，或回到配置组按用户说的任务名核对 `folderName`。
+7. 结论必须落在可核对的位置：报错原文、出错的脚本或文件、下一步动作（改哪个文件、补哪条订阅、改哪个参数）。日志里确实没有记录的失败，直说没有记录，不编造原因。
 
 ## 何时询问用户
 

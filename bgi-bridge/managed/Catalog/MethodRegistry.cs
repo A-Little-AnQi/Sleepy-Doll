@@ -7,10 +7,7 @@ namespace BgiBridge.Catalog;
 /// <summary>方法处理器；返回值序列化成 invoke 或 Job 的结果。</summary>
 public delegate Task<object?> MethodHandler(JsonElement arguments, CancellationToken cancellation);
 
-/// <summary>
-/// 方法声明。Destructive 会映射成 catalog 的 effect:gameWrite + requiresConfirmation，
-/// 交给宿主侧的审批闸门。
-/// </summary>
+/// <summary>方法声明；effect 与 requiresConfirmation 供宿主侧的审批闸门判断。</summary>
 public sealed record MethodDescriptor(
     string Id,
     string Group,
@@ -26,7 +23,6 @@ public sealed record MethodDescriptor(
         : RequiresGameReady ? "gameWrite" : "hostCommand";
     public JsonElement OutputSchema => AgentSchemas.Output(Id, Guide.ResultMeaning);
 
-    // Discovery must explain the API before the agent chooses which detail to load.
     public object Discovery(bool callable, string? unavailableReason, string catalogVersion) => new
     {
         methodId = Id, displayName = Guide.Title, group = Group, summary = Guide.Purpose,
@@ -91,23 +87,11 @@ public sealed class MethodRegistry
 
     public IEnumerable<MethodDescriptor> All => _methods.Values.Select(x => x.Descriptor);
 
-    /// <summary>词间分隔符。中英文混排的查询很常见，全角空格也在内。</summary>
+    /// <summary>词间分隔符，含全角空格。</summary>
     private static readonly char[] TermSeparators =
         [' ', '\t', '　', ',', '，', '、', '/', '|', ';', '；'];
 
-    /// <summary>
-    /// 按用途检索完整目录；禁用项仍保留说明。
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// 查询先切词，命中任一词即入选，按字段加权排序。不做整串匹配：调用方传的
-    /// 是「调度器 scheduler」这类多词查询，目录里不会有字段包含这个完整串。
-    /// </para>
-    /// <para>
-    /// `+词` 表示必须命中，其余词只参与排序。与 Claude Code 的 ToolSearch 一致：
-    /// 名称命中权重最高，说明文字最低 —— 名中最能确定一个接口是做什么的。
-    /// </para>
-    /// </remarks>
+    /// <summary>按用途检索完整目录；禁用项仍保留说明。查询按词切分，命中任一词即入选，<c>+词</c> 表示必须命中，结果按字段加权排序。</summary>
     public IEnumerable<MethodDescriptor> Search(string? query, int limit)
     {
         var ordered = All.OrderBy(x => x.Id, StringComparer.Ordinal);
@@ -117,7 +101,7 @@ public sealed class MethodRegistry
         }
 
         var needle = query.Trim();
-        // 调用方常直接传接口名，此时精确返回，不必让它再描述一遍。
+        // 调用方常直接传接口名，此时精确返回。
         var exact = All.FirstOrDefault(x => x.Id.Equals(needle, StringComparison.OrdinalIgnoreCase));
         if (exact is not null)
         {
@@ -179,8 +163,7 @@ public sealed class MethodRegistry
 
     /// <summary>
     /// 把 id 切成可比词片：`setting.OtherConfig+AutoRestart.FailureCount` 切成
-    /// setting / OtherConfig / AutoRestart / FailureCount。调用方按「重启」的
-    /// 英文词找接口时，靠的就是这一步命中 AutoRestart。
+    /// setting / OtherConfig / AutoRestart / FailureCount。
     /// </summary>
     private static string[] NameParts(string id) => id
         .Split(['.', '_', '-', '+', '/', ':'], StringSplitOptions.RemoveEmptyEntries)

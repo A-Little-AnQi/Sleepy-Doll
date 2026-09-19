@@ -11,7 +11,7 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "npm run typecheck && vite build",
-    "dist": "build-desktop.cmd",
+    "dist": "cmd /c .\\build-desktop.cmd",
     "format": "prettier --write \"web/**/*.{ts,tsx,css,html}\" \"*.{json,ts}\" \"!package-lock.json\"",
     "format:check": "prettier --check \"web/**/*.{ts,tsx,css,html}\" \"*.{json,ts}\" \"!package-lock.json\""
   },

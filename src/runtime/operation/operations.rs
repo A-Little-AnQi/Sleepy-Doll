@@ -1010,7 +1010,7 @@ impl OperationEngine {
                     effect: operation.plan.execution.effect,
                     risk: operation.plan.execution.risk,
                     unattended: operation.plan.execution.unattended,
-                    // 事务已经算过差异；除删除外由计划的执行契约给出规模。
+                    // 除删除外，规模由计划的执行契约给出。
                     scope: Some(
                         if operation.plan.execution.scope == crate::extension::ScopeKind::Delete {
                             crate::runtime::operation::permissions::ChangeScope::delete()

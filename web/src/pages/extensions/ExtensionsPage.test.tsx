@@ -41,9 +41,9 @@ const bootstrap: Bootstrap = {
   models: [],
   skills: [
     {
-      name: "bgi-operator",
-      description: "操作手册",
-      source: "product",
+      name: "my-notes",
+      description: "本机笔记",
+      source: "user",
       tags: [],
       enabled: true,
       available: false,
@@ -66,6 +66,7 @@ const bootstrap: Bootstrap = {
   tools: [
     {
       name: "bgi.state.get",
+      label: "读取游戏状态",
       description: "读取一次宿主状态",
       source: "core:bgi",
     },
@@ -144,9 +145,7 @@ it("hides host settings until the plugin is introduced", async () => {
   );
   fireEvent.click(screen.getByRole("button", { name: /游戏自动化宿主/ }));
   expect(screen.queryByRole("button", { name: "打开设置" })).toBeNull();
-  expect(
-    screen.getByText("随产品提供。开启后会出现在侧栏和设置里。"),
-  ).toBeTruthy();
+  expect(screen.getByText("随产品提供，不能移除。")).toBeTruthy();
 });
 
 it("asks in the product dialog before removing a plugin", async () => {

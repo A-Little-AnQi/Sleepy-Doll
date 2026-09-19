@@ -21,8 +21,6 @@ import "./details-panel.css";
 
 /**
  * 右侧详情栏：当前对话产生的快捷任务，或选中的任务与运行详情。
- *
- * 不是常驻必需 —— 窄窗口转成抽屉，不挤压聊天正文。
  */
 export function DetailsPanel({
   bootstrap,
@@ -189,9 +187,9 @@ export function DetailsPanel({
         {pendingRemove ? (
           <>
             <p>删除「{pendingRemove.name}」。</p>
-            <p>已经跑过的运行记录和它改过的文件都会保留。</p>
+            <p>已执行过的运行记录和它改过的文件都会保留。</p>
             {pendingRemove.runnable ? (
-              <p>如果有运行正在进行，那一次会继续跑完。</p>
+              <p>如果有运行正在进行，那一次会继续执行完。</p>
             ) : null}
           </>
         ) : null}

@@ -29,7 +29,7 @@ public sealed class SettingChangeRecord
     public string BackupDigest { get; set; } = "";
 }
 
-/// <summary>Settings-only transactions. Arbitrary host commands never enter this engine.</summary>
+/// <summary>只处理设置事务；界面命令不进入此引擎。</summary>
 public sealed class SettingsTransactionEngine(
     Func<object> rootProvider, Func<string> configPathProvider,
     Func<JsonSerializerOptions> optionsProvider, string recordDirectory,
@@ -48,7 +48,7 @@ public sealed class SettingsTransactionEngine(
         if (!File.Exists(path)) return [];
         if (new FileInfo(path).Length > 16 * 1024 * 1024) throw new BridgeException("CONFIG_TOO_LARGE", "配置文件超过安全处理大小，拒绝自动修改。", 409);
         var bytes = File.ReadAllBytes(path);
-        if (bytes.Length == 0) throw new BridgeException("INVALID_CONFIG_FILE", "宿主配置文件为空，拒绝覆盖。请先人工核对。", 409);
+        if (bytes.Length == 0) throw new BridgeException("INVALID_CONFIG_FILE", "BetterGI 配置文件为空，拒绝覆盖。请先人工核对。", 409);
         return bytes;
     }
     private static bool Equal(JsonElement left, JsonElement right) => ValueContract.Canonical(left) == ValueContract.Canonical(right);
@@ -80,7 +80,7 @@ public sealed class SettingsTransactionEngine(
             }
             var snapshot = RootSnapshot(root);
             var disk = DiskBytes(ConfigPath);
-            _ = ObjectFrom(disk, snapshot); // Refuse malformed on-disk configuration before mutation.
+            _ = ObjectFrom(disk, snapshot); // 磁盘配置不合法时在修改前抛出。
             var plan = new Plan(Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow.AddMinutes(10),
                 ValueContract.Version(snapshot), Digest(disk), changes);
             foreach (var expired in _plans.Values.Where(plan => plan.Expires < DateTimeOffset.UtcNow).ToList()) _plans.Remove(expired.Id);
@@ -147,7 +147,7 @@ public sealed class SettingsTransactionEngine(
             foreach (var saved in record.Changes)
             {
                 var entry = entries.GetValueOrDefault(saved.Path)
-                    ?? throw BridgeException.NotFound($"当前宿主不再提供 {saved.Path}。");
+                    ?? throw BridgeException.NotFound($"当前 BetterGI 不再提供 {saved.Path}。");
                 var (owner, property) = SettingsCatalog.Resolve(root, saved.Path);
                 var current = ValueContract.Snapshot(property.GetValue(owner), property.PropertyType);
                 var present = TryGet(disk, saved.Path, out var node);
@@ -214,9 +214,9 @@ public sealed class SettingsTransactionEngine(
         }
         var callback = root.GetType().GetProperty("OnAnyChangedAction");
         if (callback?.CanRead != true || !callback.CanWrite)
-            throw new BridgeException("UNSUPPORTED_HOST", "宿主没有可暂停的配置自动保存回调，拒绝修改。", 409);
+            throw new BridgeException("UNSUPPORTED_HOST", "BetterGI 没有可暂停的配置自动保存回调，拒绝修改。", 409);
         var previousSave = callback.GetValue(root);
-        SaveRecord(record, create: true); // A durable recovery record exists BEFORE the first setter.
+        SaveRecord(record, create: true); // 第一个 setter 调用前先落盘恢复记录。
         var changed = new List<(object Owner, PropertyInfo Property, object? Before)>();
         string? writtenHash = null;
         try
@@ -224,17 +224,17 @@ public sealed class SettingsTransactionEngine(
             callback.SetValue(root, null);
             foreach (var change in prepared)
             {
-                // Track before invoking: a setter can change the value and then throw.
+                // 先登记再调用：setter 可能改完值再抛异常。
                 changed.Add((change.Owner, change.Property, change.Before));
                 change.Property.SetValue(change.Owner, change.After);
                 if (!Equal(ValueContract.Snapshot(change.Property.GetValue(change.Owner), change.Property.PropertyType), record.Changes.Single(item => item.Path == change.Path).After))
-                    throw new InvalidOperationException($"宿主未接受 {change.Path} 的请求值。");
+                    throw new InvalidOperationException($"BetterGI 未接受 {change.Path} 的请求值。");
             }
             var serialized = JsonNode.Parse(RootSnapshot(root).GetRawText())!.AsObject();
             for (var index = 0; index < record.Changes.Count; index++)
             {
                 var item = record.Changes[index];
-                if (!TryGet(serialized, item.Path, out var newValue)) throw new InvalidOperationException($"宿主序列化中没有 {item.Path}。");
+                if (!TryGet(serialized, item.Path, out var newValue)) throw new InvalidOperationException($"BetterGI 序列化中没有 {item.Path}。");
                 record.Changes[index] = item with { AfterDisk = NodeValue(newValue) };
                 var restore = inverse?.Changes.Single(change => change.Path == item.Path);
                 if (restore is { BeforeDiskPresent: false })
@@ -244,7 +244,7 @@ public sealed class SettingsTransactionEngine(
                 }
                 else Set(disk, item.Path, restore is null ? newValue?.DeepClone() : JsonNode.Parse(restore.BeforeDisk.GetRawText()));
             }
-            SaveRecord(record); // Persist intended after-values to recover an interrupted commit.
+            SaveRecord(record); // 落盘目标值，用于恢复中断的提交。
             if (Digest(DiskBytes(path)) != Digest(beforeFile)) throw new InvalidOperationException("提交过程中配置文件被其他来源修改。");
             var bytes = Encoding.UTF8.GetBytes(disk.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
             writtenHash = Digest(bytes);
@@ -289,7 +289,7 @@ public sealed class SettingsTransactionEngine(
             catch
             {
                 record.State = "recoveryRequired";
-                record.Error = "无法恢复宿主自动保存回调，需要人工核对。";
+                record.Error = "无法恢复 BetterGI 自动保存回调，需要人工核对。";
                 try { SaveRecord(record); } catch { }
                 throw new BridgeException("RECOVERY_REQUIRED", $"自动保存回调恢复失败。changeId={record.ChangeId}", 409);
             }
@@ -325,7 +325,7 @@ public sealed class SettingsTransactionEngine(
         var record = JsonSerializer.Deserialize<SettingChangeRecord>(File.ReadAllText(path), RecordJson)
             ?? throw BridgeException.InvalidArgument("恢复记录无效。");
         if (record.Format != 1 || record.ChangeId != id || record.ConfigPath != ConfigPath)
-            throw BridgeException.InvalidArgument("恢复记录与当前宿主配置不匹配。");
+            throw BridgeException.InvalidArgument("恢复记录与当前 BetterGI 配置不匹配。");
         if (record.BackupDigest != Digest(System.Convert.FromBase64String(record.BeforeFileBase64)))
             throw BridgeException.InvalidArgument("恢复记录校验失败。");
         return record;
@@ -409,10 +409,10 @@ public static class SettingsTransactions
 {
     public static SettingsTransactionEngine Engine { get; private set; } = null!;
     public static void Configure(string directory) => Engine = new(
-        () => Host.AllConfigInstance() ?? throw BridgeException.Missing("宿主配置尚未初始化。"),
+        () => Host.AllConfigInstance() ?? throw BridgeException.Missing("BetterGI 配置尚未初始化。"),
         () => (string)(Reflect.CallStatic(Reflect.RequireType("BetterGenshinImpact.Core.Config.Global"), "Absolute", "User/config.json")
-            ?? throw BridgeException.Missing("无法解析宿主配置位置。")),
+            ?? throw BridgeException.Missing("无法解析 BetterGI 配置位置。")),
         () => (JsonSerializerOptions)(Reflect.GetStatic(Reflect.RequireType("BetterGenshinImpact.Service.ConfigService"), "JsonOptions")
-            ?? throw BridgeException.Missing("宿主序列化规则不可用。")), directory, () => Environment.ProcessPath,
+            ?? throw BridgeException.Missing("BetterGI 序列化规则不可用。")), directory, () => Environment.ProcessPath,
         () => { if (Host.TaskSemaphoreCount() is not > 0) throw BridgeException.Busy("存在运行中的独立任务或任务状态未知，暂不修改配置。"); });
 }

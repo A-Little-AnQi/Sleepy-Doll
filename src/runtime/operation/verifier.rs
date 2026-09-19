@@ -2,8 +2,7 @@ use crate::runtime::host::catalog::Predicate;
 use crate::runtime::types::unix_now;
 use serde_json::Value;
 
-/// Only configured predicates over fresh observations may strengthen a Job's
-/// unknown business outcome. Natural-language assistant text is never evidence.
+/// 按配置的谓词核对快照，返回 unknown / verifiedSucceeded / verifiedFailed。
 pub fn verify(predicates: &[Predicate], snapshot: &Value, instance: &str) -> &'static str {
     if predicates.is_empty() || snapshot["instanceId"] != instance {
         return "unknown";
@@ -46,9 +45,7 @@ pub fn verify(predicates: &[Predicate], snapshot: &Value, instance: &str) -> &'s
     }
 }
 
-/// Bridges may serialize the same value differently, for example `1` against
-/// `1.0`, or a number delivered as a string. A serialization difference alone
-/// must not report a successful write as `verifiedFailed`.
+/// 比较两个值：桥可能把同一个数写成 `1`、`1.0` 或字符串。
 fn equivalent(actual: &Value, expected: &Value) -> bool {
     if actual == expected {
         return true;

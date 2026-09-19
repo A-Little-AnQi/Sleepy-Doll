@@ -49,17 +49,16 @@ pub struct Grant {
     pub resource_binding_hash: String,
     pub expires_at: i64,
 }
-/// 给输出留的余量上限。参考实现取 20,000，按其摘要输出的 p99.99 量级。
+/// 给输出留的余量上限。
 const MAX_OUTPUT_RESERVE: u64 = 20_000;
 
-/// 触发修剪前留的缓冲，与参考实现一致。
+/// 触发修剪前留的缓冲。
 const THRESHOLD_BUFFER: u64 = 13_000;
 
 /// 上下文预算：字符预算与 token 上限。
 ///
-/// 按**当前模型自己的窗口**推导，而不是写死一个与模型无关的常数 —— 200k 窗口
-/// 和 32k 窗口共用一个上限，前者被白白浪费，后者直接超限。窗口减去给输出留的
-/// 余量，再留一段缓冲。显式配置了 `contextChars` / `maxTokens` 时以配置为准。
+/// 按当前模型自己的窗口推导：窗口减去给输出留的余量，再留一段缓冲。显式配置了
+/// `contextChars` / `maxTokens` 时以配置为准。
 pub fn budget(policy: &RuntimeConfig, model: &crate::config::ModelConfig) -> (usize, u64) {
     let window = model.options.context_window.max(8_192);
     let reserve = model
@@ -131,7 +130,7 @@ mod tests {
         .unwrap()
     }
 
-    /// 预算跟着模型窗口走 —— 200k 窗口不该和一个 32k 窗口用同一个上限。
+    /// 预算跟着模型窗口走。
     #[test]
     fn budget_follows_the_model_window() {
         let policy = RuntimeConfig::default();
@@ -146,7 +145,7 @@ mod tests {
         assert!(small_chars < chars && small_chars > 0);
     }
 
-    /// 输出预留有上限，长输出的模型不会把窗口吃掉。
+    /// 输出预留有上限。
     #[test]
     fn output_reserve_is_capped() {
         let policy = RuntimeConfig::default();

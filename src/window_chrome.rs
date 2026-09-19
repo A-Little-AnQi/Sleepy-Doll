@@ -2,10 +2,8 @@
 //!
 //! 属于桌面壳（`sleepy-doll.exe`）而不属于库：只有它需要知道窗口的存在。
 //!
-//! 圆角完全交给 DWM：Windows 11 会切出平滑圆角；Windows 10 没有这个属性，
-//! 窗口保持方角，与 Chrome、Edge 在该系统上的形态一致。页面绘制与窗口区域
-//! （`SetWindowRgn`）都不参与圆角 —— 前者会在角上留透明缝，后者是硬裁剪，
-//! 必有锯齿，两者都试过并放弃了。
+//! 圆角交给 DWM：Windows 11 会切出平滑圆角；Windows 10 没有这个属性，窗口
+//! 保持方角。
 
 #[cfg(not(target_os = "windows"))]
 use tao::window::Window;
@@ -94,18 +92,17 @@ mod platform {
     /// 自绘标题栏的可拖动条带，由界面在挂载后经 `set_drag_strip` 上报，单位是 CSS 像素。
     /// 高度为 0 表示还没有上报（页面刚启动），此时拖动退回界面发起的 `Action::Drag`。
     static STRIP_HEIGHT: AtomicU32 = AtomicU32::new(0);
-    /// 标题栏右侧控制按钮组的宽度：条带要把它让出来，按钮才能收到点击。
+    /// 标题栏右侧控制按钮组的宽度，条带要让出这段区域。
     static CONTROLS_WIDTH: AtomicU32 = AtomicU32::new(0);
-    /// 上报条带时声明的最大化能力。不能最大化的窗口（安装器）要在双击时吞掉
-    /// HTCAPTION 的默认最大化行为。
+    /// 上报条带时声明的最大化能力。
     static CAN_MAXIMIZE: AtomicBool = AtomicBool::new(true);
 
-    /// 子类化标识。两者只在本模块内使用，取值只需彼此不同。
+    /// 子类化标识，取值只需彼此不同。
     const PARENT_SUBCLASS: usize = 1;
     const CHILD_SUBCLASS: usize = 2;
 
-    // comctl32 的子类化接口，windows-sys 没有导出。wry 也用这一套在同一个父窗口上
-    // 挂子类（WebView2 靠它跟随窗口尺寸），两边走同一条链才能并存。
+    // comctl32 的子类化接口，windows-sys 没有导出。wry 在同一个父窗口上也用
+    // 这一套（WebView2 靠它跟随窗口尺寸），两边走同一条链才能并存。
     type SubclassProc =
         unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM, usize, usize) -> LRESULT;
 
@@ -121,7 +118,7 @@ mod platform {
     }
 
     /// 请求 DWM 画圆角。Windows 11 接受并切出平滑圆角；Windows 10 不认识这个
-    /// 属性，返回错误后窗口保持方角。无论结果如何都不需要界面配合。
+    /// 属性，窗口保持方角。
     pub fn apply_rounding(hwnd: HWND) {
         let preference = DWMWCP_ROUND;
         unsafe {
@@ -135,7 +132,7 @@ mod platform {
     }
 
     /// 界面挂载标题栏后上报可拖动条带的几何信息（CSS 像素）。上报之后条带区域
-    /// 由原生命中测试答 HTCAPTION，拖动、贴边吸附、双击最大化全部走系统路径。
+    /// 由原生命中测试答 HTCAPTION。
     pub fn set_drag_strip(height: f64, controls_width: f64, can_maximize: bool) {
         if height >= 0.0 && controls_width >= 0.0 {
             STRIP_HEIGHT.store(height as u32, Ordering::Relaxed);
@@ -149,11 +146,10 @@ mod platform {
         let hwnd = window.hwnd() as HWND;
         unsafe {
             // 子类先装上：下面加回 WS_THICKFRAME 会让系统重算非客户区，那一次
-            // WM_NCCALCSIZE 必须由我们接手，否则客户区会按边框宽度缩一圈。
+            // WM_NCCALCSIZE 要由本模块接手。
             SetWindowSubclass(hwnd, Some(parent_proc), PARENT_SUBCLASS, 0);
 
-            // 无装饰的窗口没有 WS_THICKFRAME，而缩放循环、贴边吸附、拖离最大化都挂在它上面：
-            // 就算命中测试给出 HTLEFT，DefWindowProc 缺了它也不会进入缩放循环。
+            // 无装饰的窗口没有 WS_THICKFRAME，而缩放循环、贴边吸附、拖离最大化都挂在它上面。
             let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
             SetWindowLongPtrW(hwnd, GWL_STYLE, (style | WS_THICKFRAME) as isize);
             SetWindowPos(
@@ -185,8 +181,7 @@ mod platform {
         }
     }
 
-    /// 立即进入系统的移动循环。界面在收到 pointerdown 时调用它作为兜底：
-    /// 条带上报之前页面还没被原生命中测试接管。
+    /// 立即进入系统的移动循环。条带上报之前由界面在 pointerdown 时调用。
     pub fn begin_system_drag(hwnd: isize) {
         unsafe {
             // 拖动交给系统的移动循环：贴边吸附、拖离最大化、跨显示器换 DPI 都由它处理。
@@ -205,13 +200,13 @@ mod platform {
     ) -> LRESULT {
         match message {
             WM_NCCALCSIZE if wparam != 0 => {
-                // 系统算出的客户区原样退回：非客户区被压成零宽，系统边框与标题栏就不存在了。
+                // 系统算出的客户区原样退回，非客户区被压成零宽。
                 let params = lparam as *mut NCCALCSIZE_PARAMS;
                 let proposed = unsafe { (*params).rgrc[0] };
                 unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
                 unsafe { (*params).rgrc[0] = proposed };
                 if unsafe { IsZoomed(hwnd) } != 0 {
-                    // 最大化时窗口被外扩了恰好一条边框，客户区要缩回去，否则界面会被推出屏幕。
+                    // 最大化时窗口被外扩了恰好一条边框，客户区要缩回去。
                     let frame = unsafe { frame_thickness() };
                     let rect = unsafe { &mut (*params).rgrc[0] };
                     rect.left += frame;
@@ -222,7 +217,7 @@ mod platform {
                 0
             }
             WM_NCHITTEST => {
-                // 内部区域不返回 HTCAPTION 之外的值：条带是界面自绘的标题栏，按钮自己处理点击。
+                // 内部区域不返回 HTCAPTION 之外的值：条带是界面自绘的标题栏。
                 let hit = unsafe { resize_hit(hwnd, lparam) };
                 if hit != HTCLIENT as LRESULT {
                     return hit;
@@ -233,8 +228,8 @@ mod platform {
                 HTCLIENT as LRESULT
             }
             WM_NCLBUTTONDBLCLK if wparam as i32 == HTCAPTION as i32 => {
-                // 不能最大化的窗口把双击吞掉，其余交给系统：HTCAPTION 的双击
-                // 最大化/还原是 DefWindowProc 的行为。
+                // 不能最大化的窗口把双击吞掉；HTCAPTION 的双击最大化/还原是
+                // DefWindowProc 的行为。
                 if CAN_MAXIMIZE.load(Ordering::Relaxed) {
                     unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
                 } else {
@@ -253,9 +248,8 @@ mod platform {
         _id: usize,
         _data: usize,
     ) -> LRESULT {
-        // WebView2 的子窗口铺满整个客户区，它答 HTCLIENT 就等于把边框那一条也算进自己的
-        // 地盘，缩放会整个失效。边缘与标题栏条带都交还给父窗口，两边用同一套判断，
-        // 不会有死区。
+        // WebView2 的子窗口铺满整个客户区，答 HTCLIENT 会把边框那一条也算进自己的
+        // 地盘，缩放会整个失效。边缘与标题栏条带都交还给父窗口，两边用同一套判断。
         if message == WM_NCHITTEST {
             let parent = unsafe { GetParent(hwnd) };
             if !parent.is_null() {
@@ -325,7 +319,7 @@ mod platform {
         code as LRESULT
     }
 
-    /// 系统认定的边框宽度。两条边都按这个值算，抓取区域不会错位。
+    /// 系统认定的边框宽度。
     unsafe fn frame_thickness() -> i32 {
         unsafe { GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER) }
     }

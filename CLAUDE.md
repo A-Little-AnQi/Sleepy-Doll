@@ -40,9 +40,13 @@ cargo test --no-default-features --test live -- --ignored --nocapture
   半个不可用的安装目录。构建失败时逐个列出没替换成的文件，其余保持可用。
 - 产物只有两个落点，都不进版本库：中间产物统一在 `target/`（`target/bridge`、`target/dotnet`、
   `target/ui`、`target/release`），交付物在 `dist/Sleepy-Doll/`。
-- **注释只说明代码做什么、为什么必须这样，不叙述它以前是什么样。** 改动的来龙去脉属于提交信息，
-  不属于源码；一条注释写三五行的辩解同样是噪音。
-- 文档与提交信息用标准技术文体：动词用「执行」不用「跑」、产品名不译（Build Tools、token）。
+- **注释只写这段代码做什么，一行说完。** 代码本身看不出来的外部事实要留：Windows 与 BetterGI 的
+  行为、模型协议的要求、文件格式、单位、取值范围、必须维持的不变量、危险操作的安全提示。本仓库
+  自己的设计论证一律删掉 —— 「否则」「不然」「免得」「以前」，以及替某个选择辩解的整段话。
+  界面文案同理：说清一件事，不解释为什么这样设计。写法照 BetterGI 的源码
+  （`E:\BetterGIProject\better-genshin-impact\BetterGenshinImpact`）。
+- 文档、提交信息、注释与界面文案统一用标准技术文体与简体中文：动词用「执行」不用「跑」、
+  产品名与协议术语不译（Build Tools、token）、代码注释与文档里不出现自称「我们」。
 
 ## 协作方式
 
@@ -61,8 +65,8 @@ cargo test --no-default-features --test live -- --ignored --nocapture
 
 **写代码**
 
-- 注释只说明代码做什么、为什么必须这样，**不叙述它以前是什么样**。改动来历属于提交信息，
-  不属于源码；三五行的辩解同样是噪音。
+- **注释只写代码做什么，一行说完；改动来历属于提交信息。** 外部约束（系统与宿主的行为、协议、
+  文件格式、取值范围、不变量）留下，本仓库自己的设计论证删掉。写之前先看两眼 BetterGI 的同名文件。
 - 匹配周围代码的风格与抽象层级。**不要为一个场景写特例** —— 那通常说明缺一个模型，
   先把它找出来（领域对象、协议要求、数据结构），而不是加分支。
 - **先量再改。** 判断「哪里慢」「为什么失败」之前先取真实数据（日志、探针、实测数字），
@@ -128,7 +132,7 @@ assets/       程序与安装器图标、.rc 与 UAC manifest，由 build.rs 编
 dist/Sleepy-Doll/
   sleepy-doll.exe
   bridge/      9 个 BgiBridge.* 文件与 bridge.config.json，必须整组同目录
-  skills/      随产品分发的能力包
+  plugins/bgi/ 随产品分发的插件：BetterGI 的领域说明
   user/        用户数据，构建和安装都不动它；卸载默认保留，只有显式勾选才删
 ```
 
@@ -137,17 +141,20 @@ dist/Sleepy-Doll/
 
 ## 领域知识
 
-BetterGI 的领域知识随能力包分发，放在 `skills/` 下，由 `build-desktop.cmd` 一起装进
-`dist\Sleepy-Doll\skills\`：
+BetterGI 的领域知识是**一个插件**，放在 `plugins/bgi/` 下，由 `build-desktop.cmd` 一起装进
+`dist\Sleepy-Doll\plugins\bgi\`。它自包含：清单、技能、将来的工具都在这一个目录里。
 
-- [`skills/bgi-assistant/SKILL.md`](skills/bgi-assistant/SKILL.md) —— 助手行为规范、领域概念、
-  能力边界与参考路由。`references/` 下是按需读取的资料，通过 `skills.reference` 取用。
-- [`skills/bgi-operator/SKILL.md`](skills/bgi-operator/SKILL.md) —— 具体工具调用手册：
-  配置组与任务的字段、`User\` 目录布局、脚本目录（`README.md` / `manifest.json` /
-  `settings.json`）、执行模型、界面命令「操作当前选中项」的语义，以及各条稳定接口的调用顺序。
+- [`plugins/bgi/skills/bgi-assistant/SKILL.md`](plugins/bgi/skills/bgi-assistant/SKILL.md) ——
+  助手行为规范、领域概念、能力边界与参考路由。`references/` 下是按需读取的资料，通过
+  `skills.reference` 取用。
+- [`plugins/bgi/skills/bgi-operator/SKILL.md`](plugins/bgi/skills/bgi-operator/SKILL.md) ——
+  具体工具调用手册：配置组与任务的字段、`User\` 目录布局、脚本目录（`README.md` /
+  `manifest.json` / `settings.json`）、执行模型、界面命令「操作当前选中项」的语义，以及
+  各条稳定接口的调用顺序。
 
-两份都标了 `requiresProviders: bgi`，**只在桥连接时注入**。`CORE_AGENT_POLICY` 保持与领域无关，
-接入其他软件时不会带上 BGI 的规则。
+**插件目录里的技能归插件所有**：插件停用，它们就不在注册表里，界面上也不单独出现、没有自己的
+开关。用户自己导入的技能走 `agent.skillDirectories`，那类才逐项开关。`CORE_AGENT_POLICY`
+保持与领域无关，接入其他软件时不会带上 BGI 的规则。
 
 **不要在这里复述它们的内容，也不要另写一份功能清单** —— 功能面以桥的接口目录为准
 （`setting.` 全部配置项、`cmd.` 全部界面命令，每条自带中文说明）。

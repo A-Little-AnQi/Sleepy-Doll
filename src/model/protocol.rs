@@ -122,11 +122,8 @@ pub(super) fn anthropic_body(
                 })],
             )
         } else {
-            // Anthropic 要求思考块位于同一轮的 text / tool_use 之前，且顺序
-            // 必须与模型生成时一致。只回传、不重排。
-            //
-            // 仅限 assistant 轮：这个分支也服务 user 轮，用户轮出现思考块是
-            // 协议错误。协议标签不符的载荷同样丢弃。
+            // Anthropic 要求思考块位于同一轮的 text / tool_use 之前，顺序与模型
+            // 生成时一致。思考块只能挂在 assistant 轮，协议标签不符的载荷丢弃。
             let mut content = match &message.reasoning {
                 Some(reasoning)
                     if message.role == Role::Assistant
@@ -154,10 +151,8 @@ pub(super) fn anthropic_body(
         if blocks.is_empty() {
             continue;
         }
-        // Anthropic requires alternating roles. Parallel tool results belong to
-        // one user message immediately following the assistant tool_use message.
-        // Keeping one DB row per tool is useful internally, so normalize only on
-        // the provider wire boundary.
+        // Anthropic 要求角色交替：并行的工具结果必须并进紧跟在 assistant
+        // tool_use 之后的一条 user 消息。
         if converted
             .last()
             .is_some_and(|last| last["role"].as_str() == Some(role))
@@ -165,7 +160,7 @@ pub(super) fn anthropic_body(
             let content = converted
                 .last_mut()
                 .and_then(|last| last["content"].as_array_mut())
-                .expect("Anthropic message content is always an array");
+                .expect("Anthropic 消息的 content 恒为数组");
             if role == "user" && blocks.iter().all(|block| block["type"] == "tool_result") {
                 let insert_at = content
                     .iter()
@@ -221,8 +216,8 @@ pub(super) fn gemini_body(
             } else {
                 vec![json!({"text":message.content})]
             };
-            // Gemini 3 起强制校验 thoughtSignature：收到就必须附回**同一个**
-            // part，不能合并也不能与 part 分离，否则 400。
+            // Gemini 3 起强制校验 thoughtSignature：收到就必须附回同一个 part，
+            // 不能合并也不能与 part 分离，否则 400。
             let signatures = message
                 .reasoning
                 .as_ref()
@@ -253,10 +248,8 @@ pub(super) fn gemini_body(
         if parts.is_empty() {
             continue;
         }
-        // Gemini counts functionResponse parts against the preceding functionCall parts,
-        // and they have to sit in ONE user content. One DB row per tool is useful
-        // internally, so merge only here on the provider wire boundary - same reason
-        // as anthropic_body above.
+        // Gemini 按前一条 functionCall 计数 functionResponse：并行的工具结果
+        // 必须落在同一条 user content 里。
         if contents
             .last()
             .is_some_and(|last| last["role"].as_str() == Some(role))
@@ -264,7 +257,7 @@ pub(super) fn gemini_body(
             contents
                 .last_mut()
                 .and_then(|last| last["parts"].as_array_mut())
-                .expect("Gemini content parts are always an array")
+                .expect("Gemini content 的 parts 恒为数组")
                 .extend(parts);
         } else {
             contents.push(json!({"role":role,"parts":parts}));
@@ -299,8 +292,8 @@ fn uses_max_completion_tokens(model: &str) -> bool {
 }
 
 /// Anthropic 提示缓存：最多 4 个断点，标在 tools 末、system 末、最新非 thinking
-/// 块，长对话再标上一条更早的 user。与 CC Switch `cache_injector` 同策略。
-/// 绝不能泄漏到 openai-chat：Kimi / NIM / Qwen 会因 `cache_control` 直接 400。
+/// 块，长对话再标上一条更早的 user。`cache_control` 不能进 openai-chat：
+/// Kimi / NIM / Qwen 会因它直接 400。
 fn inject_anthropic_cache(body: &mut Value) {
     let existing = count_cache_breakpoints(body);
     let mut budget = 4usize.saturating_sub(existing);
@@ -469,7 +462,7 @@ fn parse_arguments(value: &Value) -> Result<Value> {
     }
     if let Some(text) = value.as_str() {
         return serde_json::from_str(text)
-            .map_err(|_| Error::ModelProtocol("model returned invalid tool arguments".into()));
+            .map_err(|_| Error::ModelProtocol("模型返回的工具参数不合法".into()));
     }
     Ok(json!({}))
 }
@@ -478,9 +471,6 @@ fn parse_arguments(value: &Value) -> Result<Value> {
 ///
 /// 原样保留 `id` 与 `encrypted_content`，只去掉值为 `null` 的键：显式送
 /// `"encrypted_content": null` 会被严格的服务端拒绝，正确做法是省略该字段。
-///
-/// 注意：若将来在请求体里设 `store: false`，服务端不持久化输出项，这里必须
-/// 一并剥掉裸 `rs_*` id，否则会以 `Item with id ... not found` 失败。
 fn replay_reasoning_item(item: &Value) -> Option<Value> {
     let mut item = item.as_object()?.clone();
     item.retain(|_, value| !value.is_null());
@@ -489,8 +479,8 @@ fn replay_reasoning_item(item: &Value) -> Option<Value> {
 
 /// 收集 Gemini 的 thought 文本与 `functionCall` 的 `thoughtSignature`。
 ///
-/// 签名按 `functionCall` 在轮内的序号索引，不按 call id：运行时会重写 call id，
-/// 而 part 顺序稳定。并行调用时只有第一个 `functionCall` 带签名。
+/// 签名按 `functionCall` 在轮内的序号索引：运行时会重写 call id，part 顺序稳定。
+/// 并行调用时只有第一个 `functionCall` 带签名。
 fn gemini_reasoning(parts: &[Value]) -> Option<Reasoning> {
     let mut text = String::new();
     let mut signatures = Vec::new();
@@ -516,8 +506,8 @@ fn gemini_reasoning(parts: &[Value]) -> Option<Reasoning> {
     })
 }
 
-/// 只收集可读文本，用于界面展示。这两个协议不要求回传推理内容，回传多数
-/// 提供方会拒绝。
+/// 只收集可读文本，用于界面展示。这两个协议不要求回传推理内容，回传会被多数
+/// 提供方拒绝。
 fn display_reasoning(protocol: ModelProtocol, text: Option<&str>) -> Option<Reasoning> {
     let text = text.unwrap_or_default();
     (!text.is_empty()).then(|| Reasoning {
@@ -529,8 +519,8 @@ fn display_reasoning(protocol: ModelProtocol, text: Option<&str>) -> Option<Reas
 
 /// 收集 Responses 的 reasoning 输出项。
 ///
-/// 整项克隆：`encrypted_content` 必须逐字回传，在 `store=false` 下它是推理
-/// 上下文唯一的载体。
+/// 整项克隆：`encrypted_content` 必须逐字回传，在 `store=false` 下它是推理上下文
+/// 唯一的载体。
 fn responses_reasoning(output: &[Value]) -> Option<Reasoning> {
     let kept = output
         .iter()
@@ -554,8 +544,8 @@ fn responses_reasoning(output: &[Value]) -> Option<Reasoning> {
 
 /// 收集 Anthropic 的思考块。
 ///
-/// 整块克隆，不提取文本：`signature` 必须逐字回传，`redacted_thinking` 的
-/// `data` 也是。少一个键、改一个字符，下一轮就是 400。
+/// 整块克隆，不提取文本：`signature` 与 `redacted_thinking` 的 `data` 都必须逐字
+/// 回传，少一个键、改一个字符，下一轮就是 400。
 fn anthropic_reasoning(blocks: &[Value]) -> Option<Reasoning> {
     let kept = blocks
         .iter()
@@ -588,7 +578,7 @@ pub(crate) fn parse_response(protocol: ModelProtocol, raw: &Value) -> Result<Mod
             let choice = raw["choices"]
                 .as_array()
                 .and_then(|items| items.first())
-                .ok_or_else(|| Error::ModelProtocol("OpenAI response has no choices".into()))?;
+                .ok_or_else(|| Error::ModelProtocol("OpenAI 响应里没有 choices".into()))?;
             let message = &choice["message"];
             let calls = message["tool_calls"]
                 .as_array()
@@ -680,7 +670,7 @@ pub(crate) fn parse_response(protocol: ModelProtocol, raw: &Value) -> Result<Mod
             let candidate = raw["candidates"]
                 .as_array()
                 .and_then(|items| items.first())
-                .ok_or_else(|| Error::ModelProtocol("Gemini response has no candidates".into()))?;
+                .ok_or_else(|| Error::ModelProtocol("Gemini 响应里没有 candidates".into()))?;
             let parts = candidate["content"]["parts"]
                 .as_array()
                 .cloned()
@@ -818,8 +808,7 @@ mod tests {
         assert_eq!(wire[2]["content"][1]["is_error"], true);
     }
 
-    /// Gemini counts functionResponse parts against the preceding functionCall parts,
-    /// so parallel tool results have to land in one user content just like Anthropic.
+    /// Gemini 与 Anthropic 一样，并行的工具结果要落进同一条 user content。
     #[test]
     fn gemini_combines_parallel_tool_results_into_one_user_turn() {
         let config: ModelConfig = serde_json::from_value(json!({
@@ -935,7 +924,7 @@ mod tests {
         assert_eq!(block["data"], "opaque-payload");
     }
 
-    /// 协议标签不符时丢弃：把 Anthropic 的思考块发给别的协议是协议错误。
+    /// 协议标签不符时丢弃。
     #[test]
     fn anthropic_drops_reasoning_from_another_protocol() {
         let config: ModelConfig = serde_json::from_value(json!({
@@ -1037,8 +1026,8 @@ mod tests {
         assert_eq!(input[1]["type"], "function_call");
     }
 
-    /// 全链路：解码真实 SSE 帧 → 组装 → 落库 → 读回 → 组装请求体。
-    /// 签名必须逐字节保留：少一个字符、改一个键都会让下一轮 400。
+    /// 全链路：解码真实 SSE 帧 → 组装 → 落库 → 读回 → 组装请求体
+    /// 签名必须逐字节保留，否则下一轮 400。
     #[test]
     fn anthropic_reasoning_survives_decode_store_and_replay() {
         use crate::runtime::{gateway::Decoder, store::journal::Journal, types::RunState};
@@ -1110,6 +1099,7 @@ mod tests {
     fn tool(name: &str) -> crate::extension::ToolDefinition {
         crate::extension::ToolDefinition {
             name: name.into(),
+            label: String::new(),
             description: name.into(),
             input_schema: json!({"type":"object","properties":{}}),
             output_schema: None,

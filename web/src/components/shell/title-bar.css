@@ -1,6 +1,5 @@
-/* 自绘标题栏。高度记在 :root 上（默认 0），侧栏和遮罩按同一个变量让位，
-   这样浏览器预览里这些规则自然失效。页面保持方角：圆角完全由 DWM 切
-   （Windows 11），Windows 10 上窗口就是方角，与系统内其它浏览器一致。 */
+/* 自绘标题栏。高度记在 :root 上（默认 0），侧栏和遮罩按同一个变量让位。
+   窗口圆角由 DWM 切（Windows 11），Windows 10 上是方角。 */
 :root[data-frameless="true"] {
   --title-bar-height: 32px;
 }
@@ -16,12 +15,12 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  /* 窗口控制永远贴物理右缘，不跟界面语言方向走。 */
+  /* 窗口控制贴物理右缘，不随界面语言方向翻转。 */
   direction: ltr;
-  /* 用内阴影而不是下边框：下边框占掉 32px 里的一像素，控制按钮和图标就只剩 31px。 */
+  /* 用内阴影代替下边框，不占高度。 */
   box-shadow: inset 0 -1px 0 var(--border);
   background: var(--surface);
-  /* 按钮的悬停底色是方的，不裁掉就会盖住窗口的圆角。 */
+  /* 裁掉按钮悬停底色的方角。 */
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;

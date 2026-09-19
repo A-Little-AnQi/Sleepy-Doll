@@ -18,7 +18,7 @@ public static class SourceDocumentation
         {
             var entry = Find(prefix, type.FullName!, name);
             if (entry is null) continue;
-            // This DTO is explicitly copied into AutoFightConfig by the host.
+            // 宿主的 AutoFightConfig 会把该 DTO 复制一份给 AutoLeyLineOutcropFightConfig；同名成员共用一份说明。
             if (entry.Summary.Length == 0 && type.FullName == "BetterGenshinImpact.GameTask.AutoLeyLineOutcrop.AutoLeyLineOutcropFightConfig+FightFinishDetectConfig"
                 && Entries.TryGetValue($"P:BetterGenshinImpact.GameTask.AutoFight.AutoFightConfig+FightFinishDetectConfig.{name}", out var shared))
                 return entry with { Summary = "地脉花战斗检查：" + shared.Summary, DocumentationSource = "host-shared-config" };

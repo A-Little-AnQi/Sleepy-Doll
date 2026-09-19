@@ -32,8 +32,7 @@
 }
 
 .select-menu {
-  /* 位置由组件按触发器的视口坐标算好（含贴边翻转），这里只负责外观。
-     挂在 body 上，不受任何祖先的层叠上下文或 overflow 影响。 */
+  /* 位置由组件按触发器的视口坐标算出。 */
   position: fixed;
   z-index: 1000;
   max-width: calc(100vw - 16px);

@@ -20,9 +20,21 @@ pub enum ModelProtocol {
     OllamaChat,
 }
 
-/// Anthropic / Gemini 的鉴权头。官方 Claude 用 `x-api-key`，国内多数中转
-/// 跟 Claude Code 的 `ANTHROPIC_AUTH_TOKEN` 一样要 `Authorization: Bearer`。
-/// `auto`：密钥以 `sk-ant-` 开头走官方头，否则走 Bearer。
+/// 与配置里写的是同一串名字。
+impl std::fmt::Display for ModelProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::OpenaiResponses => "openai-responses",
+            Self::OpenaiChat => "openai-chat",
+            Self::AnthropicMessages => "anthropic-messages",
+            Self::Gemini => "gemini",
+            Self::OllamaChat => "ollama-chat",
+        })
+    }
+}
+
+/// Anthropic / Gemini 的鉴权头。`auto`：密钥以 `sk-ant-` 开头用 `x-api-key`，
+/// 否则用 `Authorization: Bearer`。
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ModelAuth {
@@ -43,17 +55,16 @@ pub struct ModelOptions {
     pub timeout_ms: u64,
     #[serde(default)]
     pub reasoning_effort: Option<String>,
-    /// 该模型的上下文窗口（token）。运行时的上下文预算由它推导，而不是写死一个
-    /// 与模型无关的常数 —— 200k 窗口的模型和 32k 窗口的模型不该共用一个上限。
+    /// 该模型的上下文窗口（token）。运行时的上下文预算由它推导。
     #[serde(default = "default_context_window")]
     pub context_window: u64,
     /// Anthropic 提示缓存断点。OpenAI / Gemini 由服务端自动缓存，此开关无效。
-    /// 不支持 `cache_control` 的 Claude 中转关掉即可，避免 400。
+    /// 不支持 `cache_control` 的 Claude 中转要关掉，否则请求返回 400。
     #[serde(default = "default_true")]
     pub prompt_cache: bool,
 }
 
-/// 当前主流模型的窗口量级。配置里按实际模型改。
+/// 主流模型的窗口量级，配置里按实际模型改。
 const fn default_context_window() -> u64 {
     200_000
 }
@@ -115,9 +126,7 @@ pub struct AgentConfig {
 const fn default_max_turns() -> usize {
     16
 }
-/// 一轮里允许的调用数。列一个目录再逐个读文件是很自然的批次（11 个配置组
-/// 就是 11 次读），上限压得太低会把一个批次劈成两轮，模型只能重发一遍。
-/// 单次运行的总量由 `runtime.maxTools` 约束。
+/// 一轮里允许的调用数。单次运行的总量由 `runtime.maxTools` 约束。
 const fn default_max_tools() -> usize {
     16
 }
@@ -138,13 +147,27 @@ pub fn user_skill_directory(config_dir: &Path, config: &AppConfig) -> Option<Pat
         .cloned()
 }
 
-/// 配置文件旁的 `skills/` 是用户导入的；其余（安装目录、`../skills`）随产品。
-pub fn skill_directory_source(config_dir: &Path, path: &Path) -> &'static str {
+/// 配置目录旁的 `skills/` 是用户导入的，其余随产品。
+pub fn skill_directory_source(
+    config_dir: &Path,
+    path: &Path,
+) -> crate::extension::skills::SkillSource {
     if path == config_dir.join("skills") {
-        "user"
+        crate::extension::skills::SkillSource::User
     } else {
-        "product"
+        crate::extension::skills::SkillSource::Product
     }
+}
+
+/// 用户插件落点：配置目录旁的 `plugins/`。
+pub fn user_plugin_directory(config_dir: &Path, config: &AppConfig) -> Option<PathBuf> {
+    let user = config_dir.join("plugins");
+    config
+        .plugins
+        .directories
+        .iter()
+        .find(|path| *path == &user)
+        .cloned()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,7 +206,7 @@ pub struct StorageConfig {
     pub database: PathBuf,
 }
 
-/// 托盘图标只由桌面壳消费；其余运行形态读到默认值即可，没有别的行为。
+/// 托盘图标只由桌面壳消费。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TrayConfig {
@@ -222,8 +245,7 @@ impl AppConfig {
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let mut value: serde_json::Value = serde_json::from_str(&fs::read_to_string(path)?)?;
-        // 按文件声明的版本判断，而不是按前一步刚改成的版本 —— 否则 v1 配置在同
-        // 一次加载里会被连续降级两次，把显式写下的选择一起冲掉。
+        // 按文件声明的版本判断，而不是按前一步刚改成的版本。
         let declared = value["version"].as_u64().unwrap_or(1);
         if declared == 1 {
             let backup = path.with_extension("v1.backup.json");
@@ -238,16 +260,45 @@ impl AppConfig {
             let candidate: Self = serde_json::from_value(value.clone())?;
             candidate.validate()?;
             atomic_write(path, &value)?;
+            log::info!("配置已从 1 迁移到 2，迁移前的文件保留为 config.v1.backup.json");
         }
-        // 版本 2 之前默认逐项审批，那是写进文件里的旧默认值，不是用户的选择。
-        // 产品默认已经改成「按实际影响确认」，这里跟着迁移一次；显式选择逐项
-        // 审批的用户把 permissionMode 改回 askEach 即可，之后不会再被覆盖。
-        if declared == 2 && value["runtime"]["permissionMode"] == serde_json::json!("askEach") {
+        // v2 的旧默认值 askEach 迁移为 standard；版本号无条件推进。
+        if declared == 2 {
             value["version"] = serde_json::json!(3);
-            value["runtime"]["permissionMode"] = serde_json::json!("standard");
+            if value["runtime"]["permissionMode"] == serde_json::json!("askEach") {
+                value["runtime"]["permissionMode"] = serde_json::json!("standard");
+            }
             let candidate: Self = serde_json::from_value(value.clone())?;
             candidate.validate()?;
             atomic_write(path, &value)?;
+            log::info!("配置已从 2 迁移到 3");
+        }
+        // 去掉旧的产品技能目录，补上插件目录里的产品根；用户自己的两个目录不动。
+        if declared == 3 {
+            value["version"] = serde_json::json!(4);
+            if !value["plugins"].is_object() {
+                value["plugins"] = serde_json::json!({});
+            }
+            if let Some(directories) = value["agent"]["skillDirectories"].as_array_mut() {
+                directories.retain(|entry| !is_parent_directory(entry, "skills"));
+            }
+            if !value["plugins"]["directories"].is_array() {
+                value["plugins"]["directories"] = serde_json::json!([]);
+            }
+            let directories = value["plugins"]["directories"]
+                .as_array_mut()
+                .ok_or_else(|| Error::Config("plugins.directories must be an array".into()))?;
+            // 产品根排在前面，重名时随产品的插件先占住 id。
+            if !directories
+                .iter()
+                .any(|entry| is_parent_directory(entry, "plugins"))
+            {
+                directories.insert(0, serde_json::json!("../plugins"));
+            }
+            let candidate: Self = serde_json::from_value(value.clone())?;
+            candidate.validate()?;
+            atomic_write(path, &value)?;
+            log::info!("配置已从 3 迁移到 4，领域技能改由 plugins/bgi 提供");
         }
         expand_env(&mut value)?;
         let mut config: Self = serde_json::from_value(value)?;
@@ -282,8 +333,8 @@ impl AppConfig {
 
     pub fn validate(&self) -> Result<()> {
         self.runtime.validate()?;
-        if !(1..=3).contains(&self.version) {
-            return Err(Error::Config("version must be 1, 2 or 3".into()));
+        if !(1..=4).contains(&self.version) {
+            return Err(Error::Config("version must be 1, 2, 3 or 4".into()));
         }
         if self.models.is_empty() {
             if !self.active_model.is_empty() {
@@ -340,9 +391,6 @@ impl AppConfig {
                 "agent.maxToolCallsPerTurn must be between 1 and 64".into(),
             ));
         }
-        if self.bridge.enabled && self.bridge.token.as_deref().unwrap_or("").is_empty() {
-            return Err(Error::Config("bridge is enabled but token is empty".into()));
-        }
         Ok(())
     }
 
@@ -363,7 +411,7 @@ impl AppConfig {
         Ok(())
     }
 
-    /// 写入审批级别。用户随时可改，立即生效下一轮工具调用。
+    /// 写入审批级别，下一轮工具调用生效。
     pub fn set_permission_mode(
         path: impl AsRef<Path>,
         mode: crate::runtime::operation::permissions::PermissionMode,
@@ -378,7 +426,7 @@ impl AppConfig {
         })
     }
 
-    /// 写入托盘开关。桌面壳据此立即显隐图标；其它形态写入后没有任何效果。
+    /// 写入托盘开关，桌面壳据此显隐图标。
     pub fn set_tray_enabled(path: impl AsRef<Path>, enabled: bool) -> Result<()> {
         update_raw(path.as_ref(), |value| {
             if !value["tray"].is_object() {
@@ -404,6 +452,14 @@ impl AppConfig {
 
     pub fn host_plugin_enabled(&self) -> bool {
         crate::extension::providers::host_plugin_enabled(&self.plugins.disabled)
+    }
+
+    pub fn plugin_enabled(&self, id: &str) -> bool {
+        crate::extension::providers::plugin_enabled(
+            id,
+            &self.plugins.enabled,
+            &self.plugins.disabled,
+        )
     }
 
     pub fn set_plugin_enabled(path: impl AsRef<Path>, id: &str, enabled: bool) -> Result<()> {
@@ -551,7 +607,7 @@ impl AppConfig {
         })
     }
 
-    /// 用户技能落点：配置文件旁的 `skills/`。没有这条目录就补上。
+    /// 用户技能落点：配置文件旁的 `skills/`，没有就补上。
     pub fn ensure_user_skill_directory(path: impl AsRef<Path>) -> Result<PathBuf> {
         let path = path.as_ref();
         let config = AppConfig::load(path)?;
@@ -627,25 +683,21 @@ Sleepy Doll — 面向 BetterGI 的本地桌面 Agent
   -h, --help       显示本帮助
   -V, --version    显示版本";
 
-/// Outcome of resolving the configuration path from process arguments.
+/// 从进程参数解析配置路径的结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolved {
-    /// The configuration file to load or seed.
+    /// 要加载或生成模板的配置文件。
     Config(PathBuf),
-    /// `--help` was requested; the caller prints [`USAGE`].
+    /// 请求了 `--help`，调用方打印 [`USAGE`]。
     Help,
-    /// `--version` was requested; the caller prints [`VERSION`].
+    /// 请求了 `--version`，调用方打印 [`VERSION`]。
     Version,
 }
 
 pub const VERSION: &str = concat!("Sleepy Doll ", env!("CARGO_PKG_VERSION"));
 
-/// Resolves the configuration file. An explicit argument or `SLEEPY_DOLL_CONFIG`
-/// always wins; otherwise the file lives in the `user/` directory of the
-/// installation. Relative paths are resolved against the executable's own
-/// directory, and the working directory is never used, so a stray command line
-/// argument can no longer redirect user data into wherever the process happened
-/// to start.
+/// 解析配置文件路径。显式参数或 `SLEEPY_DOLL_CONFIG` 优先，否则用安装目录下的
+/// `user/`。相对路径以可执行文件所在目录为基准，不用工作目录。
 pub fn resolve_path() -> Result<Resolved> {
     let exe_dir = env::current_exe()
         .ok()
@@ -660,7 +712,16 @@ pub fn resolve_path() -> Result<Resolved> {
     )
 }
 
-/// The per-user data root used when the installation directory is read-only.
+/// 漫游目录下留给本产品的那一层。安装目录不可写时用户数据落在这里。
+const ROAMING_DIRECTORY: &str = "Sleepy Doll";
+
+/// 安装目录不可写时用户数据落到的目录（`%APPDATA%\Sleepy Doll`）。卸载要按同一条
+/// 规则找回来。
+pub fn fallback_directory() -> Option<PathBuf> {
+    user_data_root().map(|root| root.join(ROAMING_DIRECTORY))
+}
+
+/// 安装目录不可写时用的用户数据根。
 fn user_data_root() -> Option<PathBuf> {
     env::var_os("APPDATA")
         .map(PathBuf::from)
@@ -670,8 +731,7 @@ fn user_data_root() -> Option<PathBuf> {
         })
 }
 
-/// Pure resolution: no environment access, no filesystem writes. `is_writable`
-/// is injected so the ordering rules can be tested without touching either.
+/// 纯解析：不读环境变量，不写文件系统。`is_writable` 由调用方注入。
 fn resolve_from(
     explicit: Option<&OsStr>,
     env_config: Option<&OsStr>,
@@ -699,16 +759,12 @@ fn resolve_from(
     {
         return Ok(Resolved::Config(directory.join("config.json")));
     }
-    // Read-only installation locations fall back to the per-user data root
-    // rather than refusing to start.
-    if let Some(directory) = data_root.map(|root| root.join("Sleepy Doll").join("user"))
+    // 安装位置不可写时退回用户数据根。
+    if let Some(directory) = data_root.map(|root| root.join(ROAMING_DIRECTORY).join("user"))
         && is_writable(&directory)
     {
         return Ok(Resolved::Config(directory.join("config.json")));
     }
-    // No working-directory fallback: silently writing user data next to whatever
-    // directory the process started in is exactly the behaviour this module
-    // promises to avoid.
     Err(Error::Config(
         "找不到可写的配置目录。请把 Sleepy Doll 安装到可写位置，或设置 SLEEPY_DOLL_CONFIG 指向一个可写的 .json 文件。".into(),
     ))
@@ -734,9 +790,8 @@ fn explicit_config(raw: &OsStr, exe_dir: Option<&Path>) -> Result<PathBuf> {
     Ok(base.join(path))
 }
 
-/// Reports whether `directory` can hold user data, without creating anything.
-/// A missing directory is acceptable as long as its nearest existing ancestor
-/// is writable, because `seed` creates the directory afterwards.
+/// 判断 `directory` 能否存放用户数据，不创建任何东西。目录不存在时可以接受，
+/// 只要它最近的已存在祖先可写 —— 目录随后由 `seed` 创建。
 fn writable_directory(directory: &Path) -> bool {
     let mut ancestor = directory;
     while !ancestor.exists() {
@@ -760,8 +815,7 @@ fn writable_directory(directory: &Path) -> bool {
     }
 }
 
-/// A first run materialises the shipped template in the user directory, so the
-/// application never has to write user data into the source tree.
+/// 首次运行时把随产品分发的模板写进用户目录。
 pub fn seed(path: &Path) -> Result<()> {
     if path.exists() {
         return Ok(());
@@ -770,7 +824,7 @@ pub fn seed(path: &Path) -> Result<()> {
         .parent()
         .ok_or_else(|| Error::Config("configuration path has no parent".into()))?;
     fs::create_dir_all(directory)?;
-    // The template keeps its Skill, Plugin and catalog roots next to itself.
+    // 模板把技能、插件与目录根建在自己旁边。
     for child in ["skills", "plugins", "catalog", ".sleepy-doll"] {
         fs::create_dir_all(directory.join(child))?;
     }
@@ -797,8 +851,7 @@ fn update_raw(
 
 pub(crate) fn atomic_write(path: &Path, value: &serde_json::Value) -> Result<()> {
     use std::io::Write;
-    // The suffix is appended rather than substituted so the name still ends in
-    // `.json.<id>.tmp`, which is what the ignore rules match on.
+    // 后缀是追加而不是替换，文件名仍以 `.json.<id>.tmp` 结尾，忽略规则按这个匹配。
     let name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -816,6 +869,14 @@ pub(crate) fn atomic_write(path: &Path, value: &serde_json::Value) -> Result<()>
         return Err(e.into());
     }
     Ok(())
+}
+
+/// 配置里的这条相对目录是否就是 `../<name>`。按字面比较，不碰文件系统。
+fn is_parent_directory(entry: &serde_json::Value, name: &str) -> bool {
+    entry
+        .as_str()
+        .map(|text| text.trim().replace('\\', "/"))
+        .is_some_and(|text| text.trim_end_matches('/') == format!("../{name}"))
 }
 
 fn absolute(base: &Path, path: &Path) -> PathBuf {
@@ -855,9 +916,7 @@ fn expand_env(value: &mut serde_json::Value) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// Resolution rules are exercised through the pure `resolve_from`, so these
-    /// tests never read the process environment, the executable path or the
-    /// working directory.
+    /// 解析规则经纯函数 `resolve_from` 测试，不读进程环境、可执行文件路径与工作目录。
     fn resolve(
         explicit: Option<&str>,
         env_config: Option<&str>,
@@ -884,9 +943,7 @@ mod tests {
 
     #[test]
     fn argument_wins_over_environment_and_joins_the_executable_directory() {
-        // A relative argument must never be anchored to the working directory:
-        // that is what let a stray argument create a `--help` file plus an
-        // entire data tree wherever the process happened to start.
+        // 相对参数不以工作目录为基准。
         let path = config_path(resolve(
             Some("dev.json"),
             Some("/env/config.json"),
@@ -940,10 +997,9 @@ mod tests {
 
     #[test]
     fn arguments_that_cannot_be_configuration_files_are_rejected() {
-        // Not a `.json` and not an existing file.
+        // 既不是 .json 也不是已存在的文件。
         assert!(resolve(Some("notes.txt"), None, None, None, &[]).is_err());
-        // A `.json` name that does not exist yet is still a usable target,
-        // because the first run seeds it.
+        // 尚未存在的 .json 仍可作为目标，首次运行会生成模板。
         let path = config_path(resolve(
             Some("fresh.json"),
             None,
@@ -971,7 +1027,7 @@ mod tests {
         ));
         assert_eq!(path, install_user.join("config.json"));
 
-        // A read-only installation directory falls through to the data root.
+        // 安装目录不可写时退到数据根。
         let path = config_path(resolve(
             None,
             None,
@@ -984,9 +1040,7 @@ mod tests {
 
     #[test]
     fn resolution_fails_rather_than_falling_back_to_the_working_directory() {
-        // Nothing is writable and no per-user root exists: the old code returned
-        // the relative path `user/config.json`, silently writing user data into
-        // whatever directory the process was started from.
+        // 没有任何可写目录时解析失败。
         assert!(resolve(None, None, Some("/opt/sleepy-doll"), None, &[]).is_err());
         assert!(
             resolve(
@@ -1005,7 +1059,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let candidate = directory.path().join("user");
         assert!(writable_directory(&candidate));
-        // Resolution may not have side effects; `seed` creates the directory.
+        // 解析不产生副作用，目录由 `seed` 创建。
         assert!(!candidate.exists());
         assert!(directory.path().read_dir().unwrap().next().is_none());
     }
@@ -1019,7 +1073,9 @@ mod tests {
         let config = AppConfig::load(&path).unwrap();
         assert_eq!(config.active_model, "");
         assert!(config.models.is_empty());
-        // The template keeps its resource roots next to the configuration file.
+        // 底座规则编译在二进制里（`CORE_AGENT_POLICY`），这个槽位只留给用户自己的话。
+        assert_eq!(config.agent.system_prompt, "");
+        // 模板把资源根建在配置文件旁。
         assert!(directory.path().join("user").join("skills").is_dir());
         assert!(directory.path().join("user").join(".sleepy-doll").is_dir());
     }
@@ -1162,14 +1218,69 @@ mod tests {
 
     #[test]
     fn skill_directory_next_to_config_is_user() {
+        use crate::extension::skills::SkillSource;
         let config_dir = PathBuf::from("/home/user/sleepy-doll");
         assert_eq!(
             skill_directory_source(&config_dir, &config_dir.join("skills")),
-            "user"
+            SkillSource::User
         );
         assert_eq!(
             skill_directory_source(&config_dir, &PathBuf::from("/opt/Sleepy-Doll/skills")),
-            "product"
+            SkillSource::Product
+        );
+    }
+
+    /// v3 迁移：旧配置里产品技能目录还单独列着、产品插件目录还没列。
+    #[test]
+    fn version_three_moves_the_domain_skills_into_the_plugin() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({
+                "version": 3,
+                "activeModel": "",
+                "models": [],
+                "agent": {
+                    "systemPrompt": "test",
+                    "skillDirectories": ["..\\skills", "./skills"],
+                },
+                "bridge": {"enabled": false, "baseUrl": "http://127.0.0.1"},
+                "plugins": {"directories": ["./plugins"], "enabled": []},
+                "storage": {"database": "./test.db"}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        // 载入后的形态：相对目录已经解析成绝对路径，形态由平台决定。
+        let tail = |path: &Path| path.to_string_lossy().replace('\\', "/");
+        let loaded = AppConfig::load(&path).unwrap();
+        assert_eq!(loaded.version, 4);
+        assert_eq!(loaded.agent.skill_directories.len(), 1);
+        assert!(tail(&loaded.agent.skill_directories[0]).ends_with("/skills"));
+        assert_eq!(loaded.plugins.directories.len(), 2);
+        assert!(tail(&loaded.plugins.directories[1]).ends_with("/plugins"));
+
+        // 写回文件的内容：产品根在前，用户根在后。
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(written["version"], serde_json::json!(4));
+        assert_eq!(
+            written["agent"]["skillDirectories"],
+            serde_json::json!(["./skills"])
+        );
+        assert_eq!(
+            written["plugins"]["directories"],
+            serde_json::json!(["../plugins", "./plugins"])
+        );
+
+        // 迁移按文件声明的版本执行一次，第二次加载不再改动。
+        let again = AppConfig::load(&path).unwrap();
+        assert_eq!(again.plugins.directories, loaded.plugins.directories);
+        assert_eq!(
+            again.agent.skill_directories,
+            loaded.agent.skill_directories
         );
     }
 }

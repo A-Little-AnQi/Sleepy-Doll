@@ -1,7 +1,9 @@
 use serde_json::json;
 use sleepy_doll::{
-    config::AppConfig, extension::ToolRegistry, extension::plugins::PluginManager,
-    extension::skills::SkillRegistry,
+    config::AppConfig,
+    extension::ToolRegistry,
+    extension::plugins::{PluginManager, PluginState},
+    extension::skills::{SkillRegistry, SkillSource},
 };
 use std::fs;
 
@@ -20,7 +22,7 @@ fn local_import_update_and_removal_preserve_retired_files() {
     .unwrap();
     let config = config(d.path());
     assert_eq!(
-        sleepy_doll::runtime::host::installation::install(&config, &source).unwrap(),
+        sleepy_doll::runtime::host::installation::install(d.path(), &config, &source).unwrap(),
         "sample"
     );
     assert!(
@@ -33,17 +35,72 @@ fn local_import_update_and_removal_preserve_retired_files() {
         json!({"schemaVersion":1,"id":"sample","name":"sample","version":"2"}).to_string(),
     )
     .unwrap();
-    sleepy_doll::runtime::host::installation::install(&config, &source).unwrap();
+    sleepy_doll::runtime::host::installation::install(d.path(), &config, &source).unwrap();
     assert_eq!(
         fs::read_dir(d.path().join("plugins/.retired"))
             .unwrap()
             .count(),
         1
     );
-    let retired = sleepy_doll::runtime::host::installation::remove(&config, "sample").unwrap();
+    let retired =
+        sleepy_doll::runtime::host::installation::remove(d.path(), &config, "sample").unwrap();
     assert!(retired.exists());
     assert!(!d.path().join("plugins/sample").exists());
 }
+/// 交付目录的形态：配置在 `user\` 下，产品插件在安装根的 `plugins\`。两者之间只有
+/// 配置里那条 `../plugins` 相连，写错就再也找不到随产品的领域说明。
+#[test]
+fn the_delivered_layout_finds_the_product_plugin_beside_the_install_root() {
+    let d = tempfile::tempdir().unwrap();
+    let user = d.path().join("user");
+    let skill = d.path().join("plugins/bgi/skills/domain");
+    fs::create_dir_all(&skill).unwrap();
+    fs::write(skill.join("SKILL.md"), "---\nname: domain\n---\n\n正文\n").unwrap();
+    let manifest = d.path().join("plugins/bgi/.sleepy-doll-plugin");
+    fs::create_dir_all(&manifest).unwrap();
+    fs::write(
+        manifest.join("plugin.json"),
+        json!({"schemaVersion":1,"id":"bgi","name":"BetterGI","version":"1","skills":["./skills"]})
+            .to_string(),
+    )
+    .unwrap();
+    fs::create_dir_all(&user).unwrap();
+    fs::write(
+        user.join("config.json"),
+        json!({
+            "version":4,
+            "activeModel":"local",
+            "models":[
+                {"id":"local","name":"local","protocol":"ollama-chat","model":"test","baseUrl":"http://127.0.0.1:1"}
+            ],
+            "agent":{"systemPrompt":"test","skillDirectories":["./skills"]},
+            "bridge":{"enabled":false,"baseUrl":"http://127.0.0.1:1"},
+            "plugins":{"directories":["../plugins","./plugins"]},
+            "storage":{"database":"./.sleepy-doll/sleepy-doll.db"}
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let config = AppConfig::load(user.join("config.json")).unwrap();
+    let mut skills = SkillRegistry::default();
+    let mut tools = ToolRegistry::default();
+    PluginManager::default()
+        .load(
+            &config.plugins.directories,
+            &config.plugins.enabled,
+            &config.plugins.disabled,
+            &mut tools,
+            &mut skills,
+        )
+        .unwrap();
+
+    // 宿主插件不必列进 `plugins.enabled` 也会装载；它带来的技能不单独出现在界面上。
+    assert_eq!(skills.list().len(), 1);
+    assert!(skills.standalone().is_empty());
+    assert_eq!(skills.get("domain").unwrap().source.plugin(), Some("bgi"));
+}
+
 #[test]
 fn plugin_failure_does_not_register_partial_tools_or_expose_headers() {
     let d = tempfile::tempdir().unwrap();
@@ -58,12 +115,13 @@ fn plugin_failure_does_not_register_partial_tools_or_expose_headers() {
         .load(
             &[d.path().into()],
             &["sample".into()],
+            &[],
             &mut tools,
             &mut skills,
         )
         .unwrap();
     assert!(tools.definitions().is_empty());
-    assert_eq!(plugins.list()[0].status, "failed");
+    assert_eq!(plugins.list()[0].state, PluginState::Failed);
     assert!(
         !plugins
             .public_list()
@@ -84,7 +142,9 @@ fn chinese_skill_matching_and_reference_containment() {
     fs::write(root.join("guide.md"), "guide").unwrap();
     fs::write(d.path().join("private.md"), "private").unwrap();
     let mut skills = SkillRegistry::default();
-    skills.load(&[(d.path().into(), "test".into())]).unwrap();
+    skills
+        .load(&[(d.path().into(), SkillSource::User)])
+        .unwrap();
     assert_eq!(skills.search("帮我运行采集路线", 4).len(), 1);
     assert_eq!(
         skills.read_reference("gathering", "guide.md").unwrap(),
@@ -104,7 +164,9 @@ fn skill_conditions_require_available_domain_context() {
     )
     .unwrap();
     let mut registry = SkillRegistry::default();
-    registry.load(&[(d.path().into(), "test".into())]).unwrap();
+    registry
+        .load(&[(d.path().into(), SkillSource::User)])
+        .unwrap();
     let skill = registry.get("conditional").unwrap();
     let plugins = std::collections::HashSet::from(["domain".into()]);
     let capabilities = std::collections::HashSet::from(["domain.inspect".into()]);
@@ -158,6 +220,7 @@ fn plugin_tool_execution_contract_is_explicit_and_fail_closed() {
         .load(
             &[d.path().into()],
             &["sample".into()],
+            &[],
             &mut tools,
             &mut skills,
         )
@@ -212,6 +275,7 @@ for line in sys.stdin:
         .load(
             &[d.path().into()],
             &["sample".into()],
+            &[],
             &mut tools,
             &mut skills,
         )

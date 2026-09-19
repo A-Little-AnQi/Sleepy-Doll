@@ -62,9 +62,9 @@ jobs:
       - name: Package portable archive
         shell: pwsh
         run: |
-          # user\ 是用户数据，只可能来自在构建机上跑过程序；它出现在交付目录里说明
-          # 模型密钥和桥 token 会被一起发出去。bridge\user\ 同样不该有——桥的运行期
-          # 数据与主程序共用安装根下的 user\。
+          # user\ 是用户数据，只可能由构建机上执行过的主程序产生；它出现在交付目录
+          # 里说明模型密钥和桥 token 会被一起发出去。bridge\user\ 同样不该有——桥的
+          # 运行期数据与主程序共用安装根下的 user\。
           foreach ($dirty in @("dist\Sleepy-Doll\user", "dist\Sleepy-Doll\bridge\user")) {
             if (Test-Path $dirty) { throw "$dirty 存在，交付目录不干净。" }
           }

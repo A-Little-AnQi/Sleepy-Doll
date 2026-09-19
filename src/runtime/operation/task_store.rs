@@ -1,7 +1,4 @@
 //! 快捷任务的持久化：定义、不可变修订与运行归属。
-//!
-//! 「每个聊天有它产生的快捷任务清单」由来源关联查询得出，不另存一份可漂移的
-//! 数组；来源会话被删除后，定义仍靠标题快照可读。
 
 use std::{collections::HashSet, path::Path, sync::Mutex};
 
@@ -16,7 +13,7 @@ use crate::{
     },
 };
 
-/// 列表项：定义摘要加计算出的可见状态，不返回修订正文。
+/// 列表项：定义摘要加计算出的可见状态。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSummary {
@@ -41,7 +38,7 @@ pub struct TaskSummary {
     pub issue: Option<String>,
 }
 
-/// 依赖可用性由调用方判定：Core 不认识具体领域工具。
+/// 依赖可用性由调用方判定。
 pub type Availability<'a> = &'a dyn Fn(&str) -> bool;
 
 pub struct TaskStore {
@@ -60,8 +57,7 @@ impl TaskStore {
         Ok(store)
     }
 
-    /// 旧版 `runtime_workflows` 是「已验证运行提取」的另一种存储。升级时把它读成
-    /// 新模型，而不是让两套定义长期并存。
+    /// 把旧版 `runtime_workflows` 的行读成新模型。
     fn adopt_legacy_workflows(&self) -> Result<()> {
         let db = self.connection.lock().unwrap();
         let exists: bool = db.query_row(
@@ -190,7 +186,7 @@ impl TaskStore {
         Ok(())
     }
 
-    /// 修订发布后不可变：同号重写直接拒绝，避免旧运行读到自己不认识的版本。
+    /// 同一修订号只接受内容相同的重写。
     pub fn save_revision(&self, revision: &WorkflowRevision) -> Result<()> {
         let db = self.connection.lock().unwrap();
         let existing: Option<String> = db
@@ -266,7 +262,7 @@ impl TaskStore {
             .transpose()
     }
 
-    /// 已发布修订。运行只读这里，草稿失败不影响它。
+    /// 已发布修订：运行只读这里。
     pub fn published_revision(&self, task_id: &str) -> Result<Option<WorkflowRevision>> {
         let definition = self.definition(task_id)?;
         match definition.published_revision {
@@ -457,7 +453,7 @@ fn collect_tool_names(nodes: &[TaskNode], names: &mut Vec<String>) {
     }
 }
 
-/// 编译期按工具名补齐执行契约，让修订自带发布时的契约快照。
+/// 按工具名补齐执行契约。
 pub fn contract_catalog(
     contracts: &[(String, crate::runtime::operation::task::ToolContract)],
 ) -> ToolCatalog {
@@ -468,7 +464,7 @@ pub fn contract_catalog(
     catalog
 }
 
-/// 定义的可编辑字段。改名不触碰执行语义，也不改稳定 ID。
+/// 定义的可编辑字段。
 #[derive(Debug, Clone, Default)]
 pub struct DefinitionPatch {
     pub name: Option<String>,

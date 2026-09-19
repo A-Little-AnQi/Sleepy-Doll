@@ -3,7 +3,7 @@ namespace BgiBridge.Bgi;
 /// <summary>状态快照与停止请求。只做被动观测，不得改变游戏界面。</summary>
 public static class BridgeState
 {
-    /// <summary>取一次状态快照。任何一项取不到都不抛——状态查询不能变成故障源。</summary>
+    /// <summary>取一次状态快照。任何一项取不到都不抛。</summary>
     public static (bool Ready, object Detail) Capture()
     {
         var captureReady = false;
@@ -21,10 +21,10 @@ public static class BridgeState
         }
         catch
         {
-            // 宿主可能正处于关闭过程中。状态查询返回尽力而为的结果。
+            // 宿主可能正处于关闭过程中。
         }
 
-        // 截图器没起来时 GameHandle 恒为 0，如实报出去，别让上层当成"未激活"。
+        // 截图器没起来时 GameHandle 恒为 0，如实报出去。
         var windowActive = false;
         if (captureReady && handle != 0)
         {
@@ -54,21 +54,21 @@ public static class BridgeState
                 value = "unknown",
                 status = captureReady ? "notSampled" : "unavailable",
                 reason = captureReady
-                    ? "识别需要截图，本方法只做静默观测；请用 bgi.get_game_readiness 取界面类别。"
+                    ? "桥不识别界面内容，当前没有可读取界面类别的接口。"
                     : "截图器未启动。",
             },
             position = new
             {
                 value = (object?)null,
                 status = "unknown",
-                reason = "定位需要 OCR，开销较大；请用 bgi.get_status 按需获取。",
+                reason = "桥不读画面，当前没有可读取游戏内定位的接口。",
             },
         };
 
         return (hostLoaded && captureReady, detail);
     }
 
-    /// <summary>解除暂停 → 手动取消 → 释放模拟键。顺序有意义，别调换。</summary>
+    /// <summary>解除暂停 → 手动取消 → 释放模拟键。顺序不能调换。</summary>
     public static bool RequestCancel()
     {
         var requested = false;
@@ -78,7 +78,7 @@ public static class BridgeState
             var runner = Reflect.Singleton("BetterGenshinImpact.GameTask.RunnerContext");
             if (runner is not null)
             {
-                // 先解除协作式暂停，否则取消信号要等到下一个安全检查点才生效。
+                // 先解除协作式暂停：取消信号要到下一个安全检查点才生效。
                 runner.GetType().GetProperty("IsSuspend")?.SetValue(runner, false);
                 requested = true;
             }

@@ -3,7 +3,7 @@ using BgiBridge.Protocol;
 
 namespace BgiBridge.Catalog;
 
-/// <summary>Validates the JSON Schema subset emitted by this bridge before dispatch.</summary>
+/// <summary>派发前校验桥自己产出的 JSON Schema 子集。</summary>
 public static class ArgumentSchema
 {
     public static JsonElement Parse(string json) => JsonSerializer.Deserialize<JsonElement>(json);

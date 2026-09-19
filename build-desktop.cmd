@@ -94,14 +94,20 @@ if not exist "%OUT%\bridge\bridge.config.json" (
   if errorlevel 1 set "FAILED=%FAILED% bridge.config.json"
 )
 
-rem Skills that ship with the product. They live in the install folder, not under
-rem user\ - user\ is the user's own data and is not touched by a rebuild.
-if not exist "%OUT%\skills" mkdir "%OUT%\skills"
-xcopy /e /i /y "skills" "%OUT%\skills" >nul
+rem The plugin that ships with the product: it carries the host tools' domain
+rem knowledge. Only this one directory is copied - plugins\ also holds the
+rem example that must not ship. It lives in the install folder, not under user\
+rem - user\ is the user's own data and is not touched by a rebuild.
+if not exist "%OUT%\plugins\bgi" mkdir "%OUT%\plugins\bgi"
+xcopy /e /i /y "plugins\bgi" "%OUT%\plugins\bgi" >nul
 if errorlevel 1 (
-  echo    could not copy skills\
+  echo    could not copy plugins\bgi
   exit /b 1
 )
+
+rem The domain skills used to sit in %OUT%\skills. Drop that copy, or an upgraded
+rem install keeps loading the skills the plugin already owns.
+if exist "%OUT%\skills" rmdir /s /q "%OUT%\skills"
 
 if defined FAILED (
   echo.

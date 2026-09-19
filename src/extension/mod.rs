@@ -16,8 +16,6 @@ const fn default_result_limit() -> usize {
     12_000
 }
 
-/// Execution semantics are part of the tool contract. Unknown effects are
-/// deliberately scheduled like writes until a trusted manifest says otherwise.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ToolEffect {
@@ -101,14 +99,13 @@ pub enum UnattendedPolicy {
     Forbidden,
 }
 
-/// 一次写入的实际影响从哪里取值。权限判定按影响而不是工具名，但引擎自己读不到
-/// 领域语义，所以由契约声明。缺省 `unknown` 表示无法界定，引擎不猜。
+/// 一次写入的实际影响从哪里取值。缺省 `unknown` 表示无法界定。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ScopeKind {
     #[default]
     Unknown,
-    /// 逐个配置叶字段：比较目标资源的当前内容与新内容。
+    /// 逐个配置叶字段。
     Fields,
     /// 按对象计数：`scopeTarget` 指向的参数是对象 ID 列表。
     Objects,
@@ -118,9 +115,7 @@ pub enum ScopeKind {
     Whole,
 }
 
-/// 工具是否可能调用语言模型。零 token 承诺只对 `none` 成立：会调用模型的 MCP
-/// 工具、自由脚本和无法判断的工具都不能伪装成零 token。缺省是 `unknown`，
-/// 声明为零 token 必须由可信契约给出，不由工具自述。
+/// 工具是否可能调用语言模型。缺省是 `unknown`，声明为 `none` 必须由可信契约给出。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ModelUsage {
@@ -202,7 +197,7 @@ impl ToolExecution {
             verification: VerificationMode::None,
             compensation: CompensationMode::None,
             unattended: UnattendedPolicy::Allowed,
-            // 内置只读工具都在本机完成，不经过模型网关。
+            // 内置只读工具都在本机完成。
             model_usage: ModelUsage::None,
             ..Self::default()
         }
@@ -256,6 +251,9 @@ impl ToolExecution {
 #[serde(rename_all = "camelCase")]
 pub struct ToolDefinition {
     pub name: String,
+    /// 面向用户的名字，界面在执行记录里显示它；为空时退回工具名。
+    #[serde(default)]
+    pub label: String,
     pub description: String,
     pub input_schema: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -318,10 +316,10 @@ impl ToolRegistry {
         validate_definition(&definition)?;
         let name = definition.name;
         if !valid_name(&name) {
-            return Err(Error::Tool(format!("invalid tool name: {name}")));
+            return Err(Error::Tool(format!("工具名不合法：{name}")));
         }
         if self.tools.contains_key(&name) {
-            return Err(Error::Tool(format!("duplicate tool: {name}")));
+            return Err(Error::Tool(format!("工具名重复：{name}")));
         }
         self.tools.insert(name, Arc::new(tool));
         Ok(())
@@ -333,13 +331,21 @@ impl ToolRegistry {
         validate_definition(&definition)?;
         let name = definition.name;
         if !valid_name(&name) {
-            return Err(Error::Tool(format!("invalid tool name: {name}")));
+            return Err(Error::Tool(format!("工具名不合法：{name}")));
         }
         if self.tools.contains_key(&name) {
-            return Err(Error::Tool(format!("duplicate tool: {name}")));
+            return Err(Error::Tool(format!("工具名重复：{name}")));
         }
         self.tools.insert(name, tool);
         Ok(())
+    }
+
+    pub fn len(&self) -> usize {
+        self.tools.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tools.is_empty()
     }
 
     pub fn definitions(&self) -> Vec<ToolDefinition> {
@@ -354,12 +360,12 @@ impl ToolRegistry {
 
     pub fn call(&self, name: &str, arguments: &Value) -> Value {
         let Some(tool) = self.tools.get(name) else {
-            return json!({"ok":false,"error":{"code":"TOOL_NOT_FOUND","message":format!("Unknown tool: {name}")}});
+            return json!({"ok":false,"error":{"code":"TOOL_NOT_FOUND","message":format!("未注册的工具：{name}")}});
         };
         let definition = tool.definition();
         let issues = validate(arguments, &definition.input_schema, "$");
         if !issues.is_empty() {
-            return json!({"ok":false,"error":{"code":"INVALID_ARGUMENT","message":"Tool arguments failed validation","details":issues}});
+            return json!({"ok":false,"error":{"code":"INVALID_ARGUMENT","message":"工具参数不符合契约","details":issues}});
         }
         match tool.call(arguments).and_then(|value| {
             validate_output(&value, definition.output_schema.as_ref())?;
@@ -405,7 +411,7 @@ pub(crate) fn validate(value: &Value, schema: &Value, path: &str) -> Vec<Value> 
             .take(32)
             .map(|e| json!({"path":format!("{path}{}",e.instance_path),"message":e.to_string()}))
             .collect(),
-        Err(error) => vec![json!({"path":path,"message":format!("invalid tool schema: {error}")})],
+        Err(error) => vec![json!({"path":path,"message":format!("工具 Schema 无效：{error}")})],
     }
 }
 
@@ -431,6 +437,7 @@ where
         Self {
             definition: ToolDefinition {
                 name: name.into(),
+                label: String::new(),
                 description: description.into(),
                 input_schema,
                 output_schema: None,
@@ -440,6 +447,11 @@ where
             },
             function,
         }
+    }
+
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        self.definition.label = label.into();
+        self
     }
 
     pub fn with_execution(mut self, execution: ToolExecution) -> Self {

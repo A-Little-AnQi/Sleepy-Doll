@@ -18,6 +18,7 @@ try
 {
     var registry = new MethodRegistry();
     StatusTools.Register(registry);
+    HostLogTools.Register(registry);
     CatalogTools.Register(registry);
     foreach (var descriptor in registry.All)
     {
@@ -31,14 +32,18 @@ try
         Check(discovery.GetProperty("sideEffects").GetArrayLength() > 0, "discovery hides effects");
         Check(discovery.GetProperty("parameters").GetArrayLength() == descriptor.InputSchema.GetProperty("properties").EnumerateObject().Count(), "discovery hides parameters");
     }
-    Check(registry.Count == 17, "all core APIs must have contracts");
-    // 启动游戏的意义就在于游戏还没起来 —— 它一旦被游戏就绪门禁挡住，就永远
-    // 用不上了，只能退回让用户自己点。
+    Check(registry.Count == 19, "all core APIs must have contracts");
+    // 排障接口只读宿主日志文件，不要求游戏在运行。
+    foreach (var logMethod in new[] { "bgi.read_host_log", "bgi.get_script_errors" })
+    {
+        var method = registry.All.Single(item => item.Id == logMethod);
+        Check(method.Effect == "readOnly" && !method.RequiresGameReady, logMethod + " 必须可在游戏未就绪时只读调用");
+    }
+    // 启动游戏时游戏必然没就绪，不能被就绪门禁挡住。
     var startGame = registry.All.Single(method => method.Id == "bgi.start_game");
     Check(startGame.Effect == "hostCommand" && !startGame.RequiresGameReady,
         "starting the game must not require the game to be ready");
-    // 启动入口是硬编码的宿主成员名：它一旦对不上，接口只会在运行时才发现，
-    // 而那一刻用户正等着游戏启动。
+    // 启动入口是硬编码的宿主成员名，必须与 host-documentation.json 对得上。
     Check(SourceDocumentation.Find("C", StatusTools.StartViewModel, StatusTools.StartCommand) is not null,
         "start_game 绑定的宿主命令不在 host-documentation.json 里：" + StatusTools.StartCommand);
     var runGroup = registry.All.Single(method => method.Id == "bgi.run_script_group");
@@ -50,6 +55,63 @@ try
     Check(Reflect.Singleton(typeof(DerivedContractSingleton)) is DerivedContractSingleton,
         "inherited static singleton accessor is not discoverable");
     Console.WriteLine("PASS: all core method guides, schemas and examples");
+
+    // 宿主日志：脚本失败在日志里有两种写法，都必须提取出报错原文、位置和脚本名。
+    var userRoot = Path.Combine(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar), "User");
+    var missing = Path.Combine(userRoot, "AutoPathing", "地方特产", "05-霜仙花.json");
+    const string Repo = @"D:\a\better-genshin-impact\better-genshin-impact\BetterGenshinImpact";
+    var log = string.Join("\n",
+    [
+        "[23:38:59.100] [DBG] [Primary:S4:P26172:T1788103607157] BetterGenshinImpact.Core.Script.Dependence.Log",
+        "开始刷取",
+        "",
+        "[23:39:01.200] [DBG] [Primary:S4:P26172:T1788103607157] BetterGenshinImpact.Service.ScriptService",
+        "执行脚本时发生异常",
+        "Microsoft.ClearScript.ScriptEngineException: Error: A task was canceled.",
+        new string('x', 600),
+        "   Error: A task was canceled.",
+        $"   at BetterGenshinImpact.Core.Script.Project.ScriptProject.ExecuteAsync() in {Repo}\\Core\\Script\\Project\\ScriptProject.cs:line 133",
+        "",
+        "[23:39:01.344] [ERR] [Primary:S4:P26172:T1788103607157] BetterGenshinImpact.Service.ScriptService",
+        "执行脚本时发生异常: \"Error: A task was canceled.\"",
+        "",
+        "[23:39:01.344] [INF] [Primary:S4:P26172:T1788103607157] BetterGenshinImpact.Service.ScriptService",
+        "→ 脚本执行结束: \"千星奇域每周成就经验刷取\", 耗时: 8分50.484秒",
+        "",
+        "[07:06:47.600] [INF] [Primary:S1:P32704:T1789426568302] BetterGenshinImpact.Service.ScriptService",
+        "→ 开始执行地图追踪任务: \"05-霜仙花.json\"",
+        "",
+        "[07:06:47.657] [DBG] [Primary:S1:P32704:T1789426568302] BetterGenshinImpact.Service.ScriptService",
+        "执行脚本时发生异常",
+        $"System.IO.DirectoryNotFoundException: Could not find a part of the path '{missing}'.",
+        $"   at BetterGenshinImpact.Core.Script.Group.ScriptGroupProject.Run() in {Repo}\\Core\\Script\\Group\\ScriptGroupProject.cs:line 234",
+        "",
+        "[07:06:47.657] [ERR] [Primary:S1:P32704:T1789426568302] BetterGenshinImpact.Service.ScriptService",
+        $"执行脚本时发生异常: \"Could not find a part of the path '{missing}'.\"",
+        "",
+    ]);
+    var entries = HostLogTools.Parse(log);
+    Check(entries.Count == 7, "日志记录切分错误：" + entries.Count);
+    Check(entries[0].Thread == "T1788103607157" && entries[0].Level == "DBG"
+        && entries[0].Logger == "BetterGenshinImpact.Core.Script.Dependence.Log",
+        "记录头解析错误：" + JsonSerializer.Serialize(entries[0]));
+    Check(entries[1].Body.Contains("Error: A task was canceled.") && entries[1].Body.Contains("ScriptProject.cs:line 133"),
+        "续行没有归入同一条记录");
+    var failures = HostLogTools.Failures(entries);
+    Check(failures.Count == 2, "同一次失败的重复记录必须归并成一条：" + failures.Count);
+    Check(failures[0].Error == "Error: A task was canceled.", "报错原文带上了异常类型前缀：" + failures[0].Error);
+    Check(failures[0].JsError == "A task was canceled.", "JS 层错误提取错误：" + failures[0].JsError);
+    Check(failures[0].Script == "千星奇域每周成就经验刷取", "没有关联到出错的脚本名：" + failures[0].Script);
+    Check(failures[0].Locations.Any(location => location is { Kind: "hostSource", Path: "BetterGenshinImpact/Core/Script/Project/ScriptProject.cs", Line: 133 }),
+        "宿主源位置未归一化到仓库相对路径：" + JsonSerializer.Serialize(failures[0].Locations));
+    Check(failures[0].Context.Any(entry => entry.Body.Contains("开始刷取")), "同一次运行的脚本输出未进上下文");
+    Check(failures[1].Error == $"Could not find a part of the path '{missing}'.",
+        "只有异常转储的失败没有取到消息：" + failures[1].Error);
+    Check(failures[1].Locations.Any(location => location is { Kind: "userFile", Path: "AutoPathing/地方特产/05-霜仙花.json" }),
+        "用户文件路径没有转成可读取的相对路径：" + JsonSerializer.Serialize(failures[1].Locations));
+    Check(failures[1].Script is null, "没有证据时不应猜脚本名：" + failures[1].Script);
+    Check(failures[1].JsError is null, "宿主失败没有 JS 层错误：" + failures[1].JsError);
+    Console.WriteLine("PASS: host log entries and script failures are extracted with their locations");
     var activated = CommandDocumentation.Purpose("MainWindowViewModel", "ActivatedCommand", null);
     Check(activated.Contains("剪贴板") && activated.Contains("导入脚本") && activated.Contains("兑换码"), "Activated purpose hides its actual side effects");
     Check(CommandDocumentation.Title("MainWindowViewModel", "DismissRedeemCodeCommand", null) == "关闭兑换码更新提示", "ambiguous close title");
@@ -82,7 +144,7 @@ try
     Check(mixed[2] == "cmd.auto_battle", "只命中一个词的条目应排在最后：" + string.Join(",", mixed));
     Check(searchRegistry.Search("调度器", 50).Count() == 3, "单词查询行为改变");
     Check(!searchRegistry.Search("没有这个能力", 50).Any(), "无命中时必须返回空");
-    // 调用方常直接传接口名，此时不该再要求它描述一遍。
+    // 直接传接口名时走精确匹配。
     Check(searchRegistry.Search("cmd.auto_battle", 50).Single().Id == "cmd.auto_battle",
         "精确接口名未走快速通道");
     // `+词` 必须命中：排除只靠中文说明命中的条目。
@@ -113,7 +175,7 @@ try
         using var http = new HttpClient { BaseAddress = new Uri("http://127.0.0.1:" + port), Timeout = TimeSpan.FromSeconds(5) };
         http.DefaultRequestHeaders.Authorization = new("Bearer", bridgeConfig.Token);
         var info = await http.GetFromJsonAsync<JsonElement>("/bridge/v1/info");
-        // agent 侧靠这两个路径定位用户文件，缺一个文件服务就没法工作。
+        // agent 侧靠这两个路径定位用户文件。
         var host = await http.GetFromJsonAsync<JsonElement>("/bridge/v1/host");
         Check(Path.IsPathFullyQualified(host.GetProperty("installPath").GetString()!), "host install path is not absolute");
         Check(Path.GetFileName(host.GetProperty("userPath").GetString()!) == "User"
@@ -215,7 +277,7 @@ try
     Check(root.ApiToken == "original-private-token", "secret rollback failed");
     Console.WriteLine("PASS: sensitive values are redacted from public results and recoverable");
 
-    // Only a disposable fake installation is touched; never restore the user's test host here.
+    // 只操作临时伪造的安装目录，不恢复用户的真实 BetterGI 配置。
     if (System.Diagnostics.Process.GetProcessesByName("BetterGI").Length == 0)
     {
         var offlineRoot = Path.Combine(temporary, "offline");

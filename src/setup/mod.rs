@@ -1,31 +1,32 @@
-//! 安装引擎：目录规则、载荷解包、外壳集成与卸载。
-//!
-//! 这一层不含界面，进度通过回调交出去。窗口与 WebView 在
-//! `src/bin/sleepy-doll-setup.rs`，它把回调转成推送给界面的状态。
+//! 安装引擎：目录规则、载荷解包、外壳集成与卸载。不含界面，进度通过回调交出去。
 
 pub mod install;
 pub mod payload;
 pub mod uninstall;
 
+mod cleanup;
 mod registry;
 mod shell;
 
 use std::path::{Path, PathBuf};
 
+pub use cleanup::{Removal, cleanup_after_exit};
 pub use install::install;
 pub use payload::Archive;
-pub use shell::browse_for_directory;
+pub use shell::{browse_for_directory, launch};
 pub use uninstall::uninstall;
 
 /// 产品名。安装目录、快捷方式与注册表项都用它。
 pub const NAME: &str = "Sleepy Doll";
-/// 目录名里不留空格的写法。用户挑的目录按两种写法判断是否已经带了产品名。
+/// 目录名里不留空格的写法。
 pub const SLUG: &str = "Sleepy-Doll";
-/// 主程序文件名。目录里有它就算覆盖安装，不再打扰用户。
+/// 主程序文件名。
 pub const EXECUTABLE: &str = "sleepy-doll.exe";
-/// 安装时复制出来的卸载入口，与被安装的程序同目录。
+/// 安装时复制出来的卸载入口。
 pub const UNINSTALLER: &str = "uninstall.exe";
-/// Windows 的路径上限。追加产品名之后超过它，安装必然失败，不如提前挡住。
+/// 用户数据目录，装在安装根下。
+pub(crate) const DATA_DIRECTORY: &str = "user";
+/// Windows 的路径上限。
 const MAX_PATH: usize = 260;
 
 /// 进度回调：0..1 的比例与当前动作。
@@ -54,7 +55,7 @@ impl Error {
     }
 }
 
-/// 给 io 错误补上「在做什么」。安装失败要能看出是哪一步。
+/// 给 io 错误补上「在做什么」。
 pub(crate) fn failed(context: impl Into<String>) -> impl FnOnce(std::io::Error) -> Error {
     move |source| Error::Io {
         context: context.into(),
@@ -63,8 +64,6 @@ pub(crate) fn failed(context: impl Into<String>) -> impl FnOnce(std::io::Error) 
 }
 
 /// 默认安装位置：D: 是固定磁盘就装过去，否则装进当前用户的目录。
-///
-/// 只看盘符存在会装到光驱、可移动盘或映射过来的网络盘上，盘一断程序就没了。
 pub fn default_directory() -> String {
     if let Some(drive) = fixed_drive() {
         return resolve_directory(&drive);
@@ -75,8 +74,7 @@ pub fn default_directory() -> String {
     normalize(&base.join("Programs").join(NAME).to_string_lossy())
 }
 
-/// 统一分隔符并去掉结尾的反斜杠。盘符根与 UNC 共享根的结尾反斜杠属于路径本身，
-/// 保留；大小写不动，用户输入的目录名原样返回。
+/// 统一分隔符并去掉结尾的反斜杠。盘符根与 UNC 共享根的结尾反斜杠保留，大小写不动。
 pub fn normalize(directory: &str) -> String {
     let text = directory.replace('/', "\\");
     let trimmed = text.trim_end_matches('\\');
@@ -103,10 +101,7 @@ fn is_root(path: &str) -> bool {
     })
 }
 
-/// 归一化之后，结尾不是产品目录名就补一层。
-///
-/// 只看最后一段是不是产品名，不看有没有追加过：追加完最后一段必然是产品名，
-/// 所以不会二次追加。装到 `D:\` 或 `D:\Games` 会把文件散在别人的目录里。
+/// 归一化之后，结尾不是产品目录名就补一层。只看最后一段，不会二次追加。
 pub fn resolve_directory(requested: &str) -> String {
     let normalized = normalize(requested);
     if normalized.is_empty() || is_product_name(&normalized) {
@@ -127,10 +122,7 @@ fn is_product_name(directory: &str) -> bool {
         .is_some_and(|name| name.eq_ignore_ascii_case(NAME) || name.eq_ignore_ascii_case(SLUG))
 }
 
-/// 校验归一化并追加之后的路径，而不是用户的原始输入。
-///
-/// 系统目录一律拒绝：配置、模型密钥与会话数据库放在安装位置旁边的 `user` 目录里，
-/// 那里普通程序写不进去，装进去只会得到一个起不来的程序。
+/// 校验归一化并追加之后的路径，而不是用户的原始输入。系统目录一律拒绝。
 pub fn validate_directory(directory: &str) -> Result<(), Error> {
     if directory.is_empty() || !is_absolute(directory) {
         return Err(Error::message(
@@ -154,15 +146,15 @@ pub fn validate_directory(directory: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// 目录里有别的东西又没有主程序，装进去之前要问用户一次。
+/// 目录里有别的东西又没有主程序，装进去之前要问用户一次。只有 `user\` 时不算。
 pub fn is_foreign_directory(directory: &Path) -> bool {
-    if directory.join(EXECUTABLE).is_file() {
+    if directory.join(EXECUTABLE).is_file() || directory.join(DATA_DIRECTORY).is_dir() {
         return false;
     }
     std::fs::read_dir(directory).is_ok_and(|mut entries| entries.next().is_some())
 }
 
-/// 已安装的位置与版本，取自注册表。没有登记项就是没装过。
+/// 已安装的位置与版本，取自注册表。
 pub fn installed() -> Option<Installed> {
     let directory = registry::install_location()?;
     Some(Installed {
@@ -198,9 +190,7 @@ pub fn is_uninstall_mode() -> bool {
     })
 }
 
-/// 清单里表示「桥配置」的路径。放在根下还是 `bridge\` 下、叫不叫 example 只影响
-/// 打包方式，装出来的是同一份文件；它存着本机 token，程序把同一个 token 也写进了
-/// `user\config.json`，覆盖安装必须留着旧的那份。
+/// 清单里表示「桥配置」的路径。放在根下还是 `bridge\` 下、叫不叫 example 都装成同一份文件。
 pub(crate) fn is_bridge_config(path: &str) -> bool {
     matches!(
         path,
@@ -211,8 +201,22 @@ pub(crate) fn is_bridge_config(path: &str) -> bool {
     )
 }
 
-/// `D:\Games`、`D:\`、`\\srv\share` 算绝对路径。`Sleepy Doll` 这种相对路径会落到
-/// 安装程序当时的工作目录，通常是「下载」。
+/// 清掉旧版留在安装根下的 `skills\`。载荷自己还带 `skills\` 时不动。
+pub(crate) fn remove_retired_skills(archive: &Archive, directory: &Path) {
+    if archive
+        .entries()
+        .iter()
+        .any(|entry| entry.path.starts_with("skills/"))
+    {
+        return;
+    }
+    let retired = directory.join("skills");
+    if retired.is_dir() {
+        let _ = std::fs::remove_dir_all(retired);
+    }
+}
+
+/// `D:\Games`、`D:\`、`\\srv\share` 算绝对路径。
 fn is_absolute(directory: &str) -> bool {
     let normalized = normalize(directory);
     if normalized.len() >= 2 {
@@ -246,7 +250,7 @@ fn system_directories() -> Vec<String> {
     roots
 }
 
-/// 按路径分段比较，免得 `C:\Program Files Extra` 被当成 `C:\Program Files` 之下。
+/// 按路径分段比较：`C:\Program Files Extra` 不在 `C:\Program Files` 之下。
 fn is_same_or_under(directory: &str, root: &str) -> bool {
     let directory = normalize(directory).to_ascii_lowercase();
     let root = normalize(root).to_ascii_lowercase();
@@ -381,5 +385,9 @@ mod tests {
         assert!(!is_foreign_directory(&target));
         std::fs::remove_file(target.join(EXECUTABLE)).unwrap();
         assert!(is_foreign_directory(&target));
+        // 只剩 `user\`：仍按自己的目录处理。
+        std::fs::remove_file(target.join("other.txt")).unwrap();
+        std::fs::create_dir_all(target.join(DATA_DIRECTORY)).unwrap();
+        assert!(!is_foreign_directory(&target));
     }
 }

@@ -32,7 +32,7 @@ use wry::{
 #[cfg(target_os = "windows")]
 const APP_ICON: u16 = 1;
 
-/// 窗口图标与任务栏图标取 exe 资源里的同一份；取不到只影响外观，不该拦住启动。
+/// 窗口图标与任务栏图标取 exe 资源里的同一份；取不到只影响外观。
 #[cfg(target_os = "windows")]
 fn shell_icon(size: u32) -> Option<tao::window::Icon> {
     match tao::window::Icon::from_resource(APP_ICON, Some(PhysicalSize::new(size, size))) {
@@ -48,7 +48,7 @@ fn shell_icon(size: u32) -> Option<tao::window::Icon> {
 #[folder = "target/ui/"]
 struct UiAssets;
 
-/// 界面靠这两个标记判断自己跑在桌面壳里、以及标题栏要不要自绘。
+/// 界面靠这两个标记判断自己运行在桌面壳里、以及标题栏要不要自绘。
 #[cfg(target_os = "windows")]
 const INITIALIZATION_SCRIPT: &str = "window.__SLEEPY_DOLL_DESKTOP__ = true;\n\
      window.__SLEEPY_DOLL_FRAMELESS__ = true;";
@@ -63,10 +63,10 @@ enum UserEvent {
     SyncChrome,
     #[cfg(target_os = "windows")]
     ShowWindow,
-    /// 显隐托盘图标。开关的持久化在发起侧完成，这里只负责主线程上的界面变更。
+    /// 显隐托盘图标。开关的持久化在发起侧完成，这里只在主线程上改界面。
     #[cfg(target_os = "windows")]
     TrayVisible(bool),
-    /// 同步托盘菜单里桥开关的勾选态；菜单与界面两个入口都会走到这里。
+    /// 同步托盘菜单里桥开关的勾选态。
     #[cfg(target_os = "windows")]
     BridgeState(bool),
     #[cfg(target_os = "windows")]
@@ -92,7 +92,7 @@ struct IpcError {
 
 fn main() {
     if let Err(error) = run() {
-        eprintln!("Sleepy Doll failed to start: {error}");
+        eprintln!("Sleepy Doll 启动失败：{error}");
         std::process::exit(1);
     }
 }
@@ -110,31 +110,37 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     sleepy_doll::config::seed(&config_path)?;
-    // 用户目录是配置文件的所在目录：日志和 WebView2 的缓存都放进去，安装目录里
-    // 就只剩程序本身，升级覆盖时不会连带清掉它们。
+    // 用户目录是配置文件的所在目录，日志与 WebView2 的缓存都放进去。
     let user_directory = config_path
         .parent()
         .ok_or("配置路径没有所在目录，无法定位用户目录")?
         .to_path_buf();
     if let Err(error) = logging::init(&user_directory) {
-        // 日志是诊断手段，不是运行前提。
         eprintln!("无法写入日志（{error}），本次运行的记录只有标准错误。");
     }
+    log::info!(
+        "Sleepy Doll {} 启动，配置 {}",
+        env!("CARGO_PKG_VERSION"),
+        config_path.display()
+    );
     let controller = Arc::new(AppController::load(&config_path)?);
     let startup_config = sleepy_doll::AppConfig::load(&config_path)?;
     if startup_config.host_plugin_enabled() && startup_config.bridge.enabled {
         let startup = controller.clone();
         thread::spawn(move || {
-            let _ = startup.handle(
+            // 后台自动连接，失败原因只记日志。
+            if let Err(error) = startup.handle(
                 "bridge.setEnabled",
                 json!({"enabled":true}),
                 Arc::new(|_, _| {}),
-            );
+            ) {
+                log::warn!("启动时自动连接 BetterGI 失败：{error}");
+            }
         });
     }
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
-    // 桥开关的当前值。托盘菜单勾选态、延迟建图标和启动自动连接都从这里取。
+    // 桥开关的当前值。
     #[cfg(target_os = "windows")]
     let bridge_enabled = Arc::new(AtomicBool::new(startup_config.bridge.enabled));
     #[cfg(target_os = "windows")]
@@ -147,14 +153,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-    // 窗口保持不透明：圆角由 DWM 切（Win11），Win10 上就是方角，与系统上其它
-    // 浏览器形态一致。透明管线会被拖动等 DWM 状态变化打破，露白角，不能用。
+    // 窗口保持不透明：圆角由 DWM 切（Win11），Win10 上是方角。透明管线会被拖动等
+    // DWM 状态变化打破，不能用。
     let builder = WindowBuilder::new()
         .with_title("Sleepy Doll")
         .with_inner_size(Size::Logical(LogicalSize::new(1360.0, 860.0)))
         .with_min_inner_size(Size::Logical(LogicalSize::new(900.0, 620.0)));
-    // 两个图标要在窗口创建时就设上：tao 建窗口的过程中会把它们置空，
-    // 而 window_chrome::install() 要等 WebView2 启动完。
+    // tao 建窗口的过程中会把图标置空，两个图标要在窗口创建时就设上；
+    // window_chrome::install() 要等 WebView2 启动完。
     #[cfg(target_os = "windows")]
     let builder = builder
         .with_window_icon(shell_icon(16))
@@ -164,7 +170,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let builder = builder.with_decorations(false);
     let window = builder.build(&event_loop)?;
 
-    // WebView2 默认把用户数据放在 exe 旁边，那是安装目录里会被升级覆盖的位置。
+    // WebView2 默认把用户数据放在 exe 旁边，那是升级会覆盖的位置。
     let mut web_context = WebContext::new(Some(webview_data_directory(&user_directory)));
     let ipc_controller = controller.clone();
     let ipc_proxy = proxy.clone();
@@ -191,7 +197,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if is_application_url(&destination) {
                 return true;
             }
-            // Markdown links open outside the privileged application WebView.
+            // Markdown 链接在系统浏览器里打开。
             if url::Url::parse(&destination)
                 .is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
             {
@@ -212,7 +218,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_devtools(cfg!(debug_assertions))
         .build(&window)?;
 
-    // 子窗口这时才存在：WebView2 的边缘命中测试要交给它让出来。
+    // 子窗口在 WebView2 建好后才存在，边缘命中测试要交给它。
     window_chrome::install(&window);
     let mut maximized = window.is_maximized();
 
@@ -241,7 +247,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 event: WindowEvent::Resized(_),
                 ..
             } => {
-                // 只有真正变了才通知：缩放过程里这个事件很密集。
+                // 只有真正变了才通知。
                 let current = window.is_maximized();
                 if current != maximized {
                     maximized = current;
@@ -279,7 +285,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     (Some(tray), true) => {
                         let _ = tray.icon.set_visible(true);
                     }
-                    // 图标还没建过（启动时配置为关）且要显示时才建，勾选态取当前桥状态。
+                    // 图标还没建过且要显示时才建，勾选态取当前桥状态。
                     (None, true) => match create_tray(
                         proxy.clone(),
                         user_directory.clone(),
@@ -288,9 +294,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(handles) => tray = Some(handles),
                         Err(error) => log::warn!("托盘图标不可用: {error}"),
                     },
-                    // 隐藏要连句柄一起丢弃：close_window 按句柄是否存在选择
-                    // 收进托盘还是退出，留着一个隐藏的句柄会让窗口找不到归处。
-                    // 丢弃 TrayIcon 的同时图标也会从通知区移除。
+                    // 隐藏要连句柄一起丢弃：close_window 按句柄是否存在决定收进托盘
+                    // 还是退出。丢弃 TrayIcon 时图标也从通知区移除。
                     (_, false) => tray = None,
                 }
             }
@@ -317,18 +322,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
 }
 
-/// WebView2 的用户数据目录。放进用户目录，与配置、日志同级。
+/// WebView2 的用户数据目录，与配置、日志同级。
 fn webview_data_directory(user_directory: &Path) -> std::path::PathBuf {
     user_directory.join(".sleepy-doll").join("webview2")
 }
 
-/// 关闭窗口只把界面收起来：任务可能还在跑，退出的入口在托盘菜单里。
+/// 把窗口收进托盘。
 #[cfg(target_os = "windows")]
 fn fold_into_tray(window: &Window) {
     window.set_visible(false);
 }
 
-/// 托盘可用时关闭窗口等于收进托盘；托盘被禁用就无处可回，直接走退出流程。
+/// 托盘可用时关闭窗口收进托盘，否则直接走退出流程。
 #[cfg(target_os = "windows")]
 fn close_window(
     tray: Option<&TrayHandles>,
@@ -375,7 +380,7 @@ fn create_tray(
     let menu_proxy = proxy.clone();
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
         if event.id == bridge_id {
-            // 界面入口触发的桥开关也写这同一个原子值，两边永远一致。
+            // 界面入口触发的桥开关也写这同一个原子值。
             let next = !bridge_enabled.load(Ordering::Relaxed);
             bridge_enabled.store(next, Ordering::Relaxed);
             let _ = menu_proxy.send_event(UserEvent::BridgeState(next));
@@ -404,8 +409,7 @@ fn create_tray(
         .with_tooltip("Sleepy Doll · 关闭窗口后继续运行")
         .with_menu(Box::new(menu))
         .with_menu_on_left_click(false);
-    // 图标编在 exe 的资源里，界面、窗口和托盘用的是同一份。取不到只影响外观，
-    // 不该拦住启动。
+    // 图标编在 exe 的资源里，界面、窗口和托盘共用同一份。
     match Icon::from_resource(APP_ICON, Some((32, 32))) {
         Ok(icon) => builder = builder.with_icon(icon),
         Err(error) => log::warn!("托盘图标不可用: {error}"),
@@ -416,7 +420,7 @@ fn create_tray(
     })
 }
 
-/// 事件循环持有的托盘句柄：显隐图标、同步勾选态都要用到菜单项本身。
+/// 事件循环持有的托盘句柄。
 #[cfg(target_os = "windows")]
 struct TrayHandles {
     icon: tray_icon::TrayIcon,
@@ -441,8 +445,7 @@ fn dispatch_ipc(
                 return;
             }
             "window.drag" => {
-                // 拖动必须抢在指针还按着的时候进入系统移动循环；绕行事件循环会
-                // 慢半拍，感知上就是窗口跟不上手。
+                // 拖动要在指针还按着的时候进入系统移动循环，绕行事件循环会慢半拍。
                 #[cfg(target_os = "windows")]
                 window_chrome::begin_system_drag(hwnd);
                 return;
@@ -492,7 +495,7 @@ fn dispatch_ipc(
             _ => {}
         }
         if request.method == "bridge.setEnabled" {
-            // 托盘菜单的勾选态要跟上界面里的开关；真正的执行仍在下面的线程里。
+            // 托盘菜单的勾选态跟上界面里的开关。
             if let Some(enabled) = request.params["enabled"].as_bool() {
                 #[cfg(target_os = "windows")]
                 let _ = proxy.send_event(UserEvent::BridgeState(enabled));
@@ -516,18 +519,21 @@ fn dispatch_ipc(
             let response = match controller.handle(&request.method, request.params, emit) {
                 Ok(result) => json!({"kind":"response","id":request.id,"ok":true,"result":result}),
                 Err(error) => {
+                    // 界面只显示一句用户可读的提示，方法名与内部错误留给日志。
+                    log::warn!("IPC {} 失败：{error}", request.method);
                     json!({"kind":"response","id":request.id,"ok":false,"error":IpcError { code:"NATIVE_ERROR", message:error.user_message() }})
                 }
             };
             let _ = proxy.send_event(UserEvent::ToWeb(response));
         }
         Err(error) => {
+            log::warn!("IPC 请求无法解析：{error}");
             let _ = proxy.send_event(UserEvent::ToWeb(json!({"kind":"response","id":"unknown","ok":false,"error":{"code":"INVALID_IPC","message":error.to_string()}})));
         }
     });
 }
 
-/// 从配置文件读托盘开关的当前值。读不到按默认开启处理，与 serde 默认一致。
+/// 从配置文件读托盘开关，读不到按默认开启处理。
 fn tray_enabled_from_config(path: &Path) -> bool {
     std::fs::read_to_string(path)
         .ok()

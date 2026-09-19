@@ -26,11 +26,10 @@ use store::journal::Journal;
 use tokio_util::sync::CancellationToken;
 use types::*;
 
-/// Streaming frames are coalesced before they reach SQLite; a long answer would
-/// otherwise become one locked insert per token.
+/// 增量帧攒够一批再写 SQLite。
 const DELTA_BATCH_CHARS: usize = 240;
 const DELTA_BATCH_INTERVAL: Duration = Duration::from_millis(150);
-/// 输出被截断后最多再续写几次。再多就以已有正文收成 Partial。
+/// 输出被截断后最多再续写几次。
 const MAX_TRUNCATION_RECOVERIES: usize = 3;
 
 fn remember_discovered(run: &mut Run, exposed: &HashSet<String>) {
@@ -53,10 +52,7 @@ fn context_overflow(error: &Error) -> bool {
         || (text.contains("token") && text.contains("exceed"))
 }
 
-/// 与领域无关的底座：语气、证据纪律、内部实现的边界。
-///
-/// 领域知识不写在这里。BetterGI 的行为规范与操作手册随 BGI 能力包分发，
-/// 只有该提供方在线时才注入 —— 将来接入别的软件时，它们不该被 BGI 的规则污染。
+/// 与领域无关的底座：语气、证据纪律、内部实现的边界。领域说明由提供方的能力包分发。
 const CORE_AGENT_POLICY: &str = r#"你是 Sleepy Doll，一个本地桌面助手。使用简体中文。
 
 "Sleepy Doll" 是产品身份，不是角色扮演。不要自称别的角色，不编造身份设定，也不需要反复介绍自己；用直接、可靠、不过度热情的语气体现"少操心、直接办事"。
@@ -64,7 +60,7 @@ const CORE_AGENT_POLICY: &str = r#"你是 Sleepy Doll，一个本地桌面助手
 工作方式：
 1. 用实际执行和读取到的结果回答，先给结果再给依据。只陈述有可靠依据的事实；无法观测、无法核实的事情直接说明不知道，不编造，也不用无关的工具去猜。
 2. 先查完本机能够取得的信息，再判断是否真的缺少用户输入。只问无法自行取得、且不同答案会改变结果的信息，一次问完。
-3. 需要启动程序、更新内容、修改配置或执行任务时，直接去做。要不要先征求同意由运行时的审批级别决定，不要在对话里替它先问一遍；被拦下时再说明它在等什么。
+3. 需要启动程序、更新内容、修改配置或执行任务时，直接去做。要不要先征求同意由运行时的审批级别决定，不要在对话里替它先问一遍；被拦下时再说明它在等什么。涉及不可逆结果时说明它实际会改掉什么。
 4. 一个数据源已经明确报出连接或鉴权错误时，不再调用依赖它的其他工具，直接报告这一个阻塞项。
 5. 回复先给结果；只附必要证据、生效条件，或一个无法自行解决的阻塞项。不要给用户罗列选择题来代替继续工作，也不要把自己能做到的准备步骤交回给用户。
 6. 软件目录内的本机操作使用 workspace 工具。用户没有 Node、Python、Git 或其他开发环境，命令只通过 PowerShell 执行；不要让用户安装中间件或运行时。路径必须落在软件目录内，越界或被拒绝就停止，不要改用其他方式绕过。宿主软件的配置只能走对应的桥，不能用 workspace 文件或 PowerShell 改。
@@ -76,9 +72,7 @@ const CORE_AGENT_POLICY: &str = r#"你是 Sleepy Doll，一个本地桌面助手
 - 只有用户明确要求开发排障时，才展开内部标识和原始错误摘要。"#;
 
 fn configured_agent_instructions(prompt: &str) -> &str {
-    // Two generated defaults shipped before the domain manual became an
-    // always-loaded skill. Keeping either duplicates and contradicts the
-    // current policy, while a genuinely user-authored prompt is preserved.
+    // 早期版本生成的默认提示词，内容与当前政策重复；用户自己写的保留。
     if prompt.starts_with("你是 Sleepy Doll，一个操作 BetterGI 的桌面 Agent。")
         && (prompt.contains("# 接口分两层") || prompt.contains("# 用户配置在文件里"))
     {
@@ -111,7 +105,7 @@ pub struct Supervisor {
     hooks: RwLock<Arc<host::hooks::HookBus>>,
     operations: Arc<operation::operations::OperationEngine>,
 }
-/// 技能可用性判定的输入集合。持有所有权，方便在运行循环外复用。
+/// 技能可用性判定的输入集合。
 pub struct SkillEnvironment {
     plugins: HashSet<String>,
     capabilities: HashSet<String>,
@@ -197,7 +191,7 @@ impl Supervisor {
                 recorded_at: types::now(),
             });
     }
-    /// 技能可用性判定的输入。运行循环与界面读的是同一份，条件不会各算一套。
+    /// 技能可用性判定的输入。运行循环与界面读同一份。
     pub fn skill_environment(&self, config: &AppConfig) -> SkillEnvironment {
         let mut capabilities = self
             .tools()
@@ -220,7 +214,7 @@ impl Supervisor {
             .iter()
             .cloned()
             .collect::<HashSet<_>>();
-        // 领域说明跟着提供方走：宿主插件关掉，对应手册也不再出现在提示词里。
+        // 领域说明随提供方开关：宿主插件停用时不再注入。
         let mut providers = plugins.clone();
         if crate::extension::providers::host_plugin_enabled(&config.plugins.disabled) {
             providers.insert("bgi".into());
@@ -284,7 +278,7 @@ impl Supervisor {
             hooks: RwLock::new(hook_bus),
             operations,
         });
-        // Reconcile before accepting new game writes. Persistent leases survive crashes.
+        // 启动时先对账再接受新的写入；持久化的执行锁在崩溃后仍然存在。
         let weak = Arc::downgrade(&supervisor);
         let notifier = supervisor.journal.notifier();
         executor().spawn(async move {
@@ -296,8 +290,7 @@ impl Supervisor {
                 let Some(s) = weak.upgrade() else { break };
                 let _ = s.schedule();
                 drop(s);
-                // Wake on new work instead of polling SQLite ten times a second.
-                // The timeout only covers a notification that cannot be delivered.
+                // 有新任务时唤醒；超时只兜住无法送达的通知。
                 tokio::select! {
                     _ = notifier.notified() => {}
                     _ = tokio::time::sleep(Duration::from_secs(1)) => {}
@@ -323,9 +316,7 @@ impl Supervisor {
         if prompt.len() > 128 * 1024 {
             return Err(Error::Config("消息过长（上限 128 KiB）".into()));
         }
-        // Reject content that cannot fit the context budget here, where it reads as
-        // an input problem, instead of failing mid-run with a budget error after the
-        // user has already waited for a model turn.
+        // 装不进上下文预算的消息在这里就拒绝，不进入运行。
         let config = self.config.read().unwrap();
         let active = config.active()?;
         let (context_chars, _) = policy::budget(&config.runtime, active);
@@ -345,7 +336,6 @@ impl Supervisor {
             return Err(Error::Config("任务时限必须在 1 秒到 24 小时之间".into()));
         }
         // 模型选择按优先级取：用户在界面上刚挑的那一个 → 会话自己存的 → 默认模型。
-        // 新对话还没有会话记录，第一条消息就是把它定下来的时机。
         let requested = self.validated_model(model)?;
         let stored = self
             .journal
@@ -368,13 +358,13 @@ impl Supervisor {
         let run = self
             .journal
             .create(prompt, &conversation, key, duration, Some(&resolved))?;
-        // 每个对话都要有绑定的模型。删掉的配置在上面已经回落到默认。
+        // 每个对话都要有绑定的模型。
         self.journal
             .set_conversation_model(&conversation, Some(&resolved))?;
         Ok(run)
     }
 
-    /// 请求里的模型必须真实存在，否则宁可报错也不静默换成别的模型。
+    /// 请求里的模型必须真实存在。
     fn validated_model(&self, model: Option<&str>) -> Result<Option<String>> {
         let Some(id) = model.filter(|id| !id.is_empty()) else {
             return Ok(None);
@@ -404,8 +394,7 @@ impl Supervisor {
         self.journal.mark_strategy_run(&mut strategy, &run.id)?;
         Ok(run)
     }
-    /// 运行快捷任务。只接纳已发布修订；期望版本对不上时先让卡片刷新，
-    /// 不用旧文案暗跑新目标。
+    /// 运行快捷任务。只接纳已发布修订。
     pub fn submit_workflow(
         &self,
         id: &str,
@@ -463,7 +452,7 @@ impl Supervisor {
         Ok(None)
     }
 
-    /// 会话列表。默认不含已归档，也不把全部历史一次交给前端。
+    /// 会话列表。默认不含已归档。
     pub fn conversations(
         &self,
         query: &store::journal::ConversationQuery,
@@ -476,7 +465,7 @@ impl Supervisor {
         self.skill_environment(&config).providers
     }
 
-    /// 任务定义摘要。依赖可用性由运行时判定，Core 不认识具体领域工具。
+    /// 任务定义摘要。依赖可用性由运行时判定。
     pub fn task_summaries(
         &self,
         conversation: Option<&str>,
@@ -511,7 +500,7 @@ impl Supervisor {
         Ok(summaries)
     }
 
-    /// 某任务仍占用互斥锁的运行，用于删除定义时如实提示活动运行。
+    /// 某任务仍占用互斥锁的运行。
     pub fn task_run_ids(&self, task_id: &str) -> Result<Vec<String>> {
         Ok(self
             .journal
@@ -525,7 +514,7 @@ impl Supervisor {
             .collect())
     }
 
-    /// 运行接纳时固定的模型配置。配置被删掉时显式失败，不静默换成别的协议。
+    /// 运行接纳时固定的模型配置。
     fn model_for(&self, run: &Run) -> Result<crate::config::ModelConfig> {
         let config = self.config.read().unwrap();
         match run.model_id.as_deref() {
@@ -593,12 +582,20 @@ impl Supervisor {
             let s = self.clone();
             executor().spawn(async move {
                 let mut run = run;
+                let started = std::time::Instant::now();
+                log::info!(
+                    "运行 {} 开始：会话 {}，模型 {}，{} 字",
+                    run.id,
+                    run.conversation_id,
+                    run.model_id.as_deref().unwrap_or("默认"),
+                    run.prompt.chars().count()
+                );
                 let result = s.session(&mut run, &cancel).await;
                 if let Err(e) = result
                     && !run.state.terminal()
                 {
                     if let Error::Storage(storage) = &e {
-                        log::error!("Run {} storage failure: {storage}", run.id);
+                        log::error!("运行 {} 保存失败：{storage}", run.id);
                     }
                     let unknown = s
                         .journal
@@ -617,10 +614,20 @@ impl Supervisor {
                         RunState::Failed
                     };
                     run.error = Some(e.user_message());
+                    log::warn!("运行 {} 以 {:?} 结束：{e}", run.id, next);
                     if let Err(storage) = s.journal.save(&mut run, next) {
-                        log::error!("Unable to persist failed run: {storage}");
+                        log::error!("运行失败状态保存失败：{storage}");
                     }
                 }
+                log::info!(
+                    "运行 {} 结束：{:?}，{} 次工具调用，{}+{} token，用时 {:.1}s",
+                    run.id,
+                    run.state,
+                    run.tool_calls,
+                    run.input_tokens,
+                    run.output_tokens,
+                    started.elapsed().as_secs_f64()
+                );
                 let kind = if run.state == RunState::NeedsReview {
                     host::hooks::HookEventKind::RunNeedsReview
                 } else {
@@ -690,7 +697,7 @@ impl Supervisor {
     pub fn update_config(&self, config: AppConfig) -> Result<()> {
         config.validate()?;
         let hooks = Arc::new(host::hooks::HookBus::new(config.hooks.clone())?);
-        // All model calls hold a read guard, so no old model can start after this returns.
+        // 模型调用都持有读锁，取到写锁后不会再有旧配置的调用开始。
         executor().block_on(async {
             let _guard = self.model_gate.write().await;
             *self.config.write().unwrap() = config;
@@ -813,9 +820,7 @@ impl Supervisor {
                 || run.decisions >= policy.max_decisions
                 || run.tool_calls >= policy.max_tools
             {
-                // 轮次、工具次数与时限约束一次运行的总量；token 只按当轮上下文
-                // 判断（见下面的 estimated），不累加历轮 —— 累加会让多轮任务在
-                // 上下文还很空的时候就被判定超支。
+                // 轮次、工具次数与时限约束一次运行的总量；token 只按当轮上下文判断。
                 run.error = Some("已达到本次运行预算".into());
                 self.journal.save(run, RunState::NeedsReview)?;
                 return Ok(());
@@ -893,8 +898,8 @@ impl Supervisor {
                     });
                 }
             }
-            // 预算按当前模型自己的窗口推导，所以先取模型。运行接纳时已经固定
-            // 配置；运行途中换选择只影响之后开始的运行。
+            // 预算按当前模型自己的窗口推导，所以先取模型。运行途中改模型
+            // 只影响之后开始的运行。
             let model = self.model_for(run)?;
             let output_reserve = model.options.max_output_tokens.unwrap_or(8192);
             let (base_chars, token_budget) = policy::budget(&policy, &model);
@@ -938,9 +943,7 @@ impl Supervisor {
             let messages = packed.messages;
             let guard = self.model_gate.read().await;
             let model_config = self.config.read().unwrap().clone();
-            // 只看当前这一轮的上下文占用。把历轮输入累加起来比，算的是累计
-            // 花销而不是上下文大小 —— 多轮任务跑到一半就会以「预算不足」收场，
-            // 尽管当轮上下文离上限还很远。历轮用量只作记录，不设闸门；轮次与
+            // 只看当前这一轮的上下文占用；历轮用量只作记录，不设闸门。轮次与
             // 工具次数分别由 max_decisions 和 max_tools 约束。
             if estimated + output_reserve > token_budget {
                 return Err(Error::Conflict(format!(
@@ -966,9 +969,7 @@ impl Supervisor {
             let mut last_error = None;
             for (index, candidate) in candidates.into_iter().enumerate() {
                 let mut emitted = false;
-                // One row per stream frame would make every token a locked SQLite
-                // insert, so frames are coalesced into short batches. A plain
-                // Mutex keeps the surrounding future Send for executor spawn.
+                // 增量帧攒批写 SQLite；用普通 Mutex 保持 future 为 Send。
                 let batch = std::sync::Mutex::new((String::new(), std::time::Instant::now()));
                 let model_started = std::time::Instant::now();
                 let result = tokio::time::timeout(
@@ -999,8 +1000,7 @@ impl Supervisor {
                 .await
                 .map_err(|_| Error::Conflict("模型等待超过任务时限".into()))
                 .and_then(|result| result);
-                // Surface what the model already produced even when the turn
-                // failed or was cancelled mid-stream.
+                // 本轮失败或中途停止时，也把模型已经产生的正文发出去。
                 let tail = std::mem::take(&mut batch.lock().unwrap().0);
                 if !tail.is_empty() {
                     self.journal.emit(
@@ -1072,8 +1072,7 @@ impl Supervisor {
                 || response.usage.input_tokens.is_none()
                 || response.usage.output_tokens.is_none();
             // 一轮里要的调用数超上限时，执行允许的部分，其余作为错误结果回给
-            // 模型让它分批重试。直接中止整轮等于让它白等一次模型调用 —— 一次
-            // 想读十个文件是很自然的要求，不该是致命错误。整轮预算用尽才是。
+            // 模型让它分批重试。
             let per_turn = current.agent.max_tool_calls_per_turn;
             let remaining = policy.max_tools.saturating_sub(run.tool_calls);
             if remaining == 0 {
@@ -1086,13 +1085,12 @@ impl Supervisor {
             } else {
                 Vec::new()
             };
-            // Provider IDs may repeat between turns. The internal identifier never does.
+            // 提供方的调用 ID 会跨轮重复，内部 ID 不会。
             for call in calls.iter_mut().chain(deferred.iter_mut()) {
                 call.id = format!("call_{}", uuid::Uuid::new_v4());
             }
             // 未执行的调用同样要进 assistant 轮，并各自拿到一条错误结果：提供方
-            // 要求每个 tool_use 都有配对的 tool_result，模型也要知道自己少做了
-            // 哪几件。
+            // 要求每个 tool_use 都有配对的 tool_result。
             let mut tool_calls = calls.clone();
             tool_calls.extend(deferred.iter().cloned());
             let assistant = Message {
@@ -1100,7 +1098,7 @@ impl Supervisor {
                 content: response.text.clone(),
                 tool_call_id: None,
                 tool_calls,
-                // 逐字随消息持久化：下一轮必须原样回传，否则提供方拒绝请求。
+                // 逐字随消息持久化：下一轮必须原样回传，改动会被提供方拒绝。
                 reasoning: response.reasoning,
             };
             self.journal.append_message(run, &assistant)?;
@@ -1386,7 +1384,7 @@ impl Supervisor {
         cancel: &CancellationToken,
     ) -> Result<()> {
         let revision = self.tasks.revision(task_id, revision)?;
-        // 已发布的修订是运行期唯一依据；再跑一遍静态校验，防止手工改库。
+        // 已发布的修订是运行期唯一依据，这里再执行一遍静态校验。
         if !revision.validation.issues.is_empty() {
             self.journal.save(run, RunState::Blocked)?;
             run.error = Some(
@@ -1403,7 +1401,7 @@ impl Supervisor {
         let mut executor =
             operation::executor::TaskExecutor::new(self, bridge, policy, cancel, &revision, run);
         if let Err(error) = executor.preflight().await {
-            // 预检失败且未提交任何外部写入：直接给 blocked，修好后重新点击运行。
+            // 预检失败且未提交任何外部写入时进 blocked。
             let run = executor.run_mut();
             run.error = Some(error.user_message());
             self.journal.save(run, RunState::Blocked)?;
@@ -1445,18 +1443,24 @@ impl Supervisor {
         history: &mut Vec<Message>,
     ) -> Result<()> {
         let value = match result {
-            Ok(v) => json!({"ok":true,"value":v}),
+            Ok(v) => {
+                log::info!("工具 {} 成功", call.name);
+                json!({"ok":true,"value":v})
+            }
             Err(Error::Cancelled) => return Err(Error::Cancelled),
             Err(Error::Storage(e)) => return Err(Error::Storage(e)),
             Err(Error::Conflict(e)) => return Err(Error::Conflict(e)),
-            Err(e) => json!({"ok":false,"error":e.to_string()}),
+            Err(e) => {
+                // 工具失败的原因只在这里记录。
+                log::warn!("工具 {} 失败：{e}", call.name);
+                json!({"ok":false,"error":e.to_string()})
+            }
         };
         self.journal
             .record_tool(&run.conversation_id, call, &value)?;
         let full = value.to_string();
         let chars = full.chars().count();
-        // 预览用工具自己的上限而不是本轮的剩余额度：额度耗尽时预览会变成空串，
-        // 模型拿不到任何信息，只会反复重读同一个文件。聚合体积由 context 侧的
+        // 预览用工具自己的上限，而不是本轮的剩余额度；聚合体积由 context 侧的
         // 清理负责。
         let content = if chars > result_limit {
             let artifact = self.operations.artifacts.put(full.as_bytes())?;
@@ -1497,9 +1501,10 @@ impl Supervisor {
                 t.execution.always_load || !t.execution.deferred || exposed.contains(&t.name)
             })
             .collect::<Vec<_>>();
-        for (name, description, properties, required, execution) in [
+        for (name, label, description, properties, required, execution) in [
             (
                 "tools.search",
+                "检索工具",
                 "仅在任务明确涉及已安装插件时搜索插件工具。它不包含宿主原生接口或用户目录里的文件。",
                 json!({"query":{"type":"string"}}),
                 json!(["query"]),
@@ -1507,6 +1512,7 @@ impl Supervisor {
             ),
             (
                 "user.ask",
+                "询问用户",
                 "仅询问无法从本机文件、接口契约或状态取得，且不同答案会改变目标或不可逆结果的信息。一次问完；不要重复运行时审批。",
                 json!({"question":{"type":"string"}}),
                 json!(["question"]),
@@ -1519,6 +1525,7 @@ impl Supervisor {
             ),
             (
                 "plan.update",
+                "更新计划",
                 "为两个以上相互依赖的写入或执行动作建立计划。纯查询、一次读取或单项修改不需要计划。",
                 json!({"goal":{"type":"string"},"steps":{"type":"array","items":{"type":"object"}}}),
                 json!(["goal", "steps"]),
@@ -1531,6 +1538,7 @@ impl Supervisor {
             ),
             (
                 "artifact.read",
+                "读取完整结果",
                 "仅当工具结果明确返回 artifactId 和 truncated=true 时读取完整结果。",
                 json!({"id":{"type":"string"}}),
                 json!(["id"]),
@@ -1538,6 +1546,7 @@ impl Supervisor {
             ),
             (
                 "resource.search",
+                "查找资源",
                 "仅搜索已安装插件登记的资源；不搜索宿主原生接口或用户目录里的文件。",
                 json!({"query":{"type":"string"}}),
                 json!(["query"]),
@@ -1545,6 +1554,7 @@ impl Supervisor {
             ),
             (
                 "operation.propose",
+                "提交变更",
                 "提交已安装领域插件生成的 MutationPlan。宿主文件和接口操作不使用此入口。",
                 json!({"title":{"type":"string"},"plan":{"type":"object"}}),
                 json!(["title", "plan"]),
@@ -1560,6 +1570,7 @@ impl Supervisor {
             ),
             (
                 "operation.get",
+                "查询变更状态",
                 "读取事务操作的持久状态、检查点和验证结果",
                 json!({"id":{"type":"string"}}),
                 json!(["id"]),
@@ -1567,6 +1578,7 @@ impl Supervisor {
             ),
             (
                 "skills.reference",
+                "读取技能资料",
                 "当已加载 Skill 明确引用同目录资料时读取该资料；不用于发现宿主内容。",
                 json!({"name":{"type":"string"},"path":{"type":"string"}}),
                 json!(["name", "path"]),
@@ -1574,6 +1586,7 @@ impl Supervisor {
             ),
             (
                 "task.save",
+                "保存快捷任务",
                 "把用户想反复做的一件事保存成快捷任务。只做静态校验和保存，绝不执行、也绝不产生任何外部写入；用户说「不要现在运行」时照此办理。\
                  步骤类型：tool（固定工具与参数）、sequence（顺序子步骤，nodes）、condition（condition 三值判断，另有 then/otherwise/unknown 三个分支，unknown 必填）、\
                  foreach（items 取值引用、itemKey、nodes、maxItems）、repeat（count 或 until、nodes、maxIterations）、wait（seconds 或 until+timeoutSeconds，可选只读 probe）、\
@@ -1598,14 +1611,13 @@ impl Supervisor {
                 },
             ),
         ] {
-            definitions.push(ToolDefinition{name:name.into(),description:description.into(),input_schema:json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}),output_schema:None,source:"core:runtime".into(),provider_version:Some(env!("CARGO_PKG_VERSION").into()),execution});
+            definitions.push(ToolDefinition{name:name.into(),label:label.into(),description:description.into(),input_schema:json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}),output_schema:None,source:"core:runtime".into(),provider_version:Some(env!("CARGO_PKG_VERSION").into()),execution});
         }
         definitions
     }
     /// 保存（必要时发布）一个快捷任务定义。
     ///
-    /// 这里只做编译与落库：静态校验通过即可发布为「可运行，尚未实机验证」，
-    /// 不要求先真的改一个文件或跑一次游戏才配保存。发布本身也不产生外部写入。
+    /// 这里只做编译与落库，不产生外部写入。
     fn save_task(&self, run: &Run, call: &ToolCall, arguments: &Value) -> Result<Value> {
         use operation::task::{TaskLimits, TaskNode, WorkflowDefinition, compile};
 
@@ -1695,9 +1707,8 @@ impl Supervisor {
 
     /// 按契约声明算出本次写入的实际影响。
     ///
-    /// 读的是目标资源的当前内容，不是工具名 —— 「改一个字段」和「整份替换」在
-    /// 参数上长得一样，差别只在真实差异。取不到差异就返回 `None`：引擎不猜，
-    /// 由上层按未界定处理，而不是笼统地把所有写入都拦下来。
+    /// 读的是目标资源的当前内容，不是工具名。取不到差异时返回 `None`，由上层
+    /// 按未界定处理。
     async fn change_scope(
         &self,
         call: &ToolCall,
@@ -1724,7 +1735,7 @@ impl Supervisor {
                 let next = call.arguments["content"].as_str()?;
                 let reader = definition.execution.scope_reader.as_deref()?;
                 let path = call.arguments[target].as_str()?;
-                // 截断的旧内容不是差异基线，宁可不界定也不能少算改动。
+                // 截断的旧内容不能作差异基线。
                 let previous = self
                     .tools()
                     .call_async(reader, &json!({"path": path}), cancel.clone())
@@ -1961,7 +1972,7 @@ impl Supervisor {
                             .filter(|missing| !missing.is_empty())
                             {
                                 return Err(Error::Tool(format!(
-                                    "配置组「{group}」引用的路径已经不在本机：{}。先更新或订阅这些路径，不要空跑。",
+                                    "配置组「{group}」引用的路径已经不在本机：{}。先更新或订阅这些路径，再执行。",
                                     missing.join("、")
                                 )));
                             }
@@ -2083,7 +2094,7 @@ impl Supervisor {
                     if !input.is_empty() {
                         return Ok(json!({"answer":input.join("\n")}));
                     }
-                    // Wake on the next input instead of polling every 100 ms.
+                    // 有新输入时唤醒。
                     tokio::select! {
                         _ = notifier.notified() => {}
                         _ = tokio::time::sleep(Duration::from_millis(250)) => {}
@@ -2265,7 +2276,6 @@ impl Supervisor {
                 }
                 Ok(json!({"plan":plan,"attempts":self.journal.attempts(&run.id)?}))
             }
-            // 用户文件是本地文件，不是游戏对象，也不属于任何插件。
             "bgi.user.list"
             | "bgi.user.read"
             | "bgi.user.inspect_script"
@@ -2358,8 +2368,7 @@ impl Supervisor {
                     return Err(Error::Tool("插件已停用或不可用".into()));
                 }
                 if definition.execution.effect == ToolEffect::ReadOnly {
-                    // The read-only effect is declared by the plugin manifest, so an
-                    // auto-approved call is recorded rather than run silently.
+                    // 只读效果来自插件清单的声明，自动放行的调用也记录一条事件。
                     self.journal.emit(
                         run,
                         "plugin.readOnly",
@@ -2541,8 +2550,7 @@ impl Supervisor {
 mod prompt_tests {
     use super::*;
 
-    /// 底座提示词只放与领域无关的规则。BGI 的工具名和领域流程一旦出现
-    /// 在这里，就等于所有提供方都要背 BGI 的规则。
+    /// 底座提示词只放与领域无关的规则。
     #[test]
     fn core_policy_stays_free_of_domain_knowledge() {
         for leaked in ["bgi.", "BetterGI", "配置组", "调度器", "User 目录"] {
@@ -2563,44 +2571,6 @@ mod prompt_tests {
             assert!(
                 CORE_AGENT_POLICY.contains(required),
                 "missing policy: {required}"
-            );
-        }
-    }
-
-    /// 领域说明绑定在提供方上：宿主插件关掉，对应手册都不注入。
-    #[test]
-    fn bgi_skills_are_gated_on_the_bridge_provider() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("skills");
-        let mut registry = crate::extension::skills::SkillRegistry::default();
-        registry
-            .load(&[(root, "shipped".into())])
-            .expect("shipped skills load");
-
-        let empty = std::collections::HashSet::new();
-        let kinds = std::collections::HashSet::new();
-        let with_bgi = std::collections::HashSet::from(["bgi".to_owned()]);
-        for name in ["bgi-assistant", "bgi-operator"] {
-            let skill = registry.get(name).expect(name);
-            assert!(skill.always_load, "{name} 应当随提供方在线时自动加载");
-            assert_eq!(skill.requires_providers, vec!["bgi".to_owned()]);
-            let context = crate::extension::skills::SkillContext {
-                plugins: &empty,
-                capabilities: &empty,
-                resource_kinds: &kinds,
-                providers: &empty,
-                platform: std::env::consts::OS,
-            };
-            assert!(
-                !registry.eligible(skill, &context),
-                "{name} 在提供方未引入时不该注入"
-            );
-            let context = crate::extension::skills::SkillContext {
-                providers: &with_bgi,
-                ..context
-            };
-            assert!(
-                registry.eligible(skill, &context),
-                "{name} 在提供方开启时应当注入"
             );
         }
     }

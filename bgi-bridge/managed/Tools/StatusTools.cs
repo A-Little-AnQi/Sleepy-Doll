@@ -6,7 +6,7 @@ using BgiBridge.Protocol;
 
 namespace BgiBridge.Tools;
 
-/// <summary>状态与生命周期组。目前只有打通验证需要的几个，其余按计划补齐。</summary>
+/// <summary>状态与生命周期组。</summary>
 public static class StatusTools
 {
     public const string Group = "lifecycle";
@@ -15,17 +15,12 @@ public static class StatusTools
     public const string StartViewModel = "BetterGenshinImpact.ViewModel.Pages.HomePageViewModel";
     public const string StartCommand = "StartTriggerCommand";
 
-    /// <summary>
-    /// 启动动作最多等这么久。原神从拉起窗口到能截图要几十秒，超过就先回执，
-    /// 让调用方用 bgi.get_status 续等 —— 一次调用不该挂在那里等加载完。
-    /// </summary>
+    /// <summary>启动动作最多等待的时间。原神从拉起窗口到能截图要几十秒，超过就先返回状态。</summary>
     private static readonly TimeSpan LaunchWait = TimeSpan.FromSeconds(20);
 
     private static readonly object LaunchGate = new();
 
-    /// <summary>
-    /// 正在进行的启动。宿主命令发出后不可取消，重复调用只能等它，不能二次拉起原神。
-    /// </summary>
+    /// <summary>正在进行的启动；宿主命令发出后不可取消，重复调用只能等待。</summary>
     private static Task? Launching;
 
     public static void Register(MethodRegistry registry)
@@ -44,7 +39,7 @@ public static class StatusTools
         registry.Register(
             "bgi.probe",
             Group,
-            "诊断：报告桥在宿主里实际能拿到的类型与单例。用于确认反射链是否通、以及 BGI 版本是否匹配。",
+            "诊断：报告桥在 BetterGI 里实际能拿到的类型与单例。用于确认反射链是否通、以及 BGI 版本是否匹配。",
             static (_, _) => Task.FromResult<object?>(Host.Probe()));
 
         registry.Register(
@@ -62,17 +57,16 @@ public static class StatusTools
                 });
             });
 
-        // 用户要求跑游戏任务而游戏或截图器没开时，这就是那一步。宿主自己会按
-        // 「联动启动」的配置拉起原神并开始截图，不需要用户回到界面点启动。
+        // 宿主按「联动启动」的配置拉起原神并开始截图，不需要用户回到界面点启动。
         registry.Register(
             "bgi.start_game",
             Group,
-            "启动原神并让 BetterGI 开始截图，然后返回最新状态。游戏或截图器没就绪时先调用它，等 ready=true 再跑任务；"
+            "启动原神并让 BetterGI 开始截图，然后返回最新状态。游戏或截图器没就绪时先调用它，等 ready=true 再执行任务；"
                 + "启动后仍在加载是正常状态，用 bgi.get_status 继续查看，不要把它当成失败。",
             async (_, cancellation) =>
             {
                 cancellation.ThrowIfCancellationRequested();
-                // 截图器就绪才是「已经在跑」的判据：启动按钮的可执行性与它无关。
+                // 截图器就绪才算已经在运行。
                 if (Host.CaptureReady)
                 {
                     var (runningReady, runningDetail) = BridgeState.Capture();
@@ -94,7 +88,7 @@ public static class StatusTools
                 {
                     launch = Launching is { IsCompleted: false } running ? running : Launching = Launch();
                 }
-                // 取消只作用于本次等待：已经交给宿主的启动会继续跑完。
+                // 取消只作用于本次等待：已经交给宿主的启动会继续执行完。
                 var settled = await Task.WhenAny(launch, Task.Delay(LaunchWait, cancellation))
                     .ConfigureAwait(false);
                 cancellation.ThrowIfCancellationRequested();
@@ -103,7 +97,7 @@ public static class StatusTools
                 var (ready, detail) = BridgeState.Capture();
                 if (!ready && settled == launch)
                     throw BridgeException.Failed(
-                        "宿主的启动流程已经结束，但截图器仍未就绪：没有找到原神窗口，宿主也就没有开始截图。"
+                        "BetterGI 的启动流程已经结束，但截图器仍未就绪：没有找到原神窗口，BetterGI 也就没有开始截图。"
                             + "请确认原神能正常启动，或让用户在 BetterGI 的启动页手动点击启动。");
 
                 return new
@@ -111,7 +105,7 @@ public static class StatusTools
                     started = true,
                     alreadyRunning = false,
                     ready,
-                    // 没等到启动流程结束就说明还在加载：这是过程状态，不是失败。
+                    // 未等到启动流程结束表示仍在加载；这是过程状态。
                     stillLoading = settled != launch,
                     elapsedMs = watch.ElapsedMilliseconds,
                     note = ready ? "截图器已就绪，可以运行任务了。" : "原神仍在加载，用 bgi.get_status 继续查看。",
@@ -121,14 +115,11 @@ public static class StatusTools
             readOnly: false);
     }
 
-    /// <summary>
-    /// 在宿主 UI 线程上执行启动命令。返回的任务代表宿主启动流程本身：命令一旦发出，
-    /// 就与调用方的取消无关，宿主会把它跑完。
-    /// </summary>
+    /// <summary>在宿主 UI 线程上执行启动命令。返回的任务代表宿主启动流程：命令发出后不受调用方取消影响。</summary>
     private static Task Launch() => Ui.InvokeAsync(async () =>
     {
         var services = Host.Services()
-            ?? throw BridgeException.Missing("拿不到宿主的服务容器。");
+            ?? throw BridgeException.Missing("拿不到 BetterGI 的服务容器。");
         var viewModel = Reflect.RequireType(StartViewModel);
         var home = services.GetService(viewModel)
             ?? throw BridgeException.Missing("启动页 ViewModel 未注册。");
@@ -139,8 +130,8 @@ public static class StatusTools
     });
 
     /// <summary>
-    /// 宿主在这些情况下只会弹一个对话框就返回。界面对话框在注入进程里没人点，
-    /// 而且在动手前拦下来，才能把缺的那一项直接告诉调用方。
+    /// 宿主在这些情况下只弹一个对话框就返回；注入进程里没人能点它，
+    /// 先在动手前拦下并把缺的那一项说明给调用方。
     /// </summary>
     private static void EnsureStartable(object home)
     {
@@ -148,7 +139,7 @@ public static class StatusTools
             throw BridgeException.Missing("启动页拿不到配置对象。");
         if (Reflect.Get(config, "TriggerInterval") is int interval and <= 0)
             throw BridgeException.InvalidArgument(
-                "BetterGI 的触发器触发频率不大于 0，宿主会拒绝启动截图器。请让用户先在 BetterGI 界面把它设为大于 0。");
+                "BetterGI 的触发器触发频率不大于 0，BetterGI 会拒绝启动截图器。请让用户先在 BetterGI 界面把它设为大于 0。");
 
         var systemControl = Reflect.RequireType("BetterGenshinImpact.GameTask.SystemControl");
         if (Reflect.CallStatic(systemControl, "FindGenshinImpactHandle") is IntPtr { } window

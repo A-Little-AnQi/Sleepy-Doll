@@ -41,8 +41,7 @@ export function BridgePage({
     return <BridgeApiExplorer onBack={() => setShowCatalog(false)} />;
   if (showRecovery)
     return <BridgeRecovery onBack={() => setShowRecovery(false)} />;
-  // 这里不暴露配置里的 enabled 开关 —— 它默认就是开的，拿它当连接状态会让
-  // 「没连接」显示成「已启用」。
+  // 不暴露配置里的 enabled 开关：它默认就是开的，不代表连接状态。
   const connection = busy
     ? { title: "正在连接", detail: "正在连接 BetterGI。" }
     : bridge.connected

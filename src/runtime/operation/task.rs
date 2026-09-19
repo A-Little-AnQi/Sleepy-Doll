@@ -1,8 +1,7 @@
 //! 快捷任务：可保存的确定性定义与不可变修订。
 //!
-//! 定义与修订分开：定义持有名称、来源与发布指针，修订是不可变快照。运行只读取
-//! 已发布的修订，草稿失败不影响线上版本。控制流在此处做静态校验 —— 语法合法不
-//! 等于可执行，但结构错误必须在发布前拦下，而不是运行到一半才失败。
+//! 定义持有名称、来源与发布指针，修订是不可变快照。运行只读取已发布的修订；
+//! 控制流在这里做静态校验。
 
 use std::collections::{HashMap, HashSet};
 
@@ -14,7 +13,7 @@ use crate::{
     extension::{ToolEffect, ToolExecution},
 };
 
-/// 修订结构的版本号。外部导入的定义按此重新校验，不继承自带的验证结论。
+/// 修订结构的版本号。外部导入的定义按此重新校验。
 pub const SCHEMA_VERSION: u32 = 1;
 
 pub const MAX_NODES: usize = 200;
@@ -30,10 +29,10 @@ pub const DEFAULT_RUN_SECONDS: i64 = 1800;
 pub const MAX_RUN_SECONDS: i64 = 86_400;
 pub const MAX_TEMPLATE_CHARS: usize = 16 * 1024;
 
-/// 零 token 承诺的依据来自工具契约（见 `crate::extension::ModelUsage`）。
+/// 零 token 承诺的依据来自工具契约。
 pub use crate::extension::ModelUsage;
 
-/// 效果无法判定的工具不能被当作确定性工具。
+/// 效果无法判定的工具不按确定性工具计。
 pub fn resolve_usage(declared: ModelUsage, effect: ToolEffect) -> ModelUsage {
     match (declared, effect) {
         (ModelUsage::None, ToolEffect::Unknown) => ModelUsage::Unknown,
@@ -41,7 +40,7 @@ pub fn resolve_usage(declared: ModelUsage, effect: ToolEffect) -> ModelUsage {
     }
 }
 
-/// 失败策略。默认 `stop`；无幂等保证的写入不能套通用重试。
+/// 失败策略。默认 `stop`。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -64,7 +63,7 @@ pub enum FailurePolicy {
     },
 }
 
-/// 条件求值的三值结果。缺字段是 unknown，不当作 false。
+/// 条件求值的三值结果。缺字段是 unknown。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Truth {
     True,
@@ -126,7 +125,7 @@ fn number(value: &Value) -> Option<f64> {
     }
 }
 
-/// 取值引用。只允许解析后的节点/字段路径，不接受任意表达式。
+/// 取值引用：只允许解析后的节点与字段路径。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -195,8 +194,7 @@ impl Condition {
                 };
                 op.apply(&left, &right)
             }
-            // 三值逻辑：任一为 unknown 时，all 只有出现 false 才确定；any 只有
-            // 出现 true 才确定。
+            // 三值逻辑：all 出现 false 即为假，any 出现 true 即为真。
             Condition::All { conditions } => {
                 let mut unknown = false;
                 for condition in conditions {
@@ -300,7 +298,7 @@ fn descend<'a>(value: &'a Value, path: &[String]) -> Option<&'a Value> {
 pub struct ToolNode {
     pub id: String,
     pub title: String,
-    /// 显式缺省时由编译器按工具名补齐；外部导入的定义必须自带。
+    /// 为空时由编译按工具名补齐；外部导入的定义必须自带。
     #[serde(default)]
     pub tool: Option<String>,
     #[serde(default)]
@@ -338,7 +336,7 @@ pub struct ConditionNode {
     pub then: Vec<TaskNode>,
     #[serde(default)]
     pub otherwise: Vec<TaskNode>,
-    /// 缺字段时走这里。必须有内容：unknown 不能被当成 false。
+    /// 缺字段时走这里；必须有内容。
     pub unknown: Vec<TaskNode>,
 }
 
@@ -389,7 +387,7 @@ pub struct WaitNode {
     /// 契约支持的只读条件等待；与 `seconds` 至少有一个。
     #[serde(default)]
     pub until: Option<Condition>,
-    /// 条件等待时每轮调用的只读检查步骤。条件写在 `until` 里，取值来自这一步。
+    /// 条件等待时每轮调用的只读检查步骤。
     #[serde(default)]
     pub probe: Option<Box<ToolNode>>,
     #[serde(default = "default_wait_check")]
@@ -454,7 +452,7 @@ impl TaskNode {
             TaskNode::Result(node) => &node.title,
         }
     }
-    /// 该节点在用户界面上的中文动作名，用于「正在执行：步骤名」。
+    /// 该节点在界面上的中文动作名。
     pub fn kind_label(&self) -> &'static str {
         match self {
             TaskNode::Tool(_) => "调用工具",
@@ -488,7 +486,7 @@ impl Default for TaskLimits {
     }
 }
 
-/// 静态验证结论。静态通过只说明结构合法，不代表实机可用。
+/// 静态验证结论：只说明结构合法。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskValidation {
@@ -531,7 +529,7 @@ pub struct WorkflowRevision {
     pub created_at: String,
 }
 
-/// 定义状态机的可见形态。文案与主按钮直接对应产品表。
+/// 定义状态机的可见形态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DefinitionState {
@@ -600,7 +598,7 @@ pub struct WorkflowDefinition {
     pub updated_at: String,
 }
 
-/// 编译与校验用的工具目录视图。Core 不硬编码任何领域字段。
+/// 编译与校验用的工具目录视图。
 pub struct ToolCatalog {
     entries: HashMap<String, ToolContract>,
 }
@@ -633,7 +631,7 @@ impl Default for ToolCatalog {
 }
 
 /// 编译：结构/类型校验 → 工具与控制流校验 → 资源绑定 → 效果与权限计算。
-/// 只做静态检查，不产生任何真实工具写入。
+/// 只做静态检查，不产生工具写入。
 pub fn compile(
     task_id: &str,
     revision: u64,
@@ -644,8 +642,7 @@ pub fn compile(
     catalog: &ToolCatalog,
 ) -> Result<WorkflowRevision> {
     let limits = limits.unwrap_or_default();
-    // 先把契约快照写进修订，校验再读修订自己的字段：运行期与发布期看到的是
-    // 同一份契约，不随工具目录变化而漂移。
+    // 先把契约快照写进修订，校验再读修订自己的字段。
     bind_contracts(&mut nodes, catalog);
     let mut validation = TaskValidation::default();
     let mut seen: HashSet<String> = HashSet::new();
@@ -724,7 +721,7 @@ pub fn compile(
     })
 }
 
-/// 按工具名补齐执行契约与提供方版本，让修订自带发布时的快照。
+/// 按工具名补齐执行契约与提供方版本。
 fn bind_contracts(nodes: &mut [TaskNode], catalog: &ToolCatalog) {
     for node in nodes {
         match node {
@@ -733,8 +730,7 @@ fn bind_contracts(nodes: &mut [TaskNode], catalog: &ToolCatalog) {
                     if tool.execution.is_none() {
                         tool.execution = Some(contract.execution.clone());
                     }
-                    // 已绑定的版本是修订的一部分：重新编译不能让旧定义悄悄跟上
-                    // 新契约，契约变了要报出来要求重新验证。
+                    // 已绑定的版本是修订的一部分，重新编译不覆盖。
                     if tool.provider_version.is_none() {
                         tool.provider_version = contract.provider_version.clone();
                     }
@@ -908,7 +904,7 @@ fn walk(nodes: &[TaskNode], state: &mut Walk<'_>) {
                         });
                     }
                     walk_tool(&probe, state);
-                    // 检查步骤必须是只读的，否则等待会变成反复写入。
+                    // 检查步骤必须是只读的。
                     if let Some(name) = probe.tool.as_deref()
                         && let Some(contract) = state.catalog.get(name)
                         && contract.execution.effect != ToolEffect::ReadOnly
@@ -957,7 +953,7 @@ fn walk_tool(tool: &ToolNode, state: &mut Walk<'_>) {
         return;
     };
     let Some(contract) = state.catalog.get(name) else {
-        // 缺契约不阻止保存草稿，但阻止发布 —— 由调用方按 issues 判定。
+        // 缺契约时只记 issue，是否发布由调用方判定。
         state.validation.issues.push(TaskIssue {
             node_id: id.clone(),
             message: "依赖的插件尚未连接，无法验证参数".into(),
@@ -1110,7 +1106,7 @@ fn parse_expression(expression: &str) -> Option<ValueRef> {
     Some(ValueRef::NodeOutput { node, path })
 }
 
-/// 受限模板渲染。取不到的引用保持为空串并如实记账，不编造内容。
+/// 受限模板渲染：取不到的引用保持为空串并列入 missing。
 pub fn render_template(template: &str, scope: &Scope) -> (String, Vec<String>) {
     let mut missing = Vec::new();
     let mut rendered = String::with_capacity(template.len());
@@ -1360,7 +1356,7 @@ mod tests {
         assert!(!revision.model_usage.is_deterministic());
     }
 
-    /// 未声明 modelUsage 的工具保持 unknown，不能被包装成零 token。
+    /// 未声明 modelUsage 的工具保持 unknown。
     #[test]
     fn undeclared_tool_usage_stays_unknown() {
         let mut catalog = ToolCatalog::new();
@@ -1405,7 +1401,7 @@ mod tests {
         assert!(revision.validation.publishable());
     }
 
-    /// 契约版本变化必须报出来，而不是让任务悄悄跑在新语义上。
+    /// 契约版本变化要记为 issue。
     #[test]
     fn stale_provider_version_is_reported() {
         let nodes = vec![TaskNode::Tool(ToolNode {

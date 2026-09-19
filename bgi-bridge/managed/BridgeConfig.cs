@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace BgiBridge;
 
-/// <summary>桥自己的配置。属于本工具，不写进宿主目录。</summary>
+/// <summary>桥自己的配置，放在桥目录下。</summary>
 public sealed class BridgeConfig
 {
     /// <summary>启动开关。false 时托管入口拒绝启动；运行中的开关由鉴权 control 端点管理。</summary>
@@ -30,7 +30,7 @@ public sealed class BridgeConfig
     [JsonPropertyName("requireConfirmation")]
     public bool RequireConfirmation { get; set; } = true;
 
-    /// <summary>未列出的组默认启用——升级时静默丢能力比多暴露更难查。</summary>
+    /// <summary>未列出的组默认启用。</summary>
     public bool IsGroupEnabled(string group) =>
         !Groups.Any(item => item.Key.Equals(group, StringComparison.OrdinalIgnoreCase) && !item.Value)
         && !(group == "settings" && Groups.Any(item => item.Key.Equals("setting", StringComparison.OrdinalIgnoreCase) && !item.Value));

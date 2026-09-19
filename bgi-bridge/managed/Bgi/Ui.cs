@@ -3,10 +3,7 @@ using BgiBridge.Protocol;
 
 namespace BgiBridge.Bgi;
 
-/// <summary>
-/// 切到 WPF UI 线程。配置保存、绑在页面上的 ObservableObject / ObservableCollection、
-/// 各 ViewModel 命令都只能在 UI 线程碰。
-/// </summary>
+/// <summary>切到 WPF UI 线程。配置保存、绑在页面上的 ObservableObject / ObservableCollection、各 ViewModel 命令都只能在 UI 线程操作。</summary>
 public static class Ui
 {
     private static object? Dispatcher
@@ -68,8 +65,7 @@ public static class Ui
             throw BridgeException.Failed($"切 UI 线程失败：{Reflect.Root(ex).Message}");
         }
 
-        // DispatcherOperation.Task 才是真正代表委托完成的任务。不 await 它会变成
-        // "调用返回了但命令还在跑"。
+        // DispatcherOperation.Task 才是真正代表委托完成的任务。
         if (operation?.GetType().GetProperty("Task")?.GetValue(operation) is Task task)
         {
             await task.ConfigureAwait(false);

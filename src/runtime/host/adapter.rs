@@ -57,14 +57,16 @@ impl AdapterClient {
         crate::runtime::host::process::hide_console(&mut command);
         let mut child = command.spawn()?;
         let constraint = crate::runtime::host::process::constrain_process(&child)?;
-        let stdin =
-            Arc::new(tokio::sync::Mutex::new(child.stdin.take().ok_or_else(
-                || Error::Tool("Adapter stdin unavailable".into()),
-            )?));
+        let stdin = Arc::new(tokio::sync::Mutex::new(
+            child
+                .stdin
+                .take()
+                .ok_or_else(|| Error::Tool("Adapter 的 stdin 不可用".into()))?,
+        ));
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| Error::Tool("Adapter stdout unavailable".into()))?;
+            .ok_or_else(|| Error::Tool("Adapter 的 stdout 不可用".into()))?;
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let dispatcher = pending.clone();
         let writer = stdin.clone();
@@ -83,7 +85,7 @@ impl AdapterClient {
                 frame.clear();
                 if message.get("method").is_some() {
                     if message.get("id").is_some() {
-                        let rejection = json!({"jsonrpc":"2.0","id":message["id"],"error":{"code":-32601,"message":"Adapter cannot request host tools or filesystem access"}});
+                        let rejection = json!({"jsonrpc":"2.0","id":message["id"],"error":{"code":-32601,"message":"Adapter 不能请求宿主工具或文件系统"}});
                         let mut input = writer.lock().await;
                         if input.write_all(format!("{rejection}\n").as_bytes()).await.is_err() { break; }
                     }
@@ -92,12 +94,12 @@ impl AdapterClient {
                 if let Some(id) = message["id"].as_u64()
                     && let Some(sender) = dispatcher.lock().unwrap().remove(&id)
                 {
-                    let reply = if message["error"].is_null() { Ok(message["result"].clone()) } else { Err("Adapter request rejected".into()) };
+                    let reply = if message["error"].is_null() { Ok(message["result"].clone()) } else { Err("Adapter 拒绝了请求".into()) };
                     let _ = sender.send(reply);
                 }
             }
             for (_, sender) in dispatcher.lock().unwrap().drain() {
-                let _ = sender.send(Err("Adapter exited or emitted invalid protocol data".into()));
+                let _ = sender.send(Err("Adapter 已退出或发出了无效的协议数据".into()));
             }
         });
         let client = Arc::new(Self {
@@ -121,11 +123,11 @@ impl AdapterClient {
             }),
         )?;
         if initialized["protocolVersion"] != "sleepy-adapter/1" {
-            return Err(Error::Tool("Unsupported Adapter protocol version".into()));
+            return Err(Error::Tool("Adapter 协议版本不受支持".into()));
         }
         let health = client.request("health", json!({}))?;
         if health["status"] != "ready" {
-            return Err(Error::Tool("Adapter health check failed".into()));
+            return Err(Error::Tool("Adapter 健康检查未通过".into()));
         }
         Ok(client)
     }
@@ -199,16 +201,16 @@ impl AdapterClient {
             .get("stagedOutputs")
             .or_else(|| plan_value.get("stagedOutputs"))
             .and_then(Value::as_array)
-            .ok_or_else(|| Error::Tool("Adapter MutationPlan omitted staged outputs".into()))?;
+            .ok_or_else(|| Error::Tool("Adapter 的 MutationPlan 缺少 stagedOutputs".into()))?;
         let mut materialized = Vec::new();
         for output in outputs {
             if output["kind"] == "replaceResource" {
                 let encoded = output["contentBase64"].as_str().ok_or_else(|| {
-                    Error::Tool("Adapter replaceResource omitted contentBase64".into())
+                    Error::Tool("Adapter 的 replaceResource 缺少 contentBase64".into())
                 })?;
                 let content = STANDARD
                     .decode(encoded)
-                    .map_err(|_| Error::Tool("Adapter returned invalid staged content".into()))?;
+                    .map_err(|_| Error::Tool("Adapter 返回的暂存内容无法解码".into()))?;
                 let artifact = artifacts.put(&content)?;
                 materialized.push(json!({
                     "kind":"replaceResource",
@@ -219,9 +221,7 @@ impl AdapterClient {
             } else if output["kind"] == "brokeredAction" {
                 materialized.push(output.clone());
             } else {
-                return Err(Error::Tool(
-                    "Adapter returned an unsupported staged output".into(),
-                ));
+                return Err(Error::Tool("Adapter 返回了不支持的暂存输出".into()));
             }
         }
         plan_value["stagedOutputs"] = Value::Array(materialized);
@@ -297,7 +297,7 @@ impl AdapterClient {
         let payload = json!({"jsonrpc":"2.0","id":id,"method":method,"params":params});
         let sent = tokio::select! {
             _ = cancel.cancelled() => Err(Error::Cancelled),
-            result = tokio::time::timeout(Duration::from_secs(5), self.write(payload)) => result.unwrap_or_else(|_| Err(Error::Tool("Adapter input stalled".into())))
+            result = tokio::time::timeout(Duration::from_secs(5), self.write(payload)) => result.unwrap_or_else(|_| Err(Error::Tool("Adapter 输入通道停滞".into())))
         };
         if let Err(error) = sent {
             self.pending.lock().unwrap().remove(&id);

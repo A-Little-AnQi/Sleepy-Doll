@@ -1,5 +1,4 @@
-//! Local bridge lifecycle. Only the desktop IPC invokes the injector; this is
-//! deliberately not exposed as an agent tool.
+//! 本地桥的生命周期：注入器只由桌面 IPC 调用，不暴露为 agent 工具。
 use std::{
     path::{Path, PathBuf},
     time::Duration,
@@ -18,16 +17,13 @@ fn exe_dir() -> Result<PathBuf> {
 
 pub fn directory() -> Result<PathBuf> {
     let beside_exe = exe_dir()?;
-    // Shipping packages keep the components in a `bridge` subdirectory; earlier
-    // packages put them directly beside the executable.
+    // 交付布局：组件在 `bridge` 子目录；扁平包直接放在可执行文件旁。
     for candidate in [beside_exe.join("bridge"), beside_exe.clone()] {
         if candidate.join("BgiBridge.Injector.exe").is_file() {
             return Ok(candidate);
         }
     }
-    // Cargo writes to <manifest>/target in both profiles, so a binary running
-    // from there is a development build even in release. The bridge lands in
-    // target/bridge, laid out flat, beside Cargo's own output.
+    // 开发布局：二进制在 target 下运行，桥在 target/bridge。
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let development = manifest.join("target").join("bridge");
     if beside_exe.starts_with(manifest.join("target"))
@@ -40,11 +36,9 @@ pub fn directory() -> Result<PathBuf> {
     ))
 }
 
-/// The one data root, `<install>/user`. Components live in `<install>/bridge`
-/// and would otherwise put their logs and recovery records in a second `user`
-/// directory inside the product folder, which an upgrade replaces wholesale.
-/// Anything else — a flat package, the development layout — keeps the root the
-/// bridge itself resolves, so `None` here means "do not override it".
+/// 唯一的数据根 `<install>/user`。
+///
+/// 其它布局（扁平包、开发布局）沿用桥自己解析的数据根，`None` 表示不覆盖。
 fn data_root(install: &Path, bridge_dir: &Path) -> Option<PathBuf> {
     if bridge_dir == install.join("bridge").as_path() {
         Some(install.join("user"))
@@ -165,8 +159,7 @@ fn control(config: &BridgeConfig, enabled: bool) -> Result<()> {
     Ok(())
 }
 
-/// Preserve method/group settings and reuse the token across retries. The app
-/// persists this token before injection, so even a delayed start is recoverable.
+/// 保留方法/分组设置，重试时复用 token。
 pub fn prepare(config: &mut BridgeConfig) -> Result<()> {
     let (_, preferred) = endpoint(config)?;
     let occupied = !port_free(preferred);
@@ -201,7 +194,7 @@ pub fn prepare(config: &mut BridgeConfig) -> Result<()> {
         );
     }
     if occupied {
-        // 占用方已经是本产品的桥：listen/token 不能改，只钉数据根（恢复工具和引导 DLL 从磁盘读）。
+        // 占用方已是本产品的桥：listen 与 token 不改，只钉数据根。
         if info(config).is_ok() {
             if pin_configured_root(&mut settings, &exe_dir()?, &dir) {
                 crate::config::atomic_write(&path, &settings)?;
@@ -212,6 +205,7 @@ pub fn prepare(config: &mut BridgeConfig) -> Result<()> {
             return Err(Error::Tool("请先启动 BetterGI。".into()));
         }
         let (_, port) = allocate_listen(preferred.saturating_add(1))?;
+        log::warn!("端口 {preferred} 已被占用，本次连接改用 {port}");
         config.base_url = format!("http://127.0.0.1:{port}");
     }
     let (listen, _) = endpoint(config)?;
@@ -250,10 +244,13 @@ pub fn enable(config: &BridgeConfig) -> Result<()> {
     if info(config).is_ok() {
         return control(config, true);
     }
+    log::info!("桥未就绪，开始注入 BetterGI 进程");
     inject()?;
-    let until = std::time::Instant::now() + Duration::from_secs(20);
+    let started = std::time::Instant::now();
+    let until = started + Duration::from_secs(20);
     loop {
         if info(config).is_ok() {
+            log::info!("注入后 {:.1}s 桥已响应", started.elapsed().as_secs_f64());
             return control(config, true);
         }
         if std::time::Instant::now() >= until {
@@ -261,6 +258,7 @@ pub fn enable(config: &BridgeConfig) -> Result<()> {
         }
         std::thread::sleep(Duration::from_millis(300));
     }
+    log::warn!("注入完成，但 20 秒内没有得到桥的响应");
     Err(Error::Tool(
         "BetterGI 已启动，但还没连上。请退出 BetterGI 后重试。".into(),
     ))
@@ -331,6 +329,7 @@ fn inject() -> Result<()> {
             if status.success() {
                 return Ok(());
             }
+            log::warn!("注入器退出码 {:?}", status.code());
             let message = match status.code() {
                 Some(2) => "请以管理员身份运行 Sleepy Doll，再开启 BetterGI 连接。",
                 Some(5) => {
@@ -346,6 +345,7 @@ fn inject() -> Result<()> {
         if std::time::Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
+            log::warn!("注入器 65 秒未退出，已终止");
             return Err(Error::Tool("连接超时。请重启 BetterGI 后再试。".into()));
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -367,7 +367,7 @@ mod tests {
             data_root(install, &install.join("bridge")),
             Some(install.join("user"))
         );
-        // A flat package and the development layout resolve their own root.
+        // 扁平包与开发布局解析自己的数据根。
         assert_eq!(data_root(install, install), None);
         assert_eq!(
             data_root(

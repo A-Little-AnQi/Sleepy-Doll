@@ -5,7 +5,7 @@ using BgiBridge.Protocol;
 
 namespace BgiBridge.Tools;
 
-/// <summary>Stable object-oriented operations that the WPF command surface cannot express safely.</summary>
+/// <summary>按名称调用的稳定操作，不依赖界面命令。</summary>
 public static class ScriptGroupTools
 {
     private const string PreferredViewModelType =
@@ -21,7 +21,7 @@ public static class ScriptGroupTools
             ["用户要求运行一个已从 User/ScriptGroup 确认存在的配置组时。"],
             ["截图器和游戏窗口已就绪。", "没有其他独立任务持锁。", "groupName 来自 User/ScriptGroup 的真实 name。"],
             ["启动配置组中的游戏自动化、脚本、路线或 Shell 任务；具体影响由组内已启用任务决定。"],
-            "返回 resolved=true 和 executed=true 只表示目标组已解析且宿主执行方法已返回；任务业务结果仍需继续读取 Job 和运行状态。",
+            "返回 resolved=true 和 executed=true 只表示目标组已解析且 BetterGI 执行方法已返回；任务业务结果仍需继续读取 Job 和运行状态。",
             "等待桥 Job 终态，并按配置组任务产物或 BetterGI 运行状态核验；不得只凭 executed=true 报告任务完成。",
             "已经发送的游戏输入和脚本副作用不能自动撤销；需要停止时使用对应停止操作并核验终态。",
             [JsonSerializer.SerializeToElement(new { groupName = "用户目录中读取到的精确配置组名称" })],
@@ -52,12 +52,12 @@ public static class ScriptGroupTools
         {
             cancellation.ThrowIfCancellationRequested();
             var services = Host.Services()
-                ?? throw BridgeException.Missing("拿不到宿主服务容器。");
+                ?? throw BridgeException.Missing("拿不到 BetterGI 服务容器。");
             var type = Reflect.FindType(PreferredViewModelType)
                 ?? Reflect.FindHostTypeWithMethod(RunMethod, typeof(string[]))
                 ?? throw BridgeException.Missing($"当前 BetterGI 没有公开的 {RunMethod}(string[])。");
             var viewModel = services.GetService(type)
-                ?? throw BridgeException.Missing($"包含 {RunMethod} 的宿主服务未注册。");
+                ?? throw BridgeException.Missing($"包含 {RunMethod} 的 BetterGI 服务未注册。");
             var matches = ResolveGroupsFromDisk(requested);
             if (matches.Length == 0)
             {
@@ -72,8 +72,7 @@ public static class ScriptGroupTools
                     409);
 
             var resolved = matches[0];
-            // 新建配置组可能尚未进入页面 ViewModel 的内存集合。该刷新是兼容增强，
-            // 不是硬依赖：未来版本若移除私有刷新函数，公开按名称执行入口仍可调用。
+            // 新建的配置组可能尚未进入页面 ViewModel 的内存集合。
             try
             {
                 Reflect.Call(viewModel, "ReadScriptGroup");
@@ -117,11 +116,11 @@ public static class ScriptGroupTools
             }
             catch (JsonException)
             {
-                // 一个损坏的配置文件不应阻止其它有效组被解析。
+                // 单个损坏的配置文件不影响其它组。
             }
             catch (IOException)
             {
-                // 文件可能正被 BetterGI 原子替换；本次只忽略该文件。
+                // 文件可能正被 BetterGI 原子替换。
             }
         }
         return names.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();

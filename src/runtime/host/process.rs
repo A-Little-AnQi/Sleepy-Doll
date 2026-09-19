@@ -1,17 +1,11 @@
-//! Child-process isolation shared by MCP servers and domain adapters.
-//!
-//! Both spawn binaries supplied by plugins, so both need the same treatment:
-//! a cleared environment, no console window, and a job object that keeps the
-//! child from outliving the application.
+//! MCP 服务器与领域适配器共用的子进程隔离。
 use crate::error::Result;
 use tokio::process::{Child, Command};
 
-/// The environment a plugin child process is allowed to keep. Everything else is
-/// dropped, so a third-party binary cannot read the model API key or the bridge
-/// token that `${ENV:...}` configuration keeps in this process's environment.
+/// 插件子进程保留的环境变量，其余全部丢弃。本进程环境里有模型密钥与桥 token。
 const ALLOWED_ENVIRONMENT: [&str; 5] = ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP"];
 
-/// Clears the inherited environment and restores only what a child needs to run.
+/// 清空继承的环境变量，只恢复子进程运行所需的部分。
 pub fn isolate_environment(command: &mut Command) {
     command.env_clear();
     for key in ALLOWED_ENVIRONMENT {
@@ -21,7 +15,7 @@ pub fn isolate_environment(command: &mut Command) {
     }
 }
 
-/// Keeps a background child from opening a console window.
+/// 防止后台子进程打开控制台窗口。
 pub fn hide_console(command: &mut Command) {
     #[cfg(target_os = "windows")]
     command.creation_flags(0x08000000);
@@ -29,14 +23,13 @@ pub fn hide_console(command: &mut Command) {
     let _ = command;
 }
 
-/// Holds whatever keeps the child confined for as long as it runs.
+/// 持有子进程运行期间的约束。
 pub struct ProcessConstraint {
     #[cfg(target_os = "windows")]
     _job: std::os::windows::io::OwnedHandle,
 }
 
-/// Confines the child to a job object that caps its memory and terminates it
-/// when this process exits, including any grandchildren it spawned.
+/// 把子进程放进 Job 对象：限制内存占用，本进程退出时连同它派生的进程一起终止。
 #[cfg(target_os = "windows")]
 pub fn constrain_process(child: &Child) -> Result<ProcessConstraint> {
     use std::os::windows::io::{FromRawHandle, RawHandle};
@@ -48,7 +41,7 @@ pub fn constrain_process(child: &Child) -> Result<ProcessConstraint> {
 
     let process = child
         .raw_handle()
-        .ok_or_else(|| crate::error::Error::Tool("child process handle unavailable".into()))?;
+        .ok_or_else(|| crate::error::Error::Tool("子进程句柄不可用".into()))?;
     let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
     if job.is_null() {
         return Err(std::io::Error::last_os_error().into());

@@ -6,7 +6,7 @@ using BgiBridge.Protocol;
 
 namespace BgiBridge.Tools;
 
-/// <summary>Stable repository operations backed by ScriptRepoUpdater rather than window buttons.</summary>
+/// <summary>仓库更新入口：调用 BetterGI 的 ScriptRepoUpdater，不经过界面按钮。</summary>
 public static class ScriptRepositoryTools
 {
     private const string PreferredType = "BetterGenshinImpact.Core.Script.ScriptRepoUpdater";
@@ -69,11 +69,8 @@ public static class ScriptRepositoryTools
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         cancellation.ThrowIfCancellationRequested();
-        // ImportScriptFromPathJson is also a UI entry point: it raises Toasts
-        // directly and captures the WPF synchronization context. Starting it on
-        // the bridge Job thread fails after the repository pull with
-        // "the calling thread cannot access this object". Dispatch only this
-        // phase to WPF and still await its complete async operation.
+        // ImportScriptFromPathJson 会直接弹 Toast 并捕获 WPF 同步上下文，只能在 UI 线程调用；
+        // 在桥的 Job 线程上执行会以「调用线程无法访问此对象」失败。仍要等待它的异步操作完成。
         await Ui.InvokeAsync(async () =>
         {
             cancellation.ThrowIfCancellationRequested();

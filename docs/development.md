@@ -23,7 +23,7 @@ npm run dist           # 发布构建入口，与执行 build-desktop.cmd 等价
 dist\Sleepy-Doll\
   sleepy-doll.exe        主程序
   bridge\                9 个 BgiBridge.* 文件与 bridge.config.json
-  skills\                随产品分发的能力包
+  plugins\bgi\           随产品分发的插件：BetterGI 的领域说明
 ```
 
 桥组件收在 `bridge\` 子目录里并保持整目录在一起，运行期数据不落在那里。
@@ -63,10 +63,13 @@ build-desktop.cmd
 
 - 默认装到 `D:\Sleepy Doll`（D 盘存在且为固定磁盘时），否则 `%LOCALAPPDATA%\Programs\Sleepy Doll`。
 - 用户选择的目录若最后一段不是产品名，补上 `Sleepy Doll` 并把结果写回界面；静默安装同样追加。
-- 系统目录被拒绝；目标目录非空且没有 `sleepy-doll.exe` 时先征求确认。
+- 系统目录被拒绝；目标目录非空、没有 `sleepy-doll.exe`、也没有 `user\` 时先征求确认。卸载保留
+  数据后目录里只剩 `user\`，不触发该询问。
 - 覆盖安装不覆盖 `bridge\bridge.config.json`（里面是本机 token，程序把同一个 token 也写进了
   `user\config.json`，两者必须相等）。旧的平铺布局升级时先把该文件迁进 `bridge\`。
 - `user\` 在安装与覆盖安装时都不动；卸载默认保留，只有用户显式勾选才删。
+- 卸载删掉载荷清单里的每一项，`bridge\bridge.config.json` 也在其列：它是安装写下的程序
+  文件。token 不靠它保存，程序每次连接都会把 `user\config.json` 里的那份写回去。
 
 发布由 `.github/workflows/release.yml` 执行，推 `v*` tag 或手动触发。它先以 `workflow_call`
 调用 `check.yml` 并要求发布作业依赖它，然后构建、打包便携 zip，最后创建 GitHub Release。
@@ -84,7 +87,7 @@ tag 的版本号必须与 `Cargo.toml` 的 `package.version` 一致，安装程�
 
 `web/src/components/chat/Transcript.tsx` 按用户轮次组织助手消息，按调用 ID 关联工具返回，合并相邻工具记录。
 默认显示紧凑摘要，参数和返回数据在二级详情中展开。历史 Markdown 文本独立 memo，
-避免每次流式增量都重新解析整段历史。
+流式增量不会重新解析整段历史。
 
 ```bash
 cargo test --no-default-features   # 全部测试
@@ -96,8 +99,8 @@ CI 还会执行 `cargo fmt --all -- --check`、`cargo check` 和
 
 ## 浏览器预览
 
-桌面壳走原生 IPC。浏览器开发只需要本地 HTTP 网关，转发到同一个 `AppController`，
-不造假模型、也不造假 BetterGI。首次写入的配置与发行模板相同：没有模型。
+桌面壳走原生 IPC。浏览器开发只需要一个本地 HTTP 网关，转发到同一个 `AppController`；
+开发环境里没有模型与 BetterGI 的模拟实现。首次写入的配置与发行模板相同：没有模型。
 
 ```bash
 npm run backend   # 127.0.0.1:47124/ipc，占用则顺延，端口写入 .sleepy-doll/dev/ipc.port
@@ -120,8 +123,8 @@ dotnet run --project bgi-bridge/dev/ContractTests.csproj
 编进桥）。
 
 索引识别嵌套类型、RelayCommand 命名转换、源码注释、实际 XAML 绑定、快捷键及样式设置说明。
-人工补充说明位于 SettingDocumentation.cs / CommandDocumentation.cs；新增接口没有业务说明时，
-真实宿主审计必须失败，不能仅用字段名或占位文案通过。
+人工补充说明位于 SettingDocumentation.cs / CommandDocumentation.cs；新增接口缺少业务说明时，
+真实宿主审计判为失败，字段名与占位文案不作为通过依据。
 
 实机回归（`tests/bridge_control.rs`，标了 `#[ignore]`，默认套件跳过）只用于指定测试安装、管理员
 环境：先执行 `cargo test --no-default-features --test bridge_control --no-run`，再以管理员权限

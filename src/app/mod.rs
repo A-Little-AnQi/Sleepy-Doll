@@ -70,27 +70,14 @@ impl AppController {
             .try_lock()
             .map_err(|_| Error::Conflict("该数据目录已有运行中的 Sleepy Doll".into()))?;
         let mut skills = SkillRegistry::default();
-        let config_dir = config_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_default();
-        skills.load(
-            &config
-                .agent
-                .skill_directories
-                .iter()
-                .cloned()
-                .map(|path| {
-                    let source = crate::config::skill_directory_source(&config_dir, &path);
-                    (path, source.into())
-                })
-                .collect::<Vec<_>>(),
-        )?;
+        let config_dir = config_directory(&config_path);
+        skills.load(&skill_directories(&config, &config_dir))?;
         let mut tools = ToolRegistry::default();
         let mut plugins = PluginManager::default();
         plugins.load(
             &config.plugins.directories,
             &config.plugins.enabled,
+            &config.plugins.disabled,
             &mut tools,
             &mut skills,
         )?;
@@ -180,6 +167,7 @@ impl AppController {
             "plugin.install" => {
                 let config = self.config.lock().unwrap().clone();
                 let id = crate::runtime::host::installation::install(
+                    &config_directory(&self.config_path),
                     &config,
                     Path::new(required(&params, "path")?),
                 )?;
@@ -202,7 +190,11 @@ impl AppController {
                     return Err(Error::Config("随产品提供的插件不能移除。".into()));
                 }
                 let config = self.config.lock().unwrap().clone();
-                crate::runtime::host::installation::remove(&config, id)?;
+                crate::runtime::host::installation::remove(
+                    &config_directory(&self.config_path),
+                    &config,
+                    id,
+                )?;
                 self.reload_extensions()?;
                 Ok(json!({"removed":true,"recoverable":true}))
             }
@@ -268,9 +260,7 @@ impl AppController {
                 let conversation = required(&params, "conversationId")?;
                 let after = params["after"].as_u64().unwrap_or(0);
                 let wait = params["waitMs"].as_u64().unwrap_or(0).min(25000);
-                // Wait on the journal instead of polling SQLite every 100 ms. The
-                // permit stored by `notify_one` closes the gap between reading the
-                // events and starting to wait, so no wake-up can be lost.
+                // 等待 journal 的通知，不轮询 SQLite；先注册等待再读事件，唤醒不会丢。
                 let notifier = self.supervisor.journal.notifier();
                 let deadline = std::time::Instant::now() + std::time::Duration::from_millis(wait);
                 loop {
@@ -280,7 +270,7 @@ impl AppController {
                     let events = self.supervisor.journal.events(conversation, after)?;
                     let remaining = deadline.saturating_duration_since(std::time::Instant::now());
                     if !events.is_empty() || remaining.is_zero() {
-                        // 游标过旧时明确要求重取快照，不能让被清理掉的终态静默消失。
+                        // 游标过旧时要求重取快照。
                         let expired = self
                             .supervisor
                             .journal
@@ -355,7 +345,6 @@ impl AppController {
                 Ok(json!({"saved":true,"modelId":model}))
             }
             "conversation.delete" => {
-                // 删除是用户内容的明确动作：先把影响说清楚，再执行。
                 let id = required(&params, "id")?;
                 let summary = self
                     .supervisor
@@ -477,7 +466,7 @@ impl AppController {
             "workflow.delete" => {
                 let id = required(&params, "id")?;
                 let mut definition = self.supervisor.tasks.definition(id)?;
-                // 运行中删除定义：逻辑删除，当前运行继续用已固定快照。
+                // 逻辑删除，运行中的实例继续用已固定快照。
                 definition.deleted_at = Some(crate::runtime::types::now());
                 definition.updated_at = crate::runtime::types::now();
                 self.supervisor.tasks.save_definition(&definition)?;
@@ -501,7 +490,7 @@ impl AppController {
                 definition.deleted_at = None;
                 definition.created_at = crate::runtime::types::now();
                 definition.updated_at = definition.created_at.clone();
-                // 复制生成新 ID，保留来源说明，但不复用原活动运行与外部 Job。
+                // 生成新 ID，保留来源说明，不复用原活动运行与外部 Job。
                 definition.source_message_id = None;
                 self.supervisor.tasks.create_definition(&definition)?;
                 if let Some(mut revision) = self.supervisor.tasks.latest_revision(&source.id)? {
@@ -765,7 +754,7 @@ impl AppController {
         }
     }
 
-    /// 保存或更新草稿。草稿不执行、不发布、不产生任何外部写入。
+    /// 保存或更新草稿，不执行、不发布、不产生外部写入。
     fn save_draft(&self, params: &Value) -> Result<Value> {
         use crate::runtime::operation::task::{TaskLimits, TaskNode, compile};
 
@@ -834,7 +823,7 @@ impl AppController {
         }))
     }
 
-    /// 发布一份不可变修订。发布本身不产生任何真实工具写入。
+    /// 发布一份不可变修订，本身不产生真实工具写入。
     fn publish_task(&self, params: &Value) -> Result<Value> {
         let id = required(params, "id")?;
         let revision_number = params["draftRevision"]
@@ -875,7 +864,7 @@ impl AppController {
         }))
     }
 
-    /// 改名、置顶、归档、恢复。都不触碰执行语义与稳定 ID。
+    /// 改名、置顶、归档、恢复，都不触碰执行语义与稳定 ID。
     fn patch_task(&self, params: &Value, method: &str) -> Result<Value> {
         use crate::runtime::operation::task_store::DefinitionPatch;
         let id = required(params, "id")?;
@@ -912,7 +901,7 @@ impl AppController {
         Ok(json!({"saved":true}))
     }
 
-    /// 从一次已验证运行提取快捷任务：固定执行契约与真实资源，移除发现与闲聊步骤。
+    /// 从一次已验证运行提取快捷任务，固定执行契约与真实资源。
     fn extract_task(&self, params: &Value) -> Result<Value> {
         use crate::runtime::operation::task::{
             FailurePolicy, SequenceNode, TaskNode, ToolNode, compile,
@@ -981,8 +970,7 @@ impl AppController {
             source_conversation_id: Some(run.conversation_id.clone()),
             source_message_id: None,
             source_title_snapshot: plan.goal.clone(),
-            // 提取自一次真实成功的运行：步骤与契约都来自实际证据，直接可用。
-            // 但这一份修订本身还没有跑过，状态仍是「尚未实机验证」。
+            // 这一份修订还没有执行过，状态仍是「尚未实机验证」。
             published_revision: Some(1),
             draft_revision: None,
             archived_at: None,
@@ -1005,15 +993,19 @@ impl AppController {
     fn set_bridge_enabled(&self, enabled: bool) -> Result<Value> {
         let mut config = self.config.lock().unwrap().bridge.clone();
         if enabled {
-            crate::bridge::control::prepare(&mut config)?;
+            log::info!("正在连接 BetterGI（{}）", config.base_url);
+            crate::bridge::control::prepare(&mut config)
+                .inspect_err(|error| log::warn!("准备桥失败：{error}"))?;
             AppConfig::set_bridge(&self.config_path, &config)?;
             self.reload_runtime()?;
-            crate::bridge::control::enable(&config)?;
+            crate::bridge::control::enable(&config)
+                .inspect_err(|error| log::warn!("注入或启用桥失败：{error}"))?;
             config.enabled = true;
             config.instance_id = None;
             AppConfig::set_bridge(&self.config_path, &config)?;
             self.reload_runtime()?;
             self.reload_extensions()?;
+            log::info!("BetterGI 已连接（{}）", config.base_url);
             Ok(json!({"enabled":true}))
         } else {
             config.enabled = false;
@@ -1021,6 +1013,10 @@ impl AppController {
             self.reload_runtime()?;
             self.reload_extensions()?;
             let warning = crate::bridge::control::disable(&config);
+            log::info!(
+                "BetterGI 连接已关闭：{}",
+                warning.as_deref().unwrap_or("已断开")
+            );
             Ok(json!({"enabled":false,"warning":warning}))
         }
     }
@@ -1068,7 +1064,7 @@ impl AppController {
         let online: Vec<&str> = skill_context.providers.iter().map(String::as_str).collect();
         let skills = extensions
             .skills
-            .list()
+            .standalone()
             .into_iter()
             .map(|skill| {
                 json!({
@@ -1084,8 +1080,7 @@ impl AppController {
                     "alwaysLoad":skill.always_load,
                     "requiresProviders":skill.requires_providers,
                     "instructions":skill.body,
-                    // 「启用」是用户的开关，「可用」还取决于依赖是否在线 ——
-                    // 提供方没连上时，对应技能不该显示成正在生效。
+                    // 「启用」是用户的开关，「可用」还取决于依赖是否在线。
                     "enabled":!config.agent.disabled_skills.contains(&skill.name),
                     "available":!config.agent.disabled_skills.contains(&skill.name)
                         && extensions.skills.eligible(&skill, &skill_context),
@@ -1108,28 +1103,21 @@ impl AppController {
         } else {
             json!({"enabled":false,"connected":false,"baseUrl":config.bridge.base_url})
         };
-        let mut plugins = extensions
+        let plugins = extensions
             .plugins
             .list()
             .iter()
             .map(|plugin| {
                 json!({
                     "manifest":{"id":plugin.manifest.id,"name":plugin.manifest.name,"version":plugin.manifest.version,"description":plugin.manifest.description},
-                    "status":&plugin.status,
+                    "status":plugin.state,
                     "error":plugin.error.as_ref().map(|_|"插件加载失败，请检查配置"),
-                    "configuredEnabled":config.plugins.enabled.contains(&plugin.manifest.id)
+                    "configuredEnabled":config.plugin_enabled(&plugin.manifest.id),
+                    // 随产品提供的插件不能移除。
+                    "host":crate::extension::providers::is_host_provider(&plugin.manifest.id)
                 })
             })
             .collect::<Vec<_>>();
-        if !plugins
-            .iter()
-            .any(|plugin| plugin["manifest"]["id"] == crate::extension::providers::HOST_PROVIDER)
-        {
-            plugins.insert(
-                0,
-                crate::extension::providers::host_plugin_view(config.host_plugin_enabled()),
-            );
-        }
         Ok(
             json!({"permission":permission,"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.supervisor.task_summaries(None)?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"conversationGroups":self.supervisor.journal.conversation_groups()?,"bridge":bridge_status}),
         )
@@ -1137,30 +1125,15 @@ impl AppController {
 
     fn reload_extensions(&self) -> Result<()> {
         let config = AppConfig::load(&self.config_path)?;
-        let config_dir = self
-            .config_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_default();
+        let config_dir = config_directory(&self.config_path);
         let mut skills = SkillRegistry::default();
-        skills.load(
-            &config
-                .agent
-                .skill_directories
-                .iter()
-                .map(|p| {
-                    (
-                        p.clone(),
-                        crate::config::skill_directory_source(&config_dir, p).into(),
-                    )
-                })
-                .collect::<Vec<_>>(),
-        )?;
+        skills.load(&skill_directories(&config, &config_dir))?;
         let mut tools = ToolRegistry::default();
         let mut plugins = PluginManager::default();
         plugins.load(
             &config.plugins.directories,
             &config.plugins.enabled,
+            &config.plugins.disabled,
             &mut tools,
             &mut skills,
         )?;
@@ -1272,6 +1245,32 @@ impl AppController {
     }
 }
 
+/// 配置里所有相对路径的基准，也是用户自己的技能与插件所在的目录。
+fn config_directory(config_path: &Path) -> PathBuf {
+    config_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default()
+}
+
+/// 配置里列出的技能目录及其归属。
+fn skill_directories(
+    config: &AppConfig,
+    config_dir: &Path,
+) -> Vec<(PathBuf, crate::extension::skills::SkillSource)> {
+    config
+        .agent
+        .skill_directories
+        .iter()
+        .map(|path| {
+            (
+                path.clone(),
+                crate::config::skill_directory_source(config_dir, path),
+            )
+        })
+        .collect()
+}
+
 fn required<'a>(params: &'a Value, field: &str) -> Result<&'a str> {
     params[field]
         .as_str()
@@ -1293,10 +1292,12 @@ fn register_builtin_tools(
     let skills_search = skills.clone();
     registry.register(
         FunctionTool::new("skills.search", "仅在任务需要额外的已安装操作手册时搜索 Skill。已经自动加载的手册不需要先搜索或读取。", json!({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"],"additionalProperties":false}), "core:skills", move |arguments| serde_json::to_value(skills_search.search(arguments["query"].as_str().unwrap_or_default(), arguments["limit"].as_u64().unwrap_or(8) as usize)).map_err(Error::from))
+            .with_label("检索技能")
             .with_execution(core_read()),
     )?;
     registry.register(
         FunctionTool::new("skills.read", "读取已发现但未自动加载的 Skill。当前上下文已有完整说明时不要重复读取。", json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}), "core:skills", move |arguments| skills.get(arguments["name"].as_str().unwrap_or_default()).map(|skill| json!({"name":skill.name,"description":skill.description,"instructions":skill.body})).ok_or_else(|| Error::Tool("skill not found".into())))
+            .with_label("读取技能")
             .with_execution(core_read()),
     )?;
     registry.register(
@@ -1307,6 +1308,7 @@ fn register_builtin_tools(
             "core:plugins",
             move |_| Ok(plugins.public_list()),
         )
+        .with_label("读取插件列表")
         .with_execution(core_read()),
     )?;
     crate::runtime::workspace::register_tools(registry, workspace)?;

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 export type MotionKind = "page" | "panel";
 
-/** 切页 / 切 Tab / 切对话时重挂子树，重播同一套入场。 */
+/** viewKey 变化时重建子树，重放入场动画。 */
 export function MotionSwitch({
   viewKey,
   kind = "page",

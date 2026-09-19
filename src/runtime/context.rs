@@ -13,8 +13,7 @@ pub fn message(role: Role, content: impl Into<String>) -> Message {
     }
 }
 
-/// 技能匹配看最初目标，也看最近几条用户补充。只盯第一句会让「你好」之后的
-/// 真正任务装不上领域手册。
+/// 技能匹配看最初目标，也看最近几条用户补充。
 pub fn skill_query(prompt: &str, history: &[Message]) -> String {
     let mut parts = vec![prompt.to_owned()];
     for message in history
@@ -33,9 +32,7 @@ pub fn skill_query(prompt: &str, history: &[Message]) -> String {
 
 /// 粗略 token 估算，单位与 `policy.max_tokens` 一致。
 ///
-/// ASCII 每 4 字符 1 token，非 ASCII 每字符 1 token。中文实测约 1～1.5
-/// token/字，取 1 是保守下界，宁可早一点修剪上下文。按字节折算会让中文会话
-/// 的估算值大出数倍。
+/// ASCII 每 4 字符 1 token，非 ASCII 每字符 1 token。
 pub fn estimate_tokens(text: &str) -> u64 {
     let mut ascii = 0u64;
     let mut wide = 0u64;
@@ -50,9 +47,6 @@ pub fn estimate_tokens(text: &str) -> u64 {
 }
 
 /// 估算一组消息的输入 token。
-///
-/// 逐字段估算而非整体序列化：结构化字段按实际长度算，不把 JSON 的括号引号
-/// 当成内容长度。
 pub fn estimate_messages_tokens(messages: &[Message]) -> u64 {
     messages.iter().map(estimate_message_tokens).sum()
 }
@@ -79,8 +73,7 @@ fn estimate_message_tokens(message: &Message) -> u64 {
     total
 }
 
-/// 超预算时旧工具结果的正文被换成这条提示。工具调用与结果的配对保持不变，
-/// 模型仍看得到自己调过什么、返回过什么形状，只是不再带全文。
+/// 超预算时旧工具结果的正文被换成这条提示；工具调用与结果的配对保持不变。
 const CLEARED_TOOL_RESULT: &str = "[较早的工具结果内容已清除，需要时重新调用]";
 
 /// 发给模型前的上下文。原文仍在 SQLite；这里只是这一轮实际装进窗口的内容。
@@ -105,12 +98,11 @@ impl std::ops::Deref for PackedContext {
     }
 }
 
-/// 无论如何都保留全文的工具结果条数。留一条就够让模型看到最近一次调用的
-/// 返回；留多了会变成硬下限 —— 恰好这么多条大结果时一条都清不掉，仍然超限。
+/// 无论如何都保留全文的工具结果条数。
 const KEEP_RECENT_RESULTS: usize = 1;
 
-/// 结果可以随时重新取得的工具。只有这些的正文可以清 —— 写操作与 Job 的结果
-/// 是「动作是否发生过」的证据，不能只留一句占位。
+/// 结果可以随时重新取得的工具。只有这些的正文可以清：写操作与 Job 的结果
+/// 是「动作是否发生过」的证据。
 fn reobtainable(name: &str) -> bool {
     matches!(
         name,
@@ -133,8 +125,7 @@ fn reobtainable(name: &str) -> bool {
     )
 }
 
-/// 一组消息占用多少预算。工具参数与推理载荷都算在内 —— 它们同样在回传的
-/// 报文里，漏算会让余量判断偏乐观。
+/// 一组消息占用多少预算。工具参数与推理载荷都算在内。
 fn group_cost(group: &[Message]) -> usize {
     group
         .iter()
@@ -154,8 +145,7 @@ fn group_cost(group: &[Message]) -> usize {
         .sum()
 }
 
-/// 当前历史已占用的预算。执行工具前用它算出这一轮还能放进多少结果 ——
-/// 拍一个固定比例会让多轮累积后仍然超限。
+/// 当前历史已占用的预算。
 pub fn used(messages: &[Message]) -> usize {
     messages
         .iter()
@@ -163,8 +153,8 @@ pub fn used(messages: &[Message]) -> usize {
         .sum()
 }
 
-/// Evict entire tool groups, never an isolated tool result. The original transcript
-/// stays in SQLite. This extractive digest cannot introduce facts or permissions.
+/// 超预算时按整组丢弃工具调用与结果，不单独丢一条结果。原文仍留在 SQLite；
+/// 摘录只做删减，不引入新的事实或权限。
 pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<PackedContext> {
     let mut groups: Vec<Vec<Message>> = Vec::new();
     for m in history {
@@ -180,7 +170,7 @@ pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<Pac
             groups.push(vec![m]);
         }
     }
-    // Do not send tool groups interrupted by an old process to a model.
+    // 被旧进程中断的工具组不回传给模型。
     groups.retain(|g| {
         g[0].tool_calls.iter().all(|c| {
             g.iter()
@@ -193,9 +183,7 @@ pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<Pac
     let mut cleared_results = 0usize;
     let mut dropped_groups = 0usize;
 
-    // 预算不够时先清旧工具结果的正文，再考虑整组丢弃。占大头的就是这些结果，
-    // 而它们的调用与结果配对必须留着 —— 直接报错会让整轮以「超出上下文预算」
-    // 收场，用户看到的是一次白跑。
+    // 预算不够时先清旧工具结果的正文，再考虑整组丢弃；调用与结果的配对必须保留。
     let mut clearable: Vec<(usize, usize)> = Vec::new();
     for (gi, group) in groups.iter().enumerate() {
         for (mi, m) in group.iter().enumerate() {

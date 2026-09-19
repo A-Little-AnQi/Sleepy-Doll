@@ -1,3 +1,5 @@
+import { preference } from "./preference";
+
 export type LocaleId = "zh" | "en";
 
 const LOCALE_KEY = "sleepy-doll-locale";
@@ -8,11 +10,22 @@ export const LOCALE_OPTIONS: ReadonlyArray<{ value: LocaleId; label: string }> =
     { value: "en", label: "English" },
   ];
 
-export function readLocale(): LocaleId {
-  return localStorage.getItem(LOCALE_KEY) === "en" ? "en" : "zh";
+const locale = preference<LocaleId>(
+  LOCALE_KEY,
+  (stored) => (stored === "en" ? "en" : "zh"),
+  (value) => {
+    document.documentElement.lang = value === "en" ? "en" : "zh-CN";
+  },
+);
+
+export const readLocale = locale.read;
+export const restoreLocale = locale.restore;
+
+/** 当前界面语言。 */
+export function useLocale(): LocaleId {
+  return locale.use();
 }
 
-export function writeLocale(locale: LocaleId) {
-  localStorage.setItem(LOCALE_KEY, locale);
-  document.documentElement.lang = locale === "en" ? "en" : "zh-CN";
+export function writeLocale(next: LocaleId) {
+  locale.write(next);
 }

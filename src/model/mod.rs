@@ -1,5 +1,5 @@
 //! 模型这一层的共享类型：消息、工具调用、响应，以及 `Model` 抽象本身。
-//! 各协议怎么把它编成请求体、怎么解析回来，见 [`protocol`]。
+//! 各协议的编码与解析见 [`protocol`]。
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
@@ -22,13 +22,11 @@ pub struct ToolCall {
 
 /// 模型返回的推理载荷，原样回传给产出它的协议。
 ///
-/// 三个协议要求把它带回去，否则下一轮请求被拒：Anthropic 的 `thinking`
-/// 块连同 `signature`、Gemini 的 `thoughtSignature`、Responses 的
-/// `reasoning` 项连同 `encrypted_content`。另外两个协议（OpenAI Chat、
-/// Ollama）只返回可读文本，不需要回传。
+/// Anthropic 的 `thinking` 块连同 `signature`、Gemini 的 `thoughtSignature`、
+/// Responses 的 `reasoning` 项连同 `encrypted_content` 都必须带回，否则下一轮
+/// 被拒；OpenAI Chat 与 Ollama 只返回可读文本，不需要回传。
 ///
-/// 各协议的块形态与签名语义互不兼容，所以载荷带协议标签；与目标协议不一致
-/// 时丢弃整份载荷 —— 丢失推理上下文优于协议错误。
+/// 各协议的块形态与签名语义互不兼容，所以载荷带协议标签。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Reasoning {
@@ -36,7 +34,7 @@ pub struct Reasoning {
     /// 提供方原样载荷，不解析、不改写。
     ///
     /// 用 `Value` 而非定型结构：必须逐字回传，定型结构会丢掉提供方的私有键
-    /// （如 `redacted_thinking.data`），丢键即被拒。
+    /// （如 `redacted_thinking.data`），丢键会被服务端拒绝。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blocks: Vec<Value>,
     /// 界面展示用的可读文本。协议不返回可读推理时为空。
@@ -45,7 +43,7 @@ pub struct Reasoning {
 }
 
 impl Reasoning {
-    /// 载荷能否发给目标协议。协议不符即为否，调用方据此丢弃。
+    /// 载荷能否发给目标协议。
     pub fn matches(&self, protocol: ModelProtocol) -> bool {
         self.protocol == protocol
     }
@@ -103,8 +101,8 @@ impl Usage {
         }
     }
 
-    /// 当前上下文占用。Anthropic 的 `input_tokens` 不含缓存命中，要加回去才
-    /// 和窗口可比；OpenAI / Gemini 的 prompt 计数已经含缓存。
+    /// 当前上下文占用。Anthropic 的 `input_tokens` 不含缓存命中，要加回去才能
+    /// 和窗口比较；OpenAI / Gemini 的 prompt 计数已经含缓存。
     pub fn context_tokens(&self, protocol: ModelProtocol) -> Option<u64> {
         let input = self.input_tokens?;
         Some(match protocol {
@@ -123,7 +121,7 @@ pub struct ModelResponse {
     pub tool_calls: Vec<ToolCall>,
     pub finish_reason: Option<String>,
     pub usage: Usage,
-    /// 见 [`Reasoning`]。`Deserialize` 需要默认值：调用方可能从裸 JSON 构造。
+    /// 见 [`Reasoning`]。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<Reasoning>,
 }
@@ -277,7 +275,7 @@ fn anthropic_uses_bearer(auth: ModelAuth, key: &str) -> bool {
     match auth {
         ModelAuth::Bearer => true,
         ModelAuth::ApiKey => false,
-        // 官方密钥是 `sk-ant-`；中转普遍是 `sk-` / 任意 token，走 Bearer。
+        // 官方密钥以 `sk-ant-` 开头；中转多为 `sk-` 或任意 token，走 Bearer。
         ModelAuth::Auto => !key.starts_with("sk-ant-"),
     }
 }

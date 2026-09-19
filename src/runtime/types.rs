@@ -34,12 +34,11 @@ impl RunState {
                 | Self::NeedsReview
         )
     }
-    /// 是否仍在推进。`needsReview` 不主动执行，但也不是终态的对账结果。
+    /// 是否仍在推进。
     pub fn active(self) -> bool {
         !self.terminal()
     }
-    /// 是否仍占用互斥资源。待核对可以停止推进，但在人工处置前不释放锁，
-    /// 否则通用「非运行即放行」逻辑会让另一个运行重复写入未知的外部效果。
+    /// 是否仍占用互斥资源。待核对可以停止推进，但在人工处置前不释放锁。
     pub fn holds_lease(self) -> bool {
         !matches!(
             self,
@@ -134,7 +133,7 @@ pub struct Run {
     /// 该次请求所用的窗口上限。
     #[serde(default)]
     pub context_window: u64,
-    /// 本轮是否已经丢掉或清空过较早上下文。界面只展示这一事实，不再展开细节。
+    /// 本轮是否已经丢掉或清空过较早上下文。
     #[serde(default)]
     pub context_compacted: bool,
     /// 最近一次请求的缓存命中（token）。Anthropic 是 cache_read，OpenAI / Gemini
@@ -147,13 +146,10 @@ pub struct Run {
     pub error: Option<String>,
     #[serde(default)]
     pub source: RunSource,
-    /// 接纳时固定的模型配置。运行途中改选择只影响下一次决策请求，已经发出的
-    /// 请求保持原协议与配置。
+    /// 接纳时固定的模型配置。
     #[serde(default)]
     pub model_id: Option<String>,
-    /// 本轮已经发现、允许直接调用的工具与桥接口。崩溃恢复后必须从这里还原，
-    /// 不能只靠内存里的 HashSet —— 否则模型会按历史里的 describe 结果直接
-    /// invoke，被运行时拒绝。
+    /// 本轮已经发现、允许直接调用的工具与桥接口，崩溃恢复后从这里还原。
     #[serde(default)]
     pub discovered: Vec<String>,
 }
@@ -211,7 +207,7 @@ pub struct RunCheckpoint {
     pub bridge_instances: Vec<String>,
     #[serde(default)]
     pub catalog_versions: Vec<String>,
-    /// 与 `Run.discovered` 同步，给模型看已经授权过哪些调用。
+    /// 与 `Run.discovered` 同步。
     #[serde(default)]
     pub discovered: Vec<String>,
     pub created_at: String,
@@ -295,6 +291,6 @@ pub fn now() -> String {
 }
 pub fn hash(value: &Value) -> String {
     use sha2::{Digest, Sha256};
-    // serde_json maps are sorted (preserve_order is deliberately disabled).
+    // serde_json 的 map 按 key 排序（preserve_order 未启用）。
     format!("{:x}", Sha256::digest(value.to_string().as_bytes()))
 }

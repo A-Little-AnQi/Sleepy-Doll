@@ -9,12 +9,12 @@
 | 目录 | 内容 |
 |---|---|
 | `user/config.json` | 主配置 |
-| `user/skills`、`user/plugins`、`user/catalog` | 用户自己的扩展与目录缓存 |
+| `user/skills`、`user/plugins`、`user/catalog` | 用户自己的技能、插件与目录缓存 |
 | `user/log` | 运行日志。`sleepy-doll.log` 由主程序写，超过 4 MB 轮转一次、磁盘上最多留两份；`bridge.log` 由桥在 BetterGI 进程内写 |
 | `user/.sleepy-doll` | 会话数据库、WebView2 的用户数据目录，以及桥的宿主配置改动记录 |
 
 `user/` 整棵树都由程序自己创建和维护。安装与构建都不覆盖它；卸载默认保留，只有用户在卸载界面上
-显式勾选才会删除。
+显式勾选才会删除。解析顺序里第 4 条的退回位置（`%APPDATA%\Sleepy Doll\`）按同一个勾选处理。
 
 解析顺序：
 
@@ -23,9 +23,9 @@
 3. `<可执行文件目录>/user/config.json`
 4. 安装目录不可写时（例如解压到受保护目录）退回 `%APPDATA%\Sleepy Doll\user\config.json`
 
-工作目录**从不**参与解析：既不能通过参数把数据树引到当前目录，也没有工作目录回退路径
-（找不到可写位置时直接报错并提示设置 `SLEEPY_DOLL_CONFIG`）。因此 `--help`、`--version`
-以及任何不像路径的参数都会被明确拒绝，而不是被当成配置文件名。
+工作目录不参与解析：既不能通过参数把数据树引到当前目录，也没有工作目录回退路径（找不到可写
+位置时直接报错并提示设置 `SLEEPY_DOLL_CONFIG`）。`--help`、`--version` 以及任何不像路径的参数
+都会被明确拒绝，不会当成配置文件名。
 
 注意 `cargo run` 的可执行文件在 `target/<profile>/` 下，所以开发时的 `user/` 也落在那里
 （`target/` 已被忽略，`cargo clean` 会一并清掉）；debug 与 release 各自使用独立的
@@ -49,12 +49,12 @@ IPC 的 `bootstrap` 不返回密钥，只返回会话与设置界面需要的部
 
 | 字段 | 说明 |
 |---|---|
-| `version` | 配置版本，当前为 `3`。旧版本在启动时自动迁移，见下 |
+| `version` | 配置版本，当前为 `4`。旧版本在启动时自动迁移，见下 |
 | `activeModel` | 当前默认模型。没有模型时为空；有模型时必须指向 `models` 里的一项 |
 | `models` | 模型列表，首次启动为空，由用户在设置里添加 |
-| `agent` | 回合数上限、单轮工具调用上限、系统提示词、技能目录、按需加载技能数 |
+| `agent` | 回合数上限、单轮工具调用上限、用户自定义指令、用户技能目录、按需加载技能数 |
 | `bridge` | BetterGI 连接开关、地址、token、超时 |
-| `plugins` | 插件目录与已启用插件的 ID 列表 |
+| `plugins` | 插件目录、已启用插件的 ID 列表，以及显式停用的列表（随产品提供的插件默认开启） |
 | `storage.database` | SQLite 路径，默认 `./.sleepy-doll/sleepy-doll.db` |
 | `runtime` | 执行预算、编排上限、权限模式与持续授权 |
 | `hooks` | 事件钩子，目标仅允许回环地址 |
@@ -63,9 +63,15 @@ IPC 的 `bootstrap` 不返回密钥，只返回会话与设置界面需要的部
 `agent.skillDirectories`、`plugins.directories`、`storage.database`、`runtime.catalogDirectory`
 的相对路径都相对于配置文件所在目录解析。
 
+`agent.systemPrompt` 是用户自己的常驻指令，随每一次运行注入，默认留空。产品自带的底座规则
+（语气、证据纪律、内部实现的边界）编译在程序里，不写在这个字段；领域知识随插件分发，也不在这里。
+在设置 → 通用 → 配置文件里可以直接编辑。
+
 迁移按文件里声明的版本执行，每次前进一步。`1` → `2` 补齐缺失的 `runtime` 段，并在迁移前留下
 `config.v1.backup.json`；`2` → `3` 在 `permissionMode` 仍是旧默认值 `askEach` 时改为 `standard`
-（旧默认值是写回文件的产物，不算用户选择；显式选择逐项审批的用户改回 `askEach` 即可，之后不再被覆盖）。
+（旧默认值是写回文件的产物，不算用户选择；显式选择逐项审批的用户改回 `askEach` 即可，之后不再被覆盖）；
+`3` → `4` 去掉产品技能目录（`../skills`），给插件目录补上产品根 `../plugins` —— 领域说明随
+`plugins/bgi` 分发，不再单独列一个技能目录。用户自己的 `./skills` 与 `./plugins` 不受影响。
 
 ## BetterGI 连接
 
@@ -77,7 +83,7 @@ BetterGI 连接可直接在 BetterGI 页面开关，改变后立即生效。开�
 桥自己的 `bridge.config.json` 位于安装目录的 `bridge\` 子目录（与桥组件同目录），
 其中保存监听地址、token、方法分组和禁用列表。开关保留分组设置。
 程序每次连接还会写入数据根 `userDirectory`（指向安装目录下的 `user\`），桥的日志与配置改动
-记录据此落点 —— 不写这个字段时会退回 `bridge\user\`，那是桥目录还是安装目录时期的旧布局。
+记录据此落点；不写这个字段时退回 `bridge\user\`。
 关闭后业务端点返回 `DISABLED`（`invoke`、`jobs`、`state`、`host`），只保留 `info`、`control` 与目录接口
 供再次开启；已启动的 BetterGI 任务不会因此停止，注入的 DLL 随 BetterGI 退出卸载。
 如果宿主不可达，界面会说明停用未获确认。
@@ -129,7 +135,7 @@ BetterGI 连接可直接在 BetterGI 页面开关，改变后立即生效。开�
 
 设置 → BetterGI → **接口目录**，直接读取桥的当前接口目录；页面与 Agent 使用同一份契约。
 第一层包含用途、调用时机、主要参数、执行方式、副作用、可用状态。详情提供完整 JSON Schema、
-示例、前置条件、返回值判定与回退边界。分组关闭或宿主空实现的接口仍可查阅，但不允许执行。
+示例、前置条件、返回值判定与回退边界。分组关闭或宿主空实现的接口仍可查阅，但无法调用。
 目录只代表当前宿主发现的接口，不是源码中所有公开 C# 方法。
 
 Agent 使用 bgi.api.search 分页发现，bgi.api.describe 阅读当前版本说明，再通过 bgi.api.read
@@ -138,7 +144,7 @@ Agent 使用 bgi.api.search 分页发现，bgi.api.describe 阅读当前版本�
 没有安全 JSON 契约的复合对象、只读属性及尚未适配联动处理器的属性只开放读取，并说明原因。
 
 配置事务在 `user\.sleepy-doll\config-changes` 保存 config-change-*.json 恢复记录，包含原配置
-备份，使用当前 Windows 用户的专有 ACL。放在 `user\` 下是为了重装之后仍可回滚；记录含有敏感信息，
+备份，使用当前 Windows 用户的专有 ACL。记录放在 `user\` 下，重装之后仍可回滚。记录含有敏感信息，
 不应上传、提交到 Git 或粘贴给模型。
 公开的接口结果仅显示脱敏差异。宿主命令执行前也保存配置检查点，但不能撤销外部通知、
 脚本文件修改或游戏进度。

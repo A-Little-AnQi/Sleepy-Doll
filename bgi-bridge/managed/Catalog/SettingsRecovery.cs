@@ -7,7 +7,7 @@ using BgiBridge.Protocol;
 
 namespace BgiBridge.Catalog;
 
-/// <summary>Offline recovery runs in a separate helper, never inside a broken host.</summary>
+/// <summary>离线恢复：在 BetterGI 进程之外运行，不依赖宿主类型。</summary>
 public static class SettingsRecovery
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true };

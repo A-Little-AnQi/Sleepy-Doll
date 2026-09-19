@@ -126,36 +126,59 @@
   background: transparent;
 }
 
+/* 折叠与展开共用同一个外框。 */
 .activity-group {
   width: fit-content;
   max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--subtle);
   color: var(--secondary);
+}
+
+.activity-group[open] {
+  width: min(620px, 100%);
 }
 
 .activity-group > summary {
   display: flex;
   align-items: center;
-  gap: 7px;
-  min-height: 28px;
-  padding: 3px 0;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 9px 0 11px;
   list-style: none;
   font-size: 12px;
+}
+
+.activity-group > summary:hover {
+  background: var(--hover);
+}
+
+.activity-group[open] > summary {
+  border-bottom: 1px solid var(--border);
 }
 
 .activity-group > summary::-webkit-details-marker {
   display: none;
 }
 
-.activity-check,
+.activity-icon,
 .activity-expand {
   width: 13px;
   height: 13px;
+  flex-shrink: 0;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.7;
 }
 
+.activity-icon {
+  color: var(--muted);
+}
+
 .activity-expand {
+  margin-left: auto;
   transform: rotate(-90deg);
   color: var(--muted);
 }
@@ -170,11 +193,17 @@
   white-space: nowrap;
 }
 
-.activity-label {
+.activity-label,
+.activity-subject {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.activity-subject {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .assistant-message img,
@@ -186,12 +215,8 @@
 }
 
 .activity-detail {
-  margin: 6px 0 8px 20px;
   padding: 12px;
-  width: min(620px, 100%);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--subtle);
+  background: var(--surface);
 }
 
 .activity-item + .activity-item {

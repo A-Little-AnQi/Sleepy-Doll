@@ -21,12 +21,9 @@ export interface SkillInfo {
   tags: string[];
   enabled?: boolean;
   alwaysLoad?: boolean;
-  /** 需要哪些领域提供方在线。界面只展示插件，不暴露内部 id。 */
+  /** 需要哪些领域提供方在线。 */
   requiresProviders?: string[];
-  /**
-   * 用户开关是开的、依赖也在线，这份说明才会真的进入模型上下文。
-   * `enabled` 只表示用户没有关掉它。
-   */
+  /** 用户开关是开的、依赖也在线，这份说明才进入模型上下文；`enabled` 只表示用户没有关掉它。 */
   available?: boolean;
   unavailableReason?: string;
   instructions?: string;
@@ -52,6 +49,8 @@ export interface ConversationInfo {
 }
 export interface ToolInfo {
   name: string;
+  /** 界面显示的名字，由工具自己的定义给出；为空则退回 `name`。 */
+  label: string;
   description: string;
   source: string;
 }
@@ -61,7 +60,7 @@ export interface MessageInfo {
   toolCallId?: string;
   toolCalls?: Array<{ id: string; name: string; arguments: unknown }>;
   /**
-   * 模型的推理内容。只有推理类模型会返回，且 `text` 可能为空 ——
+   * 模型的推理内容，只有推理类模型返回，`text` 可能为空。
    * `blocks` 是回传给提供方的原样载荷，界面不解析它。
    */
   reasoning?: {
@@ -111,7 +110,7 @@ export interface TaskInfo {
     | { kind: "savedWorkflow"; workflowId: string; workflowRevision: number };
 }
 
-/** 快捷任务的可见状态。文案与主按钮由后端给出，界面不另立一套。 */
+/** 快捷任务的可见状态。文案与主按钮由后端给出。 */
 export type DefinitionState =
   | "draft"
   | "invalid"
@@ -272,7 +271,7 @@ export interface RunApproval {
   };
   expiresAt: number;
 }
-/** 审批级别。文案由运行时给出，界面不另写一套。 */
+/** 审批级别。文案由运行时给出。 */
 export interface PermissionLevel {
   value: string;
   label: string;
@@ -285,10 +284,7 @@ export interface PermissionState {
   levels: PermissionLevel[];
 }
 
-/**
- * bootstrap 缺 permission 字段时垫一层，避免整页崩掉。
- * 文案与 `PermissionMode::levels` 对齐。
- */
+/** bootstrap 缺 permission 字段时垫一层，文案与 `PermissionMode::levels` 对齐。 */
 export const PREVIEW_PERMISSION: PermissionState = {
   mode: "standard",
   label: "替我审批",
@@ -325,8 +321,7 @@ export function withPermission(bootstrap: Bootstrap): Bootstrap {
 }
 
 export interface Bootstrap {
-  /** Absolute path of the configuration file, so the interface can point at it
-   * instead of telling the user to "edit the configuration". */
+  /** 配置文件的绝对路径。 */
   configPath: string;
   models: ModelInfo[];
   skills: SkillInfo[];

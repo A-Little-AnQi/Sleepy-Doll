@@ -35,10 +35,7 @@ public sealed record SettingEntry(
 
 public sealed record SettingSection(string Name, string Description, int SettingCount, int WritableCount, int SensitiveCount);
 
-/// <summary>
-/// 设置目录：反射遍历 AllConfig 对象图，每个叶子暴露成 setting.&lt;路径&gt;。
-/// 手写字段表在宿主版本变化时必烂，反射遍历让新增设置无需改桥。
-/// </summary>
+/// <summary>设置目录：反射遍历 AllConfig 对象图，每个叶子暴露成 setting.&lt;路径&gt;。</summary>
 public static class SettingsCatalog
 {
     private const int MaxDepth = 14;
@@ -93,7 +90,7 @@ public static class SettingsCatalog
         ["root"] = "顶层设置。",
     };
 
-    /// <summary>每次调用重新反射：几百项代价很低，换来改了配置立刻反映。</summary>
+    /// <summary>每次调用重新反射，反映宿主当前的配置结构。</summary>
     public static List<SettingEntry> Build(object? suppliedRoot = null)
     {
         var current = suppliedRoot ?? Host.AllConfigInstance();
@@ -142,7 +139,7 @@ public static class SettingsCatalog
             string? readError = current is null ? "父级配置对象尚未初始化。" : null;
             if (current is not null)
                 try { currentValue = property.GetValue(current); }
-                catch { readError = "宿主 getter 读取失败，当前值未知。"; }
+                catch { readError = "BetterGI getter 读取失败，当前值未知。"; }
             JsonElement rawValue;
             try { rawValue = ValueContract.Snapshot(currentValue, property.PropertyType); }
             catch { rawValue = ArgumentSchema.Parse("null"); readError = "此值无法安全序列化，当前值未知。"; }
@@ -151,8 +148,7 @@ public static class SettingsCatalog
             var defaultKnown = false;
             if (documentation?.Initial is { } initial)
                 try { defaultValue = ArgumentSchema.Parse(initial); defaultKnown = true; } catch { }
-            // A generated partial change hook may modify sibling fields or files. A field-only
-            // transaction cannot honestly promise to undo such effects without a dedicated adapter.
+            // BetterGI 生成的变更钩子可能连带修改兄弟字段或文件。
             var customHook = documentation?.HasCustomChangeHook == true
                 || property.DeclaringType?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                     .Any(method => method.Name == $"On{property.Name}Changed") == true;
@@ -175,8 +171,8 @@ public static class SettingsCatalog
             {
                 ValueSchema = schema,
                 ValueVersion = readError is null ? ValueContract.Version(rawValue) : "",
-                WriteRestriction = readError ?? (writable ? null : customHook ? "宿主包含联动变更处理器；尚无覆盖其连带副作用的事务适配，桥仅开放读取。"
-                    : property.SetMethod?.IsPublic != true ? "宿主未提供公共 setter，只能读取。" : "复合类型缺少安全 JSON 写入契约，只能读取；不得重建宿主对象。"),
+                WriteRestriction = readError ?? (writable ? null : customHook ? "BetterGI 包含联动变更处理器；尚无覆盖其连带副作用的事务适配，桥仅开放读取。"
+                    : property.SetMethod?.IsPublic != true ? "BetterGI 未提供公共 setter，只能读取。" : "复合类型缺少安全 JSON 写入契约，只能读取；不得重建 BetterGI 对象。"),
                 SourceReference = documentation is null ? null : $"{documentation.Source}:{documentation.Line}",
                 DefaultValueKnown = defaultKnown,
                 ReadError = readError,
@@ -184,7 +180,7 @@ public static class SettingsCatalog
         }
     }
 
-    /// <summary>集合与 System.* 一律当叶子：展开成 arr.0.xxx 这样的路径没有意义。</summary>
+    /// <summary>集合与 System.* 视为叶子，不展开成 arr.0.xxx 路径。</summary>
     private static bool IsLeaf(Type type) =>
         type.IsValueType
         || type == typeof(string)
@@ -200,7 +196,7 @@ public static class SettingsCatalog
         }
         catch
         {
-            // getter 可能正被别的线程访问；一项取不到不该让整张目录失败。
+            // getter 可能被其他线程访问；单项取不到不影响整张目录。
             return null;
         }
     }
@@ -230,14 +226,14 @@ public static class SettingsCatalog
         var attribute = property.GetCustomAttribute<DescriptionAttribute>()?.Description;
         if (!string.IsNullOrWhiteSpace(attribute)) return (attribute, "DescriptionAttribute");
 
-        // 推断：分区用途 + 属性名的中文词元。够用，且不假装自己知道更多。
+        // 推断：分区用途 + 属性名。
         var sectionText = SectionDescriptions.GetValueOrDefault(section, $"{section} 设置分区。");
-        return ($"读取 {section} 分区中的 {property.Name}（{FriendlyType(property.PropertyType)}）。分区用途：{sectionText}宿主未提供该字段的独立业务说明，不能仅凭名称推断改变后的游戏效果。", "type-contract");
+        return ($"读取 {section} 分区中的 {property.Name}（{FriendlyType(property.PropertyType)}）。分区用途：{sectionText}BetterGI 未提供该字段的独立业务说明，不能仅凭名称推断改变后的游戏效果。", "type-contract");
     }
 
     /// <summary>
-    /// 宿主的 XML 注释文件，原版发布默认没有，有就用没有就降级。
-    /// 路径必须用 AllConfig 所在程序集定位——我们自己的 Location 在单文件宿主里是空串。
+    /// 宿主的 XML 注释文件，原版发布默认没有。路径必须用 AllConfig 所在程序集定位：
+    /// 桥自己的 Location 在单文件宿主里是空串。
     /// </summary>
     private static Dictionary<string, string> LoadXmlDocs()
     {

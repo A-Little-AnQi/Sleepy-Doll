@@ -1,4 +1,4 @@
-//! 用本机 User 目录判定「能不能跑」，避免模型自己搜接口、读遍路线。
+//! 用本机 User 目录判定目标是否可运行。
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -6,7 +6,7 @@ use std::{
 
 use serde_json::{Value, json};
 
-/// 采集/跑配置组的入口：一次扫描配置组和 AutoPathing 目录名，不打开路线 JSON。
+/// 判定采集或运行目标的入口：一次扫描配置组与 AutoPathing 目录名，不打开路线 JSON。
 pub fn resolve_local(root: &Path, query: &str) -> Value {
     let query = query.trim();
     let groups = scan_groups(root);

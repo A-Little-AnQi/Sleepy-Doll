@@ -19,7 +19,7 @@ interface Props {
 
 /** 弹层与触发器之间留的空隙。 */
 const GAP = 6;
-/** 距视口边缘至少留这么多，避免贴边。 */
+/** 距视口边缘的最小距离。 */
 const MARGIN = 8;
 
 type Placement = {
@@ -57,10 +57,7 @@ function revealOption(list: HTMLElement, index: number) {
 /**
  * 单选下拉。
  *
- * 弹层挂到 `document.body` 上用 fixed 定位：只要留在原地，它就会被祖先元素
- * 的层叠上下文困住（面板的入场动画、`overflow: hidden` 的容器都会），再高的
- * z-index 也救不回来，选项会被后面的内容盖住。挂出去之后层级只由视口决定，
- * 顺便也能在贴边时翻转和收窄。
+ * 弹层挂到 `document.body` 上用 fixed 定位。
  */
 export function Select({
   value,
@@ -76,11 +73,11 @@ export function Select({
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState(0);
   const [placement, setPlacement] = useState<Placement>();
-  /** 键盘改焦点时才把选项滚进视口；指针划过不能拽列表，否则一滚就和滚动对着干。 */
+  /** 只有键盘改焦点时才把选项滚进视口。 */
   const fromKey = useRef(false);
-  /** 打开时定下上下方向，滚动跟随不再翻转，避免贴阈值时整层对跳。 */
+  /** 打开时定下的上下方向。 */
   const side = useRef<"above" | "below">(undefined);
-  /** 当前这次打开是否已经把选中项滚进视口；placement 后续更新不能再拽列表。 */
+  /** 这次打开是否已经把选中项滚进视口。 */
   const revealed = useRef(false);
   const selected = options.find((option) => option.value === value);
   const show = () => {
@@ -100,11 +97,10 @@ export function Select({
     trigger.current?.focus();
   };
 
-  // 有说明的选项需要比触发器更宽；语言这类短选项跟触发器对齐，
-  // 否则侧栏菜单里会出现 128px 控件配 240px 弹层。
+  // 有说明的选项用更宽的弹层，其余跟触发器对齐。
   const roomy = options.some((option) => option.description);
 
-  // 摆位在绘制前算好，避免弹层先出现在错误位置再跳一下。
+  // 绘制前算好摆位。
   useLayoutEffect(() => {
     if (!open) {
       setPlacement(undefined);
@@ -112,7 +108,7 @@ export function Select({
       return;
     }
     const place = (event?: Event) => {
-      // 列表自己滚时不要重算定位：会改 maxHeight、还会和滚轮抢 scrollTop。
+      // 列表自身滚动时不重算定位。
       if (
         event?.target instanceof Node &&
         menu.current?.contains(event.target)
@@ -150,7 +146,7 @@ export function Select({
     };
     place();
     window.addEventListener("resize", place);
-    // 页面滚动时跟着走，否则弹层会停在原地和触发器脱开。
+    // 页面滚动时跟随重算。
     window.addEventListener("scroll", place, true);
     return () => {
       window.removeEventListener("resize", place);

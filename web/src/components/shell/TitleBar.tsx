@@ -9,8 +9,7 @@ import {
 import { api } from "../../ipc/api";
 import "./title-bar.css";
 
-/** 自绘的窗口标题栏。无边框窗口里系统不再画标题栏，这条替代它。
- * 只在桌面壳注入了 frameless 标记时由调用方挂上。 */
+/** 自绘的窗口标题栏。 */
 export function TitleBar({
   canMaximize = true,
   closeDisabled = false,
@@ -22,7 +21,7 @@ export function TitleBar({
   const barRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
-    // 布局前打标记：CSS 靠它把标题栏的高度让出来，晚一帧会看到内容跳一下。
+    // 布局前打上 frameless 标记，CSS 靠它让出标题栏高度。
     document.documentElement.dataset.frameless = "true";
     return () => {
       delete document.documentElement.dataset.frameless;
@@ -38,7 +37,7 @@ export function TitleBar({
   }, []);
 
   useLayoutEffect(() => {
-    // 最大化后窗口铺满屏幕，任何一侧都不再画圆角。
+    // 最大化后不再画圆角。
     if (maximized) document.documentElement.dataset.maximized = "true";
     else delete document.documentElement.dataset.maximized;
     return () => {
@@ -47,8 +46,7 @@ export function TitleBar({
   }, [maximized]);
 
   useLayoutEffect(() => {
-    // 条带几何上报后，原生命中测试接管标题栏：拖动、贴边、双击最大化都走系统
-    // 路径，不再经过界面。上报的是 CSS 像素，缩放换算在原生侧做。
+    // 上报拖拽条带的几何，之后由原生命中测试接管标题栏。上报的是 CSS 像素。
     const bar = barRef.current;
     const controls = bar?.querySelector(".title-bar-controls");
     if (!(bar instanceof HTMLElement) || !(controls instanceof HTMLElement)) {
@@ -68,8 +66,7 @@ export function TitleBar({
   }, [canMaximize]);
 
   const onDragPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    // 只响应主键，也只在标题栏本身上起拖：控制按钮自己处理点击。
-    // 条带上报之后原生命中测试会把这里的事件截走，这条只在上报前生效。
+    // 只响应主键，控制按钮自己处理点击。条带上报后由原生命中测试接管。
     if (event.button !== 0) return;
     if (isControl(event.target)) return;
     void api.windowDrag();

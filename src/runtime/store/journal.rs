@@ -18,7 +18,7 @@ pub struct ConversationSummary {
     pub updated_at: String,
     pub pinned: bool,
     pub archived: bool,
-    /// 会话绑定的模型。为空或指向已删除配置时，运行时回落到默认模型。
+    /// 会话绑定的模型；为空或指向已删除配置时回落到默认模型。
     pub model_id: Option<String>,
     pub task_count: usize,
 }
@@ -42,7 +42,7 @@ pub struct GroupLayout {
     pub order: Vec<String>,
 }
 
-/// 会话列表的筛选与分页。默认不含已归档会话，也不把全部历史一次给前端。
+/// 会话列表的筛选与分页。默认不含已归档会话。
 #[derive(Debug, Clone, Default)]
 pub struct ConversationQuery {
     pub search: Option<String>,
@@ -70,14 +70,12 @@ pub struct Journal {
     connection: Mutex<Connection>,
     notify: Arc<tokio::sync::Notify>,
 }
-// Every transaction below writes. Acquire the writer reservation before reading:
-// a deferred WAL read transaction cannot upgrade after another connection commits,
-// and SQLITE_BUSY_SNAPSHOT bypasses busy_timeout (notably when two chats run).
+// 以下事务都要写：读之前先取写入预留。延迟的 WAL 读事务在另一连接提交后无法升级，
+// SQLITE_BUSY_SNAPSHOT 不受 busy_timeout 约束。
 impl Journal {
     pub fn open(path: &Path) -> Result<Self> {
         let mut connection = Connection::open(path)?;
-        // WAL must be set here as well: the runtime keeps its own connection which
-        // otherwise degrades to the rollback journal under concurrent access.
+        // 这里也要设 WAL：运行时另有自己的连接。
         connection.execute_batch(
             "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;",
         )?;
@@ -119,7 +117,7 @@ impl Journal {
         Ok(journal)
     }
 
-    /// Scheduler and IPC waiters subscribe to this instead of polling SQLite.
+    /// 调度器与 IPC 等待方订阅这里，不轮询 SQLite。
     pub fn notifier(&self) -> Arc<tokio::sync::Notify> {
         self.notify.clone()
     }
@@ -129,9 +127,6 @@ impl Journal {
         self.notify.notify_one();
     }
 
-    /// Stream frames are the only high-volume events, and their text is already
-    /// stored with the assistant message, so they are retired first. The wider
-    /// cap only guards against unbounded growth; recent evidence is always kept.
     pub fn prune(&self) -> Result<()> {
         let db = self.connection.lock().unwrap();
         db.execute(
@@ -309,9 +304,6 @@ impl Journal {
         Ok(())
     }
     /// 游标是否已经落在保留窗口之前。
-    ///
-    /// 事件会被清理，清理掉的终态事件再也读不回来。此时不能假装「没有新事件」，
-    /// 必须让客户端先载一致快照再续流，否则最终结果会静默丢失。
     pub fn cursor_expired(&self, conversation: &str, after: u64) -> Result<bool> {
         if after == 0 {
             return Ok(false);
@@ -673,7 +665,7 @@ impl Journal {
         Ok(())
     }
 
-    /// 没有绑定或绑的配置已经不在了，都改成当前的默认模型。
+    /// 未绑定或绑定配置已失效的会话，改用当前的默认模型。
     pub fn rebind_models(&self, valid: &[String], default: &str) -> Result<()> {
         let connection = self.connection.lock().unwrap();
         connection.execute(
@@ -699,7 +691,7 @@ impl Journal {
         Ok(())
     }
 
-    /// 归档可撤销，不删除消息，也不影响来源快捷任务。
+    /// 归档不删除消息，也不影响来源快捷任务。
     pub fn set_conversation_archived(&self, id: &str, archived: bool) -> Result<()> {
         self.connection.lock().unwrap().execute(
             "UPDATE conversations SET archived_at=?1 WHERE id=?2",
@@ -769,8 +761,7 @@ impl Journal {
         Ok(())
     }
 
-    /// 删除会话：只删这个会话的消息与运行记录。独立保存的快捷任务保留，
-    /// 来源显示为已删除，运行证据的来源快照不受影响。
+    /// 删除会话：只删这个会话的消息与运行记录，独立保存的快捷任务保留。
     pub fn delete_conversation(&self, id: &str) -> Result<Value> {
         let mut db = self.connection.lock().unwrap();
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;

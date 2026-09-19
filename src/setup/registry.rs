@@ -1,10 +1,8 @@
-//! 每用户的卸载登记项。控制面板的「程序和功能」按它显示与卸载。
-//!
-//! 写在 HKCU 下，安装与卸载都不需要管理员权限。
+//! 每用户的卸载登记项。控制面板的「程序和功能」按它显示与卸载，写在 HKCU 下。
 
 pub use platform::{install_location, installed_version, register, remove};
 
-/// 登记项的子键。64 位与 32 位视图共用 HKCU\Software，不必区分。
+/// 登记项的子键。
 const KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Sleepy Doll";
 
 #[cfg(windows)]
@@ -35,7 +33,7 @@ mod platform {
         key.set_text("DisplayName", NAME)?;
         key.set_text("DisplayVersion", version())?;
         key.set_text("Publisher", NAME)?;
-        // 图标取主程序资源里的第一个，与开始菜单快捷方式用的是同一份。
+        // 图标取主程序资源里的第一个。
         key.set_text("DisplayIcon", &format!("\"{}\",0", executable.display()))?;
         // 结尾保留分隔符：控制面板把它当目录用。
         let location = format!("{}\\", directory.display());
@@ -59,7 +57,7 @@ mod platform {
         Ok(())
     }
 
-    /// 登记项里的安装位置。没有登记项说明不是这个安装程序装的。
+    /// 登记项里的安装位置。
     pub fn install_location() -> Option<PathBuf> {
         read_text("InstallLocation")
             .filter(|text| !text.is_empty())

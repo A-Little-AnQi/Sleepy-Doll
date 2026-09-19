@@ -48,7 +48,7 @@ build.cmd
 
 | 路径 | 内容 |
 |---|---|
-| `user\log\bridge.log` | 桥在宿主进程内的日志。宿主是 WPF 应用，没有属于桥的控制台 |
+| `user\log\bridge.log` | 桥在 BetterGI 进程内的日志。BetterGI 是 WPF 应用，没有控制台 |
 | `user\.sleepy-doll\config-changes` | 宿主配置改动记录，供回滚与重装后追溯 |
 
 `user\` 是用户的目录：安装程序不覆盖它，卸载默认也保留（只在检测到该目录时问一次是否连同

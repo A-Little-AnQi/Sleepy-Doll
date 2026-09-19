@@ -10,7 +10,9 @@
     manifest.
 
     user\ is left out on purpose: a development machine keeps real model keys
-    and the bridge token there. *.log is left out as well.
+    there. *.log is left out as well. A bridge.config.json in the delivery
+    folder holds the token issued on this machine, so it is replaced by
+    bgi-bridge\bridge.config.example.json.
 
     Comments are ASCII only: Windows PowerShell reads a .ps1 without a BOM
     using the system ANSI code page, which would garble anything else.
@@ -39,6 +41,10 @@ function Test-Included([string]$relative) {
     if ($relative -like 'user/*') { return $false }
     if ($relative -like 'bridge/user/*') { return $false }
     if ($relative -like '*.log') { return $false }
+    # Replaced by the example below; setup installs either name as
+    # bridge.config.json.
+    if ($relative -eq 'bridge.config.json') { return $false }
+    if ($relative -eq 'bridge/bridge.config.json') { return $false }
     return $true
 }
 
@@ -63,6 +69,22 @@ $files = @(
 
 if ($files.Count -eq 0) {
     throw "nothing to pack: $source is empty"
+}
+
+# The payload carries the template, never the token issued on this machine.
+$example = [System.IO.Path]::GetFullPath(
+    (Join-Path $PSScriptRoot '..\bgi-bridge\bridge.config.example.json'))
+if (-not (Test-Path -LiteralPath $example -PathType Leaf)) {
+    throw "missing bridge config example: $example"
+}
+if ($files.Path -notcontains 'bridge/bridge.config.example.json') {
+    $files = @(
+        @($files) + [pscustomobject]@{
+            Path = 'bridge/bridge.config.example.json'
+            Full = $example
+            Size = (Get-Item -LiteralPath $example).Length
+        } | Sort-Object -Property Path
+    )
 }
 
 $payload = Join-Path $output 'payload.bin'

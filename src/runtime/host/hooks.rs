@@ -180,10 +180,8 @@ fn merge(target: &mut HookOutcome, source: HookOutcome) {
         .extend(source.context.into_iter().filter(|text| text.len() <= 4096));
 }
 
-/// Accepts loopback HTTP targets only. The URL is parsed rather than
-/// prefix-matched: `http://127.0.0.1:9@evil.com` starts with a loopback prefix
-/// but resolves to `evil.com`, so a prefix test would post hook payloads — tool
-/// arguments and results — to an external host.
+/// 只接受回环地址的 HTTP 目标。URL 解析后判断，不能按前缀匹配：
+/// `http://127.0.0.1:9@evil.com` 以回环前缀开头，实际主机是 `evil.com`。
 fn local_http_url(url: &str) -> bool {
     let Ok(parsed) = url::Url::parse(url) else {
         return false;
@@ -236,8 +234,7 @@ mod tests {
 
     #[test]
     fn hooks_reject_loopback_prefixes_that_actually_resolve_elsewhere() {
-        // `127.0.0.1:9` is userinfo here, not the host, so a string prefix test
-        // would let the payload leave the machine.
+        // `127.0.0.1:9` 在这里是 userinfo，不是主机名。
         for target in [
             "http://127.0.0.1:9@evil.com/collect",
             "http://localhost:1@evil.com/collect",
@@ -258,7 +255,7 @@ mod tests {
                     failure_fatal: false
                 }])
                 .is_err(),
-                "{target} must not be accepted as a local hook"
+                "{target} 不能作为本地 Hook 目标"
             );
         }
         for target in [
@@ -277,7 +274,7 @@ mod tests {
                     failure_fatal: false
                 }])
                 .is_ok(),
-                "{target} is a loopback hook and must be accepted"
+                "{target} 是回环 Hook，应当被接受"
             );
         }
     }

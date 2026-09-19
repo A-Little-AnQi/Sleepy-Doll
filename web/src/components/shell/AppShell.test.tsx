@@ -11,7 +11,7 @@ import {
 import { useState } from "react";
 
 vi.mock("../../ipc/api", () => ({
-  // 测试跑在浏览器环境里，没有无边框窗口，标题栏不渲染。
+  // 测试环境没有无边框窗口，标题栏不渲染。
   framelessWindow: () => false,
   api: {
     saveConversationGroups: vi.fn(),
@@ -22,6 +22,7 @@ vi.mock("../../ipc/api", () => ({
 
 import { api } from "../../ipc/api";
 import { AppShell } from "./AppShell";
+import { SettingsPage } from "../../pages/settings/SettingsPage";
 import { GROUPS_KEY } from "../../session/conversation-groups";
 import {
   PREVIEW_PERMISSION,
@@ -769,4 +770,43 @@ it("deletes a group after the product dialog is confirmed", () => {
     ),
   );
   expect(screen.queryByRole("button", { name: "路线" })).toBeNull();
+});
+
+it("keeps the account menu and the settings page on the same theme", async () => {
+  stubWide(true);
+  render(
+    <AppShell
+      bootstrap={bootstrap}
+      page="settings"
+      detailsOpen={false}
+      onPage={() => undefined}
+      onNew={() => undefined}
+      onConversation={() => undefined}
+      onToggleDetails={() => undefined}
+      reload={async () => undefined}
+    >
+      <SettingsPage
+        bootstrap={bootstrap}
+        section="settings"
+        onSection={() => undefined}
+        reload={async () => undefined}
+      />
+    </AppShell>,
+  );
+  const inSettings = () =>
+    within(
+      document.querySelector(".settings-content") as HTMLElement,
+    ).getByRole("switch", { name: "主题" });
+  const inMenu = () =>
+    within(screen.getByRole("menu", { name: "账户菜单" })).getByRole("switch", {
+      name: "主题",
+    });
+
+  fireEvent.click(screen.getByRole("button", { name: /本地用户/ }));
+  expect(inSettings().textContent).toContain("白昼");
+  fireEvent.click(inMenu());
+  await waitFor(() => expect(inSettings().textContent).toContain("黑夜"));
+
+  fireEvent.click(inSettings());
+  await waitFor(() => expect(inMenu().textContent).toContain("白昼"));
 });

@@ -3,7 +3,7 @@ import "./DisclosureChevron.css";
 
 type Motion = "opening" | "closing" | null;
 
-/** 下拉开合时左右笔画拉开再合上，抄自 VoiceRoom DisclosureChevron。 */
+/** 下拉开合时左右笔画分开再合拢。 */
 export function DisclosureChevron({
   expanded,
   className,

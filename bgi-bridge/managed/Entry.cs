@@ -9,26 +9,20 @@ using BgiBridge.Tools;
 
 namespace BgiBridge;
 
-/// <summary>
-/// 原生引导的托管入口。由 hostfxr 以 UNMANAGEDCALLERSONLY_METHOD 解析，
-/// 所以签名必须 blittable。
-/// </summary>
+/// <summary>原生引导的托管入口。由 hostfxr 以 UNMANAGEDCALLERSONLY_METHOD 解析，签名必须 blittable。</summary>
 public static class Entry
 {
     public const string Version = "0.1.0";
 
     private static BridgeHost? _host;
 
-    /// <summary>
-    /// 参数是桥目录的 UTF-16 路径。0 表示成功，其余是错误码。
-    /// **不能抛异常**：从原生代码调进来的，逃逸出去会终止宿主进程。
-    /// </summary>
+    /// <summary>参数是桥目录的 UTF-16 路径。0 表示成功，其余是错误码。不能抛异常：从原生代码调进来，异常逃逸会终止宿主进程。</summary>
     [UnmanagedCallersOnly]
     public static int Start(IntPtr parameters)
     {
         try
         {
-            // 原生侧传进来的是桥目录的纯路径。先接日志，后面每一步失败都看得见。
+            // 原生侧传进来的是桥目录的纯路径。先接日志。
             var bridgeDir = Marshal.PtrToStringUni(parameters) ?? "";
             Diagnostics.Attach(bridgeDir);
             InstallPaths.Ensure(bridgeDir);
@@ -49,7 +43,7 @@ public static class Entry
 
             var config = BridgeConfig.Parse(File.ReadAllText(configPath));
 
-            // 总开关。关掉时明确拒绝启动，而不是起来之后每个请求都报错。
+            // 总开关。关掉时直接拒绝启动。
             if (!config.Enabled)
             {
                 Diagnostics.Write("bridge.config.json 里 enabled=false，不启动。");
@@ -70,8 +64,9 @@ public static class Entry
             var registry = new MethodRegistry();
             SettingsTransactions.Configure(InstallPaths.ChangeRecordDirectory(bridgeDir));
             StatusTools.Register(registry);
+            HostLogTools.Register(registry);
             CatalogTools.Register(registry);
-            // 两组自动发现：命令与设置项数量随宿主版本变化，不写死。
+            // 两组自动发现：命令与设置项数量随宿主版本变化。
             Ui.InvokeAsync(() => CatalogTools.RegisterDiscovered(registry, config)).GetAwaiter().GetResult();
             Diagnostics.Write($"方法注册完成，共 {registry.Count} 个。");
 

@@ -117,9 +117,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
         </div>
       ) : null}
       {!busy && !records.length ? (
-        <p className="empty-note">
-          还没有可恢复的备份。Sleepy Doll 修改 BetterGI 配置时会自动留下。
-        </p>
+        <p className="empty-note">还没有可恢复的备份。</p>
       ) : null}
       <ConfirmDialog
         open={selected != null}
@@ -132,9 +130,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
         }}
         onConfirm={() => void restore()}
       >
-        <p>
-          把 BetterGI 的配置恢复到这次备份。当前配置会另存一份，便于再改回去。
-        </p>
+        <p>把 BetterGI 的配置恢复到这次备份。当前配置会另存一份。</p>
         {selected ? (
           <p className="muted">
             {[backupWhen(selected.createdAt), backupTitle(selected)]

@@ -1,4 +1,4 @@
-//! 实机验证：用本机真实的模型配置与真实的 BetterGI 桥跑一次完整问答。
+//! 实机验证：用本机真实的模型配置与真实的 BetterGI 桥执行一次完整问答。
 //!
 //! 默认忽略（会调用真实模型 API、消耗真实额度），手动执行：
 //!
@@ -30,9 +30,9 @@ fn answers_a_question_about_the_users_own_configuration() {
     // 相对路径以配置文件所在目录为基准，配置挪到临时目录后这些基准就变了，
     // 一律改成应用真实数据目录下的绝对路径。
     let user = install.join("user");
-    // 产品自带的技能在安装目录，用户自己的在 user\skills。
-    config["agent"]["skillDirectories"] = json!([install.join("skills"), user.join("skills")]);
-    config["plugins"]["directories"] = json!([user.join("plugins")]);
+    // 产品自带的插件（含它的技能）在安装目录，用户自己的在 user\ 下。
+    config["agent"]["skillDirectories"] = json!([user.join("skills")]);
+    config["plugins"]["directories"] = json!([install.join("plugins"), user.join("plugins")]);
     config["runtime"]["catalogDirectory"] = json!(user.join("catalog"));
     // 运行中的应用占着原来那个库，换一个。
     config["storage"]["database"] = json!(directory.path().join("live.db"));

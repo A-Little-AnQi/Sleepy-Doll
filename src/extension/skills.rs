@@ -4,27 +4,56 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 use crate::error::{Error, Result};
+
+/// 技能的归属，决定谁开关它。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkillSource {
+    /// 随产品分发，不在任何插件目录里。
+    Product,
+    /// 用户导入到配置旁的技能目录。
+    User,
+    /// 插件目录内的技能，登记持有它的插件 id。
+    Plugin(String),
+}
+
+impl SkillSource {
+    /// 持有这项技能的插件。`None` 表示由用户自己开关。
+    pub fn plugin(&self) -> Option<&str> {
+        match self {
+            Self::Plugin(id) => Some(id),
+            Self::Product | Self::User => None,
+        }
+    }
+}
+
+impl Serialize for SkillSource {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        match self {
+            Self::Product => serializer.serialize_str("product"),
+            Self::User => serializer.serialize_str("user"),
+            Self::Plugin(id) => serializer.serialize_str(&format!("plugin:{id}")),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Skill {
     pub name: String,
     pub description: String,
-    pub source: String,
+    pub source: SkillSource,
     pub tags: Vec<String>,
     pub requires_plugins: Vec<String>,
     pub requires_capabilities: Vec<String>,
-    /// 需要哪些领域提供方在线。领域知识随提供方走 —— 提供方关掉，它的说明也
-    /// 不该继续出现在提示词里。
+    /// 需要哪些领域提供方在线。
     pub requires_providers: Vec<String>,
     pub resource_kinds: Vec<String>,
     pub platforms: Vec<String>,
     pub allowed_tools: Vec<String>,
-    /// Domain-wide operating manuals are attached to every run. This is for
-    /// stable product context, not a way to grant tools or permissions.
+    /// 领域级操作手册随每次运行一起装载。
     pub always_load: bool,
     #[serde(skip)]
     pub body: String,
@@ -48,15 +77,12 @@ pub struct SkillRegistry {
 }
 
 impl SkillRegistry {
-    pub fn load(&mut self, directories: &[(PathBuf, String)]) -> Result<()> {
+    pub fn load(&mut self, directories: &[(PathBuf, SkillSource)]) -> Result<()> {
         for (directory, source) in directories {
             for path in discover(directory, 0)? {
                 let metadata = fs::metadata(&path)?;
                 if metadata.len() > 128 * 1024 {
-                    return Err(Error::Config(format!(
-                        "skill is too large: {}",
-                        path.display()
-                    )));
+                    return Err(Error::Config(format!("技能文件过大：{}", path.display())));
                 }
                 let text = fs::read_to_string(&path)?;
                 let (fields, body) = frontmatter(&text);
@@ -64,9 +90,9 @@ impl SkillRegistry {
                     .get("name")
                     .cloned()
                     .or_else(|| path.parent()?.file_name()?.to_str().map(str::to_owned))
-                    .ok_or_else(|| Error::Config("skill has no name".into()))?;
+                    .ok_or_else(|| Error::Config("技能没有名称".into()))?;
                 if self.skills.contains_key(&name) {
-                    return Err(Error::Config(format!("duplicate skill: {name}")));
+                    return Err(Error::Config(format!("技能名重复：{name}")));
                 }
                 let description = fields
                     .get("description")
@@ -98,8 +124,31 @@ impl SkillRegistry {
         Ok(())
     }
 
+    /// 全部技能，含插件带来的。
     pub fn list(&self) -> Vec<Skill> {
-        let mut skills = self.skills.values().cloned().collect::<Vec<_>>();
+        self.sorted(|_| true)
+    }
+
+    pub fn len(&self) -> usize {
+        self.skills.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.skills.is_empty()
+    }
+
+    /// 界面列出的技能，不含插件带来的。
+    pub fn standalone(&self) -> Vec<Skill> {
+        self.sorted(|skill| skill.source.plugin().is_none())
+    }
+
+    fn sorted(&self, keep: impl Fn(&Skill) -> bool) -> Vec<Skill> {
+        let mut skills = self
+            .skills
+            .values()
+            .filter(|skill| keep(skill))
+            .cloned()
+            .collect::<Vec<_>>();
         skills.sort_by(|left, right| left.name.cmp(&right.name));
         skills
     }
@@ -186,7 +235,7 @@ impl SkillRegistry {
     }
 }
 
-/// 把一份含 `SKILL.md` 的目录拷进用户技能根。名称来自 frontmatter，否则用目录名。
+/// 把一份含 `SKILL.md` 的目录拷进用户技能根。名称取自 frontmatter，缺省用目录名。
 pub fn install(destination_root: &Path, source: &Path) -> Result<String> {
     let source = source.canonicalize()?;
     let directory = if source.is_file() {
@@ -215,7 +264,7 @@ pub fn install(destination_root: &Path, source: &Path) -> Result<String> {
                 .and_then(|n| n.to_str())
                 .map(str::to_owned)
         })
-        .ok_or_else(|| Error::Config("skill has no name".into()))?;
+        .ok_or_else(|| Error::Config("技能没有名称".into()))?;
     if name.is_empty()
         || name.len() > 80
         || !name
@@ -334,14 +383,9 @@ fn discover(directory: &Path, depth: usize) -> Result<Vec<PathBuf>> {
     Ok(result)
 }
 
-/// Splits a `SKILL.md` into its YAML-ish frontmatter fields and its body.
+/// 把 `SKILL.md` 拆成 frontmatter 字段与正文。
 ///
-/// Line endings are normalised first. The repository stores these files with LF,
-/// but `core.autocrlf` checks them out as CRLF on Windows, and the previous
-/// implementation matched on `"\n"` literally. On any such checkout it found no
-/// frontmatter at all: the skill name fell back to its directory, the
-/// description fell back to the name, and the raw `---` block was handed to the
-/// model as if it were instructions.
+/// 先统一换行符：`core.autocrlf` 在 Windows 上把提交的 LF 检出成 CRLF。
 fn frontmatter(text: &str) -> (HashMap<String, String>, String) {
     let normalized = text.replace("\r\n", "\n");
     let mut lines = normalized.lines();
@@ -368,7 +412,7 @@ fn frontmatter(text: &str) -> (HashMap<String, String>, String) {
         }
     }
     if !closed {
-        // An unterminated block is not frontmatter; treat the file as all body.
+        // 未闭合的块不算 frontmatter，整份文件当正文。
         return (HashMap::new(), text.to_owned());
     }
     (fields, body.join("\n").trim().to_owned())
@@ -398,8 +442,7 @@ mod tests {
 
     const LF: &str = "---\nname: bgi-operator\ndescription: 使用 BGI Bridge 查询游戏状态\ntags: BGI, 自动化\n---\n\n# 操作规范\n\n正文第一行。\n";
 
-    /// `core.autocrlf` checks the committed LF out as CRLF on Windows. Parsing
-    /// must not depend on which form is on disk.
+    /// `core.autocrlf` 在 Windows 上把提交的 LF 检出成 CRLF，解析不依赖磁盘上的形式。
     #[test]
     fn frontmatter_parses_with_either_line_ending() {
         let crlf = LF.replace('\n', "\r\n");
@@ -421,7 +464,7 @@ mod tests {
         assert!(fields.is_empty());
         assert_eq!(body, "# 标题\n\n正文。\n");
 
-        // An opening fence with no closing one is not frontmatter either.
+        // 只有开头没有收尾的分隔行同样不算 frontmatter。
         let (fields, body) = frontmatter("---\nname: x\n");
         assert!(fields.is_empty());
         assert_eq!(body, "---\nname: x\n");
@@ -429,25 +472,78 @@ mod tests {
 
     #[test]
     fn the_shipped_skill_keeps_its_metadata() {
-        let text = include_str!("../../skills/bgi-operator/SKILL.md");
+        let text = include_str!("../../plugins/bgi/skills/bgi-operator/SKILL.md");
         let (fields, body) = frontmatter(text);
         assert_eq!(fields.get("name").map(String::as_str), Some("bgi-operator"));
-        // 断言的是「描述来自 frontmatter 且有实质内容」，不是某个固定短语 ——
-        // 技能可以改写措辞，但退化成名字回显就会失配。
+        // 只要求描述来自 frontmatter 且有实质内容，不绑定具体措辞。
         assert!(
             fields
                 .get("description")
                 .is_some_and(|value| value.contains("BetterGI") && value.chars().count() > 20),
             "description should come from the frontmatter, not fall back to the name"
         );
-        // 守的是「frontmatter 被切干净了」，不是「正文里不能出现 ---」——
-        // markdown 表格的分隔行本身就是 `|---|`。
+        // 只要求分隔行没进正文；正文里的 `|---|` 是 markdown 表格的分隔行。
         assert!(
             !body.trim_start().starts_with("---") && !body.contains("name: bgi-operator"),
             "the fence must not reach the body"
         );
         assert!(body.starts_with("# BGI 操作规范"));
         assert_eq!(fields.get("alwaysLoad").map(String::as_str), Some("true"));
+    }
+
+    /// 插件带来的技能不单独出现在界面上。
+    #[test]
+    fn plugin_skills_stay_behind_their_plugin() {
+        let mine = tempfile::tempdir().unwrap();
+        fs::write(
+            mine.path().join("SKILL.md"),
+            "---\nname: mine\n---\n\n正文\n",
+        )
+        .unwrap();
+        let owned = tempfile::tempdir().unwrap();
+        fs::write(
+            owned.path().join("SKILL.md"),
+            "---\nname: owned\n---\n\n正文\n",
+        )
+        .unwrap();
+
+        let mut registry = SkillRegistry::default();
+        registry
+            .load(&[
+                (mine.path().to_path_buf(), SkillSource::User),
+                (
+                    owned.path().to_path_buf(),
+                    SkillSource::Plugin("bgi".into()),
+                ),
+            ])
+            .unwrap();
+
+        // 提示词取全部技能，界面只取没有插件的那部分。
+        assert_eq!(registry.list().len(), 2);
+        assert_eq!(
+            registry
+                .standalone()
+                .into_iter()
+                .map(|skill| skill.name)
+                .collect::<Vec<_>>(),
+            ["mine"]
+        );
+        assert_eq!(registry.get("owned").unwrap().source.plugin(), Some("bgi"));
+        assert_eq!(registry.get("mine").unwrap().source.plugin(), None);
+    }
+
+    #[test]
+    fn sources_keep_their_wire_names() {
+        for (source, wire) in [
+            (SkillSource::Product, "product"),
+            (SkillSource::User, "user"),
+            (SkillSource::Plugin("bgi".into()), "plugin:bgi"),
+        ] {
+            assert_eq!(
+                serde_json::to_value(&source).unwrap(),
+                serde_json::json!(wire)
+            );
+        }
     }
 
     #[test]

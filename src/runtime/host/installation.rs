@@ -1,4 +1,4 @@
-//! Local plugin installation. Loading metadata never launches the plugin.
+//! 本地插件安装。只读取元数据，不启动插件。
 use crate::{
     config::AppConfig,
     error::{Error, Result},
@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub fn install(config: &AppConfig, source: &Path) -> Result<String> {
+pub fn install(config_dir: &Path, config: &AppConfig, source: &Path) -> Result<String> {
     let source = source.canonicalize()?;
     let manifest: PluginManifest =
         serde_json::from_slice(&fs::read(source.join(".sleepy-doll-plugin/plugin.json"))?)?;
@@ -46,12 +46,10 @@ pub fn install(config: &AppConfig, source: &Path) -> Result<String> {
             execution.validate()?;
         }
     }
-    let root = config
-        .plugins
-        .directories
-        .first()
+    // 装到用户自己的插件目录。
+    let root = crate::config::user_plugin_directory(config_dir, config)
         .ok_or_else(|| Error::Config("请先配置插件存放目录".into()))?;
-    fs::create_dir_all(root)?;
+    fs::create_dir_all(&root)?;
     let root = root.canonicalize()?;
     let destination = root.join(id);
     if source == destination || source.starts_with(&destination) || destination.starts_with(&source)
@@ -87,14 +85,14 @@ pub fn install(config: &AppConfig, source: &Path) -> Result<String> {
     Ok(id.clone())
 }
 
-pub fn remove(config: &AppConfig, id: &str) -> Result<PathBuf> {
+pub fn remove(config_dir: &Path, config: &AppConfig, id: &str) -> Result<PathBuf> {
     if config.plugins.enabled.iter().any(|p| p == id) {
         return Err(Error::Config("移出插件前请先停用它".into()));
     }
-    for root in &config.plugins.directories {
-        if !root.exists() {
-            continue;
-        }
+    // 只能移出用户安装的插件。
+    let root = crate::config::user_plugin_directory(config_dir, config)
+        .ok_or_else(|| Error::Config("插件未找到".into()))?;
+    if root.exists() {
         let root = root.canonicalize()?;
         for entry in fs::read_dir(&root)? {
             let entry = entry?;

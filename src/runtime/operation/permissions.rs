@@ -5,11 +5,7 @@ use crate::{
     extension::{RiskLevel, ToolEffect, UnattendedPolicy},
 };
 
-/// 审批级别。用户在界面上直接选，运行时按它决定要不要问。
-///
-/// 默认 `Standard`：普通写入直接执行，只有删除与大范围变更问一次。把每次写入
-/// 都拦下来会让「让 Agent 干活」变成「替 Agent 点确认」—— 默认值决定了绝大多数
-/// 用户的日常体验，所以默认给能干活的那一档。
+/// 审批级别：运行时据此决定写入是否需要询问。默认 `Standard`。
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum PermissionMode {
@@ -17,17 +13,17 @@ pub enum PermissionMode {
     PlanOnly,
     /// 每次写入都问。
     AskEach,
-    /// 默认。按实际影响判定，只有删除与大范围变更需要确认。
+    /// 按实际影响判定；删除与大范围变更需要确认。
     #[default]
     Standard,
     /// 完全控制：一律直接执行，不再询问。
     FullAccess,
-    /// 旧值：按资源授权范围放行。保留是为了让旧配置仍能读出来。
+    /// 旧值：按资源授权范围放行。
     TrustedScopes,
 }
 
 impl PermissionMode {
-    /// 面向用户的级别清单。文案与顺序都在这里定，界面不另写一套。
+    /// 面向用户的级别清单。
     pub fn levels() -> &'static [(PermissionMode, &'static str, &'static str)] {
         &[
             (
@@ -64,11 +60,11 @@ impl PermissionMode {
     }
 }
 
-/// 大范围判定的阈值。同一用户意图内累计计算，不因拆成多次调用而绕过。
+/// 大范围判定的阈值。
 pub const LARGE_SCOPE_FIELDS: usize = 10;
 pub const LARGE_SCOPE_OBJECTS: usize = 3;
 
-/// 一次意图内的改动规模。计数在意图范围内累计，而不是每次工具调用各自重置。
+/// 一次意图内的改动规模。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ChangeScope {
     /// 受影响的配置叶字段数量。
@@ -79,7 +75,7 @@ pub struct ChangeScope {
     pub deletes: bool,
     /// 整份替换或重置已有配置。
     pub replaces_whole: bool,
-    /// 创建全新对象。新建不按默认字段数误判为批量修改。
+    /// 创建全新对象。
     pub creates: bool,
 }
 
@@ -90,7 +86,7 @@ impl ChangeScope {
             ..Self::default()
         }
     }
-    /// 新建一个全新对象：不进入大范围判定。
+    /// 新建一个全新对象。
     pub fn create(objects: usize) -> Self {
         Self {
             creates: true,
@@ -112,10 +108,9 @@ impl ChangeScope {
             ..Self::default()
         }
     }
-    /// 按目标资源的当前内容与写入内容算出真实影响。
+    /// 按目标资源的当前内容与写入内容算出实际影响。
     ///
-    /// 写整份文件不等于改了整份配置 —— 只换一个字段就该按一个字段计。两边不是
-    /// 同一种可解析结构时返回 `None`：引擎不猜，交给上层按未界定处理。
+    /// 两边不是同一种可解析结构时返回 `None`。
     pub fn from_contents(previous: Option<&str>, next: &str) -> Option<Self> {
         let Some(previous) = previous else {
             return Some(Self::create(1));
@@ -133,14 +128,14 @@ impl ChangeScope {
         })
     }
     pub fn accumulate(&mut self, other: Self) {
-        // 新建不改写已有配置；一旦意图里出现真实改动，就把字段数一并计入。
+        // 累计字段、对象与各项标记。
         self.fields += other.fields;
         self.objects += other.objects;
         self.deletes |= other.deletes;
         self.replaces_whole |= other.replaces_whole;
         self.creates &= other.creates;
     }
-    /// 是否达到需要一次范围确认的门限。
+    /// 是否达到需要确认的门限。
     pub fn is_large(&self) -> bool {
         if self.deletes || self.replaces_whole {
             return true;
@@ -195,7 +190,7 @@ impl PermissionEngine {
         request: &PermissionRequest<'_>,
         grants: &[TrustGrant],
     ) -> PermissionDecision {
-        // 完全控制是用户显式选定的级别：到这一档就不再有任何询问。
+        // 完全控制：一律放行。
         if mode == PermissionMode::FullAccess {
             return PermissionDecision::Allow;
         }
@@ -217,10 +212,9 @@ impl PermissionEngine {
         if mode == PermissionMode::AskEach {
             return PermissionDecision::Ask;
         }
-        // 标准模式：普通写入直接执行，只有删除与大范围变更需要确认。
+        // 标准模式：普通写入直接执行。
         if mode == PermissionMode::Standard {
-            // 连「会不会写」都说不清的提供方不能静默执行。这不是把写入都拦下来，
-            // 而是要求一个可信契约或一次明确同意 —— 声明了效果的工具照常直接跑。
+            // 未声明效果的工具需要一次确认。
             if request.effect == ToolEffect::Unknown {
                 return PermissionDecision::Ask;
             }
@@ -267,7 +261,7 @@ impl PermissionEngine {
     }
 }
 
-/// 值不同的叶字段数。新增与删除的字段都算一处改动。
+/// 值不同的叶字段数；新增与删除的字段都算一处改动。
 pub fn diff_leaf_fields(before: &serde_json::Value, after: &serde_json::Value) -> usize {
     match (before, after) {
         (serde_json::Value::Object(left), serde_json::Value::Object(right)) => {
@@ -369,7 +363,7 @@ mod tests {
         );
     }
 
-    /// 默认策略：普通写入直接执行，不再逐项弹确认。
+    /// 普通写入直接执行。
     #[test]
     fn ordinary_writes_run_without_a_prompt() {
         assert_eq!(
@@ -463,7 +457,7 @@ mod tests {
         );
     }
 
-    /// 无法界定影响时继续只读解析，而不是退回「所有写入都审批」。
+    /// 影响无法界定时仍按标准模式放行。
     #[test]
     fn undetermined_scope_does_not_blanket_ask() {
         let mut unknown = request(ChangeScope::default());
@@ -479,7 +473,7 @@ mod tests {
         );
     }
 
-    /// 提供方连效果都没声明时先要一次明确同意，不伪造只读。
+    /// 未声明效果时询问一次。
     #[test]
     fn undeclared_effect_still_asks_once() {
         let undeclared = PermissionRequest {
@@ -490,7 +484,7 @@ mod tests {
             PermissionEngine::decide(PermissionMode::Standard, &undeclared, &[]),
             PermissionDecision::Ask
         );
-        // 声明了效果的写入照常直接执行。
+        // 声明了效果的写入直接执行。
         assert_eq!(
             PermissionEngine::decide(
                 PermissionMode::Standard,
@@ -520,7 +514,7 @@ mod tests {
         let created = ChangeScope::from_contents(None, after).unwrap();
         assert!(created.creates);
         assert!(!created.is_large());
-        // 两边不是同一类结构时不猜。
+        // 两边不是同一类结构时返回 None。
         assert!(ChangeScope::from_contents(Some("plain text"), after).is_none());
     }
 
@@ -540,14 +534,14 @@ mod tests {
             PermissionEngine::decide(PermissionMode::FullAccess, &irreversible, &[]),
             PermissionDecision::Allow
         );
-        // 只读级别仍然拒绝一切写入，两档不互相影响。
+        // 只读级别仍然拒绝一切写入。
         assert_eq!(
             PermissionEngine::decide(PermissionMode::PlanOnly, &delete, &[]),
             PermissionDecision::Deny
         );
     }
 
-    /// 每一档都有可读的级别名与说明，界面直接用。
+    /// 每一档都有级别名与说明。
     #[test]
     fn every_level_is_described() {
         for (mode, label, description) in PermissionMode::levels() {
@@ -557,7 +551,7 @@ mod tests {
         }
     }
 
-    /// 显式选择逐项审批的用户保留旧行为。
+    /// 请求审批级别对每次写入都询问。
     #[test]
     fn ask_each_still_prompts_for_every_write() {
         assert_eq!(
