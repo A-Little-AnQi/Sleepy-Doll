@@ -8,6 +8,7 @@ import {
 import { createPortal } from "react-dom";
 import { CloseIcon } from "../icons";
 import "./Dialog.css";
+import { useT } from "../../i18n";
 
 export function Dialog({
   title,
@@ -26,6 +27,7 @@ export function Dialog({
   footer?: ReactNode;
   compact?: boolean;
 }) {
+  const t = useT();
   const layer = useRef<HTMLDivElement>(null);
   const [present, setPresent] = useState(open);
 
@@ -78,7 +80,7 @@ export function Dialog({
           <button
             type="button"
             className="icon-button"
-            aria-label="关闭"
+            aria-label={t.common.close}
             title="关闭"
             onClick={onClose}
           >

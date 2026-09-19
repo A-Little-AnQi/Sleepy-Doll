@@ -18,6 +18,7 @@ import { CloseIcon, HistoryIcon } from "../icons";
 import { TaskCard, type TaskActions } from "../tasks/TaskCard";
 import { MotionSwitch } from "../controls/MotionSwitch";
 import "./details-panel.css";
+import { useT } from "../../i18n";
 
 /**
  * 右侧详情栏：当前对话产生的快捷任务，或选中的任务与运行详情。
@@ -41,6 +42,7 @@ export function DetailsPanel({
   reload(): Promise<void>;
   onClose(): void;
 }) {
+  const t = useT();
   const [detail, setDetail] = useState<WorkflowDetail>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
@@ -119,15 +121,15 @@ export function DetailsPanel({
   };
 
   return (
-    <aside className="details-panel" aria-label="详情">
+    <aside className="details-panel" aria-label={t.details.panel}>
       <header className="details-head">
         <h2>
-          {selectedTask ? (detail?.summary.name ?? "任务详情") : "此对话的任务"}
+          {selectedTask ? (detail?.summary.name ?? t.details.taskDetail) : t.chat.tasksPanel}
         </h2>
         <button
           className="icon-button"
-          aria-label="关闭详情"
-          title="关闭详情"
+          aria-label={t.nav.closeDetails}
+          title={t.nav.closeDetails}
           onClick={onClose}
         >
           <CloseIcon className="button-icon" />
@@ -150,7 +152,7 @@ export function DetailsPanel({
                 onOpenConversation={onOpenConversation}
               />
             ) : (
-              <p className="muted">载入中…</p>
+              <p className="muted">{t.common.loading}</p>
             )
           ) : tasks.length ? (
             <>
@@ -167,16 +169,16 @@ export function DetailsPanel({
           ) : (
             <div className="empty-state is-compact">
               <HistoryIcon />
-              <h3>这个对话还没有快捷任务</h3>
-              <p>说明你想反复做的那件事，Agent 会把它做成一键运行的任务。</p>
+              <h3>{t.tasks.empty}</h3>
+              <p>{t.tasks.emptyHint}</p>
             </div>
           )}
         </MotionSwitch>
       </div>
       <ConfirmDialog
         open={pendingRemove != null}
-        title="删除快捷任务"
-        confirmLabel="删除任务"
+        title={t.tasks.deleteTitle}
+        confirmLabel={t.tasks.deleteAction}
         onClose={() => setPendingRemove(null)}
         onConfirm={() => {
           const task = pendingRemove;
@@ -186,10 +188,10 @@ export function DetailsPanel({
       >
         {pendingRemove ? (
           <>
-            <p>删除「{pendingRemove.name}」。</p>
-            <p>已执行过的运行记录和它改过的文件都会保留。</p>
+            <p>{t.tasks.deleteNote(pendingRemove.name)}</p>
+            <p>{t.tasks.deleteKeepsRuns}</p>
             {pendingRemove.runnable ? (
-              <p>如果有运行正在进行，那一次会继续执行完。</p>
+              <p>{t.tasks.deleteKeepsActive}</p>
             ) : null}
           </>
         ) : null}
@@ -213,6 +215,7 @@ function TaskDetail({
   onBack(): void;
   onOpenConversation(id: string): void;
 }) {
+  const t = useT();
   const { summary, revision } = detail;
   const related = runs.filter(
     (run) =>
@@ -222,35 +225,35 @@ function TaskDetail({
   return (
     <>
       <button className="subtle-action" onClick={onBack}>
-        返回此对话的任务
+        {t.details.backToTasks}
       </button>
       <section className="detail-block">
-        <h3>用途</h3>
-        <p>{summary.description || "还没有写说明。"}</p>
+        <h3>{t.apiExplorer.purpose}</h3>
+        <p>{summary.description || t.details.noDescriptionYet}</p>
         <dl className="detail-facts">
           <div>
-            <dt>状态</dt>
+            <dt>{t.details.statusLabel}</dt>
             <dd>{summary.stateLabel}</dd>
           </div>
           <div>
-            <dt>依赖工具</dt>
-            <dd>{summary.nodeCount} 个步骤</dd>
+            <dt>{t.details.dependsTools}</dt>
+            <dd>{t.details.stepsCount(summary.nodeCount)}</dd>
           </div>
           <div>
-            <dt>运行是否调用模型</dt>
+            <dt>{t.details.callsModel}</dt>
             <dd>
               {summary.zeroToken
-                ? "否"
+                ? t.bridge.no
                 : summary.modelUsage === "possible"
-                  ? "可能调用"
-                  : "无法确认"}
+                  ? t.details.maybeCalls
+                  : t.details.cannotConfirm}
             </dd>
           </div>
           <div>
-            <dt>来源对话</dt>
+            <dt>{t.details.sourceChat}</dt>
             <dd>
               {summary.sourceDeleted ? (
-                "来源对话已删除，任务仍可使用"
+                t.details.sourceDeletedNote
               ) : summary.sourceConversationId ? (
                 <button
                   className="subtle-action"
@@ -258,10 +261,10 @@ function TaskDetail({
                     onOpenConversation(summary.sourceConversationId as string)
                   }
                 >
-                  打开来源对话
+                  {t.details.openSourceChat}
                 </button>
               ) : (
-                "由运行提取"
+                t.details.extractedFromRun
               )}
             </dd>
           </div>

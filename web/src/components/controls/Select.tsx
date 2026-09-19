@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { CheckIcon } from "../icons";
 import { DisclosureChevron } from "./DisclosureChevron";
 import styles from "./Select.module.css";
+import { useT } from "../../i18n";
 
 interface Props {
   value: string;
@@ -64,9 +65,10 @@ export function Select({
   options,
   onChange,
   label,
-  placeholder = "请选择",
+  placeholder,
   disabled,
 }: Props) {
+  const t = useT();
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -247,7 +249,7 @@ export function Select({
           }
         }}
       >
-        <span>{selected?.label ?? placeholder}</span>
+        <span>{selected?.label ?? placeholder ?? t.controls.selectPlaceholder}</span>
         <DisclosureChevron expanded={open} />
       </button>
       {open &&

@@ -1,3 +1,5 @@
+import { readLocale } from "../appearance/locale";
+import { dictOf } from "../i18n";
 /** 安装窗口的原生接口。回复和状态推送走初始化脚本装上的两个全局回调。 */
 
 export interface SetupInfo {
@@ -48,7 +50,7 @@ window.__setupReceive = (reply) => {
   window.clearTimeout(entry.timer);
   pending.delete(reply.id);
   if (reply.error)
-    entry.reject(new Error(reply.error.message ?? "安装程序返回失败"));
+    entry.reject(new Error(reply.error.message ?? dictOf(readLocale()).setup.bridgeFailed));
   else entry.resolve(reply.result);
 };
 
@@ -58,12 +60,12 @@ function invoke<T>(
   timeoutMs: number,
 ): Promise<T> {
   const ipc = window.ipc;
-  if (!ipc) return Promise.reject(new Error("无法连接安装程序。"));
+  if (!ipc) return Promise.reject(new Error(dictOf(readLocale()).setup.bridgeUnreachable));
   const id = crypto.randomUUID();
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
       pending.delete(id);
-      reject(new Error("安装程序没有响应。"));
+      reject(new Error(dictOf(readLocale()).setup.bridgeNoResponse));
     }, timeoutMs);
     pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
     ipc.postMessage(JSON.stringify({ id, method, params }));

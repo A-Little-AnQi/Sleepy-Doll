@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../ipc/api";
 import { Dialog } from "../overlay/Dialog";
 import { TextField } from "../controls/TextField";
+import { useT } from "../../i18n";
 
 export function ConfigEditor({
   path,
@@ -16,6 +17,7 @@ export function ConfigEditor({
   onSaved(): Promise<void>;
   onPath?(path: string): void;
 }) {
+  const t = useT();
   const [filePath, setFilePath] = useState(path);
   const [content, setContent] = useState("");
   const [error, setError] = useState("");
@@ -45,7 +47,7 @@ export function ConfigEditor({
       await onSaved();
       onClose();
     } catch (error) {
-      setError(error instanceof Error ? error.message : "保存失败");
+      setError(error instanceof Error ? error.message : t.configEditor.saveFailed);
     } finally {
       setSaving(false);
     }
@@ -76,7 +78,7 @@ export function ConfigEditor({
       {error ? <p className="inline-error">{error}</p> : null}
       <TextField
         multiline
-        aria-label="配置文件内容"
+        aria-label={t.configEditor.fileContent}
         spellCheck={false}
         value={content}
         onChange={(event) => setContent(event.target.value)}

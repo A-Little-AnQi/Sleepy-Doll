@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { TaskSummary } from "../../ipc/types";
 import { MoreIcon, PinIcon } from "../icons";
 import "./task-card.css";
+import { useT } from "../../i18n";
 
 export interface TaskActions {
   run(task: TaskSummary): void;
@@ -30,6 +31,7 @@ export function TaskCard({
   actions: TaskActions;
   showSource?: boolean;
 }) {
+  const t = useT();
   const [menu, setMenu] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -168,12 +170,12 @@ export function TaskCard({
           {task.stateLabel}
         </span>
         {task.zeroToken && task.runnable && (
-          <span className="task-card-note" title="运行时不会向模型发送请求">
-            运行不调用模型
+          <span className="task-card-note" title={t.taskCard.offlineNote}>
+            {t.taskCard.offlineShort}
           </span>
         )}
         {task.sourceDeleted && showSource && (
-          <span className="task-card-note">来源对话已删除</span>
+          <span className="task-card-note">{t.taskCard.sourceDeleted}</span>
         )}
         <button
           className="primary-action"

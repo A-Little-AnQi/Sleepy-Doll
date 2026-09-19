@@ -15,6 +15,8 @@ import type {
 } from "./types";
 import type { GroupLayout } from "../session/conversation-groups";
 import { withPermission } from "./types";
+import { dictOf } from "../i18n";
+import { readLocale } from "../appearance/locale";
 
 declare global {
   interface Window {
@@ -82,7 +84,7 @@ window.__sleepyDollReceive = (message) => {
   window.clearTimeout(entry.timer);
   pending.delete(message.id);
   if (message.ok) entry.resolve(message.result);
-  else entry.reject(new Error(message.error?.message ?? "原生请求失败"));
+  else entry.reject(new Error(message.error?.message ?? dictOf(readLocale()).ipc.requestFailed));
 };
 
 async function invokeHttp<T>(
@@ -103,15 +105,15 @@ async function invokeHttp<T>(
     throw new Error(
       error instanceof DOMException &&
         ["TimeoutError", "AbortError"].includes(error.name)
-        ? "请求超时。后台任务可能仍在运行。"
-        : "无法连接本地服务。",
+        ? dictOf(readLocale()).ipc.timeout
+        : dictOf(readLocale()).ipc.unreachable,
     );
   }
   const text = await response.text();
   if (!text) {
     throw new Error(
       response.ok
-        ? "无法连接本地服务。"
+        ? dictOf(readLocale()).ipc.unreachable
         : `本地服务返回 HTTP ${response.status}`,
     );
   }
@@ -140,7 +142,7 @@ function invoke<T>(
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
       pending.delete(id);
-      reject(new Error("请求超时。后台任务可能仍在运行。"));
+      reject(new Error(dictOf(readLocale()).ipc.timeout));
     }, timeoutMs);
     pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
     try {

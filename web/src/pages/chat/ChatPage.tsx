@@ -26,6 +26,7 @@ import { ContextMeter } from "../../components/chat/ContextMeter";
 import { ComposerDeck } from "../../components/chat/ComposerDeck";
 import { ComposerField } from "../../components/chat/ComposerField";
 import { estimateMessagesTokens } from "../../session/context-usage";
+import { useT } from "../../i18n";
 
 interface Props {
   bootstrap: Bootstrap;
@@ -43,6 +44,7 @@ export function ChatPage({
   onComposerDraft,
   onOpenHelp,
 }: Props) {
+  const t = useT();
   const data = useSession(conversationId);
   const { messages, task, stream, question, approval, plan, loading } = data;
   const busy = isRunning(task);
@@ -166,7 +168,7 @@ export function ChatPage({
       if (supplementRun) {
         await api.supplement(supplementRun, value, clientKey);
         // 补充说明在当前步骤结束后处理。
-        setNotice("已收到，将在当前步骤结束后处理。");
+        setNotice(t.chat.queuedStep);
       } else {
         const run = await api.submitTask(
           value,
@@ -177,7 +179,7 @@ export function ChatPage({
         session(run.conversationId).start();
         if (alive.current && current.current === origin)
           onConversation(run.conversationId);
-        if (queue) setNotice("已加入队列，会在当前运行结束后开始。");
+        if (queue) setNotice(t.chat.queued);
       }
       sessionStorage.removeItem(retryKey);
       await reload();
@@ -411,13 +413,13 @@ export function ChatPage({
         <ComposerDeck>
           <ComposerField
             ref={textarea}
-            aria-label="消息"
+            aria-label={t.chat.message}
             placeholder={
               question
-                ? "回复…"
+                ? t.chat.composerPlaceholderReply
                 : busy
-                  ? "补充说明…（Enter 发送，Shift+Enter 换行）"
-                  : "告诉我你想完成什么"
+                  ? t.chat.composerPlaceholderBusy
+                  : t.chat.composerPlaceholderNew
             }
             value={prompt}
             disabled={sending}
@@ -460,7 +462,7 @@ export function ChatPage({
               <button
                 className="subtle-action"
                 disabled={!prompt.trim() || sending}
-                title="等当前运行结束后再开始"
+                title={t.chat.waitCurrentRun}
                 onClick={() => void send(true)}
               >
                 排队发送
@@ -498,7 +500,7 @@ export function ChatPage({
                 <button
                   type="button"
                   className="send-action"
-                  aria-label="停止生成"
+                  aria-label={t.chat.stop}
                   title="停止生成"
                   disabled={task?.state === "cancelling"}
                   onClick={() =>
@@ -512,10 +514,10 @@ export function ChatPage({
                 <button
                   type="button"
                   className="send-action"
-                  aria-label={busy ? "发送补充" : "发送"}
+                  aria-label={busy ? t.chat.sendFollowUp : t.chat.send}
                   title={
                     !bootstrap.models.length
-                      ? "先在设置里添加模型"
+                      ? t.chat.addModelFirst
                       : busy
                         ? "发送补充"
                         : "发送"

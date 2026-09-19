@@ -7,6 +7,7 @@ import { BridgeApiExplorer } from "../../components/bridge/BridgeApiExplorer";
 import { BridgeRecovery } from "../../components/bridge/BridgeRecovery";
 import { Toast } from "../../components/overlay/Toast";
 import "./BridgePage.css";
+import { useT } from "../../i18n";
 export function BridgePage({
   bootstrap,
   reload,
@@ -14,6 +15,7 @@ export function BridgePage({
   bootstrap: Bootstrap;
   reload(): Promise<void>;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -43,10 +45,10 @@ export function BridgePage({
     return <BridgeRecovery onBack={() => setShowRecovery(false)} />;
   // 不暴露配置里的 enabled 开关：它默认就是开的，不代表连接状态。
   const connection = busy
-    ? { title: "正在连接", detail: "正在连接 BetterGI。" }
+    ? { title: t.bridge.connecting, detail: t.bridge.connectingNote }
     : bridge.connected
-      ? { title: "已连接", detail: "BetterGI 正在运行。" }
-      : { title: "未连接", detail: "请先启动 BetterGI。" };
+      ? { title: t.nav.connected, detail: t.bridge.bgRunning }
+      : { title: t.nav.disconnected, detail: t.bridge.bgNotRunning };
   return (
     <div className="page-sheet bridge-page">
       <header className="bridge-overview" data-motion="panel">
@@ -72,7 +74,7 @@ export function BridgePage({
             disabled={busy}
             onClick={() => void toggle(true)}
           >
-            {busy ? "连接中…" : bridge.connected ? "重新连接" : "连接 BetterGI"}
+            {busy ? t.bridge.connectingShort : bridge.connected ? t.bridge.reconnect : t.bridge.connectButton}
           </button>
         </div>
         <div className="bridge-endpoint">
@@ -90,7 +92,7 @@ export function BridgePage({
           <BridgeIcon />
           <span>
             <strong>接口目录</strong>
-            <small>{bridge.connected ? "查看可用接口" : "连接后可查看"}</small>
+            <small>{bridge.connected ? t.bridge.viewMethods : t.bridge.connectToView}</small>
           </span>
           <ChevronIcon />
         </button>

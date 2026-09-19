@@ -1,5 +1,6 @@
 import { formatTokens } from "../../session/context-usage";
 import "./ContextMeter.css";
+import { useT } from "../../i18n";
 
 export function ContextMeter({
   used,
@@ -12,13 +13,14 @@ export function ContextMeter({
   compacted?: boolean;
   cacheRead?: number;
 }) {
+  const t = useT();
   const ratio = window > 0 ? Math.min(1, used / window) : 0;
   const high = ratio >= 0.85;
   const title = [
     compacted
-      ? "已压缩较早上下文；完整记录仍保存在本机"
-      : "当前装进模型的上下文",
-    cacheRead > 0 ? `缓存命中 ${formatTokens(cacheRead)}` : "",
+      ? t.context.compacted
+      : t.context.inModel,
+    cacheRead > 0 ? t.context.cacheHit(formatTokens(cacheRead)) : "",
   ]
     .filter(Boolean)
     .join("；");

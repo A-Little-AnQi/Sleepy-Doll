@@ -10,15 +10,17 @@ import type {
   BridgeMethodDetail,
 } from "../../ipc/types";
 import "./BridgeApiExplorer.css";
+import { useT, type Text } from "../../i18n";
 
-const groups: Record<string, string> = {
-  lifecycle: "状态与诊断",
-  settings: "配置",
-  setting: "配置项",
-  command: "命令",
-  catalog: "目录",
-};
+const groups = (t: Text): Record<string, string> => ({
+  lifecycle: t.bridge.statusDiag,
+  settings: t.bridge.config,
+  setting: t.bridge.configItems,
+  command: t.bridge.commands,
+  catalog: t.apiExplorer.catalog,
+});
 export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState("");
   const [catalog, setCatalog] = useState<BridgeCatalog>();
@@ -109,12 +111,12 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
           }}
         >
           <ChevronIcon className="button-icon" />
-          {selected ? "接口目录" : "BetterGI"}
+          {selected ? t.bridge.methodCatalog : "BetterGI"}
         </button>
         <span className="muted">
           {catalog && Number.isFinite(catalog.total)
-            ? catalog.total + " 个接口"
-            : "接口"}
+            ? catalog.total + t.bridge.methodsCount(catalog.total)
+            : t.bridge.method}
         </span>
       </div>
       {error && <Toast message={error} onDismiss={() => setError("")} />}
@@ -124,7 +126,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
             <h2>{selected.displayName}</h2>
             <code>{selected.methodId}</code>
             <p>{guide?.purpose ?? selected.summary}</p>
-            <span className="tag">{selected.callable ? "可用" : "不可用"}</span>
+            <span className="tag">{selected.callable ? t.bridge.available : t.bridge.unavailable}</span>
             {selected.unavailableReason && (
               <p className="muted">{selected.unavailableReason}</p>
             )}
@@ -174,8 +176,8 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                           <td>{schema.type ?? "—"}</td>
                           <td>
                             {selected.inputSchema.required?.includes(name)
-                              ? "是"
-                              : "否"}
+                              ? t.bridge.yes
+                              : t.bridge.no}
                           </td>
                           <td>{schema.description ?? "—"}</td>
                         </tr>
@@ -246,7 +248,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
             <label className="search-field is-compact">
               <SearchIcon />
               <input
-                aria-label="搜索接口"
+                aria-label={t.bridge.searchMethods}
                 placeholder="搜索"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -254,14 +256,14 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
             </label>
             <div className="bridge-api-group">
               <Select
-                label="接口分类"
+                label={t.bridge.methodCategory}
                 value={group}
                 onChange={setGroup}
                 options={[
-                  { value: "", label: "全部分类" },
+                  { value: "", label: t.bridge.allCategories },
                   ...(catalog?.groups ?? []).map((entry) => ({
                     value: entry.id,
-                    label: (groups[entry.id] ?? entry.id) + " · " + entry.count,
+                    label: (groups(t)[entry.id] ?? entry.id) + " · " + entry.count,
                   })),
                 ]}
               />
@@ -290,7 +292,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                         .map(
                           (parameter) =>
                             parameter.name +
-                            (parameter.required ? "（必填）" : "（可选）") +
+                            (parameter.required ? t.bridge.required : t.bridge.optional) +
                             " — " +
                             parameter.description,
                         )
@@ -303,7 +305,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                     ? item.effect === "readOnly"
                       ? "只读"
                       : "会修改"
-                    : "不可用"}
+                    : t.bridge.unavailable}
                 </span>
               </button>
             ))}

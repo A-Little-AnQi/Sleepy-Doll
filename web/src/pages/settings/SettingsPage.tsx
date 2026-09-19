@@ -25,6 +25,7 @@ import {
   writeLocale,
   type LocaleId,
 } from "../../appearance/locale";
+import { useT } from "../../i18n";
 
 type Section = "settings" | "models" | "bridge" | "help" | "sponsor";
 
@@ -39,6 +40,7 @@ export function SettingsPage({
   onSection(section: Section | HelpOpen): void;
   reload(): Promise<void>;
 }) {
+  const t = useT();
   const theme = useTheme();
   const locale = useLocale();
   const [sendKey, setSendKey] = useState(
@@ -75,31 +77,31 @@ export function SettingsPage({
           items={[
             {
               id: "settings",
-              name: "通用",
+              name: t.settings.general,
               icon: <SettingsIcon className="button-icon" />,
             },
             {
               id: "models",
-              name: "模型",
+              name: t.settings.models,
               icon: <ModelIcon className="button-icon" />,
             },
             ...(hostPluginEnabled(bootstrap)
               ? [
                   {
                     id: "bridge" as const,
-                    name: "BetterGI",
+                    name: t.settings.bettergi,
                     icon: <BridgeIcon className="button-icon" />,
                   },
                 ]
               : []),
             {
               id: "help",
-              name: "使用说明",
+              name: t.settings.help,
               icon: <HelpIcon className="button-icon" />,
             },
             {
               id: "sponsor",
-              name: "赞助作者",
+              name: t.settings.sponsor,
               icon: <BrandIcon className="button-icon" />,
             },
           ]}
@@ -121,9 +123,9 @@ export function SettingsPage({
               <SettingRow label="主题">
                 <ThemeSwitch theme={theme} onChange={writeTheme} />
               </SettingRow>
-              <SettingRow label="语言">
+              <SettingRow label={t.settings.language}>
                 <Select
-                  label="语言"
+                  label={t.settings.language}
                   value={locale}
                   options={LOCALE_OPTIONS}
                   onChange={(value) => writeLocale(value as LocaleId)}
@@ -137,8 +139,8 @@ export function SettingsPage({
                   label="发送快捷键"
                   value={sendKey}
                   options={[
-                    { value: "enter", label: "Enter" },
-                    { value: "modifier", label: "Ctrl + Enter" },
+                    { value: "enter", label: t.settings.sendKeyEnter },
+                    { value: "modifier", label: t.settings.sendKeyModifier },
                   ]}
                   onChange={(value) => {
                     setSendKey(value);
@@ -149,17 +151,17 @@ export function SettingsPage({
             </section>
             {trayEnabled !== null ? (
               <section className="settings-group">
-                <h3>托盘</h3>
+                <h3>{t.settings.tray}</h3>
                 <SettingRow
-                  label="托盘图标"
-                  hint="隐藏后，点关闭按钮将直接退出程序"
+                  label={t.settings.trayIcon}
+                  hint={t.settings.trayIconHint}
                 >
                   <Select
-                    label="托盘图标"
+                    label={t.settings.trayIcon}
                     value={trayEnabled ? "show" : "hide"}
                     options={[
-                      { value: "show", label: "显示" },
-                      { value: "hide", label: "隐藏" },
+                      { value: "show", label: t.settings.trayShow },
+                      { value: "hide", label: t.settings.trayHide },
                     ]}
                     onChange={(value) => {
                       const next = value === "show";
@@ -174,7 +176,7 @@ export function SettingsPage({
             ) : null}
             <section className="settings-group">
               <h3>配置</h3>
-              <SettingRow label="配置文件" hint={configPath}>
+              <SettingRow label={t.settings.configFile} hint={configPath}>
                 <button
                   className="subtle-action"
                   onClick={() => setEditing(true)}
@@ -204,11 +206,12 @@ export function SettingsPage({
 }
 
 function SponsorNote() {
+  const t = useT();
   return (
     <aside className="settings-sponsor">
       <h2>赞助作者</h2>
-      <p>如果这个工具对你有帮助，欢迎扫码支持。</p>
-      <div className="settings-sponsor-qr" role="img" aria-label="收款二维码" />
+      <p>{t.settings.sponsorNote}</p>
+      <div className="settings-sponsor-qr" role="img" aria-label={t.settings.qrLabel} />
     </aside>
   );
 }

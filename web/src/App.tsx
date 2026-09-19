@@ -14,6 +14,7 @@ import { restoreLocale } from "./appearance/locale";
 import { isRunning, readError, subscribeRuns, watchTasks } from "./session";
 import type { Bootstrap, TaskSummary } from "./ipc/types";
 import { hostPluginEnabled } from "./ipc/providers";
+import { useT } from "./i18n";
 
 export type Page =
   | "chat"
@@ -26,6 +27,7 @@ export type Page =
   | "sponsor";
 
 export default function App() {
+  const t = useT();
   const [page, setPage] = useState<Page>("chat");
   const [extensionsTab, setExtensionsTab] = useState<"skills" | "plugins">(
     "skills",
@@ -100,7 +102,7 @@ export default function App() {
         <h1>
           <Wordmark />
         </h1>
-        <p>{error || "正在载入…"}</p>
+        <p>{error || t.app.loading}</p>
         {error && (
           <button
             type="button"

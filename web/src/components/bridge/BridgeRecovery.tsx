@@ -6,6 +6,7 @@ import { Toast } from "../overlay/Toast";
 import type { RecoveryRecord } from "../../ipc/types";
 import { ChevronIcon } from "../icons";
 import "./BridgeRecovery.css";
+import { useT } from "../../i18n";
 
 function isBackup(record: RecoveryRecord): boolean {
   return Boolean(
@@ -31,6 +32,7 @@ function backupWhen(iso?: string): string {
 }
 
 export function BridgeRecovery({ onBack }: { onBack(): void }) {
+  const t = useT();
   const [records, setRecords] = useState<RecoveryRecord[]>([]);
   const [running, setRunning] = useState(false);
   const [busy, setBusy] = useState(true);
@@ -64,7 +66,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
     setError("");
     try {
       const result = await api.restoreBridgeConfig(selected);
-      if (result.restored) setNotice("配置已恢复。请重新启动 BetterGI。");
+      if (result.restored) setNotice(t.bridge.configRestored);
       setSelected(undefined);
       await refresh();
     } catch (reason) {
@@ -124,7 +126,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
         title="恢复配置"
         confirmLabel="确认恢复"
         busy={busy}
-        busyLabel="恢复中…"
+        busyLabel={t.bridge.restoring}
         onClose={() => {
           if (!busy) setSelected(undefined);
         }}

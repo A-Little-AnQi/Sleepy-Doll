@@ -18,18 +18,19 @@ import {
   type ModelPreset,
 } from "../../models/presets";
 import "./ModelsPage.css";
+import { useT, type Text } from "../../i18n";
 
-const protocols = [
+const protocols = (t: Text) => [
   { value: "openai-responses", label: "OpenAI Responses" },
-  { value: "openai-chat", label: "OpenAI 兼容" },
+  { value: "openai-chat", label: t.models.protocolOpenaiChat },
   { value: "anthropic-messages", label: "Anthropic" },
   { value: "gemini", label: "Google Gemini" },
   { value: "ollama-chat", label: "Ollama" },
 ];
 
-const authModes = [
-  { value: "auto", label: "自动" },
-  { value: "apiKey", label: "API Key" },
+const authModes = (t: Text) => [
+  { value: "auto", label: t.models.authAuto },
+  { value: "apiKey", label: t.models.apiKey },
   { value: "bearer", label: "Bearer" },
 ];
 
@@ -115,6 +116,7 @@ export function ModelsPage({
   bootstrap: Bootstrap;
   reload(): Promise<void>;
 }) {
+  const t = useT();
   const [selectedId, setSelectedId] = useState(
     () =>
       bootstrap.models.find((model) => model.active)?.id ??
@@ -209,13 +211,13 @@ export function ModelsPage({
       const models = result.models.filter(Boolean);
       setCatalog(models);
       if (!models.length) {
-        setNotice("没有可用模型，请手动填写。");
+        setNotice(t.models.noModels);
         return;
       }
       if (!form.model || !models.includes(form.model)) {
         change("model", models[0]!);
       }
-      setNotice(`已获取 ${models.length} 个模型`);
+      setNotice(t.models.fetched(models.length));
     } catch (reason) {
       setError(readError(reason));
     } finally {
@@ -229,7 +231,7 @@ export function ModelsPage({
       !form.baseUrl.trim() ||
       !form.model.trim()
     ) {
-      setError("请填写名称、协议、地址和模型。");
+      setError(t.models.required);
       return;
     }
     setBusy(true);
@@ -242,7 +244,7 @@ export function ModelsPage({
       const saved = { ...form, apiKey: "" };
       drafts.current.set(form.id, saved);
       setForm(saved);
-      setNotice("已保存");
+      setNotice(t.models.saved);
     } catch (reason) {
       setError(readError(reason));
     } finally {
@@ -263,7 +265,7 @@ export function ModelsPage({
         </button>
       </header>
       <div className="model-workspace">
-        <nav className="model-list" aria-label="已配置的模型">
+        <nav className="model-list" aria-label={t.models.configured}>
           {creating && (
             <button
               type="button"
@@ -272,7 +274,7 @@ export function ModelsPage({
               onClick={() => choose("new")}
             >
               <span>
-                <strong>{form.name.trim() || "新模型"}</strong>
+                <strong>{form.name.trim() || t.models.new}</strong>
                 <small>未保存</small>
               </span>
             </button>
@@ -326,8 +328,8 @@ export function ModelsPage({
               <label>
                 <span>服务商</span>
                 <Select
-                  label="服务商"
-                  placeholder="选择服务商"
+                  label={t.models.provider}
+                  placeholder={t.models.pickProvider}
                   value={form.preset}
                   options={presetOptions}
                   onChange={applyPreset}
@@ -362,17 +364,17 @@ export function ModelsPage({
                 <input
                   required
                   value={form.name}
-                  placeholder="例如 DeepSeek"
+                  placeholder={t.models.providerExample}
                   onChange={(event) => change("name", event.target.value)}
                 />
               </label>
               <label>
                 <span>请求协议</span>
                 <Select
-                  label="请求协议"
-                  placeholder="选择协议"
+                  label={t.models.protocol}
+                  placeholder={t.models.pickProtocol}
                   value={form.protocol}
-                  options={protocols}
+                  options={protocols(t)}
                   onChange={(value) => change("protocol", value)}
                 />
               </label>
@@ -393,7 +395,7 @@ export function ModelsPage({
                     <input
                       type="password"
                       autoComplete="off"
-                      aria-label="API Key"
+                      aria-label={t.models.apiKey}
                       required={creating}
                       placeholder={selected ? "不修改请留空" : "sk-…"}
                       value={form.apiKey}
@@ -408,7 +410,7 @@ export function ModelsPage({
                   {catalog.length ? (
                     <Select
                       label="模型"
-                      placeholder="选择模型"
+                      placeholder={t.models.pickModel}
                       value={form.model}
                       options={modelOptions}
                       onChange={(value) => change("model", value)}
@@ -417,7 +419,7 @@ export function ModelsPage({
                     <input
                       required
                       aria-label="模型"
-                      placeholder={preset?.model || "模型名称"}
+                      placeholder={preset?.model || t.models.name}
                       value={form.model}
                       onChange={(event) => change("model", event.target.value)}
                     />
@@ -430,7 +432,7 @@ export function ModelsPage({
                     }
                     onClick={() => void fetchModels()}
                   >
-                    {listing ? "获取中…" : "获取模型"}
+                    {listing ? t.models.fetching : t.models.fetchModels}
                   </button>
                 </div>
               </div>
@@ -455,9 +457,9 @@ export function ModelsPage({
                     form.protocol === "gemini") && (
                     <>
                       <Select
-                        label="鉴权方式"
+                        label={t.models.auth}
                         value={form.auth}
-                        options={authModes}
+                        options={authModes(t)}
                         onChange={(value) =>
                           updateForm((draft) => ({
                             ...draft,
@@ -540,7 +542,7 @@ export function ModelsPage({
             </section>
             <footer className="detail-actions">
               <button className="primary-action" disabled={busy}>
-                {busy ? "保存中…" : "保存"}
+                {busy ? t.models.saving : t.common.save}
               </button>
               {selected && !selected.active && (
                 <button
@@ -595,7 +597,7 @@ export function ModelsPage({
                 ) ?? bootstrap.models.find((model) => model.id !== selected.id);
               resetEditor(next?.id ?? "new", formFor(next));
               setAskingDelete(false);
-              setNotice("已删除");
+              setNotice(t.models.deleted);
             })
             .catch((reason) => setError(readError(reason)))
             .finally(() => setBusy(false));

@@ -12,6 +12,7 @@ import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 import source from "./help.md?raw";
 import "./HelpPage.css";
+import { useT } from "../../i18n";
 
 export type HelpOpen = "models" | "bridge" | "extensions" | "tasks";
 
@@ -88,6 +89,7 @@ function helpComponents(onOpen?: (target: HelpOpen) => void): Components {
 }
 
 export function HelpPage({ onOpen }: { onOpen?(target: HelpOpen): void }) {
+  const t = useT();
   const root = useRef<HTMLElement>(null);
   const [active, setActive] = useState(TOC[0] ?? "");
   const components = helpComponents(onOpen);
@@ -127,7 +129,7 @@ export function HelpPage({ onOpen }: { onOpen?(target: HelpOpen): void }) {
         </Markdown>
       </div>
       <nav className="help-toc" aria-label="目录">
-        <p className="help-toc-label">目录</p>
+        <p className="help-toc-label">{t.helpToc}</p>
         <ol>
           {TOC.map((id) => (
             <li key={id}>

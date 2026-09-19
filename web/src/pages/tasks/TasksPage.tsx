@@ -14,14 +14,15 @@ import type { Bootstrap, TaskInfo, TaskSummary } from "../../ipc/types";
 import { MotionSwitch } from "../../components/controls/MotionSwitch";
 import { SlidingTabs } from "../../components/controls/SlidingTabs";
 import "./TasksPage.css";
+import { useT, type Text } from "../../i18n";
 
 type Filter = "all" | "runnable" | "attention" | "archived";
 
-const FILTERS: Array<{ id: Filter; label: string }> = [
-  { id: "all", label: "全部" },
-  { id: "runnable", label: "可运行" },
-  { id: "attention", label: "需处理" },
-  { id: "archived", label: "已归档" },
+const filters = (t: Text): Array<{ id: Filter; label: string }> => [
+  { id: "all", label: t.tasks.all },
+  { id: "runnable", label: t.tasks.runnable },
+  { id: "attention", label: t.tasks.needsAttention },
+  { id: "archived", label: t.tasks.archived },
 ];
 
 function matches(task: TaskSummary, filter: Filter) {
@@ -53,6 +54,7 @@ export function TasksPage({
   onOpenTask?: ((task: TaskSummary) => void) | undefined;
   onConnectTools?: (() => void) | undefined;
 }) {
+  const t = useT();
   const [tab, setTab] = useState<"tasks" | "runs">("tasks");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -100,7 +102,7 @@ export function TasksPage({
         onOpenConversation(run.conversationId);
       }),
     rename: (task) => {
-      const name = window.prompt("给这个快捷任务换个名字", task.name);
+      const name = window.prompt(t.tasks.renameHint, task.name);
       if (name === null) return;
       void act(task.id, () => api.renameWorkflow(task.id, name));
     },
@@ -119,7 +121,7 @@ export function TasksPage({
     askAi: (task) => {
       onOpenConversation(task.sourceConversationId ?? "");
       setError(
-        `请在这个对话里说明要改什么；「${task.name}」会生成新版本，旧版本继续可用。`,
+        t.tasks.editNote(task.name),
       );
     },
     connect: () => onConnectTools?.(),
@@ -168,7 +170,7 @@ export function TasksPage({
         </label>
         {tab === "tasks" && (
           <div className="filter-row">
-            {FILTERS.map((item) => (
+            {filters(t).map((item) => (
               <button
                 key={item.id}
                 className="subtle-action"
@@ -201,8 +203,8 @@ export function TasksPage({
               <h3>{query ? "没有找到匹配任务" : "还没有快捷任务"}</h3>
               <p>
                 {query
-                  ? "换个词试试，或者清掉筛选条件。"
-                  : "在对话里说明你想反复做的那件事，Agent 会把它做成一键运行的任务。"}
+                  ? t.tasks.emptyHint
+                  : t.tasks.emptyHow}
               </p>
               {query ? (
                 <button
@@ -239,11 +241,11 @@ export function TasksPage({
         ) : (
           <div className="empty-state">
             <HistoryIcon />
-            <h3>{query ? "没有找到匹配的运行记录" : "还没有运行记录"}</h3>
+            <h3>{query ? t.tasks.runsNoMatch : t.tasks.runsEmpty}</h3>
             <p>
               {query
-                ? "换个词试试。"
-                : "聊天和快捷任务执行都会在这里留下痕迹。"}
+                ? t.tasks.runsEmptyHint
+                : t.tasks.runsEmptyHow}
             </p>
           </div>
         )}
@@ -284,6 +286,7 @@ function RunRow({
   onOpen(): void;
   onStop(): void;
 }) {
+  const t = useT();
   return (
     <div className="record">
       <div className="record-main">
@@ -297,7 +300,7 @@ function RunRow({
             hour: "2-digit",
             minute: "2-digit",
           })}
-          {run.source?.kind === "savedWorkflow" && " · 快捷任务"}
+          {run.source?.kind === "savedWorkflow" && t.tasks.suffix}
         </small>
         {run.error && <small>{run.error}</small>}
       </div>

@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { api } from "../../ipc/api";
+import { useT } from "../../i18n";
 import "./title-bar.css";
 
 /** 自绘的窗口标题栏。 */
@@ -18,6 +19,7 @@ export function TitleBar({
   closeDisabled?: boolean;
 } = {}) {
   const [maximized, setMaximized] = useState(false);
+  const t = useT();
   const barRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -89,8 +91,8 @@ export function TitleBar({
         <button
           type="button"
           className="title-bar-button"
-          title="最小化"
-          aria-label="最小化"
+          title={t.titlebar.minimize}
+          aria-label={t.titlebar.minimize}
           onClick={() => void api.windowMinimize()}
         >
           <Glyph>
@@ -101,8 +103,8 @@ export function TitleBar({
           <button
             type="button"
             className="title-bar-button"
-            title={maximized ? "向下还原" : "最大化"}
-            aria-label={maximized ? "向下还原" : "最大化"}
+            title={maximized ? t.titlebar.restore : t.titlebar.maximize}
+            aria-label={maximized ? t.titlebar.restore : t.titlebar.maximize}
             onClick={() => void api.windowToggleMaximize()}
           >
             {maximized ? (
@@ -120,8 +122,8 @@ export function TitleBar({
         <button
           type="button"
           className="title-bar-button title-bar-close"
-          title="关闭"
-          aria-label="关闭"
+          title={t.titlebar.close}
+          aria-label={t.titlebar.close}
           disabled={closeDisabled}
           onClick={() => void api.windowClose()}
         >

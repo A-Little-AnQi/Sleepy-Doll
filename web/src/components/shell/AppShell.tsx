@@ -61,10 +61,11 @@ import {
   type GroupLayout,
 } from "../../session/conversation-groups";
 import "./app-shell.css";
+import { useT } from "../../i18n";
 
 const NAV = [
-  { page: "tasks", label: "快捷任务", Icon: ToolIcon },
-  { page: "extensions", label: "工具与扩展", Icon: PluginIcon },
+  { page: "tasks", labelKey: "tasks" as const, Icon: ToolIcon },
+  { page: "extensions", labelKey: "extensions" as const, Icon: PluginIcon },
 ] as const;
 
 const DRAG_THRESHOLD = 6;
@@ -169,6 +170,7 @@ export function AppShell({
   reload,
   composingNewChat = false,
 }: Props) {
+  const t = useT();
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem("sleepy-doll-sidebar-collapsed") === "true",
   );
@@ -258,8 +260,8 @@ export function AppShell({
   );
   const bridgeLabel =
     bootstrap.bridge.enabled && bootstrap.bridge.connected
-      ? "已连接"
-      : "未连接";
+      ? t.nav.connected
+      : t.nav.disconnected;
 
   const persistLayout = (next: GroupLayout) => {
     layoutRef.current = next;
@@ -534,7 +536,7 @@ export function AppShell({
   const aside = (
     <aside
       className="app-sidebar"
-      aria-label="侧栏"
+      aria-label={t.nav.sidebar}
       aria-hidden={!sidebarVisible}
       inert={!sidebarVisible}
       onPointerEnter={!docked ? showPeek : undefined}
@@ -544,8 +546,8 @@ export function AppShell({
         <Wordmark />
         <button
           className="icon-button"
-          title={wide ? "收起侧栏" : "关闭侧栏"}
-          aria-label={wide ? "收起侧栏" : "关闭侧栏"}
+          title={wide ? t.nav.collapseSidebar : t.nav.closeSidebar}
+          aria-label={wide ? t.nav.collapseSidebar : t.nav.closeSidebar}
           onClick={foldSidebar}
         >
           <SidebarIcon className="button-icon" />
@@ -555,8 +557,8 @@ export function AppShell({
         <PlusIcon className="button-icon" />
         <span>新建对话</span>
       </button>
-      <nav className="app-nav" aria-label="主导航">
-        {NAV.map(({ page: target, label, Icon }) => (
+      <nav className="app-nav" aria-label={t.nav.mainNav}>
+        {NAV.map(({ page: target, labelKey, Icon }) => (
           <button
             key={target}
             className={`app-nav-item${page === target ? " is-active" : ""}`}
@@ -564,10 +566,10 @@ export function AppShell({
             onClick={() => onPage(target)}
           >
             <Icon className="app-nav-icon" />
-            <span>{label}</span>
+            <span>{t.nav[labelKey]}</span>
             {target === "tasks" &&
               bootstrap.tasks.some((task) => isRunning(task)) && (
-                <span className="app-nav-badge" title="有运行正在进行">
+                <span className="app-nav-badge" title={t.nav.runningBadge}>
                   {bootstrap.tasks.filter((task) => isRunning(task)).length}
                 </span>
               )}
@@ -579,8 +581,8 @@ export function AppShell({
           <span>最近对话</span>
           <button
             className="icon-button"
-            title="新建分组"
-            aria-label="新建分组"
+            title={t.nav.newGroup}
+            aria-label={t.nav.newGroup}
             onClick={() => {
               const next = createGroup(layout);
               const created = next.groups[next.groups.length - 1];
@@ -595,8 +597,8 @@ export function AppShell({
         <label className="search-field is-compact">
           <SearchIcon />
           <input
-            aria-label="搜索对话"
-            placeholder="搜索对话"
+            aria-label={t.nav.searchConversations}
+            placeholder={t.nav.searchPlaceholder}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -658,7 +660,7 @@ export function AppShell({
             />
           )}
           {!conversations.length && !showDraft && query.trim() ? (
-            <li className="app-conversation-empty">没有找到匹配的对话</li>
+            <li className="app-conversation-empty">{t.nav.noMatch}</li>
           ) : null}
         </ul>
       </div>
@@ -681,7 +683,7 @@ export function AppShell({
         className="app-sidebar-resize"
         role="separator"
         aria-orientation="vertical"
-        aria-label="调整侧栏宽度"
+        aria-label={t.nav.resizeSidebar}
         aria-valuenow={sidebarWidth}
         aria-valuemin={SIDEBAR_MIN_WIDTH}
         aria-valuemax={SIDEBAR_MAX_WIDTH}
@@ -718,7 +720,7 @@ export function AppShell({
         {!wide && !collapsed && (
           <button
             className="app-scrim"
-            aria-label="关闭侧栏"
+            aria-label={t.nav.closeSidebar}
             onClick={foldSidebar}
           />
         )}
@@ -730,16 +732,16 @@ export function AppShell({
                   <>
                     <button
                       className="icon-button"
-                      title="展开侧栏"
-                      aria-label="展开侧栏"
+                      title={t.nav.expandSidebar}
+                      aria-label={t.nav.expandSidebar}
                       onClick={pinSidebar}
                     >
                       <SidebarIcon className="button-icon" />
                     </button>
                     <button
                       className="icon-button"
-                      title="新建对话"
-                      aria-label="新建对话"
+                      title={t.nav.newChat}
+                      aria-label={t.nav.newChat}
                       onClick={() => startNew(null)}
                     >
                       <PlusIcon className="button-icon" />
@@ -747,7 +749,7 @@ export function AppShell({
                   </>
                 )}
                 {page === "chat" ? (
-                  <h1>{conversation?.title ?? "新对话"}</h1>
+                  <h1>{conversation?.title ?? t.nav.newConversation}</h1>
                 ) : null}
               </div>
               {detailsToggle ? (
@@ -755,8 +757,8 @@ export function AppShell({
                   <button
                     className="icon-button"
                     aria-pressed={detailsOpen}
-                    aria-label={detailsOpen ? "隐藏详情" : "显示详情"}
-                    title={detailsOpen ? "隐藏详情" : "显示详情"}
+                    aria-label={detailsOpen ? t.nav.hideDetails : t.nav.showDetails}
+                    title={detailsOpen ? t.nav.hideDetails : t.nav.showDetails}
                     onClick={onToggleDetails}
                   >
                     <PanelIcon className="button-icon" />
@@ -775,7 +777,7 @@ export function AppShell({
                 <>
                   <button
                     className="details-scrim"
-                    aria-label="关闭详情"
+                    aria-label={t.nav.closeDetails}
                     onClick={onToggleDetails}
                   />
                   <div className="details-drawer">{details}</div>
@@ -805,10 +807,11 @@ export function AppShell({
 }
 
 function DraftRow({ nested = false }: { nested?: boolean }) {
+  const t = useT();
   return (
     <li className={`is-current${nested ? " is-nested" : ""}`}>
       <button type="button" aria-current="page">
-        <span className="app-conversation-title">新对话</span>
+        <span className="app-conversation-title">{t.nav.newConversation}</span>
       </button>
     </li>
   );
@@ -827,6 +830,7 @@ function GroupContextMenu({
   onDelete(): void;
   onClose(): void;
 }) {
+  const t = useT();
   const root = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
   useLayoutEffect(() => {
@@ -865,7 +869,7 @@ function GroupContextMenu({
       ref={root}
       className="app-context-menu"
       role="menu"
-      aria-label="分组"
+      aria-label={t.app.group}
       style={{ left: pos.left, top: pos.top }}
     >
       <button
@@ -886,7 +890,7 @@ function GroupContextMenu({
           onDelete();
         }}
       >
-        删除分组
+        {t.app.deleteGroup}
       </button>
     </div>,
     document.body,
@@ -928,6 +932,7 @@ function GroupRow({
   onNew(): void;
   onDelete(): void;
 }) {
+  const t = useT();
   const [editing, setEditing] = useState(renaming);
   const [name, setName] = useState(group.name);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -1001,7 +1006,7 @@ function GroupRow({
           <div className="app-conversation-actions">
             <button
               className="icon-button"
-              aria-label="在此分组新建对话"
+              aria-label={t.app.newChatInGroup}
               title="在此分组新建对话"
               onClick={onNew}
             >
@@ -1051,8 +1056,8 @@ function GroupRow({
       )}
       <ConfirmDialog
         open={asking}
-        title="删除分组"
-        confirmLabel="删除分组"
+        title={t.app.deleteGroup}
+        confirmLabel={t.app.deleteGroup}
         onClose={() => setAsking(false)}
         onConfirm={() => {
           setAsking(false);
@@ -1088,6 +1093,7 @@ function ConversationRow({
   draggingId?: string | undefined;
   onDragArm(event: PointerEvent<HTMLElement>, item: DragItem): void;
 }) {
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(entry.title);
   const [asking, setAsking] = useState<{
@@ -1103,7 +1109,7 @@ function ConversationRow({
         style={{ viewTransitionName: vtName(entry.id) } as CSSProperties}
       >
         <InlineRename
-          label="会话名称"
+          label={t.app.conversationName}
           value={title}
           onChange={setTitle}
           onSubmit={() => {
@@ -1150,7 +1156,7 @@ function ConversationRow({
         <div className="app-conversation-actions">
           <button
             className="icon-button"
-            aria-label="重命名"
+            aria-label={t.app.rename}
             title="重命名"
             onClick={() => setEditing(true)}
           >
@@ -1158,7 +1164,7 @@ function ConversationRow({
           </button>
           <button
             className="icon-button"
-            aria-label="删除对话"
+            aria-label={t.app.deleteConversation}
             title="删除对话"
             onClick={() => {
               void (async () => {

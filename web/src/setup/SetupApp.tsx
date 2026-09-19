@@ -10,6 +10,7 @@ import {
 } from "../components/icons";
 import { setupApi, type SetupInfo, type SetupState } from "./api";
 import "./setup.css";
+import { useT } from "../i18n";
 
 /** 原生没应答时用它渲染，目录取安装器的首选值。 */
 const PREVIEW_INFO: SetupInfo = {
@@ -52,6 +53,7 @@ function presetDirectory(info: SetupInfo) {
 }
 
 export function SetupApp() {
+  const t = useT();
   const [info, setInfo] = useState(PREVIEW_INFO);
   const [directory, setDirectory] = useState(PREVIEW_INFO.defaultDirectory);
   const [shortcut, setShortcut] = useState(true);
@@ -84,7 +86,7 @@ export function SetupApp() {
   }, []);
 
   const uninstall = info.uninstallMode;
-  const action = uninstall ? "卸载" : "安装";
+  const action = uninstall ? t.setup.uninstall : t.setup.install;
   const target = installedDirectory(directory);
   const view = retry || state.phase === "idle" ? "form" : state.phase;
   const busy = view === "running";
@@ -96,7 +98,7 @@ export function SetupApp() {
     setState({
       phase: "running",
       progress: 0,
-      message: "正在准备…",
+      message: t.setup.preparing,
       error: null,
     });
     try {
@@ -129,7 +131,7 @@ export function SetupApp() {
     try {
       const result = await setupApi.launch();
       if (!result.started) {
-        setLaunchError("没有启动，请从安装目录运行 sleepy-doll.exe。");
+        setLaunchError(t.setup.notStarted);
         return;
       }
       await api.windowClose();
@@ -159,8 +161,8 @@ export function SetupApp() {
             {resting ? (
               <p>
                 {uninstall
-                  ? "卸载会删除程序文件，数据默认保留。"
-                  : "程序与数据都装在所选目录下。"}
+                  ? t.setup.uninstallNote
+                  : t.setup.installNote}
               </p>
             ) : null}
           </header>
@@ -175,7 +177,7 @@ export function SetupApp() {
                   </div>
                   <div className="setup-meta-row">
                     <dt>版本</dt>
-                    <dd>{info.installedVersion ?? "未知"}</dd>
+                    <dd>{info.installedVersion ?? t.setup.unknown}</dd>
                   </div>
                 </dl>
               ) : (
@@ -251,13 +253,13 @@ export function SetupApp() {
             {busy ? (
               <div className="setup-progress" role="status">
                 <div className="setup-progress-head">
-                  <span>{state.message || `${action}中…`}</span>
+                  <span>{state.message || t.setup.progressLabel(action)}</span>
                   <span>{percent}%</span>
                 </div>
                 <div
                   className="setup-bar"
                   role="progressbar"
-                  aria-label={`${action}进度`}
+                  aria-label={t.setup.progressAria(action)}
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-valuenow={percent}
@@ -267,7 +269,7 @@ export function SetupApp() {
                     style={{ width: `${percent}%` }}
                   />
                 </div>
-                <p className="setup-note">过程中请不要关闭窗口。</p>
+                <p className="setup-note">{t.setup.keepWindowOpen}</p>
               </div>
             ) : null}
 
@@ -284,7 +286,7 @@ export function SetupApp() {
                 </p>
                 {uninstall ? (
                   <p className="setup-note">
-                    {removeUserData ? "数据已删除。" : "数据已保留。"}
+                    {removeUserData ? t.setup.dataDeleted : t.setup.dataKept}
                   </p>
                 ) : null}
                 {launchError ? (
@@ -301,8 +303,8 @@ export function SetupApp() {
                   </span>
                   <h3>{action}失败</h3>
                 </div>
-                <p>{state.error ?? `${action}没有完成。`}</p>
-                <p className="setup-note">可以点「返回重试」换个位置。</p>
+                <p>{state.error ?? t.setup.incomplete(action)}</p>
+                <p className="setup-note">{t.setup.retryHint}</p>
               </div>
             ) : null}
           </div>

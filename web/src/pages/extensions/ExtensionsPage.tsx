@@ -14,6 +14,7 @@ import type { Bootstrap } from "../../ipc/types";
 import { MotionSwitch } from "../../components/controls/MotionSwitch";
 import { SlidingTabs } from "../../components/controls/SlidingTabs";
 import { providerOfTool } from "../../ipc/providers";
+import { useT } from "../../i18n";
 export function ExtensionsPage({
   bootstrap,
   reload,
@@ -27,6 +28,7 @@ export function ExtensionsPage({
   onTab?(tab: "skills" | "plugins"): void;
   onOpenHost?(): void;
 }) {
+  const t = useT();
   const [uncontrolled, setUncontrolled] = useState<"skills" | "plugins">(tab);
   const currentTab = onTab ? tab : uncontrolled;
   const setTab = (value: "skills" | "plugins") => {
@@ -66,9 +68,9 @@ export function ExtensionsPage({
           unavailableReason: skill.unavailableReason ?? "",
           meta:
             skill.source === "product"
-              ? "随产品"
+              ? t.extensions.bundled
               : skill.source === "user"
-                ? "本机"
+                ? t.extensions.local
                 : skill.source,
           detail: skill.instructions ?? "",
           error: "",
@@ -81,7 +83,7 @@ export function ExtensionsPage({
           enabled: plugin.configuredEnabled ?? plugin.status === "enabled",
           available: plugin.status === "enabled",
           unavailableReason: plugin.error ?? "",
-          meta: plugin.host ? "随产品" : plugin.manifest.version,
+          meta: plugin.host ? t.extensions.bundled : plugin.manifest.version,
           detail: plugin.host
             ? ""
             : bootstrap.tools
@@ -143,7 +145,7 @@ export function ExtensionsPage({
       </div>
       <div className="list-toolbar">
         <SlidingTabs
-          ariaLabel="扩展类型"
+          ariaLabel={t.extensions.kind}
           value={currentTab}
           onChange={(value) => {
             setTab(value);
@@ -172,8 +174,8 @@ export function ExtensionsPage({
         <label className="search-field">
           <SearchIcon />
           <input
-            aria-label="搜索扩展"
-            placeholder="搜索"
+            aria-label={t.extensions.search}
+            placeholder={t.common.search}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -286,9 +288,9 @@ export function ExtensionsPage({
               }}
             >
               <label>
-                <span>{currentTab === "skills" ? "技能目录" : "插件目录"}</span>
+                <span>{currentTab === "skills" ? t.extensions.skillsDir : t.extensions.pluginsDir}</span>
                 <input
-                  placeholder="文件夹的完整路径"
+                  placeholder={t.extensions.dirHint}
                   value={path}
                   onChange={(event) => setPath(event.target.value)}
                 />
@@ -360,7 +362,7 @@ export function ExtensionsPage({
                     <button
                       className="secondary-action"
                       disabled={busy || current.enabled}
-                      title={current.enabled ? "请先停用插件" : undefined}
+                      title={current.enabled ? t.extensions.disableFirst : undefined}
                       onClick={() => {
                         dialog.current?.close();
                         setPendingRemove(current.id);
@@ -389,11 +391,9 @@ export function ExtensionsPage({
           });
         }}
       >
-        <p>
-          移除「
-          {items.find((item) => item.id === pendingRemove)?.name ?? "这个插件"}
-          」。它提供的工具会从本机卸下。
-        </p>
+        <p>{t.extensions.removeNote(
+          items.find((item) => item.id === pendingRemove)?.name ?? "",
+        )}</p>
       </ConfirmDialog>
     </div>
   );

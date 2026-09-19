@@ -10,6 +10,7 @@ import {
   writeLocale,
   type LocaleId,
 } from "../../appearance/locale";
+import { useT } from "../../i18n";
 
 export function SidebarAccount({
   onSettings,
@@ -19,6 +20,7 @@ export function SidebarAccount({
   onHelp(): void;
 }) {
   const [open, setOpen] = useState(false);
+  const t = useT();
   const theme = useTheme();
   const locale = useLocale();
   const root = useRef<HTMLDivElement>(null);
@@ -54,7 +56,7 @@ export function SidebarAccount({
         <button
           id="app-account-trigger"
           className="app-account"
-          aria-label="本地用户"
+          aria-label={t.account.localUser}
           aria-haspopup="menu"
           aria-expanded={open}
           aria-controls="app-account-menu"
@@ -74,7 +76,7 @@ export function SidebarAccount({
           id="app-account-menu"
           className="app-account-menu"
           role="menu"
-          aria-label="账户菜单"
+          aria-label={t.account.menu}
         >
           <div className="app-account-menu-prefs">
             <SettingRow label="主题" compact>
@@ -100,7 +102,7 @@ export function SidebarAccount({
               }}
             >
               <HelpIcon className="button-icon" />
-              使用说明
+              {t.account.help}
             </button>
             <button
               type="button"
@@ -112,7 +114,7 @@ export function SidebarAccount({
               }}
             >
               <SettingsIcon className="button-icon" />
-              设置
+              {t.account.settings}
             </button>
           </div>
         </div>
