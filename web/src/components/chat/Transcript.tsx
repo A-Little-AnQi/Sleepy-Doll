@@ -10,7 +10,13 @@ import {
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
-import { AlertIcon, BrandIcon, CheckIcon, ChevronIcon, CopyIcon } from "../icons";
+import {
+  AlertIcon,
+  BrandIcon,
+  CheckIcon,
+  ChevronIcon,
+  CopyIcon,
+} from "../icons";
 import type { MessageInfo } from "../../ipc/types";
 import "./Transcript.css";
 
@@ -219,7 +225,9 @@ function AssistantIdentity() {
 }
 
 function fenceText(children: ReactNode) {
-  const code = Children.toArray(children).find((child) => isValidElement(child));
+  const code = Children.toArray(children).find((child) =>
+    isValidElement(child),
+  );
   if (!isValidElement<{ children?: ReactNode; className?: string }>(code)) {
     return { text: "", lang: "" };
   }
@@ -250,9 +258,7 @@ const markdownComponents: Components = {
     return (
       <a
         href={href}
-        {...(external
-          ? { target: "_blank", rel: "noreferrer noopener" }
-          : {})}
+        {...(external ? { target: "_blank", rel: "noreferrer noopener" } : {})}
       >
         {children}
       </a>

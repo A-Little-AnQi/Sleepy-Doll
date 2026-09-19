@@ -183,6 +183,22 @@ pub struct StorageConfig {
     pub database: PathBuf,
 }
 
+/// 托盘图标只由桌面壳消费；其余运行形态读到默认值即可，没有别的行为。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TrayConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for TrayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppConfig {
@@ -198,6 +214,8 @@ pub struct AppConfig {
     pub runtime: crate::runtime::policy::RuntimeConfig,
     #[serde(default)]
     pub hooks: Vec<crate::runtime::host::hooks::HttpHookConfig>,
+    #[serde(default)]
+    pub tray: TrayConfig,
 }
 
 impl AppConfig {
@@ -356,6 +374,17 @@ impl AppConfig {
                     serde_json::to_value(crate::runtime::policy::RuntimeConfig::default())?;
             }
             value["runtime"]["permissionMode"] = serde_json::to_value(mode)?;
+            Ok(())
+        })
+    }
+
+    /// 写入托盘开关。桌面壳据此立即显隐图标；其它形态写入后没有任何效果。
+    pub fn set_tray_enabled(path: impl AsRef<Path>, enabled: bool) -> Result<()> {
+        update_raw(path.as_ref(), |value| {
+            if !value["tray"].is_object() {
+                value["tray"] = serde_json::json!({});
+            }
+            value["tray"]["enabled"] = serde_json::Value::Bool(enabled);
             Ok(())
         })
     }
@@ -1024,6 +1053,7 @@ mod tests {
             },
             runtime: Default::default(),
             hooks: vec![],
+            tray: TrayConfig::default(),
         };
         assert!(config.validate().is_err());
     }

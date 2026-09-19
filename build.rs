@@ -13,7 +13,7 @@ fn main() {
         println!("cargo:rustc-link-arg-bin=sleepy-doll=/MANIFESTUAC:NO");
 
         // 图标没有链接器开关，只能先过资源编译器。rc.exe 与桥的 cl.exe 来自同一套
-        // Build Tools，所以这不引入新的构建前提。只链进桌面壳：开发用的
+        // Build Tools，所以这不引入新的构建前提。只链进桌面壳的两个 bin：开发用的
         // sleepy-doll-dev 不需要图标，链接它会白等一次 rc 调用。
         embed_resource::compile_for(
             root.join("assets/sleepy-doll.rc"),
@@ -22,6 +22,13 @@ fn main() {
         )
         .manifest_required()
         .expect("compiling assets/sleepy-doll.rc");
+        embed_resource::compile_for(
+            root.join("assets/sleepy-doll-setup.rc"),
+            ["sleepy-doll-setup"],
+            embed_resource::NONE,
+        )
+        .manifest_required()
+        .expect("compiling assets/sleepy-doll-setup.rc");
     }
 }
 

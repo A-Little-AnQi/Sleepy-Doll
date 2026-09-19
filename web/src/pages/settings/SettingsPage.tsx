@@ -17,7 +17,7 @@ import { HelpPage, type HelpOpen } from "./HelpPage";
 import { SettingRow } from "../../components/controls/SettingRow";
 import { SlidingTabs } from "../../components/controls/SlidingTabs";
 import { ConfigEditor } from "../../components/bridge/ConfigEditor";
-import { api } from "../../ipc/api";
+import { api, framelessWindow } from "../../ipc/api";
 import { readTheme, writeTheme } from "../../appearance";
 import {
   LOCALE_OPTIONS,
@@ -44,6 +44,15 @@ export function SettingsPage({
   const [sendKey, setSendKey] = useState(
     () => localStorage.getItem("sleepy-doll-send-key") ?? "enter",
   );
+  // 托盘开关只在桌面壳里有意义；浏览器预览拿不到，相应分组也不显示。
+  const [trayEnabled, setTrayEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!framelessWindow()) return;
+    api
+      .trayState()
+      .then((result) => setTrayEnabled(result.enabled))
+      .catch(() => undefined);
+  }, []);
   const [editing, setEditing] = useState(false);
   const [configPath, setConfigPath] = useState(bootstrap.configPath);
   useEffect(() => setConfigPath(bootstrap.configPath), [bootstrap.configPath]);
@@ -64,8 +73,16 @@ export function SettingsPage({
           value={section}
           onChange={onSection}
           items={[
-            { id: "settings", name: "通用", icon: <SettingsIcon className="button-icon" /> },
-            { id: "models", name: "模型", icon: <ModelIcon className="button-icon" /> },
+            {
+              id: "settings",
+              name: "通用",
+              icon: <SettingsIcon className="button-icon" />,
+            },
+            {
+              id: "models",
+              name: "模型",
+              icon: <ModelIcon className="button-icon" />,
+            },
             ...(hostPluginEnabled(bootstrap)
               ? [
                   {
@@ -75,8 +92,16 @@ export function SettingsPage({
                   },
                 ]
               : []),
-            { id: "help", name: "使用说明", icon: <HelpIcon className="button-icon" /> },
-            { id: "sponsor", name: "赞助作者", icon: <BrandIcon className="button-icon" /> },
+            {
+              id: "help",
+              name: "使用说明",
+              icon: <HelpIcon className="button-icon" />,
+            },
+            {
+              id: "sponsor",
+              name: "赞助作者",
+              icon: <BrandIcon className="button-icon" />,
+            },
           ]}
         />
       </div>
@@ -132,6 +157,31 @@ export function SettingsPage({
                 />
               </SettingRow>
             </section>
+            {trayEnabled !== null ? (
+              <section className="settings-group">
+                <h3>托盘</h3>
+                <SettingRow
+                  label="托盘图标"
+                  hint="隐藏后，点关闭按钮将直接退出程序"
+                >
+                  <Select
+                    label="托盘图标"
+                    value={trayEnabled ? "show" : "hide"}
+                    options={[
+                      { value: "show", label: "显示" },
+                      { value: "hide", label: "隐藏" },
+                    ]}
+                    onChange={(value) => {
+                      const next = value === "show";
+                      setTrayEnabled(next);
+                      api
+                        .traySetEnabled(next)
+                        .catch(() => setTrayEnabled(!next));
+                    }}
+                  />
+                </SettingRow>
+              </section>
+            ) : null}
             <section className="settings-group">
               <h3>配置</h3>
               <SettingRow label="配置文件" hint={configPath}>
@@ -168,11 +218,7 @@ function SponsorNote() {
     <aside className="settings-sponsor">
       <h2>赞助作者</h2>
       <p>如果这个工具对你有帮助，欢迎扫码支持。</p>
-      <div
-        className="settings-sponsor-qr"
-        role="img"
-        aria-label="收款二维码"
-      />
+      <div className="settings-sponsor-qr" role="img" aria-label="收款二维码" />
     </aside>
   );
 }

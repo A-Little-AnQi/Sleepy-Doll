@@ -263,8 +263,7 @@ export const api = {
   executeOperation: (id: string) => invoke("operation.execute", { id }),
   rollbackOperation: (id: string) => invoke("operation.rollback", { id }),
 
-  configRead: () =>
-    invoke<{ path: string; content: string }>("config.read"),
+  configRead: () => invoke<{ path: string; content: string }>("config.read"),
   configWrite: (content: string) =>
     invoke<{ saved: boolean }>("config.write", { content }),
   conversations: (search = "", includeArchived = false) =>
@@ -349,4 +348,8 @@ export const api = {
   windowToggleMaximize: () => sendWindow("window.toggleMaximize"),
   windowClose: () => sendWindow("window.close"),
   windowState: () => sendWindow("window.state"),
+
+  trayState: () => invoke<{ enabled: boolean }>("tray.state"),
+  traySetEnabled: (enabled: boolean) =>
+    invoke<{ saved: boolean }>("tray.setEnabled", { enabled }),
 };

@@ -1,4 +1,9 @@
-import { forwardRef, useEffect, useRef, type TextareaHTMLAttributes } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useRef,
+  type TextareaHTMLAttributes,
+} from "react";
 import { TextField } from "../controls/TextField";
 
 export const ComposerField = forwardRef<

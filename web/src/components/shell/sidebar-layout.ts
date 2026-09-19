@@ -23,9 +23,6 @@ export function clampSidebarWidth(width: number, viewport: number) {
 
 export function readSidebarWidth(viewport: number, stored?: string | null) {
   const raw =
-    stored === undefined
-      ? localStorage.getItem(SIDEBAR_WIDTH_KEY)
-      : stored;
+    stored === undefined ? localStorage.getItem(SIDEBAR_WIDTH_KEY) : stored;
   return clampSidebarWidth(Number(raw), viewport);
 }
-

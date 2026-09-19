@@ -391,7 +391,8 @@ export function AppShell({
     const move = (next: globalThis.PointerEvent) => {
       const dx = next.clientX - startX;
       const dy = next.clientY - startY;
-      if (!active && dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return;
+      if (!active && dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD)
+        return;
       if (!active) {
         active = true;
         draggingRef.current = true;
@@ -706,100 +707,100 @@ export function AppShell({
           } as CSSProperties
         }
       >
-      {!docked && (
-        <div
-          className="app-sidebar-peek"
-          onPointerEnter={showPeek}
-          onPointerDown={showPeek}
-          onPointerLeave={hidePeek}
-        />
-      )}
-      {aside}
-      {!wide && !collapsed && (
-        <button
-          className="app-scrim"
-          aria-label="关闭侧栏"
-          onClick={foldSidebar}
-        />
-      )}
-      <main className="app-main">
-        {showHeader ? (
-          <header className="app-header">
-            <div className="app-header-title">
-              {collapsed && (
+        {!docked && (
+          <div
+            className="app-sidebar-peek"
+            onPointerEnter={showPeek}
+            onPointerDown={showPeek}
+            onPointerLeave={hidePeek}
+          />
+        )}
+        {aside}
+        {!wide && !collapsed && (
+          <button
+            className="app-scrim"
+            aria-label="关闭侧栏"
+            onClick={foldSidebar}
+          />
+        )}
+        <main className="app-main">
+          {showHeader ? (
+            <header className="app-header">
+              <div className="app-header-title">
+                {collapsed && (
+                  <>
+                    <button
+                      className="icon-button"
+                      title="展开侧栏"
+                      aria-label="展开侧栏"
+                      onClick={pinSidebar}
+                    >
+                      <SidebarIcon className="button-icon" />
+                    </button>
+                    <button
+                      className="icon-button"
+                      title="新建对话"
+                      aria-label="新建对话"
+                      onClick={() => startNew(null)}
+                    >
+                      <PlusIcon className="button-icon" />
+                    </button>
+                  </>
+                )}
+                {page === "chat" ? (
+                  <h1>{conversation?.title ?? "新对话"}</h1>
+                ) : null}
+              </div>
+              {detailsToggle ? (
+                <div className="app-header-actions">
+                  <button
+                    className="icon-button"
+                    aria-pressed={detailsOpen}
+                    aria-label={detailsOpen ? "隐藏详情" : "显示详情"}
+                    title={detailsOpen ? "隐藏详情" : "显示详情"}
+                    onClick={onToggleDetails}
+                  >
+                    <PanelIcon className="button-icon" />
+                  </button>
+                </div>
+              ) : null}
+            </header>
+          ) : null}
+          {error && <Toast message={error} onDismiss={() => setError("")} />}
+          <div className="app-body">
+            <div className="app-view">{children}</div>
+            {detailsPane &&
+              (roomForDetails ? (
+                details
+              ) : (
                 <>
                   <button
-                    className="icon-button"
-                    title="展开侧栏"
-                    aria-label="展开侧栏"
-                    onClick={pinSidebar}
-                  >
-                    <SidebarIcon className="button-icon" />
-                  </button>
-                  <button
-                    className="icon-button"
-                    title="新建对话"
-                    aria-label="新建对话"
-                    onClick={() => startNew(null)}
-                  >
-                    <PlusIcon className="button-icon" />
-                  </button>
+                    className="details-scrim"
+                    aria-label="关闭详情"
+                    onClick={onToggleDetails}
+                  />
+                  <div className="details-drawer">{details}</div>
                 </>
-              )}
-              {page === "chat" ? (
-                <h1>{conversation?.title ?? "新对话"}</h1>
-              ) : null}
-            </div>
-            {detailsToggle ? (
-              <div className="app-header-actions">
-                <button
-                  className="icon-button"
-                  aria-pressed={detailsOpen}
-                  aria-label={detailsOpen ? "隐藏详情" : "显示详情"}
-                  title={detailsOpen ? "隐藏详情" : "显示详情"}
-                  onClick={onToggleDetails}
-                >
-                  <PanelIcon className="button-icon" />
-                </button>
-              </div>
-            ) : null}
-          </header>
-        ) : null}
-        {error && <Toast message={error} onDismiss={() => setError("")} />}
-        <div className="app-body">
-          <div className="app-view">{children}</div>
-          {detailsPane &&
-            (roomForDetails ? (
-              details
-            ) : (
-              <>
-                <button
-                  className="details-scrim"
-                  aria-label="关闭详情"
-                  onClick={onToggleDetails}
-                />
-                <div className="details-drawer">{details}</div>
-              </>
-            ))}
-        </div>
-      </main>
-      {ghost
-        ? createPortal(
-            <div
-              className="app-drag-ghost"
-              style={{
-                left: ghost.x - ghost.grabX,
-                top: ghost.y - ghost.grabY,
-                width: ghost.width,
-                height: ghost.height,
-              }}
-            >
-              {ghost.label}
-            </div>,
-            document.body,
-          )
-        : null}
-    </div>
+              ))}
+          </div>
+        </main>
+        {ghost
+          ? createPortal(
+              <div
+                className="app-drag-ghost"
+                style={{
+                  left: ghost.x - ghost.grabX,
+                  top: ghost.y - ghost.grabY,
+                  width: ghost.width,
+                  height: ghost.height,
+                }}
+              >
+                {ghost.label}
+              </div>,
+              document.body,
+            )
+          : null}
+      </div>
     </>
   );
 }
@@ -840,7 +841,10 @@ function GroupContextMenu({
   }, [x, y]);
   useEffect(() => {
     const onDown = (event: MouseEvent) => {
-      if (event.target instanceof Node && root.current?.contains(event.target)) {
+      if (
+        event.target instanceof Node &&
+        root.current?.contains(event.target)
+      ) {
         return;
       }
       onClose();
@@ -979,7 +983,9 @@ function GroupRow({
             aria-expanded={!group.collapsed}
             aria-label={group.name}
             onClick={() =>
-              persistLayout(setGroupCollapsed(layout, group.id, !group.collapsed))
+              persistLayout(
+                setGroupCollapsed(layout, group.id, !group.collapsed),
+              )
             }
           >
             <span className="app-group-disclose" aria-hidden="true">
@@ -1112,93 +1118,93 @@ function ConversationRow({
   }
   return (
     <>
-    <li
-      className={`${current ? "is-current" : ""}${nested ? " is-nested" : ""}${
-        draggingId === entry.id ? " is-source" : ""
-      }`.trim()}
-      data-sd-slot="conversation"
-      data-sd-id={entry.id}
-      data-sd-group={groupId ?? ""}
-      style={{ viewTransitionName: vtName(entry.id) } as CSSProperties}
-      onPointerDown={(event) =>
-        onDragArm(event, {
-          kind: "conversation",
-          id: entry.id,
-          label: entry.title,
-        })
-      }
-    >
-      <button
-        title={entry.title}
-        aria-current={current ? "page" : undefined}
-        onClick={onOpen}
+      <li
+        className={`${current ? "is-current" : ""}${nested ? " is-nested" : ""}${
+          draggingId === entry.id ? " is-source" : ""
+        }`.trim()}
+        data-sd-slot="conversation"
+        data-sd-id={entry.id}
+        data-sd-group={groupId ?? ""}
+        style={{ viewTransitionName: vtName(entry.id) } as CSSProperties}
+        onPointerDown={(event) =>
+          onDragArm(event, {
+            kind: "conversation",
+            id: entry.id,
+            label: entry.title,
+          })
+        }
       >
-        <span className="app-conversation-title">{entry.title}</span>
-        {running && (
-          <span
-            className="conversation-status running"
-            title={taskLabels[running.state] ?? "运行中"}
-            aria-label={taskLabels[running.state] ?? "运行中"}
-          />
-        )}
-      </button>
-      <div className="app-conversation-actions">
         <button
-          className="icon-button"
-          aria-label="重命名"
-          title="重命名"
-          onClick={() => setEditing(true)}
+          title={entry.title}
+          aria-current={current ? "page" : undefined}
+          onClick={onOpen}
         >
-          <EditIcon className="button-icon" />
+          <span className="app-conversation-title">{entry.title}</span>
+          {running && (
+            <span
+              className="conversation-status running"
+              title={taskLabels[running.state] ?? "运行中"}
+              aria-label={taskLabels[running.state] ?? "运行中"}
+            />
+          )}
         </button>
-        <button
-          className="icon-button"
-          aria-label="删除对话"
-          title="删除对话"
-          onClick={() => {
-            void (async () => {
-              const first = await api.deleteConversation(entry.id, false);
-              if (!first.requiresConfirmation) return;
-              const preview = {
-                title: first.affects?.title ?? entry.title,
-                tasks: first.affects?.taskCount ?? 0,
-                keeps: first.keeps ?? "",
-              };
-              if (!needsConfirmation(permissionMode)) {
-                await api.deleteConversation(entry.id, true);
-                await onAct(async () => {});
-                return;
-              }
-              setAsking(preview);
-            })().catch(() => undefined);
-          }}
-        >
-          <TrashIcon className="button-icon" />
-        </button>
-      </div>
-    </li>
-    <ConfirmDialog
-      open={asking != null}
-      title="删除对话"
-      confirmLabel="删除对话"
-      onClose={() => setAsking(null)}
-      onConfirm={() => {
-        const preview = asking;
-        setAsking(null);
-        if (!preview) return;
-        void onAct(() => api.deleteConversation(entry.id, true));
-      }}
-    >
-      {asking ? (
-        <>
-          <p>
-            会删除「{asking.title}」里的消息和运行记录
-            {asking.tasks ? `，其中 ${asking.tasks} 个快捷任务会保留` : ""}。
-          </p>
-          {asking.keeps ? <p>{asking.keeps}</p> : null}
-        </>
-      ) : null}
-    </ConfirmDialog>
+        <div className="app-conversation-actions">
+          <button
+            className="icon-button"
+            aria-label="重命名"
+            title="重命名"
+            onClick={() => setEditing(true)}
+          >
+            <EditIcon className="button-icon" />
+          </button>
+          <button
+            className="icon-button"
+            aria-label="删除对话"
+            title="删除对话"
+            onClick={() => {
+              void (async () => {
+                const first = await api.deleteConversation(entry.id, false);
+                if (!first.requiresConfirmation) return;
+                const preview = {
+                  title: first.affects?.title ?? entry.title,
+                  tasks: first.affects?.taskCount ?? 0,
+                  keeps: first.keeps ?? "",
+                };
+                if (!needsConfirmation(permissionMode)) {
+                  await api.deleteConversation(entry.id, true);
+                  await onAct(async () => {});
+                  return;
+                }
+                setAsking(preview);
+              })().catch(() => undefined);
+            }}
+          >
+            <TrashIcon className="button-icon" />
+          </button>
+        </div>
+      </li>
+      <ConfirmDialog
+        open={asking != null}
+        title="删除对话"
+        confirmLabel="删除对话"
+        onClose={() => setAsking(null)}
+        onConfirm={() => {
+          const preview = asking;
+          setAsking(null);
+          if (!preview) return;
+          void onAct(() => api.deleteConversation(entry.id, true));
+        }}
+      >
+        {asking ? (
+          <>
+            <p>
+              会删除「{asking.title}」里的消息和运行记录
+              {asking.tasks ? `，其中 ${asking.tasks} 个快捷任务会保留` : ""}。
+            </p>
+            {asking.keeps ? <p>{asking.keeps}</p> : null}
+          </>
+        ) : null}
+      </ConfirmDialog>
     </>
   );
 }

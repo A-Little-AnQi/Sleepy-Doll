@@ -1,5 +1,12 @@
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { api } from "../../ipc/api";
 import { ExtensionsPage } from "./ExtensionsPage";
 import { PREVIEW_PERMISSION, type Bootstrap } from "../../ipc/types";
@@ -110,7 +117,9 @@ it("lists the host plugin as an introduction switch, not a connection control", 
 
 it("asks the user to enable a plugin when a skill is waiting on a provider", () => {
   vi.mocked(api.reloadExtensions).mockResolvedValue(undefined);
-  render(<ExtensionsPage bootstrap={bootstrap} reload={async () => undefined} />);
+  render(
+    <ExtensionsPage bootstrap={bootstrap} reload={async () => undefined} />,
+  );
   expect(screen.getByText("当前未生效：需要先启用对应插件")).toBeTruthy();
   expect(screen.queryByText(/BetterGI/)).toBeNull();
 });
@@ -135,7 +144,9 @@ it("hides host settings until the plugin is introduced", async () => {
   );
   fireEvent.click(screen.getByRole("button", { name: /游戏自动化宿主/ }));
   expect(screen.queryByRole("button", { name: "打开设置" })).toBeNull();
-  expect(screen.getByText("随产品提供。开启后会出现在侧栏和设置里。")).toBeTruthy();
+  expect(
+    screen.getByText("随产品提供。开启后会出现在侧栏和设置里。"),
+  ).toBeTruthy();
 });
 
 it("asks in the product dialog before removing a plugin", async () => {

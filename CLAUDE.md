@@ -7,12 +7,12 @@
 
 ```bash
 npm ci
-build-desktop.cmd          # 唯一的发布构建入口，产物在 dist\Sleepy-Doll\
+npm run dist               # 唯一的发布构建入口（执行 build-desktop.cmd），产物在 dist\Sleepy-Doll\
 ```
 
 | 命令 | 内容 |
 |---|---|
-| `npm run check` | 前端类型检查 + 生产构建 |
+| `npm run build` | 前端类型检查 + 生产构建（`npm run typecheck` 只做类型检查） |
 | `npm test` | 前端交互回归 |
 | `dotnet run --project bgi-bridge/dev/ContractTests.csproj` | 桥的契约测试 |
 | `cargo test --no-default-features` | 全部 Rust 测试 |
@@ -118,7 +118,8 @@ bgi-bridge/
   recovery/   离线恢复工具
   dev/        开发期专用：契约测试、元数据生成器、本地脚本
 installer/    安装器载荷打包脚本
-assets/       程序图标、.rc 与 UAC manifest，由 build.rs 编进 sleepy-doll.exe
+assets/       程序与安装器图标、.rc 与 UAC manifest，由 build.rs 编进 sleepy-doll.exe 与
+  sleepy-doll-setup.exe
 ```
 
 交付目录的形态：

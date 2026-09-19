@@ -10,8 +10,12 @@ function assistant(content: string): MessageInfo {
 }
 
 it("closes a dangling fence so streaming markdown still renders as a block", () => {
-  expect(stabilizeMarkdown("```ts\nconst a = 1")).toBe("```ts\nconst a = 1\n```");
-  expect(stabilizeMarkdown("```ts\nconst a = 1\n```")).toBe("```ts\nconst a = 1\n```");
+  expect(stabilizeMarkdown("```ts\nconst a = 1")).toBe(
+    "```ts\nconst a = 1\n```",
+  );
+  expect(stabilizeMarkdown("```ts\nconst a = 1\n```")).toBe(
+    "```ts\nconst a = 1\n```",
+  );
 });
 
 it("renders assistant markdown with a copy action and fenced copy", async () => {
@@ -20,9 +24,7 @@ it("renders assistant markdown with a copy action and fenced copy", async () => 
   });
   render(
     <Transcript
-      messages={[
-        assistant("## 标题\n\n- 一项\n\n```ts\nconst ok = true\n```"),
-      ]}
+      messages={[assistant("## 标题\n\n- 一项\n\n```ts\nconst ok = true\n```")]}
       stream=""
       seconds={0}
     />,
@@ -46,6 +48,8 @@ it("renders streaming tokens as markdown instead of a clipped preview", () => {
     />,
   );
   expect(document.querySelector(".stream-live")).toBeNull();
-  expect(document.querySelector(".assistant-message.is-streaming")).toBeTruthy();
+  expect(
+    document.querySelector(".assistant-message.is-streaming"),
+  ).toBeTruthy();
   expect(screen.getByRole("button", { name: "复制" })).toBeTruthy();
 });

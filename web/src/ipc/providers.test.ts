@@ -23,4 +23,3 @@ it("treats a missing host plugin row as introduced", () => {
     }),
   ).toBe(false);
 });
-

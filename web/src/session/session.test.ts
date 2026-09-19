@@ -3,7 +3,9 @@ import { api } from "../ipc/api";
 import { session, subscribeRuns } from ".";
 import type { RunEvent, TaskInfo } from "../ipc/types";
 
-vi.mock("../ipc/api", () => ({ api: { conversation: vi.fn(), events: vi.fn() } }));
+vi.mock("../ipc/api", () => ({
+  api: { conversation: vi.fn(), events: vi.fn() },
+}));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -129,8 +131,10 @@ describe("application-owned conversation subscriptions", () => {
     >[] = [];
     vi.mocked(api.conversation).mockResolvedValue({ id, messages: [] });
     vi.mocked(api.events).mockImplementation(() => {
-      const request =
-        deferred<{ events: RunEvent[]; snapshotRequired?: boolean }>();
+      const request = deferred<{
+        events: RunEvent[];
+        snapshotRequired?: boolean;
+      }>();
       pending.push(request);
       return request.promise;
     });

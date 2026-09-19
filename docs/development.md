@@ -12,11 +12,11 @@
 
 ```bash
 npm ci
-build-desktop.cmd      # 桥 + 界面 + release EXE，组装到 dist\Sleepy-Doll\
+npm run dist           # 发布构建入口，与执行 build-desktop.cmd 等价
 ```
 
-`build-desktop.cmd` 是唯一的发布构建入口，产物落在 `dist\Sleepy-Doll\`。它内部依次执行
-`bgi-bridge/build.cmd`、`npm run check`（含 `vite build`，release 二进制靠 `rust-embed`
+`npm run dist` 执行 `build-desktop.cmd`，是唯一的发布构建入口，产物落在 `dist\Sleepy-Doll\`。它内部依次执行
+`bgi-bridge/build.cmd`、`npm run build`（含 `tsc` 类型检查与 `vite build`，release 二进制靠 `rust-embed`
 把 `target/ui/` 编进去）和 `cargo build --release`，最后组装出交付目录：
 
 ```text
@@ -79,7 +79,7 @@ tag 的版本号必须与 `Cargo.toml` 的 `package.version` 一致，安装程�
 切换页面不取消后台任务。输入草稿与当前会话保存在浏览器本地存储。
 
 `npm test` 运行前端交互回归测试（会话后台订阅、事件去重、下拉键盘操作）。
-`npm run check` 执行类型检查及生产构建。响应超时可在模型设置中调整；IPC 普通请求、事件长轮询和
+`npm run build` 执行类型检查及生产构建，`npm run typecheck` 只做类型检查。响应超时可在模型设置中调整；IPC 普通请求、事件长轮询和
 桥加载采用不同的请求期限。模型只在收到响应体之前重试临时故障，部分流式响应不会重放。
 
 `web/src/components/chat/Transcript.tsx` 按用户轮次组织助手消息，按调用 ID 关联工具返回，合并相邻工具记录。

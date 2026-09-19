@@ -44,7 +44,10 @@ function revealRadius(x: number, y: number) {
   );
 }
 
-export function writeTheme(theme: ThemeId, origin?: ThemeOrigin): Promise<void> {
+export function writeTheme(
+  theme: ThemeId,
+  origin?: ThemeOrigin,
+): Promise<void> {
   if (document.documentElement.dataset.theme === theme) {
     localStorage.setItem(THEME_KEY, theme);
     return Promise.resolve();

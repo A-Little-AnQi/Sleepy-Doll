@@ -62,9 +62,7 @@ export function TasksPage({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [tasks, setTasks] = useState<TaskSummary[]>(bootstrap.workflows);
-  const [pendingRemove, setPendingRemove] = useState<TaskSummary | null>(
-    null,
-  );
+  const [pendingRemove, setPendingRemove] = useState<TaskSummary | null>(null);
 
   useEffect(() => {
     setTasks(bootstrap.workflows);
@@ -187,69 +185,71 @@ export function TasksPage({
         )}
       </div>
       <MotionSwitch viewKey={tab} kind="panel">
-      {tab === "tasks" ? (
-        visible.length ? (
-          <div className="task-grid">
-            {visible.map((task) => (
-              <TaskCard
-                key={task.id}
-                task={task}
-                busy={busy === task.id}
-                actions={actions}
-                showSource
+        {tab === "tasks" ? (
+          visible.length ? (
+            <div className="task-grid">
+              {visible.map((task) => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  busy={busy === task.id}
+                  actions={actions}
+                  showSource
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state">
+              <HistoryIcon />
+              <h3>{query ? "没有找到匹配任务" : "还没有快捷任务"}</h3>
+              <p>
+                {query
+                  ? "换个词试试，或者清掉筛选条件。"
+                  : "在对话里说明你想反复做的那件事，Agent 会把它做成一键运行的任务。"}
+              </p>
+              {query ? (
+                <button
+                  className="secondary-action"
+                  onClick={() => {
+                    setQuery("");
+                    setFilter("all");
+                  }}
+                >
+                  清除筛选
+                </button>
+              ) : (
+                <button
+                  className="secondary-action"
+                  onClick={() => onOpenConversation("")}
+                >
+                  通过对话创建
+                </button>
+              )}
+            </div>
+          )
+        ) : runs.length ? (
+          <div className="record-list">
+            {runs.map((run) => (
+              <RunRow
+                key={run.id}
+                run={run}
+                busy={busy === run.id}
+                onOpen={() => onOpenConversation(run.conversationId)}
+                onStop={() => void act(run.id, () => api.cancelTask(run.id))}
               />
             ))}
           </div>
         ) : (
           <div className="empty-state">
             <HistoryIcon />
-            <h3>{query ? "没有找到匹配任务" : "还没有快捷任务"}</h3>
+            <h3>{query ? "没有找到匹配的运行记录" : "还没有运行记录"}</h3>
             <p>
               {query
-                ? "换个词试试，或者清掉筛选条件。"
-                : "在对话里说明你想反复做的那件事，Agent 会把它做成一键运行的任务。"}
+                ? "换个词试试。"
+                : "聊天和快捷任务执行都会在这里留下痕迹。"}
             </p>
-            {query ? (
-              <button
-                className="secondary-action"
-                onClick={() => {
-                  setQuery("");
-                  setFilter("all");
-                }}
-              >
-                清除筛选
-              </button>
-            ) : (
-              <button
-                className="secondary-action"
-                onClick={() => onOpenConversation("")}
-              >
-                通过对话创建
-              </button>
-            )}
           </div>
-        )
-      ) : runs.length ? (
-        <div className="record-list">
-          {runs.map((run) => (
-            <RunRow
-              key={run.id}
-              run={run}
-              busy={busy === run.id}
-              onOpen={() => onOpenConversation(run.conversationId)}
-              onStop={() => void act(run.id, () => api.cancelTask(run.id))}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="empty-state">
-          <HistoryIcon />
-          <h3>{query ? "没有找到匹配的运行记录" : "还没有运行记录"}</h3>
-          <p>
-            {query ? "换个词试试。" : "聊天和快捷任务执行都会在这里留下痕迹。"}
-          </p>
-        </div>
-      )}
+        )}
       </MotionSwitch>
       <ConfirmDialog
         open={pendingRemove != null}

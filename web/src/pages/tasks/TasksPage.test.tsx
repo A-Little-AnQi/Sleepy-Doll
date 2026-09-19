@@ -1,7 +1,17 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { TasksPage } from "./TasksPage";
-import { PREVIEW_PERMISSION, type Bootstrap, type TaskSummary } from "../../ipc/types";
+import {
+  PREVIEW_PERMISSION,
+  type Bootstrap,
+  type TaskSummary,
+} from "../../ipc/types";
 
 vi.mock("../../ipc/api", () => ({
   api: {
@@ -103,5 +113,7 @@ it("deletes a shortcut task after the product dialog is confirmed", async () => 
   fireEvent.click(screen.getByRole("button", { name: "巡夜 的更多操作" }));
   fireEvent.click(screen.getByRole("menuitem", { name: "删除任务" }));
   fireEvent.click(screen.getByRole("button", { name: "删除任务" }));
-  await waitFor(() => expect(api.deleteWorkflow).toHaveBeenCalledWith("task-1"));
+  await waitFor(() =>
+    expect(api.deleteWorkflow).toHaveBeenCalledWith("task-1"),
+  );
 });

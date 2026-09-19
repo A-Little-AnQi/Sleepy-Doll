@@ -21,7 +21,7 @@
 
 ```bash
 npm ci
-build-desktop.cmd
+npm run dist
 ```
 
 产物位于 `dist\Sleepy-Doll\`：

@@ -26,9 +26,6 @@
   --header-height: 52px;
   /* 自绘标题栏的高度。只有无边框窗口（桌面壳）会把它撑开，见 title-bar.css。 */
   --title-bar-height: 0px;
-  /* 无边框窗口的圆角半径。不能大于原生侧的值 —— 原生按自己的半径切窗口，
-     页面画得更圆，多切掉的那一块就在窗口角上露出页面底色。 */
-  --window-radius: 8px;
   --page-padding: 24px;
   --prose-width: 880px;
   --sidebar-pad-x: 12px;

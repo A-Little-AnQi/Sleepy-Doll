@@ -3,7 +3,12 @@ import mascot from "../../brand/mascot.webp";
 import "./ChatPage.css";
 import { Transcript } from "../../components/chat/Transcript";
 import { api } from "../../ipc/api";
-import { CheckIcon, HelpIcon, SendIcon, StopIcon } from "../../components/icons";
+import {
+  CheckIcon,
+  HelpIcon,
+  SendIcon,
+  StopIcon,
+} from "../../components/icons";
 import { Select } from "../../components/controls/Select";
 import {
   isRunning,
@@ -72,8 +77,7 @@ export function ChatPage({
       ?.contextWindow ||
     200_000;
   const contextUsed =
-    task?.contextTokens ??
-    estimateMessagesTokens(messages, [stream, prompt]);
+    task?.contextTokens ?? estimateMessagesTokens(messages, [stream, prompt]);
   const current = useRef(conversationId);
   current.current = conversationId;
   const alive = useRef(true);
@@ -197,155 +201,164 @@ export function ChatPage({
         viewKey={conversationId ?? "new"}
         className="chat-scene-switch"
       >
-      <div
-        ref={scroll}
-        className="chat-scroll"
-        onScroll={(event) => {
-          const target = event.currentTarget;
-          follow.current =
-            target.scrollHeight - target.scrollTop - target.clientHeight < 100;
-          if (follow.current) setUnread(false);
-        }}
-      >
-        {welcome ? (
-          <div className="chat-welcome">
-            <img
-              className="welcome-mascot"
-              src={mascot}
-              alt="蜷坐在月亮上熟睡的木偶"
-            />
-            <h2>开始一项新任务</h2>
-            {!bootstrap.models.length && (
-              <p className="muted">先在设置里添加模型服务</p>
-            )}
-            {onOpenHelp && (
-              <button type="button" className="subtle-action" onClick={onOpenHelp}>
-                <HelpIcon className="button-icon" />
-                使用说明
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="conversation-scene">
-            {loading && !messages.length && <p className="muted">载入中…</p>}
-            <div className="conversation-flow">
-              <Transcript
-                messages={messages}
-                stream={stream}
-                phase={phase}
-                seconds={elapsed}
+        <div
+          ref={scroll}
+          className="chat-scroll"
+          onScroll={(event) => {
+            const target = event.currentTarget;
+            follow.current =
+              target.scrollHeight - target.scrollTop - target.clientHeight <
+              100;
+            if (follow.current) setUnread(false);
+          }}
+        >
+          {welcome ? (
+            <div className="chat-welcome">
+              <img
+                className="welcome-mascot"
+                src={mascot}
+                alt="蜷坐在月亮上熟睡的木偶"
               />
-              {plan && (
-                <details className="run-plan">
-                  <summary>执行计划 · {plan.steps.length} 步</summary>
-                  <ol>
-                    {plan.steps.map((step) => (
-                      <li key={step.id}>
-                        {step.title}
-                        {step.outcome && (
-                          <span className="muted">
-                            {" "}
-                            ·{" "}
-                            {step.outcome === "active"
-                              ? "进行中"
-                              : step.outcome === "verifiedSucceeded"
-                                ? "已完成"
-                                : step.outcome}
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ol>
-                </details>
+              <h2>开始一项新任务</h2>
+              {!bootstrap.models.length && (
+                <p className="muted">先在设置里添加模型服务</p>
               )}
-              {question && (
-                <section className="run-question">
-                  <h3>需要补充信息</h3>
-                  <p>{question}</p>
-                </section>
-              )}
-              {approval && (
-                <section className="run-approval">
-                  <h3>确认执行</h3>
-                  <p>
-                    {approval.request.binding?.description ??
-                      approval.request.methodId}
-                  </p>
-                  <details>
-                    <summary>操作参数</summary>
-                    <pre>
-                      {JSON.stringify(approval.request.arguments, null, 2)}
-                    </pre>
-                  </details>
-                  <div className="detail-actions">
-                    <button
-                      className="primary-action"
-                      disabled={confirming || now >= approval.expiresAt * 1000}
-                      onClick={() => {
-                        setConfirming(true);
-                        void act(() => api.approve(approval.id, true)).finally(
-                          () => setConfirming(false),
-                        );
-                      }}
-                    >
-                      允许
-                    </button>
-                    <button
-                      className="secondary-action"
-                      disabled={confirming || now >= approval.expiresAt * 1000}
-                      onClick={() => {
-                        setConfirming(true);
-                        void act(() => api.approve(approval.id, false)).finally(
-                          () => setConfirming(false),
-                        );
-                      }}
-                    >
-                      拒绝
-                    </button>
-                  </div>
-                  {now >= approval.expiresAt * 1000 && (
-                    <p className="muted">确认已过期</p>
-                  )}
-                </section>
-              )}
-              {task &&
-                !busy &&
-                ["failed", "cancelled", "needsReview", "partial"].includes(
-                  task.state,
-                ) && (
-                  <section className="run-error">
-                    <h3>{taskLabels[task.state]}</h3>
-                    <p>{task.error || task.result}</p>
-                  </section>
-                )}
-              {task?.state === "succeeded" && plan && (
+              {onOpenHelp && (
                 <button
+                  type="button"
                   className="subtle-action"
-                  disabled={
-                    saving ||
-                    bootstrap.workflows.some(
-                      (flow) =>
-                        flow.lastRunId === task.id ||
-                        flow.sourceConversationId === task.conversationId,
-                    )
-                  }
-                  onClick={() => {
-                    setSaving(true);
-                    void act(() =>
-                      plan.steps.every((step) => !!step.tool)
-                        ? api.extractWorkflow(task.id, plan.goal)
-                        : api.extractStrategy(task.id, plan.goal),
-                    ).finally(() => setSaving(false));
-                  }}
+                  onClick={onOpenHelp}
                 >
-                  <CheckIcon className="button-icon" />
-                  保存为快捷任务
+                  <HelpIcon className="button-icon" />
+                  使用说明
                 </button>
               )}
             </div>
-          </div>
-        )}
-      </div>
+          ) : (
+            <div className="conversation-scene">
+              {loading && !messages.length && <p className="muted">载入中…</p>}
+              <div className="conversation-flow">
+                <Transcript
+                  messages={messages}
+                  stream={stream}
+                  phase={phase}
+                  seconds={elapsed}
+                />
+                {plan && (
+                  <details className="run-plan">
+                    <summary>执行计划 · {plan.steps.length} 步</summary>
+                    <ol>
+                      {plan.steps.map((step) => (
+                        <li key={step.id}>
+                          {step.title}
+                          {step.outcome && (
+                            <span className="muted">
+                              {" "}
+                              ·{" "}
+                              {step.outcome === "active"
+                                ? "进行中"
+                                : step.outcome === "verifiedSucceeded"
+                                  ? "已完成"
+                                  : step.outcome}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  </details>
+                )}
+                {question && (
+                  <section className="run-question">
+                    <h3>需要补充信息</h3>
+                    <p>{question}</p>
+                  </section>
+                )}
+                {approval && (
+                  <section className="run-approval">
+                    <h3>确认执行</h3>
+                    <p>
+                      {approval.request.binding?.description ??
+                        approval.request.methodId}
+                    </p>
+                    <details>
+                      <summary>操作参数</summary>
+                      <pre>
+                        {JSON.stringify(approval.request.arguments, null, 2)}
+                      </pre>
+                    </details>
+                    <div className="detail-actions">
+                      <button
+                        className="primary-action"
+                        disabled={
+                          confirming || now >= approval.expiresAt * 1000
+                        }
+                        onClick={() => {
+                          setConfirming(true);
+                          void act(() =>
+                            api.approve(approval.id, true),
+                          ).finally(() => setConfirming(false));
+                        }}
+                      >
+                        允许
+                      </button>
+                      <button
+                        className="secondary-action"
+                        disabled={
+                          confirming || now >= approval.expiresAt * 1000
+                        }
+                        onClick={() => {
+                          setConfirming(true);
+                          void act(() =>
+                            api.approve(approval.id, false),
+                          ).finally(() => setConfirming(false));
+                        }}
+                      >
+                        拒绝
+                      </button>
+                    </div>
+                    {now >= approval.expiresAt * 1000 && (
+                      <p className="muted">确认已过期</p>
+                    )}
+                  </section>
+                )}
+                {task &&
+                  !busy &&
+                  ["failed", "cancelled", "needsReview", "partial"].includes(
+                    task.state,
+                  ) && (
+                    <section className="run-error">
+                      <h3>{taskLabels[task.state]}</h3>
+                      <p>{task.error || task.result}</p>
+                    </section>
+                  )}
+                {task?.state === "succeeded" && plan && (
+                  <button
+                    className="subtle-action"
+                    disabled={
+                      saving ||
+                      bootstrap.workflows.some(
+                        (flow) =>
+                          flow.lastRunId === task.id ||
+                          flow.sourceConversationId === task.conversationId,
+                      )
+                    }
+                    onClick={() => {
+                      setSaving(true);
+                      void act(() =>
+                        plan.steps.every((step) => !!step.tool)
+                          ? api.extractWorkflow(task.id, plan.goal)
+                          : api.extractStrategy(task.id, plan.goal),
+                      ).finally(() => setSaving(false));
+                    }}
+                  >
+                    <CheckIcon className="button-icon" />
+                    保存为快捷任务
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </MotionSwitch>
       {unread && busy && (
         <button

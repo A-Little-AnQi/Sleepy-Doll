@@ -43,7 +43,9 @@ it("lists restorable backups and hides unreadable records", async () => {
     ],
   });
   render(<BridgeRecovery onBack={vi.fn()} />);
-  expect(await screen.findByText("autoPickEnabled、triggerInterval")).toBeTruthy();
+  expect(
+    await screen.findByText("autoPickEnabled、triggerInterval"),
+  ).toBeTruthy();
   expect(screen.queryByRole("button", { name: "刷新" })).toBeNull();
   expect(screen.queryByText("记录无法校验。")).toBeNull();
   expect(screen.queryByText("已提交")).toBeNull();
@@ -53,10 +55,18 @@ it("lists restorable backups and hides unreadable records", async () => {
 it("asks to quit BetterGI instead of showing every row as unusable", async () => {
   vi.mocked(api.bridgeRecovery).mockResolvedValue({
     hostRunning: true,
-    records: [{ ...backup, canRestore: false, reason: "请先完全退出 BetterGI，再恢复配置。" }],
+    records: [
+      {
+        ...backup,
+        canRestore: false,
+        reason: "请先完全退出 BetterGI，再恢复配置。",
+      },
+    ],
   });
   render(<BridgeRecovery onBack={vi.fn()} />);
-  expect(await screen.findByText("请先退出 BetterGI，再恢复配置。")).toBeTruthy();
+  expect(
+    await screen.findByText("请先退出 BetterGI，再恢复配置。"),
+  ).toBeTruthy();
   expect(
     (screen.getByRole("button", { name: "恢复" }) as HTMLButtonElement)
       .disabled,
@@ -81,5 +91,7 @@ it("confirms restore in the product dialog", async () => {
   await waitFor(() => {
     expect(api.restoreBridgeConfig).toHaveBeenCalledWith(backup);
   });
-  expect(await screen.findByText("配置已恢复。请重新启动 BetterGI。")).toBeTruthy();
+  expect(
+    await screen.findByText("配置已恢复。请重新启动 BetterGI。"),
+  ).toBeTruthy();
 });

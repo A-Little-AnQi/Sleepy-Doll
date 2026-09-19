@@ -3,7 +3,12 @@ import "./ExtensionsPage.css";
 import { api } from "../../ipc/api";
 import { Toast } from "../../components/overlay/Toast";
 import { ConfirmDialog } from "../../components/overlay/ConfirmDialog";
-import { CloseIcon, PluginIcon, SearchIcon, PlusIcon } from "../../components/icons";
+import {
+  CloseIcon,
+  PluginIcon,
+  SearchIcon,
+  PlusIcon,
+} from "../../components/icons";
 import { readError } from "../../session";
 import type { Bootstrap } from "../../ipc/types";
 import { MotionSwitch } from "../../components/controls/MotionSwitch";
@@ -82,7 +87,8 @@ export function ExtensionsPage({
             : bootstrap.tools
                 .filter(
                   (tool) =>
-                    providerOfTool(tool.name, tool.source) === plugin.manifest.id,
+                    providerOfTool(tool.name, tool.source) ===
+                    plugin.manifest.id,
                 )
                 .map((tool) => tool.description || tool.name)
                 .join("\n\n"),
@@ -148,12 +154,18 @@ export function ExtensionsPage({
             {
               id: "skills",
               name: "技能",
-              extra: <span className="sd-tabs-count">{bootstrap.skills.length}</span>,
+              extra: (
+                <span className="sd-tabs-count">{bootstrap.skills.length}</span>
+              ),
             },
             {
               id: "plugins",
               name: "插件",
-              extra: <span className="sd-tabs-count">{bootstrap.plugins.length}</span>,
+              extra: (
+                <span className="sd-tabs-count">
+                  {bootstrap.plugins.length}
+                </span>
+              ),
             },
           ]}
         />
@@ -171,55 +183,57 @@ export function ExtensionsPage({
         <Toast message={error} onDismiss={() => setError("")} />
       )}
       <MotionSwitch viewKey={currentTab} kind="panel">
-      {filtered.length ? (
-        <div className="extension-list">
-          {filtered.map((item) => (
-            <div className="extension-row" key={item.id}>
-              <div className="extension-glyph">
-                <PluginIcon />
+        {filtered.length ? (
+          <div className="extension-list">
+            {filtered.map((item) => (
+              <div className="extension-row" key={item.id}>
+                <div className="extension-glyph">
+                  <PluginIcon />
+                </div>
+                <button
+                  className="extension-summary"
+                  onClick={() => {
+                    setSelected(item.id);
+                    setInstall(false);
+                    setError("");
+                    dialog.current?.showModal();
+                  }}
+                >
+                  <strong>{item.name}</strong>
+                  <span className="extension-meta">{item.meta}</span>
+                  {item.description && <p>{item.description}</p>}
+                  {item.error && <p>加载失败</p>}
+                  {item.enabled &&
+                    !item.available &&
+                    item.unavailableReason && (
+                      <p className="extension-flag">
+                        当前未生效：{item.unavailableReason}
+                      </p>
+                    )}
+                </button>
+                <button
+                  className={`switch ${item.enabled ? "on" : ""}`}
+                  role="switch"
+                  aria-label={item.name}
+                  aria-checked={item.enabled}
+                  disabled={busy}
+                  onClick={() => void toggle(item.id, !item.enabled)}
+                />
               </div>
-              <button
-                className="extension-summary"
-                onClick={() => {
-                  setSelected(item.id);
-                  setInstall(false);
-                  setError("");
-                  dialog.current?.showModal();
-                }}
-              >
-                <strong>{item.name}</strong>
-                <span className="extension-meta">{item.meta}</span>
-                {item.description && <p>{item.description}</p>}
-                {item.error && <p>加载失败</p>}
-                {item.enabled && !item.available && item.unavailableReason && (
-                  <p className="extension-flag">
-                    当前未生效：{item.unavailableReason}
-                  </p>
-                )}
-              </button>
-              <button
-                className={`switch ${item.enabled ? "on" : ""}`}
-                role="switch"
-                aria-label={item.name}
-                aria-checked={item.enabled}
-                disabled={busy}
-                onClick={() => void toggle(item.id, !item.enabled)}
-              />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="empty-state">
-          <PluginIcon />
-          <h3>
-            {query
-              ? "无匹配结果"
-              : currentTab === "skills"
-                ? "暂无技能"
-                : "暂无插件"}
-          </h3>
-        </div>
-      )}
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">
+            <PluginIcon />
+            <h3>
+              {query
+                ? "无匹配结果"
+                : currentTab === "skills"
+                  ? "暂无技能"
+                  : "暂无插件"}
+            </h3>
+          </div>
+        )}
       </MotionSwitch>
       <dialog
         ref={dialog}
@@ -272,9 +286,7 @@ export function ExtensionsPage({
               }}
             >
               <label>
-                <span>
-                  {currentTab === "skills" ? "技能目录" : "插件目录"}
-                </span>
+                <span>{currentTab === "skills" ? "技能目录" : "插件目录"}</span>
                 <input
                   placeholder="文件夹的完整路径"
                   value={path}
@@ -330,19 +342,21 @@ export function ExtensionsPage({
                       </button>
                     </div>
                   )}
-                {currentTab === "plugins" && current.host && current.enabled && (
-                  <div className="detail-actions">
-                    <button
-                      className="secondary-action"
-                      onClick={() => {
-                        dialog.current?.close();
-                        onOpenHost?.();
-                      }}
-                    >
-                      打开设置
-                    </button>
-                  </div>
-                )}
+                {currentTab === "plugins" &&
+                  current.host &&
+                  current.enabled && (
+                    <div className="detail-actions">
+                      <button
+                        className="secondary-action"
+                        onClick={() => {
+                          dialog.current?.close();
+                          onOpenHost?.();
+                        }}
+                      >
+                        打开设置
+                      </button>
+                    </div>
+                  )}
                 {currentTab === "plugins" && !current.host && (
                   <div className="detail-actions">
                     <button

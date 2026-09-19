@@ -43,7 +43,7 @@ call bgi-bridge\build.cmd
 if errorlevel 1 exit /b 1
 
 echo [2/4] Building interface...
-call npm run check
+call npm run build
 if errorlevel 1 exit /b 1
 
 echo [3/4] Building desktop binary...

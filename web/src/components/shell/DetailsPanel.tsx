@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "../../ipc/api";
-import { isRunning, needsConfirmation, readError, taskLabels } from "../../session";
+import {
+  isRunning,
+  needsConfirmation,
+  readError,
+  taskLabels,
+} from "../../session";
 import { Toast } from "../overlay/Toast";
 import { ConfirmDialog } from "../overlay/ConfirmDialog";
 import type {
@@ -136,38 +141,38 @@ export function DetailsPanel({
           viewKey={`${conversationId ?? "none"}:${selectedTask ?? "list"}`}
           kind="panel"
         >
-        {selectedTask ? (
-          detail ? (
-            <TaskDetail
-              detail={detail}
-              runs={runs}
-              busy={busy}
-              actions={actions}
-              onBack={() => onSelectTask(undefined)}
-              onOpenConversation={onOpenConversation}
-            />
-          ) : (
-            <p className="muted">载入中…</p>
-          )
-        ) : tasks.length ? (
-          <>
-            {tasks.map((task) => (
-              <TaskCard
-                key={task.id}
-                task={task}
-                busy={busy === task.id}
+          {selectedTask ? (
+            detail ? (
+              <TaskDetail
+                detail={detail}
+                runs={runs}
+                busy={busy}
                 actions={actions}
+                onBack={() => onSelectTask(undefined)}
+                onOpenConversation={onOpenConversation}
               />
-            ))}
-            {runs.length > 0 && <RunList runs={runs} />}
-          </>
-        ) : (
-          <div className="empty-state is-compact">
-            <HistoryIcon />
-            <h3>这个对话还没有快捷任务</h3>
-            <p>说明你想反复做的那件事，Agent 会把它做成一键运行的任务。</p>
-          </div>
-        )}
+            ) : (
+              <p className="muted">载入中…</p>
+            )
+          ) : tasks.length ? (
+            <>
+              {tasks.map((task) => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  busy={busy === task.id}
+                  actions={actions}
+                />
+              ))}
+              {runs.length > 0 && <RunList runs={runs} />}
+            </>
+          ) : (
+            <div className="empty-state is-compact">
+              <HistoryIcon />
+              <h3>这个对话还没有快捷任务</h3>
+              <p>说明你想反复做的那件事，Agent 会把它做成一键运行的任务。</p>
+            </div>
+          )}
         </MotionSwitch>
       </div>
       <ConfirmDialog

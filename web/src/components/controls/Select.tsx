@@ -113,7 +113,10 @@ export function Select({
     }
     const place = (event?: Event) => {
       // 列表自己滚时不要重算定位：会改 maxHeight、还会和滚轮抢 scrollTop。
-      if (event?.target instanceof Node && menu.current?.contains(event.target)) {
+      if (
+        event?.target instanceof Node &&
+        menu.current?.contains(event.target)
+      ) {
         return;
       }
       const anchor = trigger.current?.getBoundingClientRect();
@@ -141,7 +144,9 @@ export function Select({
         width,
         maxHeight: Math.max(120, Math.min(300, available)),
       };
-      setPlacement((current) => (samePlacement(current, next) ? current : next));
+      setPlacement((current) =>
+        samePlacement(current, next) ? current : next,
+      );
     };
     place();
     window.addEventListener("resize", place);

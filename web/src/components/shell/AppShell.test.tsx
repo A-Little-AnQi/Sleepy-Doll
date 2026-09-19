@@ -1,5 +1,13 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { useState } from "react";
 
 vi.mock("../../ipc/api", () => ({
@@ -15,7 +23,11 @@ vi.mock("../../ipc/api", () => ({
 import { api } from "../../ipc/api";
 import { AppShell } from "./AppShell";
 import { GROUPS_KEY } from "../../session/conversation-groups";
-import { PREVIEW_PERMISSION, type Bootstrap, type ConversationInfo } from "../../ipc/types";
+import {
+  PREVIEW_PERMISSION,
+  type Bootstrap,
+  type ConversationInfo,
+} from "../../ipc/types";
 
 afterEach(() => {
   cleanup();
@@ -102,7 +114,9 @@ it("click collapse, hover peek, and click expand all toggle the same open state"
   expect(shell.getAttribute("data-drawer")).toBe("false");
   expect(sidebar.getAttribute("aria-hidden")).toBe("true");
 
-  fireEvent.pointerEnter(document.querySelector(".app-sidebar-peek") as Element);
+  fireEvent.pointerEnter(
+    document.querySelector(".app-sidebar-peek") as Element,
+  );
   expect(shell.getAttribute("data-drawer")).toBe("true");
   expect(sidebar.getAttribute("aria-hidden")).toBe("false");
 
@@ -263,8 +277,12 @@ it("does not expose pin or archive on conversation rows", () => {
   expect(
     screen.queryByRole("button", { name: "归档", hidden: true }),
   ).toBeNull();
-  expect(screen.getByRole("button", { name: "重命名", hidden: true })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "删除对话", hidden: true })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "重命名", hidden: true }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "删除对话", hidden: true }),
+  ).toBeTruthy();
 });
 
 it("lets conversations be pointer-sorted instead of html5-dragged", () => {
@@ -317,8 +335,12 @@ it("opens theme choices and settings from the local user slot", async () => {
   expect(screen.queryByRole("button", { name: "使用说明" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /本地用户/ }));
   expect(screen.getByRole("menu", { name: "账户菜单" })).toBeTruthy();
-  expect(screen.getByRole("menuitem", { name: "使用说明" }).querySelector("svg")).toBeTruthy();
-  expect(screen.getByRole("menuitem", { name: "设置" }).querySelector("svg")).toBeTruthy();
+  expect(
+    screen.getByRole("menuitem", { name: "使用说明" }).querySelector("svg"),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("menuitem", { name: "设置" }).querySelector("svg"),
+  ).toBeTruthy();
   const menu = screen.getByRole("menu", { name: "账户菜单" });
   expect(menu.querySelector(".app-account-menu-prefs")).toBeTruthy();
   expect(menu.querySelector(".app-account-menu-links")).toBeTruthy();
@@ -330,9 +352,9 @@ it("opens theme choices and settings from the local user slot", async () => {
   fireEvent.click(themeSwitch);
   expect(document.documentElement.dataset.theme).toBe("dark");
   await waitFor(() => {
-    expect(
-      screen.getByRole("switch", { name: "主题" }),
-    ).toBe(document.activeElement);
+    expect(screen.getByRole("switch", { name: "主题" })).toBe(
+      document.activeElement,
+    );
   });
   expect(screen.getByRole("switch", { name: "主题" }).textContent).toContain(
     "黑夜",
@@ -407,10 +429,7 @@ it("hides the BetterGI entry when the host plugin is off", () => {
   expect(screen.queryByText("BetterGI")).toBeNull();
 });
 
-const chat = (
-  id: string,
-  title: string,
-): ConversationInfo => ({
+const chat = (id: string, title: string): ConversationInfo => ({
   id,
   title,
   createdAt: "t",
@@ -562,9 +581,9 @@ it("creates a draft chat from the group plus control", () => {
   fireEvent.click(
     screen.getByRole("button", { name: "在此分组新建对话", hidden: true }),
   );
-  expect(screen.getByRole("button", { name: "路线" }).getAttribute("aria-expanded")).toBe(
-    "true",
-  );
+  expect(
+    screen.getByRole("button", { name: "路线" }).getAttribute("aria-expanded"),
+  ).toBe("true");
   const draft = screen.getByRole("button", { name: "新对话" });
   expect(draft.closest(".app-group")?.textContent).toContain("路线");
 });
@@ -635,7 +654,9 @@ it("asks in the product dialog before deleting a conversation", async () => {
       reload={async () => undefined}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "删除对话", hidden: true }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "删除对话", hidden: true }),
+  );
   const dialog = await screen.findByRole("dialog", { name: "删除对话" });
   expect(dialog.textContent).toContain("夜巡");
   fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
@@ -669,7 +690,9 @@ it("deletes a conversation after the product dialog is confirmed", async () => {
       reload={async () => undefined}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "删除对话", hidden: true }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "删除对话", hidden: true }),
+  );
   fireEvent.click(
     within(await screen.findByRole("dialog", { name: "删除对话" })).getByRole(
       "button",
@@ -747,5 +770,3 @@ it("deletes a group after the product dialog is confirmed", () => {
   );
   expect(screen.queryByRole("button", { name: "路线" })).toBeNull();
 });
-
-

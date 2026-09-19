@@ -1,21 +1,8 @@
 /* 自绘标题栏。高度记在 :root 上（默认 0），侧栏和遮罩按同一个变量让位，
-   这样浏览器预览里这些规则自然失效。 */
+   这样浏览器预览里这些规则自然失效。页面保持方角：圆角完全由 DWM 切
+   （Windows 11），Windows 10 上窗口就是方角，与系统内其它浏览器一致。 */
 :root[data-frameless="true"] {
   --title-bar-height: 32px;
-  /* 窗口的圆角在页面之外，页面自己不能画到圆角外面去。 */
-  background: transparent;
-}
-
-/* 最大化时窗口铺满屏幕，原生侧不再切圆角。 */
-:root[data-frameless="true"][data-maximized="true"] {
-  --window-radius: 0px;
-}
-
-/* 贴着窗口上缘的两层是这里和 .app-shell，圆角要一起给。 */
-:root[data-frameless="true"] .title-bar,
-:root[data-frameless="true"] .app-shell,
-:root[data-frameless="true"] .setup-shell {
-  border-radius: var(--window-radius) var(--window-radius) 0 0;
 }
 
 .title-bar {

@@ -1,9 +1,16 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { SettingsPage } from "./SettingsPage";
 import { PREVIEW_PERMISSION, type Bootstrap } from "../../ipc/types";
 
 vi.mock("../../ipc/api", () => ({
+  framelessWindow: () => false,
   api: {
     configRead: vi.fn(async () => ({
       path: "/tmp/config.json",

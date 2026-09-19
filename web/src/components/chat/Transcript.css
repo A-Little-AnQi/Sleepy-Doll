@@ -367,7 +367,9 @@
   animation: stream-caret 1s step-end infinite;
 }
 
-:root[data-reduced-motion="true"] .assistant-message.is-streaming > :last-child::after {
+:root[data-reduced-motion="true"]
+  .assistant-message.is-streaming
+  > :last-child::after {
   animation: none;
 }
 

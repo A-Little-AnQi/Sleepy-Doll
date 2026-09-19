@@ -155,9 +155,7 @@ it("prefills the existing install so overwriting keeps its place", async () => {
   await waitFor(() =>
     expect(directoryField().value).toBe("D:\\Games\\Sleepy Doll"),
   );
-  expect(
-    screen.getByText("所有文件与数据均会保存在安装目录下"),
-  ).toBeTruthy();
+  expect(screen.getByText("所有文件与数据均会保存在安装目录下")).toBeTruthy();
   expect(directoryField().disabled).toBe(true);
   expect(screen.getByRole("button", { name: "浏览" })).toHaveProperty(
     "disabled",

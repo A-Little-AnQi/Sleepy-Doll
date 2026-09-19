@@ -4,7 +4,11 @@ import { readError } from "../../session";
 import { Toast } from "../overlay/Toast";
 import { Select } from "../controls/Select";
 import { ChevronIcon, SearchIcon } from "../icons";
-import type { BridgeCatalog, BridgeMethod, BridgeMethodDetail } from "../../ipc/types";
+import type {
+  BridgeCatalog,
+  BridgeMethod,
+  BridgeMethodDetail,
+} from "../../ipc/types";
 import "./BridgeApiExplorer.css";
 
 const groups: Record<string, string> = {
@@ -120,9 +124,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
             <h2>{selected.displayName}</h2>
             <code>{selected.methodId}</code>
             <p>{guide?.purpose ?? selected.summary}</p>
-            <span className="tag">
-              {selected.callable ? "可用" : "不可用"}
-            </span>
+            <span className="tag">{selected.callable ? "可用" : "不可用"}</span>
             {selected.unavailableReason && (
               <p className="muted">{selected.unavailableReason}</p>
             )}
@@ -306,9 +308,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
               </button>
             ))}
           </div>
-          {!busy && !items.length && (
-            <p className="empty-note">未找到接口</p>
-          )}
+          {!busy && !items.length && <p className="empty-note">未找到接口</p>}
           {busy && (
             <p className="muted" role="status">
               加载中…

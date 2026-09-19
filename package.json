@@ -5,14 +5,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run",
-    "build": "vite build",
-    "check": "tsc -p tsconfig.json --noEmit && vite build",
-    "format": "prettier --write \"web/**/*.{ts,tsx,css,html}\" \"*.{json,ts}\"",
-    "format:check": "prettier --check \"web/**/*.{ts,tsx,css,html}\" \"*.{json,ts}\"",
     "dev": "vite",
     "backend": "cargo run --no-default-features --features dev-ipc --bin sleepy-doll-dev",
-    "desktop": "build-desktop.cmd && powershell -NoProfile -Command \"Start-Process -FilePath './target/release/sleepy-doll.exe'\""
+    "desktop": "npm run dist && powershell -NoProfile -Command \"Start-Process -FilePath './target/release/sleepy-doll.exe'\"",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "npm run typecheck && vite build",
+    "dist": "build-desktop.cmd",
+    "format": "prettier --write \"web/**/*.{ts,tsx,css,html}\" \"*.{json,ts}\" \"!package-lock.json\"",
+    "format:check": "prettier --check \"web/**/*.{ts,tsx,css,html}\" \"*.{json,ts}\" \"!package-lock.json\""
   },
   "engines": {
     "node": ">=22.13"

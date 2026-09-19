@@ -30,9 +30,9 @@ it("changes the active tab without remounting the tablist", () => {
       ]}
     />,
   );
-  expect(screen.getByRole("button", { name: "模型" }).getAttribute("aria-current")).toBe(
-    "page",
-  );
+  expect(
+    screen.getByRole("button", { name: "模型" }).getAttribute("aria-current"),
+  ).toBe("page");
 });
 
 it("keeps an extra count inside the tab button", () => {

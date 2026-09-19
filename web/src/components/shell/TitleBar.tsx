@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -18,6 +19,7 @@ export function TitleBar({
   closeDisabled?: boolean;
 } = {}) {
   const [maximized, setMaximized] = useState(false);
+  const barRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
     // 布局前打标记：CSS 靠它把标题栏的高度让出来，晚一帧会看到内容跳一下。
@@ -36,7 +38,7 @@ export function TitleBar({
   }, []);
 
   useLayoutEffect(() => {
-    // 最大化后窗口铺满屏幕，原生侧不再切圆角，界面跟着方。
+    // 最大化后窗口铺满屏幕，任何一侧都不再画圆角。
     if (maximized) document.documentElement.dataset.maximized = "true";
     else delete document.documentElement.dataset.maximized;
     return () => {
@@ -44,8 +46,30 @@ export function TitleBar({
     };
   }, [maximized]);
 
+  useLayoutEffect(() => {
+    // 条带几何上报后，原生命中测试接管标题栏：拖动、贴边、双击最大化都走系统
+    // 路径，不再经过界面。上报的是 CSS 像素，缩放换算在原生侧做。
+    const bar = barRef.current;
+    const controls = bar?.querySelector(".title-bar-controls");
+    if (!(bar instanceof HTMLElement) || !(controls instanceof HTMLElement)) {
+      return;
+    }
+    window.ipc?.postMessage(
+      JSON.stringify({
+        id: crypto.randomUUID(),
+        method: "window.setDragStrip",
+        params: {
+          height: bar.offsetHeight,
+          controls: controls.offsetWidth,
+          maximize: canMaximize,
+        },
+      }),
+    );
+  }, [canMaximize]);
+
   const onDragPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     // 只响应主键，也只在标题栏本身上起拖：控制按钮自己处理点击。
+    // 条带上报之后原生命中测试会把这里的事件截走，这条只在上报前生效。
     if (event.button !== 0) return;
     if (isControl(event.target)) return;
     void api.windowDrag();
@@ -59,6 +83,7 @@ export function TitleBar({
 
   return (
     <div
+      ref={barRef}
       className="title-bar"
       onPointerDown={onDragPointerDown}
       onDoubleClick={onDragDoubleClick}

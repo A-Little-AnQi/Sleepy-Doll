@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { api, framelessWindow } from "../ipc/api";
 import { readError } from "../session";
 import { TitleBar } from "../components/shell/TitleBar";
-import { AlertIcon, BrandIcon, CheckIcon, FolderIcon } from "../components/icons";
+import {
+  AlertIcon,
+  BrandIcon,
+  CheckIcon,
+  FolderIcon,
+} from "../components/icons";
 import { setupApi, type SetupInfo, type SetupState } from "./api";
 import "./setup.css";
 
@@ -127,211 +132,220 @@ export function SetupApp() {
         <TitleBar canMaximize={false} closeDisabled={busy} />
       )}
       <div className="setup-shell">
-      <aside className="setup-aside">
-        <BrandIcon className="setup-mark" />
-        <div className="setup-brand">
-          <h1>Sleepy Doll</h1>
-          <span>版本 {info.version}</span>
-        </div>
-      </aside>
-      <main className="setup-main">
-        <header className="setup-head">
-          <h2>{action} Sleepy Doll</h2>
-          {resting ? (
-            <p>
-              {uninstall
-                ? "卸载会删掉程序文件；user\\ 目录是否一起删由你决定。"
-                : "所有文件与数据均会保存在安装目录下"}
-            </p>
-          ) : null}
-        </header>
+        <aside className="setup-aside">
+          <BrandIcon className="setup-mark" />
+          <div className="setup-brand">
+            <h1>Sleepy Doll</h1>
+            <span>版本 {info.version}</span>
+          </div>
+        </aside>
+        <main className="setup-main">
+          <header className="setup-head">
+            <h2>{action} Sleepy Doll</h2>
+            {resting ? (
+              <p>
+                {uninstall
+                  ? "卸载会删掉程序文件；user\\ 目录是否一起删由你决定。"
+                  : "所有文件与数据均会保存在安装目录下"}
+              </p>
+            ) : null}
+          </header>
 
-        <div className="setup-body">
-          {resting ? (
-            uninstall ? (
-              <dl className="setup-meta">
-                <div className="setup-meta-row">
-                  <dt>安装位置</dt>
-                  <dd className="setup-mono">{info.directory}</dd>
-                </div>
-                <div className="setup-meta-row">
-                  <dt>版本</dt>
-                  <dd>{info.installedVersion ?? "未知"}</dd>
-                </div>
-              </dl>
-            ) : (
-              <div className="setup-field">
-                <label className="setup-field-label" htmlFor="setup-directory">
-                  安装位置
-                </label>
-                <div className="setup-path">
-                  <input
-                    id="setup-directory"
-                    value={directory}
-                    disabled={busy || info.installed}
-                    spellCheck={false}
-                    autoComplete="off"
-                    onChange={(event) => {
-                      touched.current = true;
-                      setDirectory(event.target.value);
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="secondary-action"
-                    disabled={busy || info.installed}
-                    onClick={() => void browse()}
+          <div className="setup-body">
+            {resting ? (
+              uninstall ? (
+                <dl className="setup-meta">
+                  <div className="setup-meta-row">
+                    <dt>安装位置</dt>
+                    <dd className="setup-mono">{info.directory}</dd>
+                  </div>
+                  <div className="setup-meta-row">
+                    <dt>版本</dt>
+                    <dd>{info.installedVersion ?? "未知"}</dd>
+                  </div>
+                </dl>
+              ) : (
+                <div className="setup-field">
+                  <label
+                    className="setup-field-label"
+                    htmlFor="setup-directory"
                   >
-                    <FolderIcon className="button-icon" />
-                    浏览
-                  </button>
+                    安装位置
+                  </label>
+                  <div className="setup-path">
+                    <input
+                      id="setup-directory"
+                      value={directory}
+                      disabled={busy || info.installed}
+                      spellCheck={false}
+                      autoComplete="off"
+                      onChange={(event) => {
+                        touched.current = true;
+                        setDirectory(event.target.value);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="secondary-action"
+                      disabled={busy || info.installed}
+                      onClick={() => void browse()}
+                    >
+                      <FolderIcon className="button-icon" />
+                      浏览
+                    </button>
+                  </div>
+                  {target ? (
+                    <p className="setup-note">
+                      最终会装到 <span className="setup-mono">{target}</span>
+                    </p>
+                  ) : null}
                 </div>
-                {target ? (
-                  <p className="setup-note">
-                    最终会装到 <span className="setup-mono">{target}</span>
-                  </p>
-                ) : null}
-              </div>
-            )
-          ) : null}
+              )
+            ) : null}
 
-          {resting && uninstall ? (
-            <div className="setup-choice">
+            {resting && uninstall ? (
+              <div className="setup-choice">
+                <label className="setup-check">
+                  <input
+                    type="checkbox"
+                    checked={removeUserData}
+                    disabled={busy}
+                    onChange={(event) =>
+                      setRemoveUserData(event.target.checked)
+                    }
+                  />
+                  <span>
+                    同时删除 user\ 目录（配置、模型密钥、会话数据库、日志）
+                  </span>
+                </label>
+                <p className="setup-note">
+                  不勾选会保留这个目录，重装后可以继续用；勾选后无法恢复。
+                </p>
+              </div>
+            ) : null}
+
+            {resting && !uninstall ? (
               <label className="setup-check">
                 <input
                   type="checkbox"
-                  checked={removeUserData}
+                  checked={shortcut}
                   disabled={busy}
-                  onChange={(event) => setRemoveUserData(event.target.checked)}
+                  onChange={(event) => setShortcut(event.target.checked)}
                 />
-                <span>
-                  同时删除 user\ 目录（配置、模型密钥、会话数据库、日志）
-                </span>
+                <span>创建桌面快捷方式</span>
               </label>
-              <p className="setup-note">
-                不勾选会保留这个目录，重装后可以继续用；勾选后无法恢复。
-              </p>
-            </div>
-          ) : null}
+            ) : null}
 
-          {resting && !uninstall ? (
-            <label className="setup-check">
-              <input
-                type="checkbox"
-                checked={shortcut}
-                disabled={busy}
-                onChange={(event) => setShortcut(event.target.checked)}
-              />
-              <span>创建桌面快捷方式</span>
-            </label>
-          ) : null}
-
-          {busy ? (
-            <div className="setup-progress" role="status">
-              <div className="setup-progress-head">
-                <span>{state.message || `${action}中…`}</span>
-                <span>{percent}%</span>
-              </div>
-              <div
-                className="setup-bar"
-                role="progressbar"
-                aria-label={`${action}进度`}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={percent}
-              >
+            {busy ? (
+              <div className="setup-progress" role="status">
+                <div className="setup-progress-head">
+                  <span>{state.message || `${action}中…`}</span>
+                  <span>{percent}%</span>
+                </div>
                 <div
-                  className="setup-bar-fill"
-                  style={{ width: `${percent}%` }}
-                />
+                  className="setup-bar"
+                  role="progressbar"
+                  aria-label={`${action}进度`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={percent}
+                >
+                  <div
+                    className="setup-bar-fill"
+                    style={{ width: `${percent}%` }}
+                  />
+                </div>
+                <p className="setup-note">过程中请不要关闭窗口。</p>
               </div>
-              <p className="setup-note">过程中请不要关闭窗口。</p>
-            </div>
-          ) : null}
+            ) : null}
 
-          {view === "done" ? (
-            <div className="setup-result">
-              <span className="setup-badge">
-                <CheckIcon className="button-icon" />
-              </span>
-              <h3>{action}完成</h3>
-              <p className="setup-note">{uninstall ? "已删除" : "已安装到"}</p>
-              <p className="setup-target">
-                {uninstall ? info.directory : target}
-              </p>
-              <p className="setup-note">
-                {uninstall
-                  ? removeUserData
-                    ? "user\\ 目录也已一并删除。"
-                    : "user\\ 目录保留在安装目录下，重装后可以继续用。"
-                  : shortcut
-                    ? "桌面上的快捷方式可以直接启动。"
-                    : "运行安装目录里的 sleepy-doll.exe 启动。"}
-              </p>
-            </div>
-          ) : null}
+            {view === "done" ? (
+              <div className="setup-result">
+                <span className="setup-badge">
+                  <CheckIcon className="button-icon" />
+                </span>
+                <h3>{action}完成</h3>
+                <p className="setup-note">
+                  {uninstall ? "已删除" : "已安装到"}
+                </p>
+                <p className="setup-target">
+                  {uninstall ? info.directory : target}
+                </p>
+                <p className="setup-note">
+                  {uninstall
+                    ? removeUserData
+                      ? "user\\ 目录也已一并删除。"
+                      : "user\\ 目录保留在安装目录下，重装后可以继续用。"
+                    : shortcut
+                      ? "桌面上的快捷方式可以直接启动。"
+                      : "运行安装目录里的 sleepy-doll.exe 启动。"}
+                </p>
+              </div>
+            ) : null}
 
-          {view === "failed" ? (
-            <div className="setup-result">
-              <span className="setup-badge">
-                <AlertIcon className="button-icon" />
-              </span>
-              <h3>{action}失败</h3>
-              <p>{state.error ?? `${action}没有完成。`}</p>
-              <p className="setup-note">点「返回重试」可以换个位置再来一次。</p>
-            </div>
-          ) : null}
-        </div>
+            {view === "failed" ? (
+              <div className="setup-result">
+                <span className="setup-badge">
+                  <AlertIcon className="button-icon" />
+                </span>
+                <h3>{action}失败</h3>
+                <p>{state.error ?? `${action}没有完成。`}</p>
+                <p className="setup-note">
+                  点「返回重试」可以换个位置再来一次。
+                </p>
+              </div>
+            ) : null}
+          </div>
 
-        <footer className="setup-foot">
-          {view === "done" ? (
-            <button
-              type="button"
-              className="primary-action"
-              onClick={() => void api.windowClose()}
-            >
-              关闭
-            </button>
-          ) : view === "failed" ? (
-            <>
+          <footer className="setup-foot">
+            {view === "done" ? (
               <button
                 type="button"
-                className="subtle-action"
+                className="primary-action"
                 onClick={() => void api.windowClose()}
               >
                 关闭
               </button>
-              <button
-                type="button"
-                className="primary-action"
-                onClick={() => setRetry(true)}
-              >
-                返回重试
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="subtle-action"
-                disabled={busy}
-                onClick={() => void api.windowClose()}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="primary-action"
-                disabled={busy || (!uninstall && !target)}
-                onClick={() => void start()}
-              >
-                {action}
-              </button>
-            </>
-          )}
-        </footer>
-      </main>
-    </div>
+            ) : view === "failed" ? (
+              <>
+                <button
+                  type="button"
+                  className="subtle-action"
+                  onClick={() => void api.windowClose()}
+                >
+                  关闭
+                </button>
+                <button
+                  type="button"
+                  className="primary-action"
+                  onClick={() => setRetry(true)}
+                >
+                  返回重试
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="subtle-action"
+                  disabled={busy}
+                  onClick={() => void api.windowClose()}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="primary-action"
+                  disabled={busy || (!uninstall && !target)}
+                  onClick={() => void start()}
+                >
+                  {action}
+                </button>
+              </>
+            )}
+          </footer>
+        </main>
+      </div>
     </div>
   );
 }

@@ -24,7 +24,9 @@ export function readLayout(): GroupLayout {
     const groups: ConversationGroup[] = raw.groups
       .filter(
         (group: ConversationGroup) =>
-          group && typeof group.id === "string" && typeof group.name === "string",
+          group &&
+          typeof group.id === "string" &&
+          typeof group.name === "string",
       )
       .map((group: ConversationGroup) => ({
         id: group.id,
@@ -54,10 +56,7 @@ export function writeLayout(layout: GroupLayout) {
   localStorage.setItem(GROUPS_KEY, JSON.stringify(layout));
 }
 
-export function createGroup(
-  layout: GroupLayout,
-  name = "新分组",
-): GroupLayout {
+export function createGroup(layout: GroupLayout, name = "新分组"): GroupLayout {
   const trimmed = name.trim() || "新分组";
   return {
     ...layout,
@@ -222,7 +221,11 @@ export type DropSlot =
   | { target: "group"; id: string; edge: "before" | "after" | "into" }
   | { target: "ungrouped" };
 
-function nextAfter(order: string[], afterId: string, movingId: string): string | null {
+function nextAfter(
+  order: string[],
+  afterId: string,
+  movingId: string,
+): string | null {
   const without = order.filter((id) => id !== movingId);
   const at = without.indexOf(afterId);
   if (at < 0) return null;
@@ -250,12 +253,20 @@ export function layoutAfterDrop(
   if (item.kind === "group") {
     if (slot.target === "group") {
       if (slot.id === item.id || slot.edge === "into") return layout;
-      if (slot.edge === "before") return moveGroupBefore(layout, item.id, slot.id);
-      const ids = layout.groups.map((group) => group.id).filter((id) => id !== item.id);
+      if (slot.edge === "before")
+        return moveGroupBefore(layout, item.id, slot.id);
+      const ids = layout.groups
+        .map((group) => group.id)
+        .filter((id) => id !== item.id);
       const at = ids.indexOf(slot.id);
-      return moveGroupBefore(layout, item.id, at < 0 ? null : (ids[at + 1] ?? null));
+      return moveGroupBefore(
+        layout,
+        item.id,
+        at < 0 ? null : (ids[at + 1] ?? null),
+      );
     }
-    if (slot.target === "ungrouped") return moveGroupBefore(layout, item.id, null);
+    if (slot.target === "ungrouped")
+      return moveGroupBefore(layout, item.id, null);
     return layout;
   }
   if (slot.target === "ungrouped") {
@@ -285,7 +296,6 @@ export function layoutAfterDrop(
   );
 }
 
-
 export function byRecent<T extends { updatedAt?: string; createdAt?: string }>(
   items: T[],
 ): T[] {
@@ -313,7 +323,8 @@ export function orderConversations<
   const promoted = byRecent(
     items.filter(
       (item) =>
-        !known.has(item.id) || (running.has(item.id) && !wasRunning.has(item.id)),
+        !known.has(item.id) ||
+        (running.has(item.id) && !wasRunning.has(item.id)),
     ),
   );
   const promotedIds = new Set(promoted.map((item) => item.id));

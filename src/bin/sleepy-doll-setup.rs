@@ -140,6 +140,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let owner = window.hwnd();
     let ipc_proxy = proxy.clone();
+    let ipc_hwnd = window_chrome::hwnd_id(&window);
     let webview = WebViewBuilder::new_with_web_context(&mut web_context)
         .with_asynchronous_custom_protocol(
             "sleepy".into(),
@@ -147,7 +148,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 responder.respond(asset_response(request));
             },
         )
-        .with_ipc_handler(move |request| dispatch_ipc(request, ipc_proxy.clone()))
+        .with_ipc_handler(move |request| dispatch_ipc(request, ipc_proxy.clone(), ipc_hwnd))
         .with_initialization_script(INITIALIZATION_SCRIPT)
         .with_navigation_handler(|destination| is_application_url(&destination))
         .with_url("sleepy://localhost/setup.html")
@@ -172,12 +173,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Event::UserEvent(UserEvent::Window(action)) => {
-                if action == window_chrome::Action::Close {
-                    if !BUSY.load(Ordering::SeqCst) {
-                        *control_flow = ControlFlow::Exit;
-                    }
-                } else {
-                    window_chrome::perform(&window, action);
+                match (action, BUSY.load(Ordering::SeqCst)) {
+                    // 写入过程中关掉窗口会留下半截目录，BUSY 期间忽略关闭。
+                    (window_chrome::Action::Close, false) => *control_flow = ControlFlow::Exit,
+                    (window_chrome::Action::Close, true) => {}
+                    (action, _) => window_chrome::perform(&window, action),
                 }
             }
             Event::UserEvent(UserEvent::Browse { id }) => {
@@ -199,10 +199,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
-            } => {
-                if !BUSY.load(Ordering::SeqCst) {
-                    *control_flow = ControlFlow::Exit;
-                }
+            } if !BUSY.load(Ordering::SeqCst) => {
+                *control_flow = ControlFlow::Exit;
             }
             _ => {}
         }
@@ -210,13 +208,30 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// 处理一条界面请求。窗口动作不回执，其余都要回。
-fn dispatch_ipc(request: Request<String>, proxy: EventLoopProxy<UserEvent>) {
+fn dispatch_ipc(request: Request<String>, proxy: EventLoopProxy<UserEvent>, hwnd: isize) {
     if !is_application_url(&request.uri().to_string()) {
         return;
     }
     let Ok(request) = serde_json::from_str::<IpcRequest>(request.body()) else {
         return;
     };
+    match request.method.as_str() {
+        "window.drag" => {
+            // 与主程序一致：拖动要在指针还按着时进入系统移动循环。
+            #[cfg(target_os = "windows")]
+            window_chrome::begin_system_drag(hwnd);
+            return;
+        }
+        "window.setDragStrip" => {
+            window_chrome::set_drag_strip(
+                request.params["height"].as_f64().unwrap_or(0.0),
+                request.params["controls"].as_f64().unwrap_or(0.0),
+                request.params["maximize"].as_bool().unwrap_or(false),
+            );
+            return;
+        }
+        _ => {}
+    }
     if let Some(action) = window_chrome::Action::from_method(&request.method) {
         // 安装器窗口的尺寸是钉死的，最大化只会让界面空出一大片。
         if action != window_chrome::Action::ToggleMaximize {

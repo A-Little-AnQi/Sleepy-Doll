@@ -19,11 +19,6 @@
   --setup-glow: color-mix(in srgb, var(--gold) 28%, transparent);
 }
 
-/* 无边框窗口的圆角由原生侧切，页面自己也要把顶角画上，否则窗口角上是透明的。 */
-:root[data-frameless="true"] .setup-shell {
-  border-radius: var(--window-radius) var(--window-radius) 0 0;
-}
-
 .setup-aside {
   position: relative;
   display: grid;

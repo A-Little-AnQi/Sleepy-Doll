@@ -26,7 +26,8 @@ it("reveals the new theme from the click point", async () => {
     configurable: true,
     value: startViewTransition,
   });
-  document.documentElement.animate = animate as typeof document.documentElement.animate;
+  document.documentElement.animate =
+    animate as typeof document.documentElement.animate;
   document.documentElement.dataset.theme = "light";
   await writeTheme("dark", { x: 12, y: 34 });
   expect(startViewTransition).toHaveBeenCalledTimes(1);

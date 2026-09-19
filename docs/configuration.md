@@ -58,6 +58,7 @@ IPC 的 `bootstrap` 不返回密钥，只返回会话与设置界面需要的部
 | `storage.database` | SQLite 路径，默认 `./.sleepy-doll/sleepy-doll.db` |
 | `runtime` | 执行预算、编排上限、权限模式与持续授权 |
 | `hooks` | 事件钩子，目标仅允许回环地址 |
+| `tray.enabled` | 是否显示托盘图标，默认 `true`。只在桌面壳里生效；隐藏后点关闭按钮直接退出程序 |
 
 `agent.skillDirectories`、`plugins.directories`、`storage.database`、`runtime.catalogDirectory`
 的相对路径都相对于配置文件所在目录解析。

@@ -87,11 +87,7 @@ function helpComponents(onOpen?: (target: HelpOpen) => void): Components {
   };
 }
 
-export function HelpPage({
-  onOpen,
-}: {
-  onOpen?(target: HelpOpen): void;
-}) {
+export function HelpPage({ onOpen }: { onOpen?(target: HelpOpen): void }) {
   const root = useRef<HTMLElement>(null);
   const [active, setActive] = useState(TOC[0] ?? "");
   const components = helpComponents(onOpen);
@@ -110,7 +106,8 @@ export function HelpPage({
         if (heading.getBoundingClientRect().top <= line) current = id;
       }
       if (
-        scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 8
+        scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <
+        8
       ) {
         current = TOC.at(-1) ?? current;
       }

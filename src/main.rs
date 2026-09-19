@@ -2,7 +2,14 @@
 
 mod window_chrome;
 
-use std::{path::Path, sync::Arc, thread};
+use std::{
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+};
 
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
@@ -56,6 +63,12 @@ enum UserEvent {
     SyncChrome,
     #[cfg(target_os = "windows")]
     ShowWindow,
+    /// 显隐托盘图标。开关的持久化在发起侧完成，这里只负责主线程上的界面变更。
+    #[cfg(target_os = "windows")]
+    TrayVisible(bool),
+    /// 同步托盘菜单里桥开关的勾选态；菜单与界面两个入口都会走到这里。
+    #[cfg(target_os = "windows")]
+    BridgeState(bool),
     #[cfg(target_os = "windows")]
     Quit,
     #[cfg(target_os = "windows")]
@@ -121,8 +134,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+    // 桥开关的当前值。托盘菜单勾选态、延迟建图标和启动自动连接都从这里取。
     #[cfg(target_os = "windows")]
-    let _tray = create_tray(proxy.clone())?;
+    let bridge_enabled = Arc::new(AtomicBool::new(startup_config.bridge.enabled));
+    #[cfg(target_os = "windows")]
+    let mut tray = if startup_config.tray.enabled {
+        Some(create_tray(
+            proxy.clone(),
+            user_directory.clone(),
+            bridge_enabled.clone(),
+        )?)
+    } else {
+        None
+    };
+    // 窗口保持不透明：圆角由 DWM 切（Win11），Win10 上就是方角，与系统上其它
+    // 浏览器形态一致。透明管线会被拖动等 DWM 状态变化打破，露白角，不能用。
     let builder = WindowBuilder::new()
         .with_title("Sleepy Doll")
         .with_inner_size(Size::Logical(LogicalSize::new(1360.0, 860.0)))
@@ -142,6 +168,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut web_context = WebContext::new(Some(webview_data_directory(&user_directory)));
     let ipc_controller = controller.clone();
     let ipc_proxy = proxy.clone();
+    let ipc_config_path = config_path.clone();
+    let ipc_hwnd = window_chrome::hwnd_id(&window);
     let webview = WebViewBuilder::new_with_web_context(&mut web_context)
         .with_asynchronous_custom_protocol(
             "sleepy".into(),
@@ -150,7 +178,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             },
         )
         .with_ipc_handler(move |request| {
-            dispatch_ipc(request, ipc_controller.clone(), ipc_proxy.clone())
+            dispatch_ipc(
+                request,
+                ipc_controller.clone(),
+                ipc_proxy.clone(),
+                ipc_config_path.clone(),
+                ipc_hwnd,
+            )
         })
         .with_initialization_script(INITIALIZATION_SCRIPT)
         .with_navigation_handler(|destination| {
@@ -196,7 +230,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } => {
                 #[cfg(target_os = "windows")]
-                fold_into_tray(&window);
+                close_window(tray.as_ref(), &window, &controller, &proxy);
                 #[cfg(not(target_os = "windows"))]
                 {
                     controller.shutdown();
@@ -220,7 +254,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Event::UserEvent(UserEvent::Window(action)) => {
                 #[cfg(target_os = "windows")]
                 if action == window_chrome::Action::Close {
-                    fold_into_tray(&window);
+                    close_window(tray.as_ref(), &window, &controller, &proxy);
                 } else {
                     window_chrome::perform(&window, action);
                 }
@@ -238,6 +272,34 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Event::UserEvent(UserEvent::ShowWindow) => {
                 window.set_visible(true);
                 window.set_focus();
+            }
+            #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::TrayVisible(visible)) => {
+                match (tray.as_mut(), visible) {
+                    (Some(tray), true) => {
+                        let _ = tray.icon.set_visible(true);
+                    }
+                    // 图标还没建过（启动时配置为关）且要显示时才建，勾选态取当前桥状态。
+                    (None, true) => match create_tray(
+                        proxy.clone(),
+                        user_directory.clone(),
+                        bridge_enabled.clone(),
+                    ) {
+                        Ok(handles) => tray = Some(handles),
+                        Err(error) => log::warn!("托盘图标不可用: {error}"),
+                    },
+                    // 隐藏要连句柄一起丢弃：close_window 按句柄是否存在选择
+                    // 收进托盘还是退出，留着一个隐藏的句柄会让窗口找不到归处。
+                    // 丢弃 TrayIcon 的同时图标也会从通知区移除。
+                    (_, false) => tray = None,
+                }
+            }
+            #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::BridgeState(enabled)) => {
+                bridge_enabled.store(enabled, Ordering::Relaxed);
+                if let Some(tray) = tray.as_ref() {
+                    tray.bridge.set_checked(enabled);
+                }
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::Quit) => {
@@ -266,53 +328,176 @@ fn fold_into_tray(window: &Window) {
     window.set_visible(false);
 }
 
+/// 托盘可用时关闭窗口等于收进托盘；托盘被禁用就无处可回，直接走退出流程。
+#[cfg(target_os = "windows")]
+fn close_window(
+    tray: Option<&TrayHandles>,
+    window: &Window,
+    controller: &Arc<AppController>,
+    proxy: &EventLoopProxy<UserEvent>,
+) {
+    if tray.is_some() {
+        fold_into_tray(window);
+        return;
+    }
+    let controller = controller.clone();
+    let proxy = proxy.clone();
+    thread::spawn(move || {
+        controller.shutdown();
+        let _ = proxy.send_event(UserEvent::ShutdownFinished);
+    });
+}
+
 #[cfg(target_os = "windows")]
 fn create_tray(
     proxy: EventLoopProxy<UserEvent>,
-) -> Result<tray_icon::TrayIcon, Box<dyn std::error::Error>> {
+    user_directory: PathBuf,
+    bridge_enabled: Arc<AtomicBool>,
+) -> Result<TrayHandles, Box<dyn std::error::Error>> {
     use tray_icon::{
-        Icon, TrayIconBuilder,
-        menu::{Menu, MenuEvent, MenuItem},
+        Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent,
+        menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem},
     };
+
     let menu = Menu::new();
-    let open = MenuItem::new("打开 Sleepy Doll", true, None);
+    let bridge = CheckMenuItem::new(
+        "BetterGI 桥",
+        true,
+        bridge_enabled.load(Ordering::Relaxed),
+        None,
+    );
+    let open_user = MenuItem::new("打开配置目录", true, None);
     let quit = MenuItem::new("停止任务并退出", true, None);
-    menu.append_items(&[&open, &quit])?;
-    let open_id = open.id().clone();
+    menu.append_items(&[&bridge, &open_user, &PredefinedMenuItem::separator(), &quit])?;
+    let bridge_id = bridge.id().clone();
+    let open_user_id = open_user.id().clone();
     let quit_id = quit.id().clone();
+    let menu_proxy = proxy.clone();
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-        if event.id == open_id {
-            let _ = proxy.send_event(UserEvent::ShowWindow);
+        if event.id == bridge_id {
+            // 界面入口触发的桥开关也写这同一个原子值，两边永远一致。
+            let next = !bridge_enabled.load(Ordering::Relaxed);
+            bridge_enabled.store(next, Ordering::Relaxed);
+            let _ = menu_proxy.send_event(UserEvent::BridgeState(next));
+        }
+        if event.id == open_user_id {
+            let _ = std::process::Command::new("explorer.exe")
+                .arg(&user_directory)
+                .spawn();
         }
         if event.id == quit_id {
-            let _ = proxy.send_event(UserEvent::Quit);
+            let _ = menu_proxy.send_event(UserEvent::Quit);
+        }
+    }));
+    // 左键（松开）直接呼出主窗口；菜单只挂在右键上。
+    TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
+        if let TrayIconEvent::Click {
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
+            ..
+        } = event
+        {
+            let _ = proxy.send_event(UserEvent::ShowWindow);
         }
     }));
     let mut builder = TrayIconBuilder::new()
         .with_tooltip("Sleepy Doll · 关闭窗口后继续运行")
-        .with_menu(Box::new(menu));
+        .with_menu(Box::new(menu))
+        .with_menu_on_left_click(false);
     // 图标编在 exe 的资源里，界面、窗口和托盘用的是同一份。取不到只影响外观，
     // 不该拦住启动。
     match Icon::from_resource(APP_ICON, Some((32, 32))) {
         Ok(icon) => builder = builder.with_icon(icon),
         Err(error) => log::warn!("托盘图标不可用: {error}"),
     }
-    Ok(builder.build()?)
+    Ok(TrayHandles {
+        icon: builder.build()?,
+        bridge,
+    })
+}
+
+/// 事件循环持有的托盘句柄：显隐图标、同步勾选态都要用到菜单项本身。
+#[cfg(target_os = "windows")]
+struct TrayHandles {
+    icon: tray_icon::TrayIcon,
+    bridge: tray_icon::menu::CheckMenuItem,
 }
 fn dispatch_ipc(
     request: Request<String>,
     controller: Arc<AppController>,
     proxy: EventLoopProxy<UserEvent>,
+    config_path: PathBuf,
+    hwnd: isize,
 ) {
     if !is_application_url(&request.uri().to_string()) {
         return;
     }
     let parsed = serde_json::from_str::<IpcRequest>(request.body());
     if let Ok(request) = &parsed {
-        if request.method == "window.state" {
-            #[cfg(target_os = "windows")]
-            let _ = proxy.send_event(UserEvent::SyncChrome);
-            return;
+        match request.method.as_str() {
+            "window.state" => {
+                #[cfg(target_os = "windows")]
+                let _ = proxy.send_event(UserEvent::SyncChrome);
+                return;
+            }
+            "window.drag" => {
+                // 拖动必须抢在指针还按着的时候进入系统移动循环；绕行事件循环会
+                // 慢半拍，感知上就是窗口跟不上手。
+                #[cfg(target_os = "windows")]
+                window_chrome::begin_system_drag(hwnd);
+                return;
+            }
+            "window.setDragStrip" => {
+                window_chrome::set_drag_strip(
+                    request.params["height"].as_f64().unwrap_or(0.0),
+                    request.params["controls"].as_f64().unwrap_or(0.0),
+                    request.params["maximize"].as_bool().unwrap_or(true),
+                );
+                return;
+            }
+            "tray.state" => {
+                let response = json!({
+                    "kind":"response",
+                    "id":request.id,
+                    "ok":true,
+                    "result":{"enabled":tray_enabled_from_config(&config_path)}
+                });
+                let _ = proxy.send_event(UserEvent::ToWeb(response));
+                return;
+            }
+            "tray.setEnabled" => {
+                let response = match request.params["enabled"].as_bool() {
+                    Some(enabled) => {
+                        match sleepy_doll::config::AppConfig::set_tray_enabled(
+                            &config_path,
+                            enabled,
+                        ) {
+                            Ok(()) => {
+                                #[cfg(target_os = "windows")]
+                                let _ = proxy.send_event(UserEvent::TrayVisible(enabled));
+                                json!({"kind":"response","id":request.id,"ok":true,"result":{"saved":true}})
+                            }
+                            Err(error) => {
+                                json!({"kind":"response","id":request.id,"ok":false,"error":{"code":"NATIVE_ERROR","message":error.user_message()}})
+                            }
+                        }
+                    }
+                    None => {
+                        json!({"kind":"response","id":request.id,"ok":false,"error":{"code":"INVALID_IPC","message":"enabled 必须是布尔值"}})
+                    }
+                };
+                let _ = proxy.send_event(UserEvent::ToWeb(response));
+                return;
+            }
+            _ => {}
+        }
+        if request.method == "bridge.setEnabled" {
+            // 托盘菜单的勾选态要跟上界面里的开关；真正的执行仍在下面的线程里。
+            if let Some(enabled) = request.params["enabled"].as_bool() {
+                #[cfg(target_os = "windows")]
+                let _ = proxy.send_event(UserEvent::BridgeState(enabled));
+                let _ = enabled;
+            }
         }
         if let Some(action) = window_chrome::Action::from_method(&request.method) {
             let _ = proxy.send_event(UserEvent::Window(action));
@@ -340,6 +525,15 @@ fn dispatch_ipc(
             let _ = proxy.send_event(UserEvent::ToWeb(json!({"kind":"response","id":"unknown","ok":false,"error":{"code":"INVALID_IPC","message":error.to_string()}})));
         }
     });
+}
+
+/// 从配置文件读托盘开关的当前值。读不到按默认开启处理，与 serde 默认一致。
+fn tray_enabled_from_config(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|value| value["tray"]["enabled"].as_bool())
+        .unwrap_or(true)
 }
 
 fn is_application_url(value: &str) -> bool {

@@ -87,7 +87,9 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
       {running ? (
         <p className="notice">请先退出 BetterGI，再恢复配置。</p>
       ) : null}
-      {notice ? <Toast message={notice} onDismiss={() => setNotice("")} /> : null}
+      {notice ? (
+        <Toast message={notice} onDismiss={() => setNotice("")} />
+      ) : null}
       {error ? <Toast message={error} onDismiss={() => setError("")} /> : null}
       {records.length ? (
         <div className="recovery-list">
