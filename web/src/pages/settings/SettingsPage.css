@@ -4,16 +4,13 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  padding: 28px clamp(24px, 4vw, 44px) 0;
+  padding: 28px 0 0;
 }
 
-.settings-nav,
-.settings-content {
+/* 滚动容器占满页框、滚动条贴边（与对话页同一模式），内容列在内部居中。 */
+.settings-nav {
   width: min(100%, 920px);
   margin-inline: auto;
-}
-
-.settings-nav {
   flex: 0 0 auto;
   padding: 12px 0 14px;
   border-bottom: 1px solid var(--border);
@@ -42,10 +39,12 @@
 .settings-content > .page-sheet,
 .settings-content > .bridge-api-explorer,
 .settings-content > .bridge-recovery,
+.settings-content > .help-page,
 .settings-content .page-sheet,
 .settings-content .bridge-api-explorer,
 .settings-content .bridge-recovery {
-  width: 100%;
+  width: min(100%, 920px);
+  margin-inline: auto;
   max-width: none;
   height: auto;
   padding: 0;
@@ -56,6 +55,7 @@
   display: grid;
   gap: 26px;
   width: min(100%, 720px);
+  margin-inline: auto;
 }
 
 .settings-general > h2 {
@@ -88,6 +88,7 @@
   display: grid;
   gap: 14px;
   width: min(100%, 720px);
+  margin-inline: auto;
 }
 
 .settings-sponsor h2 {
@@ -116,6 +117,7 @@
   .settings-layout {
     padding: 18px 18px 0;
   }
+
 
   .settings-nav {
     overflow-x: auto;
