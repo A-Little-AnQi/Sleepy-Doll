@@ -52,9 +52,10 @@ if errorlevel 1 exit /b 1
 
 echo.
 echo Assembling %OUT% ...
-rem Overwrite in place rather than clearing the folder first. The bridge DLLs are
-rem loaded inside a running BetterGI and cannot be deleted, so clearing first
-rem leaves a half-destroyed install with no EXE. Unreplaced files are listed
+rem Overwrite in place rather than clearing the folder first: a half-copied
+rem folder is still usable, and injection loads bridge DLLs from a shadow copy
+rem under bridge-cache\, never from this folder, so the files here stay
+rem replaceable even while BetterGI runs. Unreplaced files are listed
 rem individually and everything else stays usable.
 if not exist "%OUT%" mkdir "%OUT%"
 if not exist "%OUT%\bridge" mkdir "%OUT%\bridge"
@@ -112,8 +113,9 @@ if exist "%OUT%\skills" rmdir /s /q "%OUT%\skills"
 if defined FAILED (
   echo.
   echo    Could not replace:%FAILED%
-  echo    Usually the bridge is still loaded in a running BetterGI. Exit BetterGI and
-  echo    build again. BetterGI runs elevated, so an unelevated shell cannot stop it.
+  echo    Close whatever is using those files - a running copy of this app, or an
+  echo    antivirus scan - and build again. Injection uses shadow copies under
+  echo    bridge-cache\, so a running BetterGI no longer locks these files.
   echo    Everything else in the folder is up to date.
   exit /b 1
 )

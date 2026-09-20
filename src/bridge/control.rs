@@ -451,12 +451,103 @@ pub fn recovery(action: &str, arguments: &[&str]) -> Result<Value> {
     })
 }
 
+/// 桥在安装目录里的全部交付文件，注入副本按这份清单整体复制。
+#[cfg(target_os = "windows")]
+const BRIDGE_FILES: [&str; 9] = [
+    "BgiBridge.Injector.exe",
+    "BgiBridge.Bootstrap.dll",
+    "BgiBridge.dll",
+    "BgiBridge.runtimeconfig.json",
+    "BgiBridge.deps.json",
+    "BgiBridge.Recovery.exe",
+    "BgiBridge.Recovery.dll",
+    "BgiBridge.Recovery.runtimeconfig.json",
+    "BgiBridge.Recovery.deps.json",
+];
+
+/// 注入用的工作副本（影拷贝）。
+///
+/// 安装目录里的桥文件一旦加载进 BetterGI 就锁到进程退出，升级、重装、重打包都换不了
+/// 文件。注入一律从这份按内容指纹缓存的副本走：安装目录永远不被加载、永远可覆盖；
+/// 换版本得到新指纹目录；旧副本等不再被加载后自动清掉。
+#[cfg(target_os = "windows")]
+fn injection_copy(source: &Path, root: &Path) -> Result<PathBuf> {
+    let target = root.join(fingerprint(source)?);
+    if !BRIDGE_FILES.iter().all(|file| target.join(file).is_file()) {
+        let staging = root.join(format!(".staging-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&staging);
+        std::fs::create_dir_all(&staging)?;
+        for file in BRIDGE_FILES {
+            std::fs::copy(source.join(file), staging.join(file))?;
+        }
+        // 撞上并发建好的同指纹副本就直接用；别的失败才是真失败。
+        if std::fs::rename(&staging, &target).is_err() {
+            let _ = std::fs::remove_dir_all(&staging);
+            if !BRIDGE_FILES.iter().all(|file| target.join(file).is_file()) {
+                return Err(Error::Config("桥的注入副本建立失败。请重试。".into()));
+            }
+        }
+    }
+    // 配置不参与指纹：token 与监听端口以安装目录为准，每次注入都带最新的。
+    std::fs::copy(
+        source.join("bridge.config.json"),
+        target.join("bridge.config.json"),
+    )?;
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            if entry.path() != target {
+                // 还被加载着的旧副本删不掉，跳过，下次再清。
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+    Ok(target)
+}
+
+/// 副本目录名：桥文件内容的指纹。内容变了就是新目录，安装目录随之可整体替换。
+#[cfg(target_os = "windows")]
+fn fingerprint(source: &Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for file in BRIDGE_FILES {
+        hasher.update(file.as_bytes());
+        hasher.update(std::fs::read(source.join(file))?);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+/// 副本放哪：优先安装目录旁边；安装位置不可写时退到漫游目录。
+#[cfg(target_os = "windows")]
+fn cache_root() -> Result<PathBuf> {
+    let beside = exe_dir()?.join("bridge-cache");
+    if std::fs::create_dir_all(&beside).is_ok() && directory_writable(&beside) {
+        return Ok(beside);
+    }
+    let roaming = crate::config::fallback_directory()
+        .ok_or_else(|| Error::Config("无法定位可写的桥缓存目录。".into()))?
+        .join("bridge-cache");
+    std::fs::create_dir_all(&roaming)?;
+    Ok(roaming)
+}
+
+#[cfg(target_os = "windows")]
+fn directory_writable(directory: &Path) -> bool {
+    let probe = directory.join(format!(".probe-{}", std::process::id()));
+    std::fs::write(&probe, b"").is_ok() && std::fs::remove_file(&probe).is_ok()
+}
+
 #[cfg(target_os = "windows")]
 fn inject() -> Result<()> {
     use std::os::windows::process::CommandExt;
-    let dir = directory()?;
+    let source = directory()?;
     let install = exe_dir()?;
-    let user = data_root(&install, &dir).unwrap_or_else(|| dir.join("user"));
+    let dir = injection_copy(&source, &cache_root()?)?;
+    let user = data_root(&install, &source).unwrap_or_else(|| source.join("user"));
     let mut child = std::process::Command::new(dir.join("BgiBridge.Injector.exe"))
         .arg("--process")
         .arg("BetterGI.exe")
@@ -637,6 +728,59 @@ HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Bett
             parse_reg_value("    InstallLocation    REG_SZ       ", "InstallLocation"),
             None
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn injection_copy_reuses_one_dir_and_refreshes_only_the_config() {
+        let source = tempfile::tempdir().unwrap();
+        for file in BRIDGE_FILES {
+            std::fs::write(source.path().join(file), b"v1").unwrap();
+        }
+        std::fs::write(source.path().join("bridge.config.json"), r#"{"token":"a"}"#).unwrap();
+        let root = tempfile::tempdir().unwrap();
+
+        let first = injection_copy(source.path(), root.path()).unwrap();
+        assert!(first.join("BgiBridge.dll").is_file());
+        assert_eq!(
+            std::fs::read_to_string(first.join("bridge.config.json")).unwrap(),
+            r#"{"token":"a"}"#
+        );
+
+        // token 或监听端口变了：同一份副本，只刷新配置，不重建目录。
+        std::fs::write(source.path().join("bridge.config.json"), r#"{"token":"b"}"#).unwrap();
+        let second = injection_copy(source.path(), root.path()).unwrap();
+        assert_eq!(second, first);
+        assert_eq!(
+            std::fs::read_to_string(second.join("bridge.config.json")).unwrap(),
+            r#"{"token":"b"}"#
+        );
+
+        // 桥内容变了：新指纹目录接替，旧副本被清掉。
+        std::fs::write(source.path().join("BgiBridge.dll"), b"v2").unwrap();
+        let third = injection_copy(source.path(), root.path()).unwrap();
+        assert_ne!(third, first);
+        assert!(third.join("BgiBridge.dll").is_file());
+        assert!(!first.exists());
+        // 只有当前副本留在缓存里。
+        let remaining: Vec<_> = std::fs::read_dir(root.path()).unwrap().flatten().collect();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].path(), third);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn fingerprint_tracks_file_content_not_order_noise() {
+        let source = tempfile::tempdir().unwrap();
+        for file in BRIDGE_FILES {
+            std::fs::write(source.path().join(file), b"same").unwrap();
+        }
+        let first = fingerprint(source.path()).unwrap();
+        // 内容不变：重算指纹稳定。
+        assert_eq!(fingerprint(source.path()).unwrap(), first);
+        // 任意交付文件变化：指纹必须变。
+        std::fs::write(source.path().join("BgiBridge.deps.json"), b"changed").unwrap();
+        assert_ne!(fingerprint(source.path()).unwrap(), first);
     }
 
     fn endpoint_config() -> BridgeConfig {
