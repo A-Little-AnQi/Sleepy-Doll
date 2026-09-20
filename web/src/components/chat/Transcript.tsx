@@ -24,9 +24,10 @@ type Part =
   | { kind: "reasoning"; text: string }
   | { kind: "stream"; text: string }
   | { kind: "activities"; activities: Activity[] };
+let partSeq = 0;
 export interface Turn {
   role: "user" | "assistant";
-  parts: Part[];
+  parts: (Part & { id: number })[];
   createdAt?: string;
 }
 
@@ -62,7 +63,14 @@ function pushReasoning(turn: Turn, text: string) {
     existing.text = `${existing.text}\n\n${text}`;
     return;
   }
-  turn.parts.unshift({ kind: "reasoning", text });
+  const anchor = turn.parts.findLastIndex(
+    (part) => part.kind === "text" || part.kind === "stream",
+  );
+  const part = { kind: "reasoning" as const, text, id: (partSeq += 1) };
+  // 插在第一条回答文本之前；没有文本时追加。part 顺序保持稳定，
+  // 流式重挂载不再把答案顶得来回跳。
+  if (anchor >= 0) turn.parts.splice(anchor, 0, part);
+  else turn.parts.push(part);
 }
 
 /** 把消息组装成对话轮次。 */
@@ -95,11 +103,15 @@ export function buildTurns(messages: MessageInfo[], stream: string): Turn[] {
     }
     if (reasoning) pushReasoning(turn, reasoning);
     if (message.content)
-      turn.parts.push({ kind: "text", text: message.content });
+      turn.parts.push({
+        kind: "text",
+        text: message.content,
+        id: (partSeq += 1),
+      });
     if (calls.length) {
       let part = turn.parts.at(-1);
       if (part?.kind !== "activities") {
-        part = { kind: "activities", activities: [] };
+        part = { kind: "activities", activities: [], id: (partSeq += 1) };
         turn.parts.push(part);
       }
       part.activities.push(
@@ -116,7 +128,7 @@ export function buildTurns(messages: MessageInfo[], stream: string): Turn[] {
       turn = { role: "assistant", parts: [] };
       turns.push(turn);
     }
-    turn.parts.push({ kind: "stream", text: stream });
+    turn.parts.push({ kind: "stream", text: stream, id: (partSeq += 1) });
   }
   return turns;
 }
@@ -249,21 +261,29 @@ function ActivityDetailDisclosure({
   );
 }
 
-/** 推理文本，默认折叠。 */
-function ReasoningDisclosure({ text }: { text: string }) {
+/** 单轮的执行过程：思考与工具调用收进一个默认折叠的组。 */
+function ProcessGroup({
+  steps,
+  running,
+  children,
+}: {
+  steps: number;
+  running: boolean;
+  children: ReactNode;
+}) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <section
-      className="activity-group reasoning-group"
-      data-expanded={expanded}
-    >
+    <section className="activity-group process-group" data-expanded={expanded}>
       <button
         type="button"
         className="activity-summary"
         aria-expanded={expanded}
         onClick={() => setExpanded((open) => !open)}
       >
-        <span className="activity-label">思考过程</span>
+        {running && <span className="activity-spinner" />}
+        <span className="activity-label">
+          执行过程 · {steps} 步
+        </span>
         <DisclosureChevron expanded={expanded} className="activity-expand" />
       </button>
       <div
@@ -271,11 +291,7 @@ function ReasoningDisclosure({ text }: { text: string }) {
         aria-hidden={!expanded}
         inert={!expanded}
       >
-        <div className="activity-disclosure-inner">
-          <div className="activity-detail">
-            <pre className="reasoning-text">{text}</pre>
-          </div>
-        </div>
+        <div className="activity-disclosure-inner">{children}</div>
       </div>
     </section>
   );
@@ -404,10 +420,49 @@ export const Transcript = memo(function Transcript({
       {turns.map((turn, index) => {
         const copy = turnCopyText(turn);
         const time = formatMessageTime(turn.createdAt);
+        // 过程（思考与工具调用）收进一个默认折叠的组：对话里回答是主角，
+        // 过程按需展开。整组一次性渲染，流式增量不再引发布局重排。
+        const process = turn.parts.filter(
+          (part) => part.kind === "reasoning" || part.kind === "activities",
+        );
+        const content = turn.parts.filter(
+          (part) => part.kind === "text" || part.kind === "stream",
+        );
+        const processSteps = process.reduce(
+          (count, part) =>
+            count + (part.kind === "activities" ? part.activities.length : 1),
+          0,
+        );
+        const processRunning = process.some(
+          (part) =>
+            part.kind === "activities" &&
+            part.activities.some((activity) => activity.result === undefined),
+        );
         return (
           <article key={index} className={`message-turn ${turn.role}`}>
             <div className="message-content">
-              {turn.parts.map((part, partIndex) =>
+              {process.length > 0 && (
+                <ProcessGroup
+                  key={process[0]!.id}
+                  steps={processSteps}
+                  running={processRunning}
+                >
+                  {process.map((part) =>
+                    part.kind === "reasoning" ? (
+                      <div key={part.id} className="reasoning-entry">
+                        <pre className="reasoning-text">{part.text}</pre>
+                      </div>
+                    ) : (
+                      <ActivityGroup
+                        key={part.id}
+                        activities={part.activities}
+                        labels={toolLabels}
+                      />
+                    ),
+                  )}
+                </ProcessGroup>
+              )}
+              {content.map((part) =>
                 part.kind === "text" ? (
                   <div
                     className={
@@ -415,25 +470,17 @@ export const Transcript = memo(function Transcript({
                         ? "user-message"
                         : "assistant-message"
                     }
-                    key={partIndex}
+                    key={part.id}
                   >
                     <MarkdownText text={part.text} />
                   </div>
-                ) : part.kind === "reasoning" ? (
-                  <ReasoningDisclosure key={partIndex} text={part.text} />
-                ) : part.kind === "stream" ? (
+                ) : (
                   <div
                     className="assistant-message is-streaming"
-                    key={partIndex}
+                    key={part.id}
                   >
                     <MarkdownText text={part.text} streaming />
                   </div>
-                ) : (
-                  <ActivityGroup
-                    key={partIndex}
-                    activities={part.activities}
-                    labels={toolLabels}
-                  />
                 ),
               )}
               {turn.role === "assistant" &&

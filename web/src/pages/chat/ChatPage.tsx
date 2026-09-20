@@ -411,13 +411,9 @@ export function ChatPage({
                 )}
                 {task &&
                   !busy &&
-                  [
-                    "failed",
-                    "cancelled",
-                    "needsReview",
-                    "partial",
-                    "blocked",
-                  ].includes(task.state) && (
+                  ["failed", "cancelled", "partial", "blocked"].includes(
+                    task.state,
+                  ) && (
                     <section className="run-error">
                       <h3>{taskLabels[task.state]}</h3>
                       <p>{task.error || task.result}</p>

@@ -56,10 +56,10 @@ it("names a tool call the way its own definition does", () => {
       toolLabels={{ "bgi.user.read": "读取配置文件" }}
     />,
   );
-  expect(container.querySelector(".activity-label")?.textContent).toBe(
+  expect(container.querySelector(".process-group .activity-group .activity-label")?.textContent).toBe(
     "读取配置文件",
   );
-  expect(container.querySelector(".activity-subject")?.textContent).toBe(
+  expect(container.querySelector(".process-group .activity-subject")?.textContent).toBe(
     "ScriptGroup/每日.json",
   );
 });
@@ -73,7 +73,7 @@ it("falls back to the tool name when a tool has no label of its own", () => {
       toolLabels={{}}
     />,
   );
-  expect(container.querySelector(".activity-label")?.textContent).toBe(
+  expect(container.querySelector(".process-group .activity-group .activity-label")?.textContent).toBe(
     "demo.echo",
   );
   expect(container.querySelector(".activity-subject")).toBeNull();
