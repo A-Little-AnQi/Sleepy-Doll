@@ -24,10 +24,9 @@ type Part =
   | { kind: "reasoning"; text: string }
   | { kind: "stream"; text: string }
   | { kind: "activities"; activities: Activity[] };
-let partSeq = 0;
 export interface Turn {
   role: "user" | "assistant";
-  parts: (Part & { id: number })[];
+  parts: Part[];
   createdAt?: string;
 }
 
@@ -66,7 +65,7 @@ function pushReasoning(turn: Turn, text: string) {
   const anchor = turn.parts.findLastIndex(
     (part) => part.kind === "text" || part.kind === "stream",
   );
-  const part = { kind: "reasoning" as const, text, id: (partSeq += 1) };
+  const part = { kind: "reasoning" as const, text };
   // 插在第一条回答文本之前；没有文本时追加。part 顺序保持稳定，
   // 流式重挂载不再把答案顶得来回跳。
   if (anchor >= 0) turn.parts.splice(anchor, 0, part);
@@ -103,15 +102,11 @@ export function buildTurns(messages: MessageInfo[], stream: string): Turn[] {
     }
     if (reasoning) pushReasoning(turn, reasoning);
     if (message.content)
-      turn.parts.push({
-        kind: "text",
-        text: message.content,
-        id: (partSeq += 1),
-      });
+      turn.parts.push({ kind: "text", text: message.content });
     if (calls.length) {
       let part = turn.parts.at(-1);
       if (part?.kind !== "activities") {
-        part = { kind: "activities", activities: [], id: (partSeq += 1) };
+        part = { kind: "activities", activities: [] };
         turn.parts.push(part);
       }
       part.activities.push(
@@ -128,7 +123,7 @@ export function buildTurns(messages: MessageInfo[], stream: string): Turn[] {
       turn = { role: "assistant", parts: [] };
       turns.push(turn);
     }
-    turn.parts.push({ kind: "stream", text: stream, id: (partSeq += 1) });
+    turn.parts.push({ kind: "stream", text: stream });
   }
   return turns;
 }
@@ -261,7 +256,7 @@ function ActivityDetailDisclosure({
   );
 }
 
-/** 单轮的执行过程：思考与工具调用收进一个默认折叠的组。 */
+/** 单轮的执行过程（思考与工具调用）：默认折叠，回答是主角。 */
 function ProcessGroup({
   steps,
   running,
@@ -280,10 +275,10 @@ function ProcessGroup({
         aria-expanded={expanded}
         onClick={() => setExpanded((open) => !open)}
       >
-        {running && <span className="activity-spinner" />}
         <span className="activity-label">
-          执行过程 · {steps} 步
+          {running ? "思考中" : steps > 0 ? `思考过程 · ${steps} 步` : "思考过程"}
         </span>
+        {running && <span className="activity-spinner" />}
         <DisclosureChevron expanded={expanded} className="activity-expand" />
       </button>
       <div
@@ -433,28 +428,26 @@ export const Transcript = memo(function Transcript({
             count + (part.kind === "activities" ? part.activities.length : 1),
           0,
         );
-        const processRunning = process.some(
-          (part) =>
-            part.kind === "activities" &&
-            part.activities.some((activity) => activity.result === undefined),
-        );
+        // 只随「这一轮是否还在推进」变化；跟单条工具结果走会来回抖。
+        const turnActive =
+          index === turns.length - 1 &&
+          (Boolean(stream) || Boolean(phase) || pendingActivity);
         return (
           <article key={index} className={`message-turn ${turn.role}`}>
             <div className="message-content">
               {process.length > 0 && (
                 <ProcessGroup
-                  key={process[0]!.id}
                   steps={processSteps}
-                  running={processRunning}
+                  running={turnActive}
                 >
-                  {process.map((part) =>
+                  {process.map((part, partIndex) =>
                     part.kind === "reasoning" ? (
-                      <div key={part.id} className="reasoning-entry">
+                      <div key={partIndex} className="reasoning-entry">
                         <pre className="reasoning-text">{part.text}</pre>
                       </div>
                     ) : (
                       <ActivityGroup
-                        key={part.id}
+                        key={partIndex}
                         activities={part.activities}
                         labels={toolLabels}
                       />
@@ -462,7 +455,7 @@ export const Transcript = memo(function Transcript({
                   )}
                 </ProcessGroup>
               )}
-              {content.map((part) =>
+              {content.map((part, partIndex) =>
                 part.kind === "text" ? (
                   <div
                     className={
@@ -470,14 +463,14 @@ export const Transcript = memo(function Transcript({
                         ? "user-message"
                         : "assistant-message"
                     }
-                    key={part.id}
+                    key={partIndex}
                   >
                     <MarkdownText text={part.text} />
                   </div>
                 ) : (
                   <div
                     className="assistant-message is-streaming"
-                    key={part.id}
+                    key={partIndex}
                   >
                     <MarkdownText text={part.text} streaming />
                   </div>
