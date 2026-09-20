@@ -115,8 +115,8 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
         </button>
         <span className="muted">
           {catalog && Number.isFinite(catalog.total)
-            ? catalog.total + t.bridge.methodsCount(catalog.total)
-            : t.bridge.method}
+            ? t.bridge.methodsCount(catalog.total)
+            : t.bridge.connectToView}
         </span>
       </div>
       {error && <Toast message={error} onDismiss={() => setError("")} />}
@@ -134,7 +134,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
           {guide ? (
             <>
               <section>
-                <h3>用途</h3>
+                <h3>{t.apiExplorer.purpose}</h3>
                 <ul>
                   {guide.whenToUse.map((line) => (
                     <li key={line}>{line}</li>
@@ -142,7 +142,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                 </ul>
               </section>
               <section>
-                <h3>前提</h3>
+                <h3>{t.apiExplorer.prerequisites}</h3>
                 <ul>
                   {guide.preconditions.map((line) => (
                     <li key={line}>{line}</li>
@@ -151,19 +151,19 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
               </section>
             </>
           ) : (
-            <p className="notice">暂无说明</p>
+            <p className="notice">{t.apiExplorer.noDocs}</p>
           )}
           <section>
-            <h3>参数</h3>
+            <h3>{t.apiExplorer.params}</h3>
             {Object.keys(selected.inputSchema?.properties ?? {}).length ? (
               <div className="bridge-api-table">
                 <table>
                   <thead>
                     <tr>
-                      <th>参数</th>
-                      <th>类型</th>
-                      <th>必填</th>
-                      <th>作用</th>
+                      <th>{t.apiExplorer.param}</th>
+                      <th>{t.apiExplorer.type}</th>
+                      <th>{t.apiExplorer.requiredCol}</th>
+                      <th>{t.apiExplorer.effect}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -187,26 +187,26 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                 </table>
               </div>
             ) : (
-              <p>无需参数</p>
+              <p>{t.apiExplorer.noParams}</p>
             )}
             <details>
-              <summary>参数详情</summary>
+              <summary>{t.apiExplorer.paramsDetail}</summary>
               <pre>{JSON.stringify(selected.inputSchema, null, 2)}</pre>
             </details>
           </section>
           {guide && (
             <>
               <section>
-                <h3>返回</h3>
+                <h3>{t.apiExplorer.returns}</h3>
                 <p>{guide.resultMeaning}</p>
                 <p>{guide.verification}</p>
                 <details>
-                  <summary>返回结构</summary>
+                  <summary>{t.apiExplorer.returnShape}</summary>
                   <pre>{JSON.stringify(selected.outputSchema, null, 2)}</pre>
                 </details>
               </section>
               <section>
-                <h3>影响</h3>
+                <h3>{t.apiExplorer.impact}</h3>
                 <ul>
                   {guide.sideEffects.map((line) => (
                     <li key={line}>{line}</li>
@@ -215,7 +215,7 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                 <p>{guide.rollback}</p>
               </section>
               <section>
-                <h3>示例</h3>
+                <h3>{t.apiExplorer.examples}</h3>
                 {guide.examples.map((example, index) => (
                   <pre key={index}>
                     {JSON.stringify(
@@ -227,14 +227,14 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                 ))}
               </section>
               <footer className="muted">
-                来源：{guide.documentationSource}
+                {t.apiExplorer.source(guide.documentationSource)}
                 {guide.sourceReference ? " · " + guide.sourceReference : ""}
               </footer>
             </>
           )}
           {selected.errors?.length ? (
             <details>
-              <summary>错误码</summary>
+              <summary>{t.apiExplorer.errorCodes}</summary>
               <p>{selected.errors.join(" · ")}</p>
             </details>
           ) : null}
@@ -242,14 +242,14 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
       ) : (
         <>
           <div className="page-title">
-            <h2>接口目录</h2>
+            <h2>{t.bridge.methodCatalog}</h2>
           </div>
           <div className="list-toolbar">
             <label className="search-field is-compact">
               <SearchIcon />
               <input
                 aria-label={t.bridge.searchMethods}
-                placeholder="搜索"
+                placeholder={t.common.search}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
@@ -282,47 +282,36 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                   <p>{item.summary}</p>
                   {item.whenToUse?.[0] && (
                     <small className="bridge-api-use">
-                      适用：{item.whenToUse[0]}
-                    </small>
-                  )}
-                  {!!item.parameters?.length && (
-                    <small>
-                      参数：
-                      {item.parameters
-                        .map(
-                          (parameter) =>
-                            parameter.name +
-                            (parameter.required ? t.bridge.required : t.bridge.optional) +
-                            " — " +
-                            parameter.description,
-                        )
-                        .join("；")}
+                      {t.apiExplorer.applies(item.whenToUse[0])}
                     </small>
                   )}
                 </span>
                 <span className="tag">
                   {item.callable
                     ? item.effect === "readOnly"
-                      ? "只读"
-                      : "会修改"
+                      ? t.bridge.readOnly
+                      : t.bridge.mutating
                     : t.bridge.unavailable}
                 </span>
               </button>
             ))}
           </div>
-          {!busy && !items.length && <p className="empty-note">未找到接口</p>}
+          {!busy && !items.length && (
+            <p className="empty-note">{t.apiExplorer.noneFound}</p>
+          )}
           {busy && (
-            <p className="muted" role="status">
-              加载中…
+            <p className="bridge-api-status" role="status">
+              <span className="bridge-api-spinner" aria-hidden="true" />
+              {t.common.loading}
             </p>
           )}
           {catalog?.nextOffset != null && (
             <button
-              className="secondary-action"
+              className="secondary-action bridge-api-more"
               disabled={busy}
               onClick={() => void more()}
             >
-              加载更多
+              {t.apiExplorer.loadMore}
             </button>
           )}
         </>

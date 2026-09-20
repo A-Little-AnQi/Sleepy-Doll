@@ -34,11 +34,12 @@ const entry = {
   ],
 };
 
-it("shows purpose and parameters before opening details, including disabled APIs", async () => {
+it("shows summary and availability in rows, and the count exactly once", async () => {
   vi.mocked(api.bridgeCatalog).mockResolvedValue({ total: 1, items: [entry] });
   render(<BridgeApiExplorer onBack={vi.fn()} />);
   expect(await screen.findByText(entry.summary)).toBeTruthy();
-  expect(screen.getByText(/配置目录中的精确路径/)).toBeTruthy();
+  expect(screen.getByText("1 个接口")).toBeTruthy();
+  expect(screen.queryByText(/配置目录中的精确路径/)).toBeNull();
   expect(screen.getByText("不可用")).toBeTruthy();
   expect(api.bridgeDescribe).not.toHaveBeenCalled();
 });
