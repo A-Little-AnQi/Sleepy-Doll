@@ -70,6 +70,155 @@ fn host_running() -> bool {
     })
 }
 
+/// 宿主是否在运行。给桌面壳的监视循环用。
+pub fn is_host_running() -> bool {
+    host_running()
+}
+
+/// 连接前保证宿主在运行：没运行就找到安装位置启动它，并等进程出现。
+fn ensure_host_running(config: &BridgeConfig) -> Result<()> {
+    if host_running() {
+        return Ok(());
+    }
+    let executable = locate_host(config).ok_or_else(|| {
+        Error::Tool(
+            "没有找到 BetterGI 的安装位置。请手动启动一次 BetterGI，连接成功后会记住它的位置。"
+                .into(),
+        )
+    })?;
+    let directory = executable
+        .parent()
+        .ok_or_else(|| Error::Config("BetterGI 安装路径无效。".into()))?
+        .to_path_buf();
+    let mut command = std::process::Command::new(&executable);
+    command
+        .current_dir(&directory)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    command.spawn()?;
+    let started = std::time::Instant::now();
+    while !host_running() {
+        if started.elapsed() >= Duration::from_secs(30) {
+            return Err(Error::Tool(
+                "已尝试启动 BetterGI，但进程迟迟没有出现。请手动启动后重试。".into(),
+            ));
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+    Ok(())
+}
+
+/// BetterGI 可执行文件的位置：上次连接记住的目录 → 卸载注册表 → 常见安装目录。
+fn locate_host(config: &BridgeConfig) -> Option<PathBuf> {
+    if let Some(remembered) = config.host_install_path.as_ref() {
+        let executable = remembered.join("BetterGI.exe");
+        if executable.is_file() {
+            return Some(executable);
+        }
+    }
+    #[cfg(target_os = "windows")]
+    if let Some(executable) = registry_host_executable() {
+        return Some(executable);
+    }
+    common_host_roots()
+        .into_iter()
+        .map(|root| root.join("BetterGI").join("BetterGI.exe"))
+        .find(|executable| executable.is_file())
+}
+
+fn common_host_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for key in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+        let Some(value) = std::env::var_os(key) else {
+            continue;
+        };
+        let base = PathBuf::from(value);
+        for root in [base.clone(), base.join("Programs")] {
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+    }
+    roots
+}
+
+/// 从卸载注册表（安装器写入的标准位置）找 BetterGI 的安装目录。
+#[cfg(target_os = "windows")]
+fn registry_host_executable() -> Option<PathBuf> {
+    const UNINSTALL: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
+    for hive in ["HKCU", r"HKLM\SOFTWARE", r"HKLM\SOFTWARE\WOW6432Node"] {
+        let root = format!(r"{hive}\{UNINSTALL}");
+        let Some(search) = reg_query(&[
+            "reg",
+            "query",
+            &root,
+            "/s",
+            "/f",
+            "BetterGI",
+            "/v",
+            "DisplayName",
+            "/d",
+        ]) else {
+            continue;
+        };
+        for key in parse_matching_keys(&search) {
+            let Some(values) = reg_query(&["reg", "query", &key, "/v", "InstallLocation"]) else {
+                continue;
+            };
+            if let Some(location) = parse_reg_value(&values, "InstallLocation") {
+                let executable = PathBuf::from(&location).join("BetterGI.exe");
+                if executable.is_file() {
+                    return Some(executable);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn reg_query(args: &[&str]) -> Option<String> {
+    let mut command = std::process::Command::new(args[0]);
+    command
+        .args(&args[1..])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(0x08000000);
+    let output = command.output().ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// 从 `reg query /s /f` 的输出里取匹配到的键路径（`HKEY_` 开头的行）。
+#[cfg(target_os = "windows")]
+fn parse_matching_keys(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("HKEY_"))
+        .map(str::to_string)
+        .collect()
+}
+
+/// 从 `reg query <键> /v <名>` 的输出里取字符串值。
+#[cfg(target_os = "windows")]
+fn parse_reg_value(output: &str, name: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let line = line.trim();
+        let (_, value) = line.split_once("REG_SZ")?;
+        if !line.starts_with(name) {
+            return None;
+        }
+        let value = value.trim().trim_matches('"').trim();
+        (!value.is_empty()).then(|| value.to_string())
+    })
+}
+
 /// 产品默认监听端口。占用时从这里往后找空位。
 const DEFAULT_PORT: u16 = 26101;
 const PORT_SPAN: u16 = 64;
@@ -163,9 +312,7 @@ fn control(config: &BridgeConfig, enabled: bool) -> Result<()> {
 pub fn prepare(config: &mut BridgeConfig) -> Result<()> {
     let (_, preferred) = endpoint(config)?;
     let occupied = !port_free(preferred);
-    if !host_running() && !occupied {
-        return Err(Error::Tool("请先启动 BetterGI。".into()));
-    }
+    ensure_host_running(config)?;
     let dir = directory()?;
     let path = dir.join("bridge.config.json");
     let mut settings: Value = if path.is_file() {
@@ -401,6 +548,7 @@ mod tests {
             token: None,
             instance_id: None,
             timeout_ms: 1000,
+            host_install_path: None,
         };
         assert_eq!(
             endpoint(&config).unwrap(),
@@ -430,5 +578,75 @@ mod tests {
         let (listen, next) = allocate_listen(port).unwrap();
         assert_ne!(next, port);
         assert_eq!(listen, format!("127.0.0.1:{next}"));
+    }
+
+    #[test]
+    fn locate_host_prefers_a_remembered_install() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("BetterGI.exe"), b"").unwrap();
+        let config = BridgeConfig {
+            host_install_path: Some(dir.path().to_path_buf()),
+            ..endpoint_config()
+        };
+        assert_eq!(locate_host(&config), Some(dir.path().join("BetterGI.exe")));
+    }
+
+    #[test]
+    fn remembered_install_without_the_executable_falls_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = BridgeConfig {
+            host_install_path: Some(dir.path().to_path_buf()),
+            ..endpoint_config()
+        };
+        // 目录在但可执行文件不在：不能拿无效路径去启动；找没找到另说，反正不是它。
+        assert_ne!(locate_host(&config), Some(dir.path().join("BetterGI.exe")));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn reg_search_output_yields_matching_keys_only() {
+        let output = "\
+HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BetterGI
+    DisplayName    REG_SZ    BetterGI
+
+End of search: 1 match(es) found.
+";
+        assert_eq!(
+            parse_matching_keys(output),
+            vec![
+                r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\BetterGI"
+                    .to_string()
+            ]
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn reg_value_output_yields_the_location() {
+        let output = "\
+HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BetterGI
+    InstallLocation    REG_SZ    C:\\Apps\\BetterGI
+
+";
+        assert_eq!(
+            parse_reg_value(output, "InstallLocation").as_deref(),
+            Some(r"C:\Apps\BetterGI")
+        );
+        assert_eq!(parse_reg_value(output, "DisplayName"), None);
+        assert_eq!(
+            parse_reg_value("    InstallLocation    REG_SZ       ", "InstallLocation"),
+            None
+        );
+    }
+
+    fn endpoint_config() -> BridgeConfig {
+        BridgeConfig {
+            enabled: false,
+            base_url: "http://127.0.0.1:26101".into(),
+            token: None,
+            instance_id: None,
+            timeout_ms: 30_000,
+            host_install_path: None,
+        }
     }
 }

@@ -996,23 +996,11 @@ impl AppController {
     }
 
     fn set_bridge_enabled(&self, enabled: bool) -> Result<Value> {
-        let mut config = self.config.lock().unwrap().bridge.clone();
         if enabled {
-            log::info!("正在连接 BetterGI（{}）", config.base_url);
-            crate::bridge::control::prepare(&mut config)
-                .inspect_err(|error| log::warn!("准备桥失败：{error}"))?;
-            AppConfig::set_bridge(&self.config_path, &config)?;
-            self.reload_runtime()?;
-            crate::bridge::control::enable(&config)
-                .inspect_err(|error| log::warn!("注入或启用桥失败：{error}"))?;
-            config.enabled = true;
-            config.instance_id = None;
-            AppConfig::set_bridge(&self.config_path, &config)?;
-            self.reload_runtime()?;
-            self.reload_extensions()?;
-            log::info!("BetterGI 已连接（{}）", config.base_url);
+            self.connect_bridge()?;
             Ok(json!({"enabled":true}))
         } else {
+            let mut config = self.config.lock().unwrap().bridge.clone();
             config.enabled = false;
             AppConfig::set_bridge(&self.config_path, &config)?;
             self.reload_runtime()?;
@@ -1024,6 +1012,48 @@ impl AppController {
             );
             Ok(json!({"enabled":false,"warning":warning}))
         }
+    }
+
+    /// 连接 BetterGI 的完整流程：宿主没运行就自动启动，注入后记住安装位置。
+    pub fn connect_bridge(&self) -> Result<()> {
+        let mut config = self.config.lock().unwrap().bridge.clone();
+        log::info!("正在连接 BetterGI（{}）", config.base_url);
+        crate::bridge::control::prepare(&mut config)
+            .inspect_err(|error| log::warn!("准备桥失败：{error}"))?;
+        AppConfig::set_bridge(&self.config_path, &config)?;
+        self.reload_runtime()?;
+        crate::bridge::control::enable(&config)
+            .inspect_err(|error| log::warn!("注入或启用桥失败：{error}"))?;
+        config.enabled = true;
+        config.instance_id = None;
+        let remembered = BgiClient::new(config.clone())
+            .host()
+            .ok()
+            .and_then(|host| host["installPath"].as_str().map(str::to_owned));
+        if let Some(install) = remembered {
+            let install = std::path::PathBuf::from(install);
+            if config.host_install_path.as_deref() != Some(install.as_path()) {
+                log::info!("记住 BetterGI 安装位置：{}", install.display());
+                config.host_install_path = Some(install);
+            }
+        }
+        AppConfig::set_bridge(&self.config_path, &config)?;
+        self.reload_runtime()?;
+        self.reload_extensions()?;
+        log::info!("BetterGI 已连接（{}）", config.base_url);
+        Ok(())
+    }
+
+    /// 桥开关当前是否打开。给桌面壳的监视循环用。
+    pub fn bridge_enabled(&self) -> bool {
+        self.config.lock().unwrap().bridge.enabled
+    }
+
+    /// 桥是否已连上（短超时探测）。给桌面壳的监视循环用。
+    pub fn bridge_connected(&self) -> bool {
+        let mut config = self.config.lock().unwrap().bridge.clone();
+        config.timeout_ms = config.timeout_ms.min(2000);
+        BgiClient::new(config).info().is_ok()
     }
 
     fn bootstrap(&self) -> Result<Value> {

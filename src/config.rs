@@ -182,6 +182,9 @@ pub struct BridgeConfig {
     pub instance_id: Option<String>,
     #[serde(default = "default_bridge_timeout")]
     pub timeout_ms: u64,
+    /// 上次连接成功时宿主的安装目录，连接前用它自动启动 BetterGI。
+    #[serde(default)]
+    pub host_install_path: Option<PathBuf>,
 }
 
 const fn default_bridge_timeout() -> u64 {
@@ -1102,6 +1105,7 @@ mod tests {
                 token: None,
                 instance_id: None,
                 timeout_ms: 1000,
+                host_install_path: None,
             },
             plugins: PluginsConfig::default(),
             storage: StorageConfig {

@@ -9,6 +9,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
+    time::Duration,
 };
 
 use rust_embed::RustEmbed;
@@ -135,6 +136,38 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Arc::new(|_, _| {}),
             ) {
                 log::warn!("启动时自动连接 BetterGI 失败：{error}");
+            }
+        });
+    }
+    {
+        // 宿主生命周期跟随：桥开关开着、宿主在运行而连接断着时自动接回。
+        // 只重连不拉起：拉起 BetterGI 只发生在用户主动连接时。
+        let watcher = controller.clone();
+        thread::spawn(move || {
+            let cooldown = Duration::from_secs(30);
+            let mut next_attempt = std::time::Instant::now();
+            let mut last_failure = String::new();
+            loop {
+                thread::sleep(Duration::from_secs(5));
+                if !watcher.bridge_enabled() || watcher.bridge_connected() {
+                    continue;
+                }
+                if !sleepy_doll::bridge::control::is_host_running()
+                    || std::time::Instant::now() < next_attempt
+                {
+                    continue;
+                }
+                next_attempt = std::time::Instant::now() + cooldown;
+                match watcher.connect_bridge() {
+                    Ok(()) => last_failure.clear(),
+                    Err(error) => {
+                        // 同一个失败原因只记一次，避免日志被重试刷屏。
+                        if last_failure != error.to_string() {
+                            last_failure = error.to_string();
+                            log::warn!("自动重连 BetterGI 失败：{error}");
+                        }
+                    }
+                }
             }
         });
     }

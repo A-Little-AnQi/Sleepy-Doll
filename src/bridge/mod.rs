@@ -833,6 +833,7 @@ mod tests {
             token: Some("test".into()),
             instance_id: None,
             timeout_ms: 1000,
+            host_install_path: None,
         }));
         let mut registry = ToolRegistry::default();
         register_tools(&mut registry, client).unwrap();
