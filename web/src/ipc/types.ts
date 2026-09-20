@@ -57,6 +57,7 @@ export interface ToolInfo {
 export interface MessageInfo {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
+  createdAt?: string;
   toolCallId?: string;
   toolCalls?: Array<{ id: string; name: string; arguments: unknown }>;
   /**
@@ -103,7 +104,12 @@ export interface TaskInfo {
   contextTokens?: number;
   contextWindow?: number;
   contextCompacted?: boolean;
+  /** 底层模型服务返回的缓存计数，只用于诊断协议。 */
   cacheReadTokens?: number;
+  /** Agent 确认复用的稳定提示前缀，不依赖厂商 usage 字段。 */
+  promptCacheHitTokens?: number;
+  promptCacheHit?: boolean;
+  promptCacheReason?: string | null;
   source?:
     | { kind: "agent" }
     | { kind: "savedStrategy"; strategyId: string }

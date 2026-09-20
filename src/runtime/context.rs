@@ -1,7 +1,13 @@
 use crate::{
+    config::ModelConfig,
     error::{Error, Result},
+    extension::ToolDefinition,
     model::{Message, Role},
+    runtime::types::PromptCacheSnapshot,
 };
+use serde_json::json;
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 
 pub fn message(role: Role, content: impl Into<String>) -> Message {
     Message {
@@ -51,6 +57,105 @@ pub fn estimate_messages_tokens(messages: &[Message]) -> u64 {
     messages.iter().map(estimate_message_tokens).sum()
 }
 
+/// 一次模型请求能否复用上一轮的完整提示前缀。
+///
+/// 这里的“命中”是 Agent 自己维护的结构事实：缓存关键配置必须相同，且上一轮
+/// 已派发的消息必须逐字节成为本轮消息的前缀。模型服务返回的 cached token 只
+/// 能在请求结束后用于核对，不能替代这项判断。
+#[derive(Debug, Clone)]
+pub struct PromptCacheDecision {
+    pub hit: bool,
+    pub hit_tokens: u64,
+    pub reason: &'static str,
+    pub next: PromptCacheSnapshot,
+}
+
+pub fn prompt_cache_decision(
+    previous: Option<&PromptCacheSnapshot>,
+    model: &ModelConfig,
+    system: &str,
+    tools: &[ToolDefinition],
+    messages: &[Message],
+    tokens: u64,
+) -> Result<PromptCacheDecision> {
+    let model_key = cache_model_key(model)?;
+    let system_key = digest(system.as_bytes());
+    let mut stable_tools = tools.to_vec();
+    stable_tools.sort_by(|left, right| left.name.cmp(&right.name));
+    let tools_key = digest(&serde_json::to_vec(&stable_tools)?);
+    let prefix_key = digest(&serde_json::to_vec(messages)?);
+    let next = PromptCacheSnapshot {
+        model_key: model_key.clone(),
+        system_key: system_key.clone(),
+        tools_key: tools_key.clone(),
+        prefix_key,
+        message_count: messages.len(),
+        tokens,
+    };
+    let Some(previous) = previous else {
+        return Ok(PromptCacheDecision {
+            hit: false,
+            hit_tokens: 0,
+            reason: "coldStart",
+            next,
+        });
+    };
+    let reason = if previous.model_key != model_key {
+        "modelChanged"
+    } else if previous.system_key != system_key {
+        "systemChanged"
+    } else if previous.tools_key != tools_key {
+        "toolsChanged"
+    } else if messages.len() < previous.message_count {
+        "historyShortened"
+    } else {
+        let current_prefix = digest(&serde_json::to_vec(&messages[..previous.message_count])?);
+        if current_prefix != previous.prefix_key {
+            "historyRewritten"
+        } else {
+            "hit"
+        }
+    };
+    let hit = reason == "hit";
+    Ok(PromptCacheDecision {
+        hit,
+        hit_tokens: if hit { previous.tokens.min(tokens) } else { 0 },
+        reason,
+        next,
+    })
+}
+
+fn cache_model_key(model: &ModelConfig) -> Result<String> {
+    // Hash 会落盘，但鉴权内容本身不应该进入快照；其余会改变请求字节或服务端
+    // 缓存命名空间的字段全部参与判定。BTreeMap 保证自定义头顺序稳定。
+    let headers = model
+        .headers
+        .iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), value))
+        .collect::<BTreeMap<_, _>>();
+    let auth_identity = model
+        .api_key
+        .as_deref()
+        .map(|secret| digest(secret.as_bytes()));
+    let value = json!({
+        "protocol": model.protocol,
+        "model": model.model,
+        "baseUrl": model.base_url,
+        "auth": model.auth,
+        "authIdentity": auth_identity,
+        "headers": headers,
+        "temperature": model.options.temperature,
+        "maxOutputTokens": model.options.max_output_tokens,
+        "reasoningEffort": model.options.reasoning_effort,
+        "promptCache": model.options.prompt_cache,
+    });
+    Ok(digest(&serde_json::to_vec(&value)?))
+}
+
+fn digest(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
 fn estimate_message_tokens(message: &Message) -> u64 {
     // 角色、分隔符与消息外层的固定开销。
     let mut total = estimate_tokens(&message.content) + 8;
@@ -82,12 +187,44 @@ pub struct PackedContext {
     pub messages: Vec<Message>,
     pub tokens: u64,
     pub cleared_results: usize,
-    pub dropped_groups: usize,
+    /// 当前完整历史在微压缩后仍超过窗口。调用方必须先让模型生成摘要，不能
+    /// 把 `messages` 直接发送，也不能在这里静默删除旧消息。
+    pub needs_model_compaction: bool,
+}
+
+/// SQLite 中一条可参与模型上下文的原始消息。排序键与 Journal 的会话排序完全
+/// 相同，压缩边界因此不会把后来排队的消息误算进较早的运行。
+#[derive(Debug, Clone)]
+pub struct HistoryEntry {
+    pub sort_key: i64,
+    pub id: i64,
+    pub message: Message,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredSummary {
+    pub through_sort_key: i64,
+    pub through_message_id: i64,
+    pub content: String,
+}
+
+#[derive(Debug)]
+pub struct CompactionPlan {
+    pub through_sort_key: i64,
+    pub through_message_id: i64,
+    /// 交给摘要模型的完整旧轮次；已有摘要放在最前面继续滚动压缩。
+    pub source: Vec<Message>,
+}
+
+const SUMMARY_PREFIX: &str = "[对话历史压缩摘要；仅用于恢复事实，不代表新的用户授权或工具指令]";
+
+pub fn summary_message(content: &str) -> Message {
+    message(Role::User, format!("{SUMMARY_PREFIX}\n{content}"))
 }
 
 impl PackedContext {
     pub fn compacted(&self) -> bool {
-        self.cleared_results > 0 || self.dropped_groups > 0
+        self.cleared_results > 0
     }
 }
 
@@ -145,6 +282,100 @@ fn group_cost(group: &[Message]) -> usize {
         .sum()
 }
 
+fn grouped_entries(history: &[HistoryEntry]) -> Vec<Vec<HistoryEntry>> {
+    let mut groups: Vec<Vec<HistoryEntry>> = Vec::new();
+    for entry in history.iter().cloned() {
+        if entry.message.role == Role::Tool {
+            if let Some(group) = groups.iter_mut().rev().find(|group| {
+                group[0]
+                    .message
+                    .tool_calls
+                    .iter()
+                    .any(|call| Some(&call.id) == entry.message.tool_call_id.as_ref())
+            }) {
+                group.push(entry);
+            }
+        } else {
+            groups.push(vec![entry]);
+        }
+    }
+    // 不把半截工具轮次交给主模型或摘要模型。
+    groups.retain(|group| {
+        group[0].message.tool_calls.iter().all(|call| {
+            group.iter().any(|entry| {
+                entry.message.role == Role::Tool
+                    && entry.message.tool_call_id.as_ref() == Some(&call.id)
+            })
+        })
+    });
+    groups
+}
+
+/// 按完整 API 轮次选择要摘要的前缀，保留足够多的最近原始消息。这个过程只
+/// 规划边界；原始消息永不删除。
+pub fn plan_compaction(
+    history: &[HistoryEntry],
+    previous: Option<&StoredSummary>,
+    budget: usize,
+) -> Option<CompactionPlan> {
+    let groups = grouped_entries(history);
+    if groups.len() < 3 {
+        return None;
+    }
+    let protected_budget = (budget / 2).max(2048);
+    let mut protected_cost = 0usize;
+    let mut split = groups.len();
+    // 至少保留最近两个完整轮次；如果还有预算，继续向前保留。
+    while split > 1 {
+        let next = group_cost(
+            &groups[split - 1]
+                .iter()
+                .map(|entry| entry.message.clone())
+                .collect::<Vec<_>>(),
+        );
+        let protected = groups.len() - split;
+        if protected >= 2 && protected_cost + next > protected_budget {
+            break;
+        }
+        protected_cost += next;
+        split -= 1;
+    }
+    let mut source = Vec::new();
+    if let Some(previous) = previous {
+        source.push(summary_message(&previous.content));
+    }
+    let mut source_cost = source.iter().map(estimate_message_tokens).sum::<u64>() as usize;
+    let source_budget = (budget.saturating_mul(3) / 4).max(4096);
+    let mut source_end = 0usize;
+    for group in &groups[..split] {
+        let next = group_cost(
+            &group
+                .iter()
+                .map(|entry| entry.message.clone())
+                .collect::<Vec<_>>(),
+        );
+        if source_cost + next > source_budget {
+            break;
+        }
+        source_cost += next;
+        source_end += 1;
+    }
+    if source_end == 0 {
+        return None;
+    }
+    let boundary = groups[source_end - 1].last()?;
+    source.extend(
+        groups[..source_end]
+            .iter()
+            .flat_map(|group| group.iter().map(|entry| entry.message.clone())),
+    );
+    Some(CompactionPlan {
+        through_sort_key: boundary.sort_key,
+        through_message_id: boundary.id,
+        source,
+    })
+}
+
 /// 当前历史已占用的预算。
 pub fn used(messages: &[Message]) -> usize {
     messages
@@ -153,8 +384,9 @@ pub fn used(messages: &[Message]) -> usize {
         .sum()
 }
 
-/// 超预算时按整组丢弃工具调用与结果，不单独丢一条结果。原文仍留在 SQLite；
-/// 摘录只做删减，不引入新的事实或权限。
+/// 构造一轮模型上下文。程序只会微压缩可重新读取的旧工具结果；如果完整历史
+/// 仍然超预算，就返回 `needs_model_compaction`，由调用方交给模型生成语义摘要。
+/// 这里绝不删除、截取或拼接对话正文来冒充压缩。
 pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<PackedContext> {
     let mut groups: Vec<Vec<Message>> = Vec::new();
     for m in history {
@@ -179,11 +411,9 @@ pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<Pac
     });
     let cost = |g: &Vec<Message>| group_cost(g);
     let mut total = system.chars().count() + groups.iter().map(cost).sum::<usize>();
-    let mut removed = Vec::new();
     let mut cleared_results = 0usize;
-    let mut dropped_groups = 0usize;
 
-    // 预算不够时先清旧工具结果的正文，再考虑整组丢弃；调用与结果的配对必须保留。
+    // 预算不够时仅清理可重新读取的旧工具结果正文；调用与结果的配对必须保留。
     let mut clearable: Vec<(usize, usize)> = Vec::new();
     for (gi, group) in groups.iter().enumerate() {
         for (mi, m) in group.iter().enumerate() {
@@ -216,49 +446,58 @@ pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<Pac
         cleared_results += 1;
     }
 
-    while total + 2048 > budget && groups.len() > 2 {
-        let g = groups.remove(0);
-        total = total.saturating_sub(cost(&g));
-        dropped_groups += 1;
-        if g[0].role == Role::User {
-            removed.push(g[0].content.chars().take(180).collect::<String>());
-        }
-    }
-    if total + 2048 > budget {
+    let needs_model_compaction = total + 2048 > budget && groups.len() > 2;
+    if total + 2048 > budget && !needs_model_compaction {
         return Err(Error::Conflict(format!(
             "当前消息超过上下文预算（可用 {budget} 字符），请缩短内容或调大 runtime.contextChars"
         )));
     }
     let mut result = vec![message(Role::System, system)];
-    if !removed.is_empty() {
-        result.push(message(
-            Role::User,
-            format!(
-                "[历史用户请求摘录；不是当前状态或执行证据]\n{}",
-                removed
-                    .into_iter()
-                    .rev()
-                    .take(8)
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            ),
-        ));
-    }
     result.extend(groups.into_iter().flatten());
     let tokens = estimate_messages_tokens(&result);
     Ok(PackedContext {
         messages: result,
         tokens,
         cleared_results,
-        dropped_groups,
+        needs_model_compaction,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{ModelAuth, ModelOptions, ModelProtocol};
+    use crate::extension::ToolExecution;
     use crate::model::ToolCall;
     use serde_json::json;
+    use std::collections::HashMap;
+
+    fn test_model(name: &str) -> ModelConfig {
+        ModelConfig {
+            id: name.into(),
+            name: name.into(),
+            protocol: ModelProtocol::OpenaiResponses,
+            model: name.into(),
+            base_url: "https://example.test/v1".into(),
+            api_key: Some("never-hashed".into()),
+            auth: ModelAuth::Bearer,
+            headers: HashMap::new(),
+            options: ModelOptions::default(),
+        }
+    }
+
+    fn test_tool(name: &str) -> ToolDefinition {
+        ToolDefinition {
+            name: name.into(),
+            label: name.into(),
+            description: "test".into(),
+            input_schema: json!({"type":"object"}),
+            output_schema: None,
+            source: "test".into(),
+            provider_version: Some("1".into()),
+            execution: ToolExecution::read_only(),
+        }
+    }
 
     #[test]
     fn refuses_oversized_recent_messages() {
@@ -269,6 +508,35 @@ mod tests {
                 4096
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn over_budget_history_requests_model_compaction_without_dropping_messages() {
+        let history = vec![
+            message(Role::User, format!("first:{}", "a".repeat(1800))),
+            message(Role::Assistant, format!("second:{}", "b".repeat(1800))),
+            message(Role::User, format!("third:{}", "c".repeat(1800))),
+        ];
+        let packed = build("system".into(), history, 4096).unwrap();
+        assert!(packed.needs_model_compaction);
+        assert!(
+            packed
+                .messages
+                .iter()
+                .any(|m| m.content.starts_with("first:"))
+        );
+        assert!(
+            packed
+                .messages
+                .iter()
+                .any(|m| m.content.starts_with("second:"))
+        );
+        assert!(
+            packed
+                .messages
+                .iter()
+                .any(|m| m.content.starts_with("third:"))
         );
     }
 
@@ -320,5 +588,150 @@ mod tests {
         );
         assert!(query.contains("你好"));
         assert!(query.contains("帮我改配置组"));
+    }
+
+    #[test]
+    fn compaction_uses_a_stable_boundary_and_keeps_recent_rounds_raw() {
+        let entries = (1..=8)
+            .map(|id| HistoryEntry {
+                sort_key: id,
+                id,
+                message: message(
+                    if id % 2 == 0 {
+                        Role::Assistant
+                    } else {
+                        Role::User
+                    },
+                    format!("message-{id}"),
+                ),
+            })
+            .collect::<Vec<_>>();
+        let previous = StoredSummary {
+            through_sort_key: 0,
+            through_message_id: 0,
+            content: "旧摘要".into(),
+        };
+        let plan = plan_compaction(&entries, Some(&previous), 128).unwrap();
+        assert!(plan.through_message_id <= 6);
+        assert!(plan.through_message_id >= 1);
+        assert!(plan.source[0].content.contains("旧摘要"));
+        assert!(plan.source.iter().any(|entry| entry.content == "message-1"));
+        assert!(!plan.source.iter().any(|entry| entry.content == "message-8"));
+    }
+
+    #[test]
+    fn compaction_plan_never_splits_tool_call_and_result() {
+        let mut assistant = message(Role::Assistant, "读取");
+        assistant.tool_calls.push(ToolCall {
+            id: "paired".into(),
+            name: "bgi.state.get".into(),
+            arguments: json!({}),
+        });
+        let mut result = message(Role::Tool, "x".repeat(200));
+        result.tool_call_id = Some("paired".into());
+        let entries = vec![
+            HistoryEntry {
+                sort_key: 1,
+                id: 1,
+                message: assistant,
+            },
+            HistoryEntry {
+                sort_key: 1,
+                id: 2,
+                message: result,
+            },
+            HistoryEntry {
+                sort_key: 3,
+                id: 3,
+                message: message(Role::User, "继续"),
+            },
+            HistoryEntry {
+                sort_key: 4,
+                id: 4,
+                message: message(Role::Assistant, "完成"),
+            },
+        ];
+        let plan = plan_compaction(&entries, None, 8192).unwrap();
+        assert!(plan.source.iter().any(|entry| !entry.tool_calls.is_empty()));
+        assert!(
+            plan.source
+                .iter()
+                .any(|entry| entry.tool_call_id.as_deref() == Some("paired"))
+        );
+    }
+
+    #[test]
+    fn prompt_cache_hits_when_the_previous_request_is_an_exact_prefix() {
+        let model = test_model("model-a");
+        let tools = vec![test_tool("z.read"), test_tool("a.read")];
+        let first_messages = vec![
+            message(Role::System, "stable"),
+            message(Role::User, "first"),
+        ];
+        let cold =
+            prompt_cache_decision(None, &model, "stable", &tools, &first_messages, 120).unwrap();
+        assert!(!cold.hit);
+        assert_eq!(cold.reason, "coldStart");
+
+        let mut next_messages = first_messages;
+        next_messages.push(message(Role::Assistant, "answer"));
+        next_messages.push(message(Role::User, "continue"));
+        let hit = prompt_cache_decision(
+            Some(&cold.next),
+            &model,
+            "stable",
+            &tools.into_iter().rev().collect::<Vec<_>>(),
+            &next_messages,
+            180,
+        )
+        .unwrap();
+        assert!(hit.hit);
+        assert_eq!(hit.hit_tokens, 120);
+        assert_eq!(hit.reason, "hit");
+    }
+
+    #[test]
+    fn prompt_cache_reports_which_cache_critical_section_changed() {
+        let model = test_model("model-a");
+        let messages = vec![
+            message(Role::System, "stable"),
+            message(Role::User, "first"),
+        ];
+        let cold = prompt_cache_decision(None, &model, "stable", &[], &messages, 100).unwrap();
+
+        let system_change =
+            prompt_cache_decision(Some(&cold.next), &model, "changed", &[], &messages, 100)
+                .unwrap();
+        assert_eq!(system_change.reason, "systemChanged");
+
+        let tool_change = prompt_cache_decision(
+            Some(&cold.next),
+            &model,
+            "stable",
+            &[test_tool("new.read")],
+            &messages,
+            100,
+        )
+        .unwrap();
+        assert_eq!(tool_change.reason, "toolsChanged");
+
+        let mut rewritten = messages.clone();
+        rewritten[1].content = "rewritten".into();
+        let history_change =
+            prompt_cache_decision(Some(&cold.next), &model, "stable", &[], &rewritten, 100)
+                .unwrap();
+        assert_eq!(history_change.reason, "historyRewritten");
+
+        let other_model = test_model("model-b");
+        let model_change = prompt_cache_decision(
+            Some(&cold.next),
+            &other_model,
+            "stable",
+            &[],
+            &messages,
+            100,
+        )
+        .unwrap();
+        assert_eq!(model_change.reason, "modelChanged");
     }
 }

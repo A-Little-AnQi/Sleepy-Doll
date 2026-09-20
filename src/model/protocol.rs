@@ -1069,20 +1069,25 @@ mod tests {
         let history = journal.conversation_messages("c").unwrap();
         let stored = history
             .iter()
-            .find(|m| m.role == Role::Assistant)
+            .find(|entry| entry.message.role == Role::Assistant)
             .expect("落库后缺少 assistant 轮次");
         assert_eq!(
-            stored.reasoning.as_ref(),
+            stored.message.reasoning.as_ref(),
             Some(&reasoning),
             "落库往返丢了推理载荷"
         );
+        assert!(!stored.created_at.is_empty(), "对话读取丢了消息时间");
 
         let config: ModelConfig = serde_json::from_value(json!({
             "id":"test","name":"test","protocol":"anthropic-messages",
             "model":"test","baseUrl":"http://localhost"
         }))
         .unwrap();
-        let body = anthropic_body(&config, &history, &[]);
+        let messages = history
+            .iter()
+            .map(|entry| entry.message.clone())
+            .collect::<Vec<_>>();
+        let body = anthropic_body(&config, &messages, &[]);
         let assistant = body["messages"]
             .as_array()
             .unwrap()

@@ -96,6 +96,7 @@ impl Bridge {
             match self.request("GET", path, None, cancel).await {
                 Ok(v) => return Ok(v),
                 Err(Error::Http(s)) => last = Some(Error::Http(s)),
+                Err(Error::Timeout(s)) => last = Some(Error::Timeout(s)),
                 Err(e) => return Err(e),
             }
             if attempt == 2 {

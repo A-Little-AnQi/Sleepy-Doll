@@ -11,7 +11,7 @@ vi.mock("../../ipc/api", () => ({
   },
 }));
 
-import { ChatPage } from "./ChatPage";
+import { ChatPage, RunPlanCard } from "./ChatPage";
 import { PREVIEW_PERMISSION, type Bootstrap } from "../../ipc/types";
 
 beforeAll(() => {
@@ -58,6 +58,34 @@ const bootstrap: Bootstrap = {
   permission: PREVIEW_PERMISSION,
   bridge: { enabled: true, connected: true, baseUrl: "http://127.0.0.1" },
 };
+
+it("uses the shared animated disclosure for the in-conversation plan", () => {
+  const save = vi.fn();
+  const { container } = render(
+    <RunPlanCard
+      plan={{
+        goal: "完成测试路线",
+        steps: [
+          {
+            id: "step-1",
+            title: "运行测试路线",
+            tool: "bgi.route.run",
+            outcome: "verifiedSucceeded",
+          },
+        ],
+      }}
+      save={{ disabled: false, onClick: save }}
+    />,
+  );
+  const summary = screen.getByRole("button", { name: /执行计划/ });
+  const motion = container.querySelector(".run-plan-motion") as HTMLElement;
+  expect(summary.querySelector(".sd-chevron")).toBeTruthy();
+  expect(motion.getAttribute("aria-hidden")).toBe("true");
+  fireEvent.click(summary);
+  expect(motion.getAttribute("aria-hidden")).toBe("false");
+  fireEvent.click(screen.getByRole("button", { name: "保存为快捷任务" }));
+  expect(save).toHaveBeenCalledOnce();
+});
 
 it("puts the model picker in the composer instead of following a default option", () => {
   render(

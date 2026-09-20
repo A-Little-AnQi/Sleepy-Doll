@@ -6,21 +6,19 @@ export function ContextMeter({
   used,
   window,
   compacted = false,
-  cacheRead = 0,
+  cacheHit = 0,
 }: {
   used: number;
   window: number;
   compacted?: boolean;
-  cacheRead?: number;
+  cacheHit?: number;
 }) {
   const t = useT();
   const ratio = window > 0 ? Math.min(1, used / window) : 0;
   const high = ratio >= 0.85;
   const title = [
-    compacted
-      ? t.context.compacted
-      : t.context.inModel,
-    cacheRead > 0 ? t.context.cacheHit(formatTokens(cacheRead)) : "",
+    compacted ? t.context.compacted : t.context.inModel,
+    cacheHit > 0 ? t.context.cacheHit(formatTokens(cacheHit)) : "",
   ]
     .filter(Boolean)
     .join("；");
@@ -35,7 +33,7 @@ export function ContextMeter({
       <span className="sd-context-copy">
         {formatTokens(used)} / {formatTokens(window)}
       </span>
-      {cacheRead > 0 ? <em>缓存 {formatTokens(cacheRead)}</em> : null}
+      {cacheHit > 0 ? <em>缓存 {formatTokens(cacheHit)}</em> : null}
       {compacted ? <em>已压缩</em> : null}
     </div>
   );

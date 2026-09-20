@@ -27,6 +27,8 @@ sleepy-doll.config.*.tmp
 *.pfx
 .idea/
 .vscode/
+.cursor/
+.dev-vite.sh
 *.swp
 *~
 npm-debug.log*

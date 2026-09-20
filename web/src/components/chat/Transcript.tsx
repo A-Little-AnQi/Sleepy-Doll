@@ -10,13 +10,8 @@ import {
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
-import {
-  AlertIcon,
-  BrandIcon,
-  CheckIcon,
-  ChevronIcon,
-  CopyIcon,
-} from "../icons";
+import { AlertIcon, CheckIcon, CopyIcon } from "../icons";
+import { DisclosureChevron } from "../controls/DisclosureChevron";
 import type { MessageInfo } from "../../ipc/types";
 import "./Transcript.css";
 
@@ -32,6 +27,7 @@ type Part =
 export interface Turn {
   role: "user" | "assistant";
   parts: Part[];
+  createdAt?: string;
 }
 
 /** 工具在界面上显示的名字。 */
@@ -87,8 +83,15 @@ export function buildTurns(messages: MessageInfo[], stream: string): Turn[] {
     if (!message.content && !calls.length && !reasoning) continue;
     let turn = turns.at(-1);
     if (!turn || turn.role !== message.role || message.role === "user") {
-      turn = { role: message.role, parts: [] };
-      turns.push(turn);
+      const nextTurn: Turn = {
+        role: message.role,
+        parts: [],
+        ...(message.createdAt ? { createdAt: message.createdAt } : {}),
+      };
+      turns.push(nextTurn);
+      turn = nextTurn;
+    } else if (message.createdAt) {
+      turn.createdAt = message.createdAt;
     }
     if (reasoning) pushReasoning(turn, reasoning);
     if (message.content)
@@ -149,6 +152,7 @@ function ActivityGroup({
   activities: Activity[];
   labels: ToolLabels;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const running = activities.some(
     (activity) => outcome(activity) === "running",
   );
@@ -163,8 +167,13 @@ function ActivityGroup({
   const subject =
     activities.length === 1 ? subjectOf(activities[0]!.arguments) : "";
   return (
-    <details className="activity-group">
-      <summary>
+    <section className="activity-group" data-expanded={expanded}>
+      <button
+        type="button"
+        className="activity-summary"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((open) => !open)}
+      >
         {running ? (
           <span className="activity-spinner" />
         ) : failed ? (
@@ -179,52 +188,96 @@ function ActivityGroup({
             {running ? "进行中" : "调用失败"}
           </span>
         )}
-        <ChevronIcon className="activity-expand" />
-      </summary>
-      <div className="activity-detail">
-        {activities.map((activity) => (
-          <div className="activity-item" key={activity.id}>
-            <strong>{labels[activity.name] ?? activity.name}</strong>
-            <details>
-              <summary>参数</summary>
-              <pre>{JSON.stringify(activity.arguments, null, 2)}</pre>
-            </details>
-            {activity.result && (
-              <details>
-                <summary>返回数据</summary>
-                <pre>{activity.result}</pre>
-              </details>
-            )}
+        <DisclosureChevron expanded={expanded} className="activity-expand" />
+      </button>
+      <div
+        className="activity-disclosure-motion"
+        aria-hidden={!expanded}
+        inert={!expanded}
+      >
+        <div className="activity-disclosure-inner">
+          <div className="activity-detail">
+            {activities.map((activity) => (
+              <div className="activity-item" key={activity.id}>
+                <strong>{labels[activity.name] ?? activity.name}</strong>
+                <ActivityDetailDisclosure label="参数">
+                  {JSON.stringify(activity.arguments, null, 2)}
+                </ActivityDetailDisclosure>
+                {activity.result && (
+                  <ActivityDetailDisclosure label="返回数据">
+                    {activity.result}
+                  </ActivityDetailDisclosure>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
       </div>
-    </details>
+    </section>
+  );
+}
+
+function ActivityDetailDisclosure({
+  label,
+  children,
+}: {
+  label: string;
+  children: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <section className="activity-subdetails" data-expanded={expanded}>
+      <button
+        type="button"
+        className="activity-subsummary"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((open) => !open)}
+      >
+        <DisclosureChevron expanded={expanded} />
+        <span>{label}</span>
+      </button>
+      <div
+        className="activity-disclosure-motion"
+        aria-hidden={!expanded}
+        inert={!expanded}
+      >
+        <div className="activity-disclosure-inner">
+          <pre>{children}</pre>
+        </div>
+      </div>
+    </section>
   );
 }
 
 /** 推理文本，默认折叠。 */
 function ReasoningDisclosure({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <details className="activity-group reasoning-group">
-      <summary>
+    <section
+      className="activity-group reasoning-group"
+      data-expanded={expanded}
+    >
+      <button
+        type="button"
+        className="activity-summary"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((open) => !open)}
+      >
         <span className="activity-label">思考过程</span>
-        <ChevronIcon className="activity-expand" />
-      </summary>
-      <div className="activity-detail">
-        <pre className="reasoning-text">{text}</pre>
+        <DisclosureChevron expanded={expanded} className="activity-expand" />
+      </button>
+      <div
+        className="activity-disclosure-motion"
+        aria-hidden={!expanded}
+        inert={!expanded}
+      >
+        <div className="activity-disclosure-inner">
+          <div className="activity-detail">
+            <pre className="reasoning-text">{text}</pre>
+          </div>
+        </div>
       </div>
-    </details>
-  );
-}
-
-function AssistantIdentity() {
-  return (
-    <div className="message-identity">
-      <span className="assistant-avatar">
-        <BrandIcon />
-      </span>
-      <span>Sleepy Doll</span>
-    </div>
+    </section>
   );
 }
 
@@ -312,6 +365,18 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+const messageTime = new Intl.DateTimeFormat(undefined, {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+function formatMessageTime(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? "" : messageTime.format(date);
+}
+
 export const Transcript = memo(function Transcript({
   messages,
   stream,
@@ -338,9 +403,9 @@ export const Transcript = memo(function Transcript({
     <>
       {turns.map((turn, index) => {
         const copy = turnCopyText(turn);
+        const time = formatMessageTime(turn.createdAt);
         return (
           <article key={index} className={`message-turn ${turn.role}`}>
-            {turn.role === "assistant" && <AssistantIdentity />}
             <div className="message-content">
               {turn.parts.map((part, partIndex) =>
                 part.kind === "text" ? (
@@ -383,11 +448,16 @@ export const Transcript = memo(function Transcript({
                   </div>
                 )}
             </div>
-            {copy ? (
+            {copy || time ? (
               <div
                 className={`message-actions${turn.role === "user" ? " is-user" : ""}`}
               >
-                <CopyButton text={copy} />
+                {time && (
+                  <time className="message-time" dateTime={turn.createdAt}>
+                    {time}
+                  </time>
+                )}
+                {copy && <CopyButton text={copy} />}
               </div>
             ) : null}
           </article>
@@ -395,7 +465,6 @@ export const Transcript = memo(function Transcript({
       })}
       {phase && last?.role !== "assistant" && (
         <article className="message-turn assistant">
-          <AssistantIdentity />
           <div className="response-phase" role="status">
             <span className="activity-spinner" />
             {phase}

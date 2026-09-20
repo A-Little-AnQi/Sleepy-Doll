@@ -21,12 +21,14 @@ import {
 import { Toast } from "../../components/overlay/Toast";
 import type { Bootstrap } from "../../ipc/types";
 import { MotionSwitch } from "../../components/controls/MotionSwitch";
+import { DisclosureChevron } from "../../components/controls/DisclosureChevron";
 import { resolveConversationModel } from "../../models";
 import { ContextMeter } from "../../components/chat/ContextMeter";
 import { ComposerDeck } from "../../components/chat/ComposerDeck";
 import { ComposerField } from "../../components/chat/ComposerField";
 import { estimateMessagesTokens } from "../../session/context-usage";
 import { useT } from "../../i18n";
+import type { Plan } from "../../session";
 
 interface Props {
   bootstrap: Bootstrap;
@@ -36,6 +38,75 @@ interface Props {
   onComposerDraft?(active: boolean): void;
   onOpenHelp?(): void;
 }
+
+export function RunPlanCard({
+  plan,
+  save,
+}: {
+  plan: Plan;
+  save?:
+    | {
+        disabled: boolean;
+        onClick(): void;
+      }
+    | undefined;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <section className="run-plan-cluster" data-expanded={expanded}>
+      <div className="run-plan">
+        <button
+          type="button"
+          className="run-plan-summary"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((open) => !open)}
+        >
+          <span>执行计划</span>
+          <span className="muted">· {plan.steps.length} 步</span>
+          <DisclosureChevron expanded={expanded} />
+        </button>
+        <div
+          className="run-plan-motion"
+          aria-hidden={!expanded}
+          inert={!expanded}
+        >
+          <div className="run-plan-motion-inner">
+            <ol>
+              {plan.steps.map((step) => (
+                <li key={step.id}>
+                  {step.title}
+                  {step.outcome && (
+                    <span className="muted">
+                      {" "}
+                      ·{" "}
+                      {step.outcome === "active"
+                        ? "进行中"
+                        : step.outcome === "verifiedSucceeded"
+                          ? "已完成"
+                          : step.outcome}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      </div>
+      {save && (
+        <button
+          type="button"
+          className="subtle-action save-workflow-action"
+          disabled={save.disabled}
+          onClick={save.onClick}
+        >
+          <CheckIcon className="button-icon" />
+          保存为快捷任务
+        </button>
+      )}
+    </section>
+  );
+}
+
 export function ChatPage({
   bootstrap,
   conversationId,
@@ -258,27 +329,31 @@ export function ChatPage({
                   toolLabels={toolLabels}
                 />
                 {plan && (
-                  <details className="run-plan">
-                    <summary>执行计划 · {plan.steps.length} 步</summary>
-                    <ol>
-                      {plan.steps.map((step) => (
-                        <li key={step.id}>
-                          {step.title}
-                          {step.outcome && (
-                            <span className="muted">
-                              {" "}
-                              ·{" "}
-                              {step.outcome === "active"
-                                ? "进行中"
-                                : step.outcome === "verifiedSucceeded"
-                                  ? "已完成"
-                                  : step.outcome}
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ol>
-                  </details>
+                  <RunPlanCard
+                    plan={plan}
+                    save={
+                      task?.state === "succeeded"
+                        ? {
+                            disabled:
+                              saving ||
+                              bootstrap.workflows.some(
+                                (flow) =>
+                                  flow.lastRunId === task.id ||
+                                  flow.sourceConversationId ===
+                                    task.conversationId,
+                              ),
+                            onClick: () => {
+                              setSaving(true);
+                              void act(() =>
+                                plan.steps.every((step) => !!step.tool)
+                                  ? api.extractWorkflow(task.id, plan.goal)
+                                  : api.extractStrategy(task.id, plan.goal),
+                              ).finally(() => setSaving(false));
+                            },
+                          }
+                        : undefined
+                    }
+                  />
                 )}
                 {question && (
                   <section className="run-question">
@@ -336,38 +411,38 @@ export function ChatPage({
                 )}
                 {task &&
                   !busy &&
-                  ["failed", "cancelled", "needsReview", "partial"].includes(
-                    task.state,
-                  ) && (
+                  [
+                    "failed",
+                    "cancelled",
+                    "needsReview",
+                    "partial",
+                    "blocked",
+                  ].includes(task.state) && (
                     <section className="run-error">
                       <h3>{taskLabels[task.state]}</h3>
                       <p>{task.error || task.result}</p>
+                      {task.state === "blocked" && (
+                        <div className="detail-actions">
+                          <button
+                            className="primary-action"
+                            onClick={() =>
+                              void act(() => api.resumeTask(task.id))
+                            }
+                          >
+                            重试
+                          </button>
+                          <button
+                            className="secondary-action"
+                            onClick={() =>
+                              void act(() => api.cancelTask(task.id))
+                            }
+                          >
+                            停止
+                          </button>
+                        </div>
+                      )}
                     </section>
                   )}
-                {task?.state === "succeeded" && plan && (
-                  <button
-                    className="subtle-action"
-                    disabled={
-                      saving ||
-                      bootstrap.workflows.some(
-                        (flow) =>
-                          flow.lastRunId === task.id ||
-                          flow.sourceConversationId === task.conversationId,
-                      )
-                    }
-                    onClick={() => {
-                      setSaving(true);
-                      void act(() =>
-                        plan.steps.every((step) => !!step.tool)
-                          ? api.extractWorkflow(task.id, plan.goal)
-                          : api.extractStrategy(task.id, plan.goal),
-                      ).finally(() => setSaving(false));
-                    }}
-                  >
-                    <CheckIcon className="button-icon" />
-                    保存为快捷任务
-                  </button>
-                )}
               </div>
             </div>
           )}
@@ -473,7 +548,9 @@ export function ChatPage({
                 used={contextUsed}
                 window={contextWindow}
                 compacted={Boolean(task?.contextCompacted)}
-                cacheRead={task?.cacheReadTokens ?? 0}
+                cacheHit={
+                  task?.promptCacheHit ? (task.promptCacheHitTokens ?? 0) : 0
+                }
               />
               <div className="composer-menu composer-model">
                 <Select

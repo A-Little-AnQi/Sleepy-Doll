@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub const LATEST_SCHEMA_VERSION: i64 = 13;
+pub const LATEST_SCHEMA_VERSION: i64 = 14;
 
 pub fn migrate(connection: &mut Connection) -> Result<()> {
     connection.execute_batch(
@@ -273,6 +273,20 @@ const MIGRATIONS: &[(i64, &str)] = &[
             collapsed INTEGER NOT NULL DEFAULT 0
         );
         ALTER TABLE conversations ADD COLUMN group_id TEXT;
+    "#,
+    ),
+    // 对话压缩只保存滚动摘要与一个稳定的逻辑排序边界；原始消息仍完整保留。
+    (
+        14,
+        r#"
+        CREATE TABLE IF NOT EXISTS conversation_compactions(
+            conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+            run_id TEXT NOT NULL,
+            through_sort_key INTEGER NOT NULL,
+            through_message_id INTEGER NOT NULL,
+            summary TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
     "#,
     ),
 ];

@@ -15,7 +15,7 @@ it("applies the theme immediately when view transitions are unavailable", async 
   expect(localStorage.getItem("sleepy-doll-theme")).toBe("dark");
 });
 
-it("reveals the new theme from the click point", async () => {
+it("crossfades the whole interface as one theme layer", async () => {
   const animate = vi.fn();
   const ready = Promise.resolve();
   const finished = Promise.resolve();
@@ -36,11 +36,11 @@ it("reveals the new theme from the click point", async () => {
   await ready;
   expect(animate).toHaveBeenCalled();
   const [keyframes, options] = animate.mock.calls[0] as [
-    { clipPath: string[] },
+    { opacity: number[] },
     KeyframeAnimationOptions,
   ];
-  expect(keyframes.clipPath[0]).toBe("circle(0px at 12px 34px)");
-  expect(keyframes.clipPath[1]).toMatch(/^circle\(.+ at 12px 34px\)$/);
+  expect(keyframes.opacity).toEqual([0, 1]);
+  expect(options.duration).toBe(160);
   expect(options.pseudoElement).toBe("::view-transition-new(root)");
   await finished;
   expect(document.documentElement.dataset.themeReveal).toBeUndefined();

@@ -239,6 +239,11 @@ impl AppController {
             "task.cancel" | "run.cancel" => Ok(crate::runtime::types::public_run(
                 &self.supervisor.cancel(required(&params, "id")?)?,
             )),
+            "task.resume" | "run.resume" => Ok(crate::runtime::types::public_run(
+                &self
+                    .supervisor
+                    .resume(required(&params, "id")?, params["durationSec"].as_i64())?,
+            )),
             "run.input" => {
                 self.supervisor.journal.input_once(
                     required(&params, "id")?,

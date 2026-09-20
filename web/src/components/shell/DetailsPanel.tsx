@@ -154,7 +154,7 @@ export function DetailsPanel({
             ) : (
               <p className="muted">{t.common.loading}</p>
             )
-          ) : tasks.length ? (
+          ) : tasks.length || runs.length ? (
             <>
               {tasks.map((task) => (
                 <TaskCard
@@ -170,7 +170,7 @@ export function DetailsPanel({
             <div className="empty-state is-compact">
               <HistoryIcon />
               <h3>{t.tasks.empty}</h3>
-              <p>{t.tasks.emptyHint}</p>
+              <p>{t.tasks.emptyHow}</p>
             </div>
           )}
         </MotionSwitch>

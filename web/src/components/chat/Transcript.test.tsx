@@ -79,6 +79,61 @@ it("falls back to the tool name when a tool has no label of its own", () => {
   expect(container.querySelector(".activity-subject")).toBeNull();
 });
 
+it("uses the shared animated disclosure chevron beside tool status text", () => {
+  const { container } = render(
+    <Transcript
+      messages={[call("demo.echo", {})]}
+      stream=""
+      seconds={0}
+      toolLabels={{}}
+    />,
+  );
+  const summary = container.querySelector(".activity-summary") as HTMLElement;
+  const chevron = summary.querySelector(".sd-chevron") as SVGElement;
+  const motion = container.querySelector(
+    ".activity-disclosure-motion",
+  ) as HTMLElement;
+  expect(chevron).toBeTruthy();
+  expect(chevron.getAttribute("data-expanded")).toBe("false");
+  expect(summary.lastElementChild).toBe(chevron);
+  expect(motion.getAttribute("aria-hidden")).toBe("true");
+  fireEvent.click(summary);
+  expect(chevron.getAttribute("data-expanded")).toBe("true");
+  expect(motion.getAttribute("aria-hidden")).toBe("false");
+});
+
+it("groups message time and copy into a separate action row for every role", () => {
+  const { container } = render(
+    <Transcript
+      messages={[
+        {
+          role: "user",
+          content: "检查状态",
+          createdAt: "2026-09-20T03:38:00Z",
+        },
+        {
+          role: "assistant",
+          content: "完成",
+          createdAt: "2026-09-20T03:39:00Z",
+        },
+      ]}
+      stream=""
+      seconds={0}
+      toolLabels={{}}
+    />,
+  );
+  const turns = Array.from(container.querySelectorAll(".message-turn"));
+  expect(turns).toHaveLength(2);
+  for (const turn of turns) {
+    const content = turn.querySelector(".message-content");
+    const actions = turn.querySelector(".message-actions");
+    expect(actions?.previousElementSibling).toBe(content);
+    expect(actions?.querySelector(".message-time")?.textContent).toBeTruthy();
+    expect(actions?.querySelector(".copy-action")).toBeTruthy();
+  }
+  expect(turns[0]?.querySelector(".message-actions.is-user")).toBeTruthy();
+});
+
 it("renders streaming tokens as markdown instead of a clipped preview", () => {
   render(
     <Transcript

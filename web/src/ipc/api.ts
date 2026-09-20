@@ -192,6 +192,7 @@ export const api = {
       eventsReadParams(conversationId, after, Boolean(window.ipc)),
     ),
   cancelTask: (id: string) => invoke<TaskInfo>("task.cancel", { id }),
+  resumeTask: (id: string) => invoke<TaskInfo>("task.resume", { id }),
   conversation: (id: string) =>
     invoke<{ id: string; messages: MessageInfo[] }>("conversation.get", { id }),
   useModel: (id: string) =>

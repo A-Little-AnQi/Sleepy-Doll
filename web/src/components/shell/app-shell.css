@@ -740,7 +740,7 @@ html[data-theme-reveal="true"]::view-transition-new(root) {
   mix-blend-mode: normal;
 }
 html[data-theme-reveal="true"]::view-transition-group(root) {
-  animation-duration: 560ms;
+  animation-duration: 160ms;
 }
 /* 主题揭示期间去掉列表项的 view-transition-name，让它们跟随整页一起换。 */
 html[data-theme-reveal="true"] .app-conversations li,

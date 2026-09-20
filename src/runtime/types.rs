@@ -105,7 +105,7 @@ impl RunState {
                 Self::WaitingJob | Self::Verifying | Self::Deciding | Self::Blocked
             ),
             // blocked 修好后由用户重新点击运行，不自动推进。
-            Self::Blocked => matches!(next, Self::Preflighting | Self::Deciding),
+            Self::Blocked => matches!(next, Self::Queued | Self::Preflighting | Self::Deciding),
             _ => false,
         }
     }
@@ -136,10 +136,24 @@ pub struct Run {
     /// 本轮是否已经丢掉或清空过较早上下文。
     #[serde(default)]
     pub context_compacted: bool,
-    /// 最近一次请求的缓存命中（token）。Anthropic 是 cache_read，OpenAI / Gemini
-    /// 是 prompt 里被计为 cached 的部分。
+    /// 模型服务报告的缓存读取量，仅用于核对底层协议行为。它不代表 Agent 已经
+    /// 正确维持了可复用前缀。
     #[serde(default)]
     pub cache_read_tokens: u64,
+    /// Agent 在发起本轮模型请求前确认可复用的稳定前缀 token 数。命中判断来自
+    /// 本地保存的模型、系统提示、工具契约与消息前缀快照，不依赖厂商用量字段。
+    #[serde(default)]
+    pub prompt_cache_hit_tokens: u64,
+    /// 最近一次模型请求是否复用了上一轮的完整稳定前缀。
+    #[serde(default)]
+    pub prompt_cache_hit: bool,
+    /// 冷启动或失效原因，供事件、诊断和测试使用。
+    #[serde(default)]
+    pub prompt_cache_reason: Option<String>,
+    /// 最近一次已经派发给模型的缓存关键快照。先持久化再发送，崩溃恢复后仍能
+    /// 判断后续请求有没有改写既有前缀。
+    #[serde(default)]
+    pub prompt_cache_snapshot: Option<PromptCacheSnapshot>,
     #[serde(default)]
     pub message_boundary: i64,
     pub result: Option<String>,
@@ -152,6 +166,17 @@ pub struct Run {
     /// 本轮已经发现、允许直接调用的工具与桥接口，崩溃恢复后从这里还原。
     #[serde(default)]
     pub discovered: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptCacheSnapshot {
+    pub model_key: String,
+    pub system_key: String,
+    pub tools_key: String,
+    pub prefix_key: String,
+    pub message_count: usize,
+    pub tokens: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -282,7 +307,12 @@ pub fn unix_now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
 pub fn public_run(run: &Run) -> Value {
-    serde_json::to_value(run).expect("serializable run")
+    let mut value = serde_json::to_value(run).expect("serializable run");
+    // 前缀哈希只用于恢复与审计，界面既不需要它，也不应把内部缓存键当产品状态。
+    if let Some(object) = value.as_object_mut() {
+        object.remove("promptCacheSnapshot");
+    }
+    value
 }
 pub fn now() -> String {
     time::OffsetDateTime::now_utc()
@@ -293,4 +323,55 @@ pub fn hash(value: &Value) -> String {
     use sha2::{Digest, Sha256};
     // serde_json 的 map 按 key 排序（preserve_order 未启用）。
     format!("{:x}", Sha256::digest(value.to_string().as_bytes()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocked_runs_can_be_requeued_or_cancelled() {
+        assert!(RunState::Blocked.permits(RunState::Queued));
+        assert!(RunState::Blocked.permits(RunState::Cancelled));
+    }
+
+    #[test]
+    fn public_run_does_not_expose_the_internal_prompt_cache_key() {
+        let run = Run {
+            id: "run".into(),
+            conversation_id: "conversation".into(),
+            prompt: "test".into(),
+            state: RunState::Deciding,
+            revision: 1,
+            created_at: "now".into(),
+            updated_at: "now".into(),
+            deadline: 1,
+            decisions: 1,
+            tool_calls: 0,
+            input_tokens: 10,
+            output_tokens: 0,
+            usage_estimated: true,
+            context_tokens: 10,
+            context_window: 100,
+            context_compacted: false,
+            cache_read_tokens: 0,
+            prompt_cache_hit_tokens: 10,
+            prompt_cache_hit: true,
+            prompt_cache_reason: Some("hit".into()),
+            prompt_cache_snapshot: Some(PromptCacheSnapshot {
+                model_key: "secret-model-key".into(),
+                ..PromptCacheSnapshot::default()
+            }),
+            message_boundary: 1,
+            result: None,
+            error: None,
+            source: RunSource::Agent,
+            model_id: Some("model".into()),
+            discovered: vec![],
+        };
+        let public = public_run(&run);
+        assert!(public.get("promptCacheSnapshot").is_none());
+        assert_eq!(public["promptCacheHit"], true);
+        assert_eq!(public["promptCacheHitTokens"], 10);
+    }
 }

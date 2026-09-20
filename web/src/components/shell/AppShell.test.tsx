@@ -139,6 +139,43 @@ it("peeks the collapsed sidebar from the left edge without a scrim", () => {
   expect(document.querySelector(".app-scrim")).toBeNull();
 });
 
+it("keeps sidebar and details drawers mutually exclusive on narrow windows", async () => {
+  stubWide(false);
+  localStorage.setItem("sleepy-doll-sidebar-collapsed", "false");
+  function Harness() {
+    const [detailsOpen, setDetailsOpen] = useState(true);
+    return (
+      <AppShell
+        bootstrap={bootstrap}
+        page="chat"
+        detailsOpen={detailsOpen}
+        details={<aside>详情内容</aside>}
+        onPage={() => undefined}
+        onNew={() => undefined}
+        onConversation={() => undefined}
+        onToggleDetails={() => setDetailsOpen((open) => !open)}
+        reload={async () => undefined}
+      />
+    );
+  }
+  render(<Harness />);
+  expect(document.querySelector(".details-scrim")).toBeTruthy();
+  expect(document.querySelector(".app-scrim")).toBeNull();
+  expect(
+    document.querySelector(".app-sidebar")?.getAttribute("aria-hidden"),
+  ).toBe("true");
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "展开侧栏" }),
+    ).toBeTruthy(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "展开侧栏" }));
+  expect(document.querySelector(".details-scrim")).toBeNull();
+  expect(
+    document.querySelector(".app-sidebar")?.getAttribute("aria-hidden"),
+  ).toBe("false");
+});
+
 it("does not dismiss peek when the pointer leaves the window", async () => {
   renderShell(true);
   const peek = document.querySelector(".app-sidebar-peek") as HTMLElement;

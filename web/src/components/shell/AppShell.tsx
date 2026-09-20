@@ -438,9 +438,13 @@ export function AppShell({
     window.addEventListener("pointercancel", stop);
   };
 
+  const detailsToggle = page === "chat";
+  const detailsPane = detailsOpen && (page === "chat" || page === "tasks");
+  const detailsDrawerOpen = detailsPane && !roomForDetails;
   // 宽窗口未折叠时侧栏占布局列，其余情况靠左缘悬停唤出悬浮抽屉。
+  // 窄窗只允许一个模态抽屉；详情打开时侧栏不会同时留在遮罩下。
   const docked = wide && !collapsed;
-  const overlayOpen = !docked && (peek || !collapsed);
+  const overlayOpen = !docked && (peek || !collapsed) && !detailsDrawerOpen;
   const sidebarVisible = docked || overlayOpen;
   const showPeek = () => {
     window.clearTimeout(peekTimer.current);
@@ -480,6 +484,7 @@ export function AppShell({
   const pinSidebar = () => {
     window.clearTimeout(peekTimer.current);
     setPeek(false);
+    if (detailsDrawerOpen) onToggleDetails();
     setCollapsed(false);
   };
   const foldSidebar = () => {
@@ -487,6 +492,9 @@ export function AppShell({
     setPeek(false);
     setCollapsed(true);
   };
+  useEffect(() => {
+    if (detailsDrawerOpen && !collapsed) foldSidebar();
+  }, [detailsDrawerOpen, collapsed]);
   const onResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -519,9 +527,6 @@ export function AppShell({
     window.addEventListener("pointerup", stop);
     window.addEventListener("pointercancel", stop);
   };
-  // 只有对话页显示详情开关。
-  const detailsToggle = page === "chat";
-  const detailsPane = detailsOpen && (page === "chat" || page === "tasks");
   const showHeader = page === "chat" || collapsed;
   const conversationAct = async (action: () => Promise<unknown>) => {
     setError("");
@@ -717,7 +722,7 @@ export function AppShell({
           />
         )}
         {aside}
-        {!wide && !collapsed && (
+        {!wide && !collapsed && !detailsDrawerOpen && (
           <button
             className="app-scrim"
             aria-label={t.nav.closeSidebar}
@@ -759,7 +764,10 @@ export function AppShell({
                     aria-pressed={detailsOpen}
                     aria-label={detailsOpen ? t.nav.hideDetails : t.nav.showDetails}
                     title={detailsOpen ? t.nav.hideDetails : t.nav.showDetails}
-                    onClick={onToggleDetails}
+                    onClick={() => {
+                      if (!detailsOpen && !roomForDetails) foldSidebar();
+                      onToggleDetails();
+                    }}
                   >
                     <PanelIcon className="button-icon" />
                   </button>

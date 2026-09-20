@@ -47,6 +47,16 @@
   animation: sd-chevron-close-right 160ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
+:root[data-reduced-motion="true"] .sd-chevron-motion {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sd-chevron-motion {
+    animation: none !important;
+  }
+}
+
 @keyframes sd-chevron-open-left {
   from {
     transform: translateX(0);

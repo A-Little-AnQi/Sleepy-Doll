@@ -37,7 +37,7 @@ export default function App() {
   );
   const [bootstrap, setBootstrap] = useState<Bootstrap>();
   const [detailsOpen, setDetailsOpen] = useState(
-    () => localStorage.getItem("sleepy-doll-details-open") !== "false",
+    () => localStorage.getItem("sleepy-doll-details-open") === "true",
   );
   const [selectedTask, setSelectedTask] = useState<string>();
   const [error, setError] = useState("");
