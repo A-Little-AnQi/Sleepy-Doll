@@ -57,7 +57,7 @@ export function ConfigEditor({
     <Dialog
       open={open}
       onClose={onClose}
-      title="编辑配置"
+      title={t.configEditor.editConfig}
       subtitle={filePath || path}
       footer={
         <>
@@ -70,7 +70,7 @@ export function ConfigEditor({
             disabled={saving}
             onClick={() => void save()}
           >
-            {saving ? "保存中…" : "保存"}
+            {saving ? t.configEditor.saving : t.common.save}
           </button>
         </>
       }

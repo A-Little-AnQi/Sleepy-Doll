@@ -258,7 +258,7 @@ export function ModelsPage({
   return (
     <div className="model-settings">
       <header className="model-page-head">
-        <h2>模型</h2>
+        <h2>{t.settings.models}</h2>
         <button className="secondary-action" type="button" onClick={add}>
           <PlusIcon className="button-icon" />
           添加
@@ -275,7 +275,7 @@ export function ModelsPage({
             >
               <span>
                 <strong>{form.name.trim() || t.models.new}</strong>
-                <small>未保存</small>
+                <small>{t.models.unsaved}</small>
               </span>
             </button>
           )}
@@ -294,11 +294,11 @@ export function ModelsPage({
                   {model.model ? ` · ${model.model}` : ""}
                 </small>
               </span>
-              {model.active && <span className="tag tag-active">默认</span>}
+              {model.active && <span className="tag tag-active">{t.models.default}</span>}
             </button>
           ))}
           {!bootstrap.models.length && !creating && (
-            <p className="model-list-empty">还没有模型</p>
+            <p className="model-list-empty">{t.models.noModelsYet}</p>
           )}
         </nav>
         <MotionSwitch
@@ -314,10 +314,10 @@ export function ModelsPage({
             }}
           >
             <header className="model-form-head">
-              <h3>{creating ? "添加模型" : (selected?.name ?? "模型")}</h3>
-              {dirty && <span className="tag">未保存</span>}
+              <h3>{creating ? t.models.addModel : (selected?.name ?? t.settings.models)}</h3>
+              {dirty && <span className="tag">{t.models.unsaved}</span>}
               {selected?.active && (
-                <span className="tag tag-active">默认模型</span>
+                <span className="tag tag-active">{t.models.defaultModel}</span>
               )}
             </header>
             {error && <Toast message={error} onDismiss={() => setError("")} />}
@@ -326,7 +326,7 @@ export function ModelsPage({
             )}
             <section className="form-section">
               <label>
-                <span>服务商</span>
+                <span>{t.models.provider}</span>
                 <Select
                   label={t.models.provider}
                   placeholder={t.models.pickProvider}
@@ -360,7 +360,7 @@ export function ModelsPage({
                 </div>
               )}
               <label>
-                <span>名称</span>
+                <span>{t.models.nameLabel}</span>
                 <input
                   required
                   value={form.name}
@@ -369,7 +369,7 @@ export function ModelsPage({
                 />
               </label>
               <label>
-                <span>请求协议</span>
+                <span>{t.models.protocol}</span>
                 <Select
                   label={t.models.protocol}
                   placeholder={t.models.pickProtocol}
@@ -397,7 +397,7 @@ export function ModelsPage({
                       autoComplete="off"
                       aria-label={t.models.apiKey}
                       required={creating}
-                      placeholder={selected ? "不修改请留空" : "sk-…"}
+                      placeholder={selected ? t.models.apiKeyKeep : t.models.keyPlaceholderNew}
                       value={form.apiKey}
                       onChange={(event) => change("apiKey", event.target.value)}
                     />
@@ -405,11 +405,11 @@ export function ModelsPage({
                 </>
               )}
               <div className="model-field">
-                <span>模型</span>
+                <span>{t.models.modelLabel}</span>
                 <div className="model-pick">
                   {catalog.length ? (
                     <Select
-                      label="模型"
+                      label={t.models.modelLabel}
                       placeholder={t.models.pickModel}
                       value={form.model}
                       options={modelOptions}
@@ -418,7 +418,7 @@ export function ModelsPage({
                   ) : (
                     <input
                       required
-                      aria-label="模型"
+                      aria-label={t.models.modelLabel}
                       placeholder={preset?.model || t.models.name}
                       value={form.model}
                       onChange={(event) => change("model", event.target.value)}
@@ -452,7 +452,7 @@ export function ModelsPage({
                 inert={!advanced}
               >
                 <div className="model-advanced-inner">
-                  <h4>连接</h4>
+                  <h4>{t.models.connection}</h4>
                   {(form.protocol === "anthropic-messages" ||
                     form.protocol === "gemini") && (
                     <>
@@ -485,10 +485,10 @@ export function ModelsPage({
                       }
                     />
                   </label>
-                  <h4>窗口</h4>
+                  <h4>{t.models.window}</h4>
                   <div className="form-grid">
                     <label>
-                      <span>上下文长度</span>
+                      <span>{t.models.contextLabel}</span>
                       <input
                         type="number"
                         min={8192}
@@ -504,7 +504,7 @@ export function ModelsPage({
                       />
                     </label>
                     <label>
-                      <span>最大输出</span>
+                      <span>{t.models.maxOutputLabel}</span>
                       <input
                         type="number"
                         min={256}
@@ -522,7 +522,7 @@ export function ModelsPage({
                   </div>
                   {form.protocol === "anthropic-messages" && (
                     <label className="toggle-row">
-                      <span>提示缓存</span>
+                      <span>{t.models.promptCacheLabel}</span>
                       <button
                         type="button"
                         className={`switch ${form.promptCache ? "on" : ""}`}
@@ -578,8 +578,8 @@ export function ModelsPage({
       </div>
       <ConfirmDialog
         open={askingDelete}
-        title="删除模型"
-        confirmLabel="删除模型"
+        title={t.models.delete}
+        confirmLabel={t.models.delete}
         busy={busy}
         onClose={() => setAskingDelete(false)}
         onConfirm={() => {

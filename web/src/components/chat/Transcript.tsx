@@ -14,6 +14,7 @@ import { AlertIcon, CheckIcon, CopyIcon } from "../icons";
 import { DisclosureChevron } from "../controls/DisclosureChevron";
 import type { MessageInfo } from "../../ipc/types";
 import "./Transcript.css";
+import { useT } from "../../i18n";
 
 type Call = NonNullable<MessageInfo["toolCalls"]>[number];
 interface Activity extends Call {
@@ -159,6 +160,7 @@ function ActivityGroup({
   activities: Activity[];
   labels: ToolLabels;
 }) {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
   const running = activities.some(
     (activity) => outcome(activity) === "running",
@@ -192,7 +194,7 @@ function ActivityGroup({
         {subject && <span className="activity-subject">{subject}</span>}
         {(running || failed) && (
           <span className="activity-outcome">
-            {running ? "进行中" : "调用失败"}
+            {running ? t.chat.statusRunning : t.transcript.callFailed}
           </span>
         )}
         <DisclosureChevron expanded={expanded} className="activity-expand" />
@@ -207,11 +209,11 @@ function ActivityGroup({
             {activities.map((activity) => (
               <div className="activity-item" key={activity.id}>
                 <strong>{labels[activity.name] ?? activity.name}</strong>
-                <ActivityDetailDisclosure label="参数">
+                <ActivityDetailDisclosure label={t.transcript.params}>
                   {JSON.stringify(activity.arguments, null, 2)}
                 </ActivityDetailDisclosure>
                 {activity.result && (
-                  <ActivityDetailDisclosure label="返回数据">
+                  <ActivityDetailDisclosure label={t.transcript.returnData}>
                     {activity.result}
                   </ActivityDetailDisclosure>
                 )}
@@ -266,6 +268,7 @@ function ProcessGroup({
   running: boolean;
   children: ReactNode;
 }) {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
   return (
     <section className="activity-group process-group" data-expanded={expanded}>
@@ -276,7 +279,11 @@ function ProcessGroup({
         onClick={() => setExpanded((open) => !open)}
       >
         <span className="activity-label">
-          {running ? "思考中" : steps > 0 ? `思考过程 · ${steps} 步` : "思考过程"}
+          {running
+            ? t.transcript.thinkingRunning
+            : steps > 0
+              ? t.transcript.thinkingSteps(steps)
+              : t.transcript.thinking}
         </span>
         {running && <span className="activity-spinner" />}
         <DisclosureChevron expanded={expanded} className="activity-expand" />
@@ -305,11 +312,12 @@ function fenceText(children: ReactNode) {
 }
 
 function CodeFence({ children }: { children?: ReactNode }) {
+  const t = useT();
   const { text, lang } = fenceText(children);
   return (
     <div className="md-fence">
       <div className="md-fence-bar">
-        <span className="md-fence-lang">{lang || "代码"}</span>
+        <span className="md-fence-lang">{lang || t.transcript.code}</span>
         <CopyButton text={text} />
       </div>
       <pre>{children}</pre>
@@ -349,6 +357,7 @@ const MarkdownText = memo(function MarkdownText({
 });
 
 function CopyButton({ text }: { text: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const timer = useRef(0);
   useEffect(() => () => window.clearTimeout(timer.current), []);
@@ -356,8 +365,8 @@ function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       className="copy-action"
-      aria-label={copied ? "已复制" : "复制"}
-      title={copied ? "已复制" : "复制"}
+      aria-label={copied ? t.common.copied : t.common.copy}
+      title={copied ? t.common.copied : t.common.copy}
       onClick={(event) => {
         event.stopPropagation();
         void navigator.clipboard?.writeText(text).then(() => {

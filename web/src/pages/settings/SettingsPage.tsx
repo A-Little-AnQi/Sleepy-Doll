@@ -71,7 +71,7 @@ export function SettingsPage({
     <div className="settings-layout">
       <div className="settings-nav">
         <SlidingTabs
-          ariaLabel="设置分类"
+          ariaLabel={t.settings.categories}
           value={section}
           onChange={onSection}
           items={[
@@ -118,9 +118,9 @@ export function SettingsPage({
           <SponsorNote />
         ) : (
           <div className="settings-general">
-            <h2>通用</h2>
+            <h2>{t.settings.general}</h2>
             <section className="settings-group">
-              <SettingRow label="主题">
+              <SettingRow label={t.settings.theme}>
                 <ThemeSwitch theme={theme} onChange={writeTheme} />
               </SettingRow>
               <SettingRow label={t.settings.language}>
@@ -133,10 +133,10 @@ export function SettingsPage({
               </SettingRow>
             </section>
             <section className="settings-group">
-              <h3>对话</h3>
-              <SettingRow label="发送快捷键">
+              <h3>{t.settings.dialogHeading}</h3>
+              <SettingRow label={t.settings.sendKey}>
                 <Select
-                  label="发送快捷键"
+                  label={t.settings.sendKey}
                   value={sendKey}
                   options={[
                     { value: "enter", label: t.settings.sendKeyEnter },
@@ -175,7 +175,7 @@ export function SettingsPage({
               </section>
             ) : null}
             <section className="settings-group">
-              <h3>配置</h3>
+              <h3>{t.settings.configHeading}</h3>
               <SettingRow label={t.settings.configFile} hint={configPath}>
                 <button
                   className="subtle-action"
@@ -209,7 +209,7 @@ function SponsorNote() {
   const t = useT();
   return (
     <aside className="settings-sponsor">
-      <h2>赞助作者</h2>
+      <h2>{t.settings.sponsor}</h2>
       <p>{t.settings.sponsorNote}</p>
       <div className="settings-sponsor-qr" role="img" aria-label={t.settings.qrLabel} />
     </aside>

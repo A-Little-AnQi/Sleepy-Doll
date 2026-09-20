@@ -304,12 +304,14 @@ function TaskDetail({
         </div>
       </section>
       <section className="detail-block">
-        <h3>版本</h3>
+        <h3>{t.details.version}</h3>
         <p className="muted">
           {summary.publishedRevision
-            ? `当前发布第 ${summary.publishedRevision} 版`
-            : "还没有发布版本"}
-          {revision ? ` · 共 ${revision.validation.nodeCount} 个节点` : ""}
+            ? t.details.publishedRevision(summary.publishedRevision)
+            : t.details.noRelease}
+          {revision
+            ? ` · ${t.details.nodeCount(revision.validation.nodeCount)}`
+            : ""}
         </p>
         {revision && revision.validation.issues.length > 0 && (
           <details>
@@ -328,11 +330,11 @@ function TaskDetail({
         )}
       </section>
       <section className="detail-block">
-        <h3>最近运行</h3>
+        <h3>{t.details.recentRuns}</h3>
         {related.length ? (
           <RunList runs={related} />
         ) : (
-          <p className="muted">还没有运行过。</p>
+          <p className="muted">{t.details.noRuns}</p>
         )}
       </section>
     </>
@@ -340,6 +342,7 @@ function TaskDetail({
 }
 
 function RunList({ runs }: { runs: TaskInfo[] }) {
+  const t = useT();
   return (
     <ul className="detail-runs">
       {runs.slice(0, 10).map((run) => (
@@ -353,7 +356,7 @@ function RunList({ runs }: { runs: TaskInfo[] }) {
               minute: "2-digit",
             })}
           </small>
-          {isRunning(run) && <em>进行中</em>}
+          {isRunning(run) && <em>{t.chat.statusRunning}</em>}
         </li>
       ))}
     </ul>

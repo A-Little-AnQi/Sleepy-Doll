@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { MoonIcon, SunIcon } from "../icons";
+import { useT } from "../../i18n";
 import type { ThemeId, ThemeOrigin } from "../../appearance";
 
 export function ThemeSwitch({
@@ -9,6 +10,7 @@ export function ThemeSwitch({
   theme: ThemeId;
   onChange(next: ThemeId, origin: ThemeOrigin): void | Promise<void>;
 }) {
+  const t = useT();
   const dark = theme === "dark";
   const next: ThemeId = dark ? "light" : "dark";
   const [hot, setHot] = useState(false);
@@ -18,7 +20,7 @@ export function ThemeSwitch({
       className={`app-theme-switch${dark ? " is-dark" : ""}${hot ? " is-hot" : ""}`}
       role="switch"
       aria-checked={dark}
-      aria-label="主题"
+      aria-label={t.settings.theme}
       onPointerEnter={() => setHot(true)}
       onPointerLeave={() => setHot(false)}
       onClick={(event) => {
@@ -39,7 +41,7 @@ export function ThemeSwitch({
       <span className="app-theme-switch-knob" aria-hidden="true" />
       <span className="app-theme-switch-copy">
         {dark ? <MoonIcon /> : <SunIcon />}
-        <span className="app-theme-switch-label">{dark ? "黑夜" : "白昼"}</span>
+        <span className="app-theme-switch-label">{dark ? t.settings.themeDark : t.settings.themeLight}</span>
       </span>
     </button>
   );

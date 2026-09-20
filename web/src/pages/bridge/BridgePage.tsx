@@ -78,7 +78,7 @@ export function BridgePage({
           </button>
         </div>
         <div className="bridge-endpoint">
-          <span>地址</span>
+          <span>{t.bridge.addrLabel}</span>
           <code>{bridge.baseUrl}</code>
         </div>
       </section>
@@ -91,7 +91,7 @@ export function BridgePage({
         >
           <BridgeIcon />
           <span>
-            <strong>接口目录</strong>
+            <strong>{t.bridge.methodCatalog}</strong>
             <small>{bridge.connected ? t.bridge.viewMethods : t.bridge.connectToView}</small>
           </span>
           <ChevronIcon />
@@ -103,8 +103,8 @@ export function BridgePage({
         >
           <HistoryIcon />
           <span>
-            <strong>配置恢复</strong>
-            <small>还原之前的配置</small>
+            <strong>{t.bridge.recoveryHeading}</strong>
+            <small>{t.bridge.recoveryDesc}</small>
           </span>
           <ChevronIcon />
         </button>

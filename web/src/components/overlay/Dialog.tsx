@@ -81,7 +81,7 @@ export function Dialog({
             type="button"
             className="icon-button"
             aria-label={t.common.close}
-            title="关闭"
+            title={t.common.close}
             onClick={onClose}
           >
             <CloseIcon className="button-icon" />

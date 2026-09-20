@@ -172,11 +172,11 @@ export function SetupApp() {
               uninstall ? (
                 <dl className="setup-meta">
                   <div className="setup-meta-row">
-                    <dt>安装位置</dt>
+                    <dt>{t.setup.installLocation}</dt>
                     <dd className="setup-mono">{info.directory}</dd>
                   </div>
                   <div className="setup-meta-row">
-                    <dt>版本</dt>
+                    <dt>{t.setup.version}</dt>
                     <dd>{info.installedVersion ?? t.setup.unknown}</dd>
                   </div>
                 </dl>
@@ -246,7 +246,7 @@ export function SetupApp() {
                   disabled={busy}
                   onChange={(event) => setShortcut(event.target.checked)}
                 />
-                <span>创建桌面快捷方式</span>
+                <span>{t.setup.createShortcut}</span>
               </label>
             ) : null}
 

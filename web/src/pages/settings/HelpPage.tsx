@@ -128,7 +128,7 @@ export function HelpPage({ onOpen }: { onOpen?(target: HelpOpen): void }) {
           {source}
         </Markdown>
       </div>
-      <nav className="help-toc" aria-label="目录">
+      <nav className="help-toc" aria-label={t.helpToc}>
         <p className="help-toc-label">{t.helpToc}</p>
         <ol>
           {TOC.map((id) => (

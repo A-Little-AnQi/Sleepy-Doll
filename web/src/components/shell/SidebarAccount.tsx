@@ -66,8 +66,8 @@ export function SidebarAccount({
             <BrandIcon />
           </span>
           <span className="app-account-copy">
-            <strong>本地用户</strong>
-            <small>本机</small>
+            <strong>{t.account.localUser}</strong>
+            <small>{t.account.onThisMachine}</small>
           </span>
         </button>
       </div>
@@ -79,12 +79,12 @@ export function SidebarAccount({
           aria-label={t.account.menu}
         >
           <div className="app-account-menu-prefs">
-            <SettingRow label="主题" compact>
+            <SettingRow label={t.settings.theme} compact>
               <ThemeSwitch theme={theme} onChange={writeTheme} />
             </SettingRow>
-            <SettingRow label="语言" compact>
+            <SettingRow label={t.settings.language} compact>
               <Select
-                label="语言"
+                label={t.settings.language}
                 value={locale}
                 options={LOCALE_OPTIONS}
                 onChange={(value) => writeLocale(value as LocaleId)}

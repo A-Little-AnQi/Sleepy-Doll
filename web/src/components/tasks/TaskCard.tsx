@@ -63,7 +63,7 @@ export function TaskCard({
           {task.name}
         </button>
         {task.pinned && (
-          <span className="task-card-pinned" title="已置顶">
+          <span className="task-card-pinned" title={t.taskCard.pinned}>
             <PinIcon />
           </span>
         )}
@@ -98,7 +98,7 @@ export function TaskCard({
                     actions.pin?.(task, !task.pinned);
                   }}
                 >
-                  {task.pinned ? "取消置顶" : "置顶"}
+                  {task.pinned ? t.taskCard.unpin : t.taskCard.pin}
                 </button>
               )}
               {actions.copy && (
@@ -144,7 +144,7 @@ export function TaskCard({
                     actions.archive?.(task, task.state !== "archived");
                   }}
                 >
-                  {task.state === "archived" ? "恢复" : "归档"}
+                  {task.state === "archived" ? t.taskCard.restore : t.taskCard.archive}
                 </button>
               )}
               {actions.remove && (
@@ -163,7 +163,7 @@ export function TaskCard({
         </div>
       </div>
       <p className="task-card-description">
-        {task.description || "还没有写说明"}
+        {task.description || t.taskCard.noDescription}
       </p>
       <div className="task-card-foot">
         <span className="task-card-state" data-state={task.state}>
@@ -182,7 +182,7 @@ export function TaskCard({
           disabled={busy || task.state === "deleted"}
           onClick={primary}
         >
-          {busy ? "运行中" : task.actionLabel || "打开"}
+          {busy ? t.app.running : task.actionLabel || t.taskCard.open}
         </button>
       </div>
       {task.issue && task.state !== "archived" && (

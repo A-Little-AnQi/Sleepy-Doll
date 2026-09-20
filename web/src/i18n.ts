@@ -119,10 +119,13 @@ const zh = {
     params: "参数",
     returnData: "返回数据",
     thinking: "思考过程",
+    thinkingRunning: "思考中",
+    thinkingSteps: (n: number) => `思考过程 · ${n} 步`,
   },
 
   context: {
     compacted: "已压缩较早上下文；完整记录仍保存在本机",
+    compactedShort: "已压缩",
     inModel: "当前装进模型的上下文",
     cacheHit: (tokens: string) => `缓存命中 ${tokens}`,
   },
@@ -229,6 +232,9 @@ const zh = {
     trayShow: "显示",
     trayHide: "隐藏",
     configFile: "配置文件",
+    categories: "设置分类",
+    themeDark: "黑夜",
+    themeLight: "白昼",
     sponsorNote: "如果这个工具对你有帮助，欢迎扫码支持。",
     qrLabel: "收款二维码",
     dialogHeading: "对话",
@@ -316,6 +322,7 @@ const zh = {
     readOnly: "只读",
     mutating: "会修改",
     recoveryBackup: "恢复前的备份",
+    backupItemsCount: (n: number) => `等 ${n} 项`,
     actionBackup: "操作前的备份",
     configBackup: "配置备份",
     configRestored: "配置已恢复。请重新启动 BetterGI。",
@@ -324,6 +331,7 @@ const zh = {
     restoring: "恢复中…",
     addrLabel: "地址",
     recoveryHeading: "配置恢复",
+    recoveryDesc: "还原之前的配置",
     recoveryNotice: "请先退出 BetterGI，再恢复配置。",
     restoreAction: "恢复",
     recoveryEmpty: "还没有可恢复的备份。",
@@ -355,6 +363,7 @@ const zh = {
 
   configEditor: {
     saveFailed: "保存失败",
+    saving: "保存中…",
     editConfig: "编辑配置",
     fileContent: "配置文件内容",
   },
@@ -377,6 +386,9 @@ const zh = {
     keepWindowOpen: "过程中请不要关闭窗口。",
     incomplete: (action: string) => `${action}没有完成。`,
     retryHint: "可以点「返回重试」换个位置。",
+    installLocation: "安装位置",
+    version: "版本",
+    createShortcut: "创建桌面快捷方式",
   },
 
   ipc: {
@@ -408,6 +420,12 @@ const zh = {
     openSourceChat: "打开来源对话",
     extractedFromRun: "由运行提取",
     backToTasks: "返回此对话的任务",
+    version: "版本",
+    recentRuns: "最近运行",
+    publishedRevision: (n: number) => `当前发布第 ${n} 版`,
+    noRelease: "还没有发布版本",
+    nodeCount: (n: number) => `共 ${n} 个节点`,
+    noRuns: "还没有运行过。",
   },
 };
 
@@ -528,10 +546,13 @@ const en: Dict = {
     params: "Arguments",
     returnData: "Result",
     thinking: "Thinking",
+    thinkingRunning: "Thinking",
+    thinkingSteps: (n: number) => `Thinking · ${n} steps`,
   },
 
   context: {
     compacted: "Older context was compacted; the full record stays on this machine",
+    compactedShort: "Compacted",
     inModel: "Context currently in the model",
     cacheHit: (tokens: string) => `Cache hit ${tokens}`,
   },
@@ -641,6 +662,9 @@ const en: Dict = {
     trayShow: "Show",
     trayHide: "Hide",
     configFile: "Config file",
+    categories: "Settings sections",
+    themeDark: "Dark",
+    themeLight: "Light",
     sponsorNote: "If this tool helps you, scan to support the author.",
     qrLabel: "QR code",
     dialogHeading: "Chat",
@@ -729,6 +753,7 @@ const en: Dict = {
     readOnly: "Read-only",
     mutating: "Mutating",
     recoveryBackup: "Pre-restore backup",
+    backupItemsCount: (n: number) => `+ ${n} more`,
     actionBackup: "Pre-action backup",
     configBackup: "Config backup",
     configRestored: "Config restored. Please restart BetterGI.",
@@ -737,6 +762,7 @@ const en: Dict = {
     restoring: "Restoring…",
     addrLabel: "Address",
     recoveryHeading: "Config recovery",
+    recoveryDesc: "Restore an earlier configuration",
     recoveryNotice: "Quit BetterGI before restoring the config.",
     restoreAction: "Restore",
     recoveryEmpty: "No restorable backups yet.",
@@ -769,6 +795,7 @@ const en: Dict = {
 
   configEditor: {
     saveFailed: "Save failed",
+    saving: "Saving…",
     editConfig: "Edit config",
     fileContent: "Config file content",
   },
@@ -791,6 +818,9 @@ const en: Dict = {
     keepWindowOpen: "Keep this window open until it finishes.",
     incomplete: (action: string) => `The ${action.toLowerCase()} did not complete.`,
     retryHint: "You can go back and pick another location.",
+    installLocation: "Install location",
+    version: "Version",
+    createShortcut: "Create desktop shortcut",
   },
 
   ipc: {
@@ -822,6 +852,12 @@ const en: Dict = {
     openSourceChat: "Open source chat",
     extractedFromRun: "Extracted from a run",
     backToTasks: "Back to this chat's tasks",
+    version: "Version",
+    recentRuns: "Recent runs",
+    publishedRevision: (n: number) => `Published revision ${n}`,
+    noRelease: "No published revision yet",
+    nodeCount: (n: number) => `${n} nodes`,
+    noRuns: "No runs yet.",
   },
 };
 

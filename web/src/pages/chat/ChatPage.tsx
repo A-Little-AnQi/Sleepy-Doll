@@ -7,6 +7,7 @@ import {
   CheckIcon,
   HelpIcon,
   SendIcon,
+  SettingsIcon,
   StopIcon,
 } from "../../components/icons";
 import { Select } from "../../components/controls/Select";
@@ -37,6 +38,7 @@ interface Props {
   reload(): Promise<void>;
   onComposerDraft?(active: boolean): void;
   onOpenHelp?(): void;
+  onOpenModels?(): void;
 }
 
 export function RunPlanCard({
@@ -52,6 +54,7 @@ export function RunPlanCard({
     | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const t = useT();
   return (
     <section className="run-plan-cluster" data-expanded={expanded}>
       <div className="run-plan">
@@ -61,8 +64,7 @@ export function RunPlanCard({
           aria-expanded={expanded}
           onClick={() => setExpanded((open) => !open)}
         >
-          <span>执行计划</span>
-          <span className="muted">· {plan.steps.length} 步</span>
+          <span>{t.chat.planSummary(plan.steps.length)}</span>
           <DisclosureChevron expanded={expanded} />
         </button>
         <div
@@ -80,9 +82,9 @@ export function RunPlanCard({
                       {" "}
                       ·{" "}
                       {step.outcome === "active"
-                        ? "进行中"
+                        ? t.chat.statusRunning
                         : step.outcome === "verifiedSucceeded"
-                          ? "已完成"
+                          ? t.chat.statusDone
                           : step.outcome}
                     </span>
                   )}
@@ -114,6 +116,7 @@ export function ChatPage({
   reload,
   onComposerDraft,
   onOpenHelp,
+  onOpenModels,
 }: Props) {
   const t = useT();
   const data = useSession(conversationId);
@@ -300,12 +303,22 @@ export function ChatPage({
               <img
                 className="welcome-mascot"
                 src={mascot}
-                alt="蜷坐在月亮上熟睡的木偶"
+                alt={t.chat.mascotAlt}
               />
-              <h2>开始一项新任务</h2>
-              {!bootstrap.models.length && (
-                <p className="muted">先在设置里添加模型服务</p>
-              )}
+              <h2>{t.chat.startNew}</h2>
+              {!bootstrap.models.length &&
+                (onOpenModels ? (
+                  <button
+                    type="button"
+                    className="subtle-action"
+                    onClick={onOpenModels}
+                  >
+                    <SettingsIcon className="button-icon" />
+                    {t.chat.addModelFirst}
+                  </button>
+                ) : (
+                  <p className="muted">{t.chat.addModelFirst}</p>
+                ))}
               {onOpenHelp && (
                 <button
                   type="button"
@@ -313,13 +326,15 @@ export function ChatPage({
                   onClick={onOpenHelp}
                 >
                   <HelpIcon className="button-icon" />
-                  使用说明
+                  {t.account.help}
                 </button>
               )}
             </div>
           ) : (
             <div className="conversation-scene">
-              {loading && !messages.length && <p className="muted">载入中…</p>}
+              {loading && !messages.length && (
+                <p className="muted">{t.common.loading}</p>
+              )}
               <div className="conversation-flow">
                 <Transcript
                   messages={messages}
@@ -357,19 +372,19 @@ export function ChatPage({
                 )}
                 {question && (
                   <section className="run-question">
-                    <h3>需要补充信息</h3>
+                    <h3>{t.chat.needInfo}</h3>
                     <p>{question}</p>
                   </section>
                 )}
                 {approval && (
                   <section className="run-approval">
-                    <h3>确认执行</h3>
+                    <h3>{t.chat.confirmExec}</h3>
                     <p>
                       {approval.request.binding?.description ??
                         approval.request.methodId}
                     </p>
                     <details>
-                      <summary>操作参数</summary>
+                      <summary>{t.chat.opParams}</summary>
                       <pre>
                         {JSON.stringify(approval.request.arguments, null, 2)}
                       </pre>
@@ -405,7 +420,7 @@ export function ChatPage({
                       </button>
                     </div>
                     {now >= approval.expiresAt * 1000 && (
-                      <p className="muted">确认已过期</p>
+                      <p className="muted">{t.chat.approvalExpired}</p>
                     )}
                   </section>
                 )}
@@ -514,7 +529,7 @@ export function ChatPage({
           <div className="composer-actions">
             <div className="composer-menu composer-approval">
               <Select
-                label="审批级别"
+                label={t.chat.approvalLevel}
                 value={bootstrap.permission.mode}
                 options={bootstrap.permission.levels.map((level) => ({
                   value: level.value,
@@ -536,7 +551,7 @@ export function ChatPage({
                 title={t.chat.waitCurrentRun}
                 onClick={() => void send(true)}
               >
-                排队发送
+                {t.chat.queuedSend}
               </button>
             )}
             <div className="composer-submit">
@@ -550,7 +565,7 @@ export function ChatPage({
               />
               <div className="composer-menu composer-model">
                 <Select
-                  label="模型"
+                  label={t.chat.model}
                   value={selectedModel}
                   disabled={sending || !bootstrap.models.length}
                   options={bootstrap.models.map((model) => ({
@@ -574,7 +589,7 @@ export function ChatPage({
                   type="button"
                   className="send-action"
                   aria-label={t.chat.stop}
-                  title="停止生成"
+                  title={t.chat.stop}
                   disabled={task?.state === "cancelling"}
                   onClick={() =>
                     task && void act(() => api.cancelTask(task.id))
@@ -592,8 +607,8 @@ export function ChatPage({
                     !bootstrap.models.length
                       ? t.chat.addModelFirst
                       : busy
-                        ? "发送补充"
-                        : "发送"
+                        ? t.chat.sendFollowUp
+                        : t.chat.send
                   }
                   disabled={
                     sending || !prompt.trim() || !bootstrap.models.length

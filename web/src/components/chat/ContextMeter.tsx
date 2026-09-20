@@ -34,7 +34,7 @@ export function ContextMeter({
         {formatTokens(used)} / {formatTokens(window)}
       </span>
       {cacheHit > 0 ? <em>缓存 {formatTokens(cacheHit)}</em> : null}
-      {compacted ? <em>已压缩</em> : null}
+      {compacted ? <em>{t.context.compactedShort}</em> : null}
     </div>
   );
 }

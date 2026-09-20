@@ -560,7 +560,7 @@ export function AppShell({
       </div>
       <button className="app-new" onClick={() => startNew(null)}>
         <PlusIcon className="button-icon" />
-        <span>新建对话</span>
+        <span>{t.nav.newChat}</span>
       </button>
       <nav className="app-nav" aria-label={t.nav.mainNav}>
         {NAV.map(({ page: target, labelKey, Icon }) => (
@@ -583,7 +583,7 @@ export function AppShell({
       </nav>
       <div className="app-sidebar-tools">
         <div className="app-section-head">
-          <span>最近对话</span>
+          <span>{t.app.recent}</span>
           <button
             className="icon-button"
             title={t.nav.newGroup}
@@ -971,7 +971,7 @@ function GroupRow({
     >
       {editing ? (
         <InlineRename
-          label="分组名称"
+          label={t.app.groupName}
           value={name}
           onChange={setName}
           onSubmit={() => stopEditing(true)}
@@ -1015,7 +1015,7 @@ function GroupRow({
             <button
               className="icon-button"
               aria-label={t.app.newChatInGroup}
-              title="在此分组新建对话"
+              title={t.app.newChatInGroup}
               onClick={onNew}
             >
               <PlusIcon className="button-icon" />
@@ -1156,8 +1156,8 @@ function ConversationRow({
           {running && (
             <span
               className="conversation-status running"
-              title={taskLabels[running.state] ?? "运行中"}
-              aria-label={taskLabels[running.state] ?? "运行中"}
+              title={taskLabels[running.state] ?? t.app.running}
+              aria-label={taskLabels[running.state] ?? t.app.running}
             />
           )}
         </button>
@@ -1165,7 +1165,7 @@ function ConversationRow({
           <button
             className="icon-button"
             aria-label={t.app.rename}
-            title="重命名"
+            title={t.app.rename}
             onClick={() => setEditing(true)}
           >
             <EditIcon className="button-icon" />
@@ -1173,7 +1173,7 @@ function ConversationRow({
           <button
             className="icon-button"
             aria-label={t.app.deleteConversation}
-            title="删除对话"
+            title={t.app.deleteConversation}
             onClick={() => {
               void (async () => {
                 const first = await api.deleteConversation(entry.id, false);
@@ -1198,8 +1198,8 @@ function ConversationRow({
       </li>
       <ConfirmDialog
         open={asking != null}
-        title="删除对话"
-        confirmLabel="删除对话"
+        title={t.app.deleteConversation}
+        confirmLabel={t.app.deleteConversation}
         onClose={() => setAsking(null)}
         onConfirm={() => {
           const preview = asking;

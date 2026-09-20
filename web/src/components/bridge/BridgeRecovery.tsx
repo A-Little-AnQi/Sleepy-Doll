@@ -6,7 +6,7 @@ import { Toast } from "../overlay/Toast";
 import type { RecoveryRecord } from "../../ipc/types";
 import { ChevronIcon } from "../icons";
 import "./BridgeRecovery.css";
-import { useT } from "../../i18n";
+import { useT, type Text } from "../../i18n";
 
 function isBackup(record: RecoveryRecord): boolean {
   return Boolean(
@@ -14,15 +14,17 @@ function isBackup(record: RecoveryRecord): boolean {
   );
 }
 
-function backupTitle(record: RecoveryRecord): string {
+function backupTitle(record: RecoveryRecord, t: Text): string {
   const paths = record.paths.filter(Boolean);
   if (paths.length) {
     const shown = paths.slice(0, 2).join("、");
-    return paths.length > 2 ? `${shown} 等 ${paths.length} 项` : shown;
+    return paths.length > 2
+      ? `${shown} ${t.bridge.backupItemsCount(paths.length)}`
+      : shown;
   }
-  if (record.operation === "offline-restore") return "恢复前的备份";
-  if (record.state === "commandCheckpoint") return "操作前的备份";
-  return "配置备份";
+  if (record.operation === "offline-restore") return t.bridge.recoveryBackup;
+  if (record.state === "commandCheckpoint") return t.bridge.actionBackup;
+  return t.bridge.configBackup;
 }
 
 function backupWhen(iso?: string): string {
@@ -84,7 +86,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
         </button>
       </div>
       <div className="page-title">
-        <h2>配置恢复</h2>
+        <h2>{t.bridge.recoveryHeading}</h2>
       </div>
       {running ? (
         <p className="notice">请先退出 BetterGI，再恢复配置。</p>
@@ -98,7 +100,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
           {records.map((record) => (
             <article className="recovery-row" key={record.changeId}>
               <div>
-                <strong>{backupTitle(record)}</strong>
+                <strong>{backupTitle(record, t)}</strong>
                 {backupWhen(record.createdAt) ? (
                   <small>{backupWhen(record.createdAt)}</small>
                 ) : null}
@@ -119,12 +121,12 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
         </div>
       ) : null}
       {!busy && !records.length ? (
-        <p className="empty-note">还没有可恢复的备份。</p>
+        <p className="empty-note">{t.bridge.recoveryEmpty}</p>
       ) : null}
       <ConfirmDialog
         open={selected != null}
-        title="恢复配置"
-        confirmLabel="确认恢复"
+        title={t.bridge.restoreConfig}
+        confirmLabel={t.bridge.confirmRestore}
         busy={busy}
         busyLabel={t.bridge.restoring}
         onClose={() => {
@@ -135,7 +137,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
         <p>把 BetterGI 的配置恢复到这次备份。当前配置会另存一份。</p>
         {selected ? (
           <p className="muted">
-            {[backupWhen(selected.createdAt), backupTitle(selected)]
+            {[backupWhen(selected.createdAt), backupTitle(selected, t)]
               .filter(Boolean)
               .join(" · ")}
           </p>

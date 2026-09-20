@@ -188,6 +188,7 @@ export default function App() {
             reload={reload}
             onComposerDraft={setComposingNewChat}
             onOpenHelp={() => setPage("help")}
+            onOpenModels={() => setPage("models")}
           />
         ) : visiblePage === "tasks" ? (
           <TasksPage

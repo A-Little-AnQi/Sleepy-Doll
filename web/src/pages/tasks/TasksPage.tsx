@@ -141,19 +141,19 @@ export function TasksPage({
   return (
     <div className="page-sheet tasks-page">
       <div className="page-title">
-        <h2>快捷任务</h2>
+        <h2>{t.tasks.title}</h2>
         <span className="muted">
           {bootstrap.tasks.filter(isRunning).length} 项正在运行
         </span>
       </div>
       <div className="list-toolbar">
         <SlidingTabs
-          ariaLabel="快捷任务与运行记录"
+          ariaLabel={t.tasks.heading}
           value={tab}
           onChange={setTab}
           items={[
-            { id: "tasks", name: "快捷任务" },
-            { id: "runs", name: "运行记录" },
+            { id: "tasks", name: t.tasks.tabTasks },
+            { id: "runs", name: t.tasks.runs },
           ]}
         />
       </div>
@@ -162,8 +162,8 @@ export function TasksPage({
         <label className="search-field">
           <SearchIcon />
           <input
-            aria-label={tab === "tasks" ? "搜索快捷任务" : "搜索运行记录"}
-            placeholder={tab === "tasks" ? "搜索快捷任务" : "搜索运行记录"}
+            aria-label={tab === "tasks" ? t.tasks.search : t.tasks.runsSearch}
+            placeholder={tab === "tasks" ? t.tasks.search : t.tasks.runsSearch}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -200,7 +200,7 @@ export function TasksPage({
           ) : (
             <div className="empty-state">
               <HistoryIcon />
-              <h3>{query ? "没有找到匹配任务" : "还没有快捷任务"}</h3>
+              <h3>{query ? t.tasks.noMatch : t.tasks.empty}</h3>
               <p>
                 {query
                   ? t.tasks.emptyHint
@@ -252,8 +252,8 @@ export function TasksPage({
       </MotionSwitch>
       <ConfirmDialog
         open={pendingRemove != null}
-        title="删除快捷任务"
-        confirmLabel="删除任务"
+        title={t.tasks.deleteTitle}
+        confirmLabel={t.tasks.deleteAction}
         onClose={() => setPendingRemove(null)}
         onConfirm={() => {
           const task = pendingRemove;
@@ -264,7 +264,7 @@ export function TasksPage({
         {pendingRemove ? (
           <>
             <p>删除「{pendingRemove.name}」。</p>
-            <p>已执行过的运行记录和它改过的文件都会保留。</p>
+            <p>{t.tasks.deleteKeepsRuns}</p>
             {pendingRemove.runnable ? (
               <p>如果有运行正在进行，那一次会继续执行完。</p>
             ) : null}

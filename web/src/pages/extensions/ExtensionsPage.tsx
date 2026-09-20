@@ -130,7 +130,7 @@ export function ExtensionsPage({
   return (
     <div className="page-sheet extensions-page">
       <div className="page-title">
-        <h2>已安装</h2>
+        <h2>{t.extensions.installed}</h2>
         <button
           className="secondary-action"
           onClick={() => {
@@ -140,7 +140,7 @@ export function ExtensionsPage({
           }}
         >
           <PlusIcon className="button-icon" />
-          {currentTab === "skills" ? "导入技能" : "导入插件"}
+          {currentTab === "skills" ? t.extensions.importSkills : t.extensions.importPlugins}
         </button>
       </div>
       <div className="list-toolbar">
@@ -155,14 +155,14 @@ export function ExtensionsPage({
           items={[
             {
               id: "skills",
-              name: "技能",
+              name: t.extensions.skills,
               extra: (
                 <span className="sd-tabs-count">{bootstrap.skills.length}</span>
               ),
             },
             {
               id: "plugins",
-              name: "插件",
+              name: t.extensions.plugins,
               extra: (
                 <span className="sd-tabs-count">
                   {bootstrap.plugins.length}
@@ -204,7 +204,7 @@ export function ExtensionsPage({
                   <strong>{item.name}</strong>
                   <span className="extension-meta">{item.meta}</span>
                   {item.description && <p>{item.description}</p>}
-                  {item.error && <p>加载失败</p>}
+                  {item.error && <p>{t.extensions.loadFailed}</p>}
                   {item.enabled &&
                     !item.available &&
                     item.unavailableReason && (
@@ -229,10 +229,10 @@ export function ExtensionsPage({
             <PluginIcon />
             <h3>
               {query
-                ? "无匹配结果"
+                ? t.extensions.noMatch
                 : currentTab === "skills"
-                  ? "暂无技能"
-                  : "暂无插件"}
+                  ? t.extensions.noSkills
+                  : t.extensions.noPlugins}
             </h3>
           </div>
         )}
@@ -256,13 +256,13 @@ export function ExtensionsPage({
           <h2>
             {install
               ? currentTab === "skills"
-                ? "导入技能"
-                : "导入插件"
+                ? t.extensions.importSkills
+                : t.extensions.importPlugins
               : current?.name}
           </h2>
           <button
             className="icon-button"
-            aria-label="关闭"
+            aria-label={t.common.close}
             onClick={() => dialog.current?.close()}
           >
             <CloseIcon className="button-icon" />
@@ -316,15 +316,15 @@ export function ExtensionsPage({
                 {current.error && <p>{current.error}</p>}
                 {currentTab === "skills" ? (
                   <section className="page-block">
-                    <h3>指令</h3>
-                    <pre>{current.detail || "无内容"}</pre>
+                    <h3>{t.extensions.commandsHeading}</h3>
+                    <pre>{current.detail || t.extensions.nothing}</pre>
                   </section>
                 ) : current.host ? (
                   <p className="muted">随产品提供，不能移除。</p>
                 ) : (
                   <section className="page-block">
-                    <h3>提供的工具</h3>
-                    <pre>{current.detail || "无内容"}</pre>
+                    <h3>{t.extensions.toolsHeading}</h3>
+                    <pre>{current.detail || t.extensions.nothing}</pre>
                   </section>
                 )}
                 {currentTab === "skills" &&
@@ -379,8 +379,8 @@ export function ExtensionsPage({
       </dialog>
       <ConfirmDialog
         open={pendingRemove != null}
-        title="移除插件"
-        confirmLabel="移除插件"
+        title={t.extensions.remove}
+        confirmLabel={t.extensions.remove}
         busy={busy}
         onClose={() => setPendingRemove(null)}
         onConfirm={() => {
