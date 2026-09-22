@@ -178,12 +178,23 @@ export function SettingsPage({
                 </button>
               </SettingRow>
             </section>
-            <div className="settings-about">
+            <button
+              type="button"
+              className="settings-about"
+              onClick={() =>
+                window.dispatchEvent(
+                  new CustomEvent("sleepy-doll:open-release-notes", {
+                    detail: "changelog",
+                  }),
+                )
+              }
+              title={t.settings.releaseNotes}
+            >
               <BrandIcon className="brand-mark" />
               <span>
-                Sleepy Doll <span className="muted">0.1.0</span>
+                Sleepy Doll <span className="muted">{__APP_VERSION__}</span>
               </span>
-            </div>
+            </button>
           </div>
         )}
       </div>

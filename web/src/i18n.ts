@@ -48,6 +48,7 @@ const zh = {
     localUser: "本地用户",
     onThisMachine: "本机",
     menu: "账户菜单",
+    help: "使用说明",
     settings: "设置",
   },
 
@@ -233,6 +234,7 @@ const zh = {
     trayShow: "显示",
     trayHide: "隐藏",
     configFile: "配置文件",
+    releaseNotes: "查看更新内容",
     categories: "设置分类",
     themeDark: "黑夜",
     themeLight: "白昼",
@@ -487,6 +489,7 @@ const en: Dict = {
     localUser: "Local user",
     onThisMachine: "This machine",
     menu: "Account menu",
+    help: "User guide",
     settings: "Settings",
   },
 
@@ -675,6 +678,7 @@ const en: Dict = {
     trayShow: "Show",
     trayHide: "Hide",
     configFile: "Config file",
+    releaseNotes: "View release notes",
     categories: "Settings sections",
     themeDark: "Dark",
     themeLight: "Light",

@@ -59,6 +59,7 @@ export default function App() {
   const [selectedTask, setSelectedTask] = useState<string>();
   const [error, setError] = useState("");
   const [panicNotice, setPanicNotice] = useState(false);
+  const [releaseNotesTab, setReleaseNotesTab] = useState("changelog");
   const [releaseNotesOpen, setReleaseNotesOpen] = useState(
     // 更新弹窗：本地记录的版本与当前不同（包括第一次使用）就弹。
     () => localStorage.getItem("sleepy-doll-version") !== __APP_VERSION__,
@@ -117,6 +118,18 @@ export default function App() {
       }),
     [],
   );
+
+  useEffect(() => {
+    // 「使用说明」「版本与更新」等入口：detail 指定要打开的标签页。
+    const open = (event: Event) => {
+      const tab = (event as CustomEvent<string>).detail;
+      setReleaseNotesTab(typeof tab === "string" ? tab : "changelog");
+      setReleaseNotesOpen(true);
+    };
+    window.addEventListener("sleepy-doll:open-release-notes", open);
+    return () =>
+      window.removeEventListener("sleepy-doll:open-release-notes", open);
+  }, []);
 
   useEffect(() => {
     // 运行列表靠会话事件推进，不定时打 task.list。
@@ -272,6 +285,7 @@ export default function App() {
       )}
       <UpdateDialog
         open={releaseNotesOpen}
+        initialTab={releaseNotesTab}
         onClose={() => setReleaseNotesOpen(false)}
       />
     </AppShell>

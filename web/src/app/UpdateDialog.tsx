@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Dialog } from "../components/overlay/Dialog";
@@ -26,12 +26,18 @@ function tabs(t: Text): Array<{ key: string; title: string; source: string }> {
 export function UpdateDialog({
   open,
   onClose,
+  initialTab = "changelog",
 }: {
   open: boolean;
   onClose(): void;
+  /** 打开时落在哪个标签页；入口是「使用说明」时传 guide。 */
+  initialTab?: string;
 }) {
   const t = useT();
-  const [tab, setTab] = useState("changelog");
+  const [tab, setTab] = useState(initialTab);
+  useEffect(() => {
+    if (open) setTab(initialTab);
+  }, [open, initialTab]);
   const items = useMemo(() => tabs(t), [t]);
   const active = items.find((item) => item.key === tab) ?? items[0];
   if (!active) return null;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BrandIcon, SettingsIcon } from "../icons";
+import { BrandIcon, HelpIcon, SettingsIcon } from "../icons";
 import { ThemeSwitch } from "../controls/ThemeSwitch";
 import { SettingRow } from "../controls/SettingRow";
 import { Select } from "../controls/Select";
@@ -13,8 +13,10 @@ import {
 import { useT } from "../../i18n";
 
 export function SidebarAccount({
+  onHelp,
   onSettings,
 }: {
+  onHelp(): void;
   onSettings(): void;
 }) {
   const [open, setOpen] = useState(false);
@@ -90,6 +92,18 @@ export function SidebarAccount({
             </SettingRow>
           </div>
           <div className="app-account-menu-links">
+            <button
+              type="button"
+              className="app-account-more"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onHelp();
+              }}
+            >
+              <HelpIcon className="button-icon" />
+              {t.account.help}
+            </button>
             <button
               type="button"
               className="app-account-more"

@@ -680,6 +680,13 @@ export function AppShell({
       )}
       <div className="app-sidebar-foot">
         <SidebarAccount
+          onHelp={() =>
+            window.dispatchEvent(
+              new CustomEvent("sleepy-doll:open-release-notes", {
+                detail: "guide",
+              }),
+            )
+          }
           onSettings={() => onPage("settings")}
         />
       </div>

@@ -5,6 +5,7 @@ import { Transcript } from "../../components/chat/Transcript";
 import { api } from "../../ipc/api";
 import {
   CheckIcon,
+  HelpIcon,
   SendIcon,
   SettingsIcon,
   StopIcon,
@@ -316,6 +317,20 @@ export function ChatPage({
                 ) : (
                   <p className="muted">{t.chat.addModelFirst}</p>
                 ))}
+              <button
+                type="button"
+                className="subtle-action"
+                onClick={() =>
+                  window.dispatchEvent(
+                    new CustomEvent("sleepy-doll:open-release-notes", {
+                      detail: "guide",
+                    }),
+                  )
+                }
+              >
+                <HelpIcon className="button-icon" />
+                {t.account.help}
+              </button>
             </div>
           ) : (
             <div className="conversation-scene">
