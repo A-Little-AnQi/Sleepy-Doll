@@ -297,6 +297,14 @@ const zh = {
       `删除「${name}」。已绑定它的对话会改用默认模型。`,
   },
 
+  update: {
+    title: "版本更新",
+    changelog: "更新日志",
+    guide: "上手指南",
+    faq: "常见问题",
+    start: "开始使用",
+  },
+
   helpToc: "目录",
 
   bridge: {
@@ -733,6 +741,14 @@ const en: Dict = {
     setDefault: "Set as default",
     deleteNote: (name: string) =>
       `Delete “${name}”? Chats bound to it will fall back to the default model.`,
+  },
+
+  update: {
+    title: "What's new",
+    changelog: "Changelog",
+    guide: "Guide",
+    faq: "FAQ",
+    start: "Get started",
   },
 
   helpToc: "Contents",

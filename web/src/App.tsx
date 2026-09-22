@@ -10,6 +10,7 @@ import { ChatPage } from "./pages/chat/ChatPage";
 import { ExtensionsPage } from "./pages/extensions/ExtensionsPage";
 import { SettingsPage } from "./pages/settings/SettingsPage";
 import { TasksPage } from "./pages/tasks/TasksPage";
+import { UpdateDialog } from "./app/UpdateDialog";
 import { restoreTheme } from "./appearance";
 import { restoreLocale } from "./appearance/locale";
 import { isRunning, readError, subscribeRuns, watchTasks } from "./session";
@@ -60,7 +61,16 @@ export default function App() {
   const [selectedTask, setSelectedTask] = useState<string>();
   const [error, setError] = useState("");
   const [panicNotice, setPanicNotice] = useState(false);
+  const [releaseNotesOpen, setReleaseNotesOpen] = useState(
+    // 更新弹窗：本地记录的版本与当前不同（包括第一次使用）就弹。
+    () => localStorage.getItem("sleepy-doll-version") !== __APP_VERSION__,
+  );
   const [composingNewChat, setComposingNewChat] = useState(false);
+
+  useEffect(() => {
+    if (!releaseNotesOpen) return;
+    localStorage.setItem("sleepy-doll-version", __APP_VERSION__);
+  }, [releaseNotesOpen]);
 
   useEffect(() => {
     localStorage.setItem(PAGE_KEY, page);
@@ -264,6 +274,10 @@ export default function App() {
           onDismiss={() => setPanicNotice(false)}
         />
       )}
+      <UpdateDialog
+        open={releaseNotesOpen}
+        onClose={() => setReleaseNotesOpen(false)}
+      />
     </AppShell>
   );
 }
