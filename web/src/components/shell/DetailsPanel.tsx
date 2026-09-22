@@ -50,7 +50,6 @@ export function DetailsPanel({
   const panelRef = useRef<HTMLElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
-  const [drawer, setDrawer] = useState(false);
   const previousSelection = useRef(selectedTask);
 
   useEffect(() => {
@@ -76,34 +75,15 @@ export function DetailsPanel({
           : trigger;
       if (target?.isConnected && target.getClientRects().length) target.focus();
     };
-    if (!panel.closest(".details-drawer")) return restoreFocus;
-    setDrawer(true);
-    const controls = () =>
-      Array.from(
-        panel.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), a[href], input:not(:disabled), summary, [tabindex="0"]',
-        ),
-      ).filter((element) => !element.closest('[hidden], [aria-hidden="true"]'));
-    controls()[0]?.focus();
     const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        // An open task menu handles Escape first.
-        if (panel.querySelector('[aria-expanded="true"]')) return;
-        event.preventDefault();
-        event.stopPropagation();
-        closeRef.current();
-      }
-      if (event.key !== "Tab") return;
-      const items = controls();
-      const first = items[0];
-      const last = items.at(-1);
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first?.focus();
-      }
+      if (
+        event.key !== "Escape" ||
+        panel.querySelector('[aria-expanded="true"]')
+      )
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeRef.current();
     };
     panel.addEventListener("keydown", handleKey);
     return () => {
@@ -116,11 +96,11 @@ export function DetailsPanel({
     // Navigation replaces the clicked task/back button in either presentation.
     const navigated = previousSelection.current !== selectedTask;
     previousSelection.current = selectedTask;
-    if (drawer || (navigated && document.activeElement === document.body))
+    if (navigated && document.activeElement === document.body)
       panelRef.current
         ?.querySelector<HTMLButtonElement>(".details-head button")
         ?.focus();
-  }, [drawer, selectedTask]);
+  }, [selectedTask]);
   // Bootstrap also updates during streaming. Only refresh detail when this
   // workflow changes, and never show the previous workflow while loading another.
   const selectedVersion = JSON.stringify(
@@ -207,8 +187,6 @@ export function DetailsPanel({
       ref={panelRef}
       className="details-panel"
       aria-label={t.details.panel}
-      role={drawer ? "dialog" : undefined}
-      aria-modal={drawer ? true : undefined}
     >
       <header className="details-head">
         {selectedTask ? (

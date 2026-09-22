@@ -224,9 +224,6 @@ export function AppShell({
   const [wide, setWide] = useState(
     () => window.matchMedia("(min-width: 960px)").matches,
   );
-  const [roomForDetails, setRoomForDetails] = useState(
-    () => window.matchMedia("(min-width: 1180px)").matches,
-  );
 
   useEffect(() => {
     localStorage.setItem("sleepy-doll-sidebar-collapsed", String(collapsed));
@@ -243,17 +240,13 @@ export function AppShell({
   useEffect(() => {
     // 断点按 CSS 像素判定，窗口缩放改变的是 CSS 宽度。
     const sidebar = window.matchMedia("(min-width: 960px)");
-    const details = window.matchMedia("(min-width: 1180px)");
     const sync = () => {
       setWide(sidebar.matches);
-      setRoomForDetails(details.matches);
     };
     sync();
     sidebar.addEventListener("change", sync);
-    details.addEventListener("change", sync);
     return () => {
       sidebar.removeEventListener("change", sync);
-      details.removeEventListener("change", sync);
     };
   }, []);
   const conversation = bootstrap.conversations.find(
@@ -443,36 +436,21 @@ export function AppShell({
   const detailsPane = detailsOpen && (page === "chat" || page === "tasks");
   const detailsVisible =
     (detailsPane || detailsPresent) && (page === "chat" || page === "tasks");
-  const detailsDrawerOpen = detailsVisible && !roomForDetails;
   useEffect(() => {
     if (detailsPane) {
       setDetailsPresent(true);
-      if (roomForDetails) return;
-      // A quick reopen can reuse the still-mounted exit layer. Restore modal
-      // focus even when the DetailsPanel mount effect does not run again.
-      const frame = window.requestAnimationFrame(() => {
-        document
-          .querySelector<HTMLButtonElement>(
-            ".details-drawer .details-head button",
-          )
-          ?.focus();
-      });
-      return () => window.cancelAnimationFrame(frame);
+      return;
     }
-    if (
-      (page !== "chat" && page !== "tasks") ||
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ) {
+    if (page !== "chat" && page !== "tasks") {
       setDetailsPresent(false);
       return;
     }
-    const timer = window.setTimeout(() => setDetailsPresent(false), 180);
+    const timer = window.setTimeout(() => setDetailsPresent(false), 320);
     return () => window.clearTimeout(timer);
-  }, [detailsPane, page, roomForDetails]);
+  }, [detailsPane, page]);
   // 宽窗口未折叠时侧栏占布局列，其余情况靠左缘悬停唤出悬浮抽屉。
-  // 窄窗只允许一个模态抽屉；详情打开时侧栏不会同时留在遮罩下。
   const docked = wide && !collapsed;
-  const overlayOpen = !docked && (peek || !collapsed) && !detailsDrawerOpen;
+  const overlayOpen = !docked && (peek || !collapsed);
   const sidebarVisible = docked || overlayOpen;
   const showPeek = () => {
     window.clearTimeout(peekTimer.current);
@@ -512,7 +490,6 @@ export function AppShell({
   const pinSidebar = () => {
     window.clearTimeout(peekTimer.current);
     setPeek(false);
-    if (detailsDrawerOpen) onToggleDetails();
     setCollapsed(false);
   };
   const foldSidebar = () => {
@@ -521,8 +498,9 @@ export function AppShell({
     setCollapsed(true);
   };
   useEffect(() => {
-    if (detailsDrawerOpen && !collapsed) foldSidebar();
-  }, [detailsDrawerOpen, collapsed]);
+    // 窄窗口优先给对话和任务面板留出空间。
+    if (detailsPane && viewport - sidebarWidth < 800) foldSidebar();
+  }, [detailsPane, viewport, sidebarWidth]);
   const onResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -739,7 +717,7 @@ export function AppShell({
         data-collapsed={!docked}
         data-drawer={overlayOpen}
         data-resizing={resizing}
-        data-details={detailsVisible && roomForDetails}
+        data-details={detailsPane}
         style={
           {
             "--sidebar-user-width": `${sidebarWidth}px`,
@@ -756,7 +734,7 @@ export function AppShell({
           />
         )}
         {aside}
-        {!wide && !collapsed && !detailsDrawerOpen && (
+        {!wide && !collapsed && (
           <button
             className="app-scrim"
             aria-label={t.nav.closeSidebar}
@@ -801,10 +779,7 @@ export function AppShell({
                       detailsOpen ? t.nav.hideDetails : t.nav.showDetails
                     }
                     title={detailsOpen ? t.nav.hideDetails : t.nav.showDetails}
-                    onClick={() => {
-                      if (!detailsOpen && !roomForDetails) foldSidebar();
-                      onToggleDetails();
-                    }}
+                    onClick={onToggleDetails}
                   >
                     <PanelIcon className="button-icon" />
                   </button>
@@ -815,33 +790,14 @@ export function AppShell({
           {error && <Toast message={error} onDismiss={() => setError("")} />}
           <div className="app-body">
             <div className="app-view">{children}</div>
-            {detailsVisible &&
-              (roomForDetails ? (
-                <div
-                  className="details-slot"
-                  data-open={detailsPane}
-                  inert={!detailsPane}
-                >
-                  {details}
-                </div>
-              ) : (
-                <>
-                  <button
-                    className="details-scrim"
-                    data-open={detailsPane}
-                    inert={!detailsPane}
-                    aria-label={t.nav.closeDetails}
-                    onClick={onToggleDetails}
-                  />
-                  <div
-                    className="details-drawer"
-                    data-open={detailsPane}
-                    inert={!detailsPane}
-                  >
-                    {details}
-                  </div>
-                </>
-              ))}
+            <div
+              className="details-slot"
+              data-open={detailsPane}
+              aria-hidden={!detailsPane}
+              inert={!detailsPane}
+            >
+              {detailsVisible ? details : null}
+            </div>
           </div>
         </main>
         {ghost

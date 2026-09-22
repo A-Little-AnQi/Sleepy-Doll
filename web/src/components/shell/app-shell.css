@@ -2,6 +2,9 @@
   --sidebar-user-width: 248px;
   --sidebar-width: 248px;
   --sidebar-motion: var(--motion-slow) var(--ease-enter);
+  --details-width: clamp(280px, 28vw, 336px);
+  --layout-radius: 16px;
+  --layout-gap: 10px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   height: 100%;
@@ -9,7 +12,7 @@
   padding-top: var(--title-bar-height);
   overflow: hidden;
   color: var(--text);
-  background: var(--surface);
+  background: var(--sidebar);
 }
 .app-shell[data-resizing="true"] .app-sidebar,
 .app-shell[data-resizing="true"] .app-main {
@@ -64,7 +67,7 @@
   min-width: 0;
   overflow: hidden;
   background: var(--sidebar);
-  border-right: 1px solid var(--border);
+  border-right: 0;
   white-space: nowrap;
   transform: translateX(-100%);
   pointer-events: none;
@@ -76,11 +79,11 @@
   pointer-events: auto;
 }
 .app-brand {
-  height: var(--header-height);
+  height: calc(var(--header-height) + 8px);
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 var(--sidebar-pad-x);
+  padding: 8px var(--sidebar-pad-x) 0;
   flex-shrink: 0;
 }
 .app-wordmark {
@@ -536,6 +539,8 @@
   margin-left: var(--sidebar-width);
   display: flex;
   flex-direction: column;
+  gap: 8px;
+  padding: 8px var(--layout-gap) var(--layout-gap);
   overflow: hidden;
   transition: margin-left var(--sidebar-motion);
 }
@@ -547,7 +552,9 @@
   justify-content: space-between;
   gap: 12px;
   padding: 0 var(--page-padding);
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--layout-radius);
+  background: var(--surface);
 }
 .app-header-actions {
   display: flex;
@@ -580,11 +587,16 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 0px;
+  column-gap: 0;
   overflow: hidden;
+  transition:
+    grid-template-columns 320ms var(--ease-enter),
+    column-gap 320ms var(--ease-enter);
 }
 .app-shell[data-details="true"] .app-body {
   grid-template-columns: minmax(0, 1fr) var(--details-width);
+  column-gap: var(--layout-gap);
 }
 .app-view {
   width: 100%;
@@ -592,6 +604,9 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--layout-radius);
+  background: var(--surface);
 }
 .app-view .page-sheet {
   height: 100%;
