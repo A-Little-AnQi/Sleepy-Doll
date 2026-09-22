@@ -334,6 +334,7 @@
 }
 .composer-menu [data-ui="select-trigger"] {
   width: auto;
+  height: var(--control-height);
   min-height: var(--control-height);
   gap: 4px;
   padding: 0 8px;
@@ -344,6 +345,14 @@
   font-size: var(--font-body);
   font-weight: 500;
   color: var(--secondary);
+}
+/* 对齐文字字面和箭头图形，而不只对齐各自的外框。 */
+.composer-menu [data-ui="select-trigger"] > span {
+  line-height: 16px;
+  transform: translateY(-1px);
+}
+.composer-menu [data-ui="select-trigger"] > .sd-chevron {
+  transform: translateY(1px);
 }
 .composer-menu [data-ui="select-trigger"]:hover,
 .composer-menu [data-ui="select-trigger"][aria-expanded="true"] {
