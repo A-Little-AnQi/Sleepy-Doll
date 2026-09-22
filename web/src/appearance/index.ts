@@ -10,6 +10,13 @@ const theme = preference<ThemeId>(
   (stored) => (stored === "dark" ? "dark" : "light"),
   (value) => {
     document.documentElement.dataset.theme = value;
+    window.ipc?.postMessage(
+      JSON.stringify({
+        id: crypto.randomUUID(),
+        method: "window.setTheme",
+        params: { theme: value },
+      }),
+    );
   },
 );
 
@@ -22,9 +29,14 @@ export function useTheme(): ThemeId {
   return theme.use();
 }
 
-export function writeTheme(next: ThemeId, _origin?: ThemeOrigin): Promise<void> {
+export function writeTheme(
+  next: ThemeId,
+  _origin?: ThemeOrigin,
+): Promise<void> {
   const start = document.startViewTransition?.bind(document);
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const reduced = window.matchMedia?.(
+    "(prefers-reduced-motion: reduce)",
+  ).matches;
   // 已经是这个主题、浏览器不支持统一过渡或用户要求减少动态时直接写入。
   if (!start || reduced || document.documentElement.dataset.theme === next) {
     theme.write(next);

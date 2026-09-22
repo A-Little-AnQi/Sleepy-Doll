@@ -120,9 +120,7 @@ export function TasksPage({
     },
     askAi: (task) => {
       onOpenConversation(task.sourceConversationId ?? "");
-      setError(
-        t.tasks.editNote(task.name),
-      );
+      setError(t.tasks.editNote(task.name));
     },
     connect: () => onConnectTools?.(),
     open: (task) => onOpenTask?.(task),
@@ -201,11 +199,7 @@ export function TasksPage({
             <div className="empty-state">
               <HistoryIcon />
               <h3>{query ? t.tasks.noMatch : t.tasks.empty}</h3>
-              <p>
-                {query
-                  ? t.tasks.emptyHint
-                  : t.tasks.emptyHow}
-              </p>
+              <p>{query ? t.tasks.emptyHint : t.tasks.emptyHow}</p>
               {query ? (
                 <button
                   className="secondary-action"
@@ -242,11 +236,7 @@ export function TasksPage({
           <div className="empty-state">
             <HistoryIcon />
             <h3>{query ? t.tasks.runsNoMatch : t.tasks.runsEmpty}</h3>
-            <p>
-              {query
-                ? t.tasks.runsEmptyHint
-                : t.tasks.runsEmptyHow}
-            </p>
+            <p>{query ? t.tasks.runsEmptyHint : t.tasks.runsEmptyHow}</p>
           </div>
         )}
       </MotionSwitch>
@@ -263,10 +253,10 @@ export function TasksPage({
       >
         {pendingRemove ? (
           <>
-            <p>删除「{pendingRemove.name}」。</p>
+            <p>确定删除快捷任务「{pendingRemove.name}」？</p>
             <p>{t.tasks.deleteKeepsRuns}</p>
             {pendingRemove.runnable ? (
-              <p>如果有运行正在进行，那一次会继续执行完。</p>
+              <p>此操作不会停止正在运行的任务。</p>
             ) : null}
           </>
         ) : null}
@@ -306,12 +296,20 @@ function RunRow({
       </div>
       <span className="tag">{taskLabels[run.state] ?? run.state}</span>
       {isRunning(run) ? (
-        <button className="subtle-action" disabled={busy} onClick={onStop}>
-          停止
+        <button
+          className="subtle-action"
+          disabled={busy || run.state === "cancelling"}
+          onClick={onStop}
+        >
+          {run.state === "queued"
+            ? "取消排队"
+            : run.state === "cancelling"
+              ? "正在停止"
+              : "停止任务"}
         </button>
       ) : (
         <button className="subtle-action" onClick={onOpen}>
-          打开
+          查看对话
         </button>
       )}
     </div>

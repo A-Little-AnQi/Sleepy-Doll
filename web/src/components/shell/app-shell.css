@@ -757,6 +757,7 @@ html[data-theme-reveal="true"] .app-group {
 .app-account-menu {
   padding: 8px;
   border-radius: 12px;
+  animation: account-menu-in 180ms var(--ease-enter) both;
   box-shadow:
     0 12px 36px #00000014,
     0 2px 6px #00000008;
@@ -800,13 +801,38 @@ html[data-theme-reveal="true"] .app-group {
   outline: 2px solid var(--chat-user);
   outline-offset: 2px;
 }
+.app-account-menu[data-open="false"] {
+  pointer-events: none;
+  animation: account-menu-out 140ms ease-in both;
+}
+@keyframes account-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes account-menu-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(3px) scale(0.985);
+  }
+}
 :root[data-theme="dark"] .app-account-menu {
   box-shadow:
     0 12px 36px #0006,
     0 2px 6px #0003;
 }
 @media (prefers-reduced-motion: reduce) {
-  .app-account-menu {
+  .app-account-menu,
+  .app-account-menu[data-open="false"] {
     animation: none;
   }
   .app-account-menu .app-account-more {

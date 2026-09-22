@@ -115,10 +115,11 @@ export default defineConfig({
     outDir: "../target/ui",
     emptyOutDir: true,
     rollupOptions: {
-      // 两个窗口各一份 HTML：主程序加载 index.html，安装程序加载 setup.html。
+      // 主窗口、安装程序和托盘分别加载各自入口。
       input: {
         index: fileURLToPath(new URL("./web/index.html", import.meta.url)),
         setup: fileURLToPath(new URL("./web/setup.html", import.meta.url)),
+        tray: fileURLToPath(new URL("./web/tray.html", import.meta.url)),
       },
     },
   },

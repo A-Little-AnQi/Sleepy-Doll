@@ -1,27 +1,20 @@
 .sd-context {
   position: relative;
-  display: flex;
-  align-items: center;
+  display: inline-grid;
+  place-items: center;
   flex-shrink: 0;
-  gap: 5px;
-  min-height: 32px;
-  padding: 3px 7px 3px 4px;
-  border: 1px solid transparent;
-  border-radius: 9px;
+  width: var(--control-height);
+  height: var(--control-height);
+  padding: 0;
+  border-radius: 6px;
   color: var(--secondary);
-  font-size: 11px;
+  font-size: var(--font-body);
+  font-weight: 400;
+  line-height: normal;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   outline: none;
   cursor: help;
-  transition:
-    background-color 140ms ease,
-    border-color 140ms ease;
-}
-.sd-context:hover,
-.sd-context:focus-visible {
-  background: var(--subtle);
-  border-color: var(--border);
 }
 .sd-context:focus-visible {
   outline: 2px solid var(--secondary);
@@ -29,18 +22,17 @@
 }
 .sd-context-ring {
   display: block;
-  width: 24px;
-  height: 24px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
-  overflow: visible;
 }
 .sd-context-track,
 .sd-context-fill {
   fill: none;
-  stroke-width: 2.5;
+  stroke-width: 2;
 }
 .sd-context-track {
-  stroke: var(--border);
+  stroke: var(--border-strong);
 }
 .sd-context-fill {
   stroke: var(--secondary);
@@ -51,45 +43,18 @@
     stroke-dasharray 260ms ease-out,
     stroke 160ms ease;
 }
-.sd-context-center {
-  fill: var(--muted);
-}
 .sd-context.is-high .sd-context-fill {
   stroke: var(--gold);
-}
-.sd-context.is-high .sd-context-label > span {
-  color: var(--text);
-}
-.sd-context-copy {
-  display: grid;
-  gap: 2px;
-  min-width: 80px;
-  line-height: 1;
-}
-.sd-context-label {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--secondary);
-  font-size: 10px;
-}
-.sd-context-label > span {
-  color: var(--secondary);
-}
-.sd-context-numbers {
-  font-weight: 550;
-  letter-spacing: 0.01em;
-  color: var(--secondary);
 }
 .sd-context-hint {
   position: absolute;
   z-index: 50;
-  bottom: calc(100% + 9px);
+  bottom: calc(100% + 8px);
   right: 0;
-  width: max-content;
+  width: 240px;
   max-width: min(260px, 70vw);
   display: grid;
-  gap: 7px;
+  gap: 6px;
   padding: 10px 12px;
   border: 1px solid var(--border-strong);
   border-radius: 10px;
@@ -115,42 +80,37 @@
   visibility: visible;
   transform: translateY(0);
 }
-.sd-context-hint em {
-  font-style: normal;
+.sd-context-hint-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
   color: var(--text);
+  font-weight: 500;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.sd-context-hint-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.sd-context-hint-row > :last-child {
+  color: var(--text);
+  text-align: right;
+  white-space: nowrap;
+}
+.sd-context-hint-note {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
 }
 .sd-context[data-hint-dismissed="true"] .sd-context-hint {
   opacity: 0;
   visibility: hidden;
 }
-.sd-context-compacted {
-  position: absolute;
-  top: 5px;
-  left: 22px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--gold);
-  box-shadow: 0 0 0 2px var(--surface);
-}
-@media (max-width: 560px) {
-  .sd-context {
-    gap: 3px;
-    padding-right: 3px;
-  }
-  .sd-context-ring {
-    width: 22px;
-    height: 22px;
-  }
-  .sd-context-copy {
-    min-width: 74px;
-  }
-  .sd-context-compacted {
-    left: 20px;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
-  .sd-context,
   .sd-context-fill,
   .sd-context-hint {
     transition: none;

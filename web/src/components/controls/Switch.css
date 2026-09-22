@@ -1,0 +1,55 @@
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: var(--border-strong);
+  cursor: pointer;
+  transition: background-color var(--motion-fast, 120ms)
+    var(--ease-standard, ease);
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 3px #0002;
+  transition:
+    transform var(--motion-base, 240ms) var(--ease-enter, ease),
+    background-color var(--motion-fast, 120ms) var(--ease-standard, ease),
+    box-shadow var(--motion-fast, 120ms) var(--ease-standard, ease);
+}
+
+.switch.on {
+  background: var(--solid);
+}
+
+.switch.on::after {
+  background: var(--inverse);
+  transform: translateX(14px);
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--secondary);
+  outline-offset: 3px;
+}
+
+.switch:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button.switch,
+  button.switch::after {
+    transition: none;
+  }
+}

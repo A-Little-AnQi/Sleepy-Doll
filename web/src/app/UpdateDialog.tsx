@@ -1,4 +1,11 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Dialog } from "../components/overlay/Dialog";
@@ -37,13 +44,13 @@ export function UpdateDialog({
   const id = useId();
   const body = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState(initialTab);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (open) setTab(initialTab);
   }, [open, initialTab]);
   const items = useMemo(() => tabs(t), [t]);
   const active = items.find((item) => item.key === tab) ?? items[0];
-  useEffect(() => {
-    if (body.current) body.current.scrollTop = 0;
+  useLayoutEffect(() => {
+    if (open && body.current) body.current.scrollTop = 0;
   }, [tab, open]);
   useEffect(() => {
     if (!open) return;
@@ -98,7 +105,7 @@ export function UpdateDialog({
         </button>
       }
     >
-      <div className="update-dialog">
+      <div className="update-dialog" data-tab={active.key}>
         <div className="update-dialog-toolbar">
           <div
             className="update-dialog-tabs"

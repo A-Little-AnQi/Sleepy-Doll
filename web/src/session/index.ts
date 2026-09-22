@@ -16,20 +16,20 @@ export function needsConfirmation(mode?: string): boolean {
 /** 运行状态文案，与运行时 `RunState::label` 一一对应。 */
 export const taskLabels: Record<string, string> = {
   queued: "排队中",
-  preflighting: "检查运行条件",
+  preflighting: "正在检查运行条件",
   deciding: "正在处理请求",
   running: "运行中",
   executing: "正在执行",
-  awaitingUser: "等待你补充信息",
-  awaitingApproval: "等待你确认更改",
+  awaitingUser: "等待补充信息",
+  awaitingApproval: "等待确认操作",
   waitingJob: "等待工具完成",
   verifying: "正在核对结果",
   recovering: "正在恢复运行状态",
-  cancelling: "正在请求停止",
+  cancelling: "正在停止",
   blocked: "暂时无法运行",
   cancelled: "已停止",
   answered: "已回答",
-  succeeded: "已完成并核对",
+  succeeded: "已完成",
   failed: "执行失败",
   needsReview: "结果待核对",
   partial: "部分完成",
@@ -55,7 +55,7 @@ export function phaseLabel(task?: TaskInfo): string | undefined {
     case "queued":
       return "排队中";
     case "preflighting":
-      return "检查运行条件";
+      return "正在检查运行条件";
     case "cancelling":
       return "正在停止";
     case "waitingJob":
@@ -66,8 +66,14 @@ export function phaseLabel(task?: TaskInfo): string | undefined {
       return "正在恢复运行状态";
     case "executing":
       return "正在执行";
+    case "awaitingUser":
+      return "等待补充信息";
+    case "awaitingApproval":
+      return "等待确认操作";
+    case "running":
+      return "正在处理请求";
     default:
-      return "等待响应";
+      return "等待模型响应";
   }
 }
 export interface Plan {
@@ -278,15 +284,13 @@ class Session {
               loading: false,
             });
           failures = 0;
-          if (
-            !batch.events.length && !window.ipc
-          ) {
+          if (!batch.events.length && !window.ipc) {
             await new Promise((resolve) => setTimeout(resolve, 1000));
           }
         } catch (error) {
           failures++;
           this.publish({
-            error: `连接中断，正在重连。${error instanceof Error ? error.message : String(error)}`,
+            error: `暂时无法同步对话，正在重试。${readError(error)}`,
             loading: false,
           });
           await new Promise((resolve) =>

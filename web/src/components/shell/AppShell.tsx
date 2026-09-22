@@ -183,6 +183,7 @@ export function AppShell({
   const sidebarWidth = clampSidebarWidth(preferredWidth, viewport);
   const [peek, setPeek] = useState(false);
   const [resizing, setResizing] = useState(false);
+  const [detailsPresent, setDetailsPresent] = useState(detailsOpen);
   const widthRef = useRef(preferredWidth);
   const resizingRef = useRef(false);
   const peekTimer = useRef(0);
@@ -440,7 +441,34 @@ export function AppShell({
 
   const detailsToggle = page === "chat";
   const detailsPane = detailsOpen && (page === "chat" || page === "tasks");
-  const detailsDrawerOpen = detailsPane && !roomForDetails;
+  const detailsVisible =
+    (detailsPane || detailsPresent) && (page === "chat" || page === "tasks");
+  const detailsDrawerOpen = detailsVisible && !roomForDetails;
+  useEffect(() => {
+    if (detailsPane) {
+      setDetailsPresent(true);
+      if (roomForDetails) return;
+      // A quick reopen can reuse the still-mounted exit layer. Restore modal
+      // focus even when the DetailsPanel mount effect does not run again.
+      const frame = window.requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLButtonElement>(
+            ".details-drawer .details-head button",
+          )
+          ?.focus();
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+    if (
+      (page !== "chat" && page !== "tasks") ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      setDetailsPresent(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setDetailsPresent(false), 180);
+    return () => window.clearTimeout(timer);
+  }, [detailsPane, page, roomForDetails]);
   // 宽窗口未折叠时侧栏占布局列，其余情况靠左缘悬停唤出悬浮抽屉。
   // 窄窗只允许一个模态抽屉；详情打开时侧栏不会同时留在遮罩下。
   const docked = wide && !collapsed;
@@ -711,7 +739,7 @@ export function AppShell({
         data-collapsed={!docked}
         data-drawer={overlayOpen}
         data-resizing={resizing}
-        data-details={detailsPane && roomForDetails}
+        data-details={detailsVisible && roomForDetails}
         style={
           {
             "--sidebar-user-width": `${sidebarWidth}px`,
@@ -768,7 +796,10 @@ export function AppShell({
                   <button
                     className="icon-button"
                     aria-pressed={detailsOpen}
-                    aria-label={detailsOpen ? t.nav.hideDetails : t.nav.showDetails}
+                    data-details-trigger=""
+                    aria-label={
+                      detailsOpen ? t.nav.hideDetails : t.nav.showDetails
+                    }
                     title={detailsOpen ? t.nav.hideDetails : t.nav.showDetails}
                     onClick={() => {
                       if (!detailsOpen && !roomForDetails) foldSidebar();
@@ -784,17 +815,31 @@ export function AppShell({
           {error && <Toast message={error} onDismiss={() => setError("")} />}
           <div className="app-body">
             <div className="app-view">{children}</div>
-            {detailsPane &&
+            {detailsVisible &&
               (roomForDetails ? (
-                details
+                <div
+                  className="details-slot"
+                  data-open={detailsPane}
+                  inert={!detailsPane}
+                >
+                  {details}
+                </div>
               ) : (
                 <>
                   <button
                     className="details-scrim"
+                    data-open={detailsPane}
+                    inert={!detailsPane}
                     aria-label={t.nav.closeDetails}
                     onClick={onToggleDetails}
                   />
-                  <div className="details-drawer">{details}</div>
+                  <div
+                    className="details-drawer"
+                    data-open={detailsPane}
+                    inert={!detailsPane}
+                  >
+                    {details}
+                  </div>
                 </>
               ))}
           </div>

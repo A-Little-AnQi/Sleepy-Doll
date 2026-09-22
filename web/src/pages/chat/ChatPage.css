@@ -299,10 +299,17 @@
   }
 }
 
+.chat-unread-anchor {
+  position: relative;
+  flex: 0 0 0;
+  width: 100%;
+  z-index: 20;
+}
+
 .chat-unread {
   position: absolute;
   left: 50%;
-  bottom: 132px;
+  bottom: 12px;
   transform: translateX(-50%);
   z-index: 20;
   padding: 6px 14px;
@@ -368,5 +375,12 @@
 
 .send-action[data-stopping="true"] {
   cursor: wait;
-  opacity: 0.5;
+  opacity: 0.7;
+}
+
+.send-action .activity-spinner {
+  width: 14px;
+  height: 14px;
+  border-color: color-mix(in srgb, currentColor 28%, transparent);
+  border-top-color: currentColor;
 }

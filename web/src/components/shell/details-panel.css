@@ -7,6 +7,18 @@
   border-left: 1px solid var(--border);
   animation: details-enter 220ms var(--ease-enter) both;
 }
+.details-slot {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+.details-slot > .details-panel {
+  flex: 1;
+}
+.details-slot[data-open="false"] {
+  animation: details-leave 180ms ease-in both;
+  pointer-events: none;
+}
 .details-head {
   display: flex;
   align-items: center;
@@ -340,6 +352,10 @@
   flex: 1;
   animation: none;
 }
+.details-drawer[data-open="false"] {
+  animation: details-drawer-leave 180ms ease-in both;
+  pointer-events: none;
+}
 .details-scrim {
   position: fixed;
   inset: var(--title-bar-height) 0 0 0;
@@ -348,6 +364,26 @@
   border: 0;
   padding: 0;
   animation: backdrop-enter 180ms ease-out both;
+}
+.details-scrim[data-open="false"] {
+  animation: details-scrim-leave 180ms ease-out both;
+  pointer-events: none;
+}
+@keyframes details-leave {
+  to {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+@keyframes details-drawer-leave {
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes details-scrim-leave {
+  to {
+    opacity: 0;
+  }
 }
 @keyframes details-enter {
   from {
@@ -382,6 +418,11 @@
   .details-content[data-motion="panel"],
   .details-drawer,
   .details-scrim {
+    animation: none;
+  }
+  .details-slot[data-open="false"],
+  .details-drawer[data-open="false"],
+  .details-scrim[data-open="false"] {
     animation: none;
   }
   .details-panel .task-card {

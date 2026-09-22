@@ -174,7 +174,7 @@ export function SettingsPage({
                   className="subtle-action"
                   onClick={() => setEditing(true)}
                 >
-                  编辑
+                  编辑配置
                 </button>
               </SettingRow>
             </section>
@@ -215,7 +215,11 @@ function SponsorNote() {
     <aside className="settings-sponsor">
       <h2>{t.settings.sponsor}</h2>
       <p>{t.settings.sponsorNote}</p>
-      <div className="settings-sponsor-qr" role="img" aria-label={t.settings.qrLabel} />
+      <div
+        className="settings-sponsor-qr"
+        role="img"
+        aria-label={t.settings.qrLabel}
+      />
     </aside>
   );
 }

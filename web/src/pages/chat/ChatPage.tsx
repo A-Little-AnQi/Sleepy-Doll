@@ -133,6 +133,7 @@ export function ChatPage({
   const [unread, setUnread] = useState(false);
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const interrupting = stopping || task?.state === "cancelling";
   // 工具名取自工具定义里的 label，没有 label 的不进表。
   const toolLabels = useMemo(
     () =>
@@ -175,7 +176,7 @@ export function ChatPage({
       alive.current = false;
     };
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     setError("");
     setNotice("");
     setSending(false);
@@ -206,7 +207,7 @@ export function ChatPage({
     } else {
       setUnread(true);
     }
-  }, [messages, stream, plan]);
+  }, [draftKey, messages, stream, plan]);
   const setDraft = (value: string) => {
     setPrompt(value);
     localStorage.setItem(draftKey, value);
@@ -251,7 +252,8 @@ export function ChatPage({
       if (supplementRun) {
         await api.supplement(supplementRun, value, clientKey);
         // 补充说明在当前步骤结束后处理。
-        setNotice(t.chat.queuedStep);
+        if (alive.current && current.current === origin)
+          setNotice(t.chat.queuedStep);
       } else {
         const run = await api.submitTask(
           value,
@@ -262,10 +264,16 @@ export function ChatPage({
         session(run.conversationId).start();
         if (alive.current && current.current === origin)
           onConversation(run.conversationId);
-        if (queue) setNotice(t.chat.queued);
+        if (queue && alive.current && current.current === origin)
+          setNotice(t.chat.queued);
       }
       sessionStorage.removeItem(retryKey);
-      await reload();
+      // The server has accepted this prompt. A shell refresh failure must not
+      // restore the draft and invite the same message to be sent a second time.
+      await reload().catch((reason: unknown) => {
+        if (alive.current && current.current === origin)
+          setError(readError(reason));
+      });
     } catch (reason) {
       localStorage.setItem(draftKey, value);
       if (alive.current && current.current === origin) {
@@ -289,7 +297,11 @@ export function ChatPage({
   const elapsed = task
     ? Math.max(0, Math.floor((now - new Date(task.createdAt).getTime()) / 1000))
     : 0;
-  const phase = question || approval ? undefined : phaseLabel(task);
+  const phase = interrupting
+    ? "正在停止"
+    : question || approval
+      ? undefined
+      : phaseLabel(task);
   return (
     <section className={`chat-workspace${welcome ? " is-welcome" : ""}`}>
       <MotionSwitch
@@ -416,7 +428,7 @@ export function ChatPage({
                           ).finally(() => setConfirming(false));
                         }}
                       >
-                        允许
+                        允许执行
                       </button>
                       <button
                         className="secondary-action"
@@ -430,7 +442,7 @@ export function ChatPage({
                           ).finally(() => setConfirming(false));
                         }}
                       >
-                        拒绝
+                        拒绝执行
                       </button>
                     </div>
                     {now >= approval.expiresAt * 1000 && (
@@ -452,7 +464,7 @@ export function ChatPage({
                       <h3>{taskLabels[task.state]}</h3>
                       <p>
                         {task.state === "cancelled"
-                          ? "已保留生成的内容，你可以继续发送消息。"
+                          ? "可以继续发送消息。"
                           : task.error || task.result}
                       </p>
                       {task.state === "blocked" && (
@@ -463,7 +475,7 @@ export function ChatPage({
                               void act(() => api.resumeTask(task.id))
                             }
                           >
-                            重试
+                            重试任务
                           </button>
                           <button
                             className="secondary-action"
@@ -471,7 +483,7 @@ export function ChatPage({
                               void act(() => api.cancelTask(task.id))
                             }
                           >
-                            停止
+                            停止任务
                           </button>
                         </div>
                       )}
@@ -482,17 +494,19 @@ export function ChatPage({
           )}
         </div>
       </MotionSwitch>
-      {unread && busy && (
-        <button
-          className="chat-unread"
-          onClick={() => {
-            follow.current = true;
-            setUnread(false);
-            scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
-          }}
-        >
-          有新内容 · 回到最新
-        </button>
+      {unread && (
+        <div className="chat-unread-anchor">
+          <button
+            className="chat-unread"
+            onClick={() => {
+              follow.current = true;
+              setUnread(false);
+              scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
+            }}
+          >
+            有新内容 · 回到最新
+          </button>
+        </div>
       )}
       <div className="composer-dock">
         {notice && <Toast message={notice} onDismiss={() => setNotice("")} />}
@@ -513,7 +527,7 @@ export function ChatPage({
                   className="subtle-action"
                   onClick={() => void act(() => api.cancelTask(run.id))}
                 >
-                  取消
+                  取消排队
                 </button>
               </div>
             ))}
@@ -616,10 +630,11 @@ export function ChatPage({
                 <button
                   type="button"
                   className="send-action"
-                  aria-label={t.chat.stop}
-                  title={t.chat.stop}
-                  disabled={stopping || task?.state === "cancelling"}
-                  data-stopping={stopping || task?.state === "cancelling"}
+                  aria-label={interrupting ? "正在停止" : t.chat.stop}
+                  title={interrupting ? "正在停止" : t.chat.stop}
+                  aria-busy={interrupting}
+                  disabled={interrupting}
+                  data-stopping={interrupting}
                   onClick={() => {
                     if (!task || stopping) return;
                     setStopping(true);
@@ -628,12 +643,21 @@ export function ChatPage({
                       .cancelTask(task.id)
                       .then(reload)
                       .catch((reason: unknown) => {
+                        if (
+                          !alive.current ||
+                          current.current !== task.conversationId
+                        )
+                          return;
                         setStopping(false);
                         setError(readError(reason));
                       });
                   }}
                 >
-                  <StopIcon className="button-icon" />
+                  {interrupting ? (
+                    <span className="activity-spinner" aria-hidden="true" />
+                  ) : (
+                    <StopIcon className="button-icon" />
+                  )}
                 </button>
               )}
               {(!busy || prompt.trim()) && (

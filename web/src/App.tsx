@@ -58,7 +58,8 @@ export default function App() {
   );
   const [selectedTask, setSelectedTask] = useState<string>();
   const [error, setError] = useState("");
-  const [panicNotice, setPanicNotice] = useState(false);
+  const [panicNotice, setPanicNotice] = useState<number | null>(null);
+  const [trayNotice, setTrayNotice] = useState("");
   const [releaseNotesTab, setReleaseNotesTab] = useState("changelog");
   const [releaseNotesOpen, setReleaseNotesOpen] = useState(
     // 更新弹窗：本地记录的版本与当前不同（包括第一次使用）就弹。
@@ -113,8 +114,22 @@ export default function App() {
   useEffect(
     // 急停热键：掐掉运行后壳会把窗口带回前台，这里只负责告知。
     () =>
-      subscribeNativeEvents((name) => {
-        if (name === "panicStop") setPanicNotice(true);
+      subscribeNativeEvents((name, payload) => {
+        if (name === "panicStop") {
+          setPanicNotice(
+            payload && typeof payload === "object" && "stopped" in payload
+              ? Number(payload.stopped)
+              : 1,
+          );
+        }
+        if (
+          name === "trayError" &&
+          payload &&
+          typeof payload === "object" &&
+          "message" in payload
+        ) {
+          setTrayNotice(String(payload.message));
+        }
         if (name === "openSettings") setPage("settings");
         if (name === "openHelp") {
           setReleaseNotesTab("guide");
@@ -281,11 +296,24 @@ export default function App() {
           />
         )}
       </MotionSwitch>
-      {panicNotice && (
+      {panicNotice !== null && (
         <Toast
-          message={t.app.panicStop}
+          message={
+            panicNotice === 0
+              ? t.app.panicStopIdle
+              : bootstrap.tasks.some(isRunning)
+                ? t.app.panicStop
+                : t.app.panicStopDone
+          }
           duration={6000}
-          onDismiss={() => setPanicNotice(false)}
+          onDismiss={() => setPanicNotice(null)}
+        />
+      )}
+      {trayNotice && (
+        <Toast
+          message={trayNotice}
+          duration={6000}
+          onDismiss={() => setTrayNotice("")}
         />
       )}
       <UpdateDialog

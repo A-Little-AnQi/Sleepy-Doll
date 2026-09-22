@@ -20,6 +20,7 @@ export function SidebarAccount({
   onSettings(): void;
 }) {
   const [open, setOpen] = useState(false);
+  const [present, setPresent] = useState(false);
   const t = useT();
   const theme = useTheme();
   const locale = useLocale();
@@ -28,7 +29,21 @@ export function SidebarAccount({
   const keyboardOpen = useRef(false);
 
   useEffect(() => {
-    if (!open) return;
+    if (open) {
+      setPresent(true);
+      return;
+    }
+    if (!present) return;
+    const delay = window.matchMedia?.("(prefers-reduced-motion: reduce)")
+      .matches
+      ? 0
+      : 140;
+    const timer = window.setTimeout(() => setPresent(false), delay);
+    return () => window.clearTimeout(timer);
+  }, [open, present]);
+
+  useEffect(() => {
+    if (!open || !present) return;
     if (keyboardOpen.current) {
       root.current
         ?.querySelector<HTMLButtonElement>(".app-account-menu button")
@@ -58,15 +73,27 @@ export function SidebarAccount({
       trigger.current?.focus({ preventScroll: true });
     };
     document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", onKey);
+    // Inspect the nested list before its target handler closes it.
+    document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey, true);
     };
-  }, [open]);
+  }, [open, present]);
 
   return (
-    <div className="app-account-row" ref={root}>
+    <div
+      className="app-account-row"
+      ref={root}
+      onBlur={(event) => {
+        const next = event.relatedTarget;
+        if (!(next instanceof Node) || event.currentTarget.contains(next))
+          return;
+        if (next instanceof Element && next.closest('[data-ui="select-menu"]'))
+          return;
+        setOpen(false);
+      }}
+    >
       <div className="app-account-slot">
         <button
           id="app-account-trigger"
@@ -97,10 +124,13 @@ export function SidebarAccount({
           </span>
         </button>
       </div>
-      {open && (
+      {present && (
         <div
           id="app-account-menu"
           className="app-account-menu"
+          data-open={open}
+          inert={!open}
+          aria-hidden={!open}
           role="menu"
           aria-label={t.account.menu}
         >
@@ -123,6 +153,7 @@ export function SidebarAccount({
               className="app-account-more"
               role="menuitem"
               onClick={() => {
+                trigger.current?.focus({ preventScroll: true });
                 setOpen(false);
                 onHelp();
               }}
@@ -135,6 +166,7 @@ export function SidebarAccount({
               className="app-account-more"
               role="menuitem"
               onClick={() => {
+                trigger.current?.focus({ preventScroll: true });
                 setOpen(false);
                 onSettings();
               }}

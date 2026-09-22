@@ -13,6 +13,7 @@ import { readError } from "../../session";
 import type { Bootstrap } from "../../ipc/types";
 import { MotionSwitch } from "../../components/controls/MotionSwitch";
 import { SlidingTabs } from "../../components/controls/SlidingTabs";
+import { Switch } from "../../components/controls/Switch";
 import { providerOfTool } from "../../ipc/providers";
 import { useT } from "../../i18n";
 export function ExtensionsPage({
@@ -140,7 +141,9 @@ export function ExtensionsPage({
           }}
         >
           <PlusIcon className="button-icon" />
-          {currentTab === "skills" ? t.extensions.importSkills : t.extensions.importPlugins}
+          {currentTab === "skills"
+            ? t.extensions.importSkills
+            : t.extensions.importPlugins}
         </button>
       </div>
       <div className="list-toolbar">
@@ -213,13 +216,11 @@ export function ExtensionsPage({
                       </p>
                     )}
                 </button>
-                <button
-                  className={`switch ${item.enabled ? "on" : ""}`}
-                  role="switch"
-                  aria-label={item.name}
-                  aria-checked={item.enabled}
+                <Switch
+                  label={item.name}
+                  checked={item.enabled}
                   disabled={busy}
-                  onClick={() => void toggle(item.id, !item.enabled)}
+                  onChange={(enabled) => void toggle(item.id, enabled)}
                 />
               </div>
             ))}
@@ -288,7 +289,11 @@ export function ExtensionsPage({
               }}
             >
               <label>
-                <span>{currentTab === "skills" ? t.extensions.skillsDir : t.extensions.pluginsDir}</span>
+                <span>
+                  {currentTab === "skills"
+                    ? t.extensions.skillsDir
+                    : t.extensions.pluginsDir}
+                </span>
                 <input
                   placeholder={t.extensions.dirHint}
                   value={path}
@@ -297,7 +302,8 @@ export function ExtensionsPage({
               </label>
               {currentTab === "skills" && (
                 <p className="field-help">
-                  目录里要有 SKILL.md。导入后出现在本机技能目录，可随时开关。
+                  所选目录须包含
+                  SKILL.md。导入后保存到本机技能目录，可在此启用或停用。
                 </p>
               )}
               <div>
@@ -305,7 +311,7 @@ export function ExtensionsPage({
                   className="primary-action"
                   disabled={busy || !path.trim()}
                 >
-                  导入
+                  {currentTab === "skills" ? "导入技能" : "导入插件"}
                 </button>
               </div>
             </form>
@@ -362,7 +368,9 @@ export function ExtensionsPage({
                     <button
                       className="secondary-action"
                       disabled={busy || current.enabled}
-                      title={current.enabled ? t.extensions.disableFirst : undefined}
+                      title={
+                        current.enabled ? t.extensions.disableFirst : undefined
+                      }
                       onClick={() => {
                         dialog.current?.close();
                         setPendingRemove(current.id);
@@ -391,9 +399,11 @@ export function ExtensionsPage({
           });
         }}
       >
-        <p>{t.extensions.removeNote(
-          items.find((item) => item.id === pendingRemove)?.name ?? "",
-        )}</p>
+        <p>
+          {t.extensions.removeNote(
+            items.find((item) => item.id === pendingRemove)?.name ?? "",
+          )}
+        </p>
       </ConfirmDialog>
     </div>
   );

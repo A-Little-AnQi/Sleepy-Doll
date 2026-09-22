@@ -200,7 +200,7 @@ function ActivityGroup({
             {running
               ? t.chat.statusRunning
               : pending
-                ? "已中断"
+                ? "未收到结果"
                 : t.transcript.callFailed}
           </span>
         )}
@@ -269,10 +269,12 @@ function ActivityDetailDisclosure({
 function ProcessGroup({
   steps,
   running,
+  stopping,
   children,
 }: {
   steps: number;
   running: boolean;
+  stopping: boolean;
   children: ReactNode;
 }) {
   const t = useT();
@@ -286,11 +288,13 @@ function ProcessGroup({
         onClick={() => setExpanded((open) => !open)}
       >
         <span className="activity-label">
-          {running
-            ? t.transcript.thinkingRunning
-            : steps > 0
-              ? t.transcript.thinkingSteps(steps)
-              : t.transcript.thinking}
+          {stopping
+            ? "正在停止"
+            : running
+              ? t.transcript.thinkingRunning
+              : steps > 0
+                ? t.transcript.thinkingSteps(steps)
+                : t.transcript.thinking}
         </span>
         {running && <span className="activity-spinner" />}
         <DisclosureChevron expanded={expanded} className="activity-expand" />
@@ -452,7 +456,11 @@ export const Transcript = memo(function Transcript({
           <article key={index} className={`message-turn ${turn.role}`}>
             <div className="message-content">
               {process.length > 0 && (
-                <ProcessGroup steps={processSteps} running={turnActive}>
+                <ProcessGroup
+                  steps={processSteps}
+                  running={turnActive}
+                  stopping={turnActive && phase === "正在停止"}
+                >
                   {process.map((part, partIndex) =>
                     part.kind === "reasoning" ? (
                       <div key="reasoning" className="reasoning-entry">

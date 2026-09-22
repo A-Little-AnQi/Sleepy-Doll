@@ -51,12 +51,33 @@ export function DetailsPanel({
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   const [drawer, setDrawer] = useState(false);
+  const previousSelection = useRef(selectedTask);
 
   useEffect(() => {
     const panel = panelRef.current;
-    if (!panel?.closest(".details-drawer")) return;
-    setDrawer(true);
+    if (!panel) return;
     const previous = document.activeElement as HTMLElement | null;
+    const trigger = document.querySelector<HTMLElement>(
+      "[data-details-trigger]",
+    );
+    const restoreFocus = () => {
+      // Closing an inert exit layer can move focus to body. Navigation to an
+      // unrelated control should retain that control's focus instead.
+      if (
+        document.activeElement !== document.body &&
+        !panel.contains(document.activeElement)
+      )
+        return;
+      const target =
+        previous !== document.body &&
+        previous?.isConnected &&
+        previous.getClientRects().length
+          ? previous
+          : trigger;
+      if (target?.isConnected && target.getClientRects().length) target.focus();
+    };
+    if (!panel.closest(".details-drawer")) return restoreFocus;
+    setDrawer(true);
     const controls = () =>
       Array.from(
         panel.querySelectorAll<HTMLElement>(
@@ -87,13 +108,15 @@ export function DetailsPanel({
     panel.addEventListener("keydown", handleKey);
     return () => {
       panel.removeEventListener("keydown", handleKey);
-      if (previous?.isConnected) previous.focus();
+      restoreFocus();
     };
   }, []);
 
   useEffect(() => {
-    // Navigation replaces the task button; keep keyboard focus inside the drawer.
-    if (drawer)
+    // Navigation replaces the clicked task/back button in either presentation.
+    const navigated = previousSelection.current !== selectedTask;
+    previousSelection.current = selectedTask;
+    if (drawer || (navigated && document.activeElement === document.body))
       panelRef.current
         ?.querySelector<HTMLButtonElement>(".details-head button")
         ?.focus();

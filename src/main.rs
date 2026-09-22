@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "windows")]
+mod tray_popup;
 mod window_chrome;
 
 use std::{
@@ -69,6 +71,14 @@ enum UserEvent {
     #[cfg(target_os = "windows")]
     OpenHelp,
     #[cfg(target_os = "windows")]
+    ShowTrayMenu(f64, f64),
+    #[cfg(target_os = "windows")]
+    TrayAction(String),
+    #[cfg(target_os = "windows")]
+    TrayTheme(bool),
+    #[cfg(target_os = "windows")]
+    BridgeFailed(String),
+    #[cfg(target_os = "windows")]
     ToggleBridge,
     #[cfg(target_os = "windows")]
     OpenUserDirectory,
@@ -117,6 +127,7 @@ struct WindowPlacement {
 
 fn main() {
     if let Err(error) = run() {
+        log::error!("Sleepy Doll 启动失败：{error}");
         eprintln!("Sleepy Doll 启动失败：{error}");
         std::process::exit(1);
     }
@@ -323,8 +334,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(|placement| PhysicalSize::new(placement.width, placement.height))
         .unwrap_or_else(|| window.inner_size());
     let mut placement_deadline = None;
+    #[cfg(target_os = "windows")]
+    let mut tray_popup: Option<tray_popup::TrayPopup> = None;
+    #[cfg(target_os = "windows")]
+    let mut tray_menu_state = json!({"dark":false,"active":false,"bridge":bridge_enabled.load(Ordering::Relaxed),"bridgeBusy":false});
 
-    event_loop.run(move |event, _, control_flow| {
+    event_loop.run(move |event, event_target, control_flow| {
+        #[cfg(target_os = "windows")]
+        let mut refresh_tray_menu = false;
         if placement_deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
             save_window_placement(
                 &placement_path,
@@ -336,6 +353,77 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         *control_flow = ControlFlow::Wait;
         match event {
+            #[cfg(target_os = "windows")]
+            Event::WindowEvent {
+                window_id,
+                event: WindowEvent::Focused(false) | WindowEvent::CloseRequested,
+                ..
+            } if tray_popup
+                .as_ref()
+                .is_some_and(|popup| popup.window.id() == window_id) =>
+            {
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.hide();
+                }
+            }
+            #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::ShowTrayMenu(x, y)) => {
+                tray_menu_state["active"] = json!(controller.has_active_runs());
+                if tray_popup.is_none() {
+                    match tray_popup::TrayPopup::new(
+                        event_target,
+                        proxy.clone(),
+                        &user_directory,
+                        tray_menu_state.clone(),
+                    ) {
+                        Ok(popup) => tray_popup = Some(popup),
+                        Err(error) => {
+                            log::warn!("托盘面板不可用，使用系统菜单：{error}");
+                            if let Some(tray) = tray.as_ref() {
+                                use tray_icon::menu::ContextMenu;
+                                unsafe {
+                                    tray.menu.show_context_menu_for_hwnd(
+                                        window_chrome::hwnd_id(&window),
+                                        Some(PhysicalPosition::new(x as i32, y as i32).into()),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.show(x, y, tray_menu_state.clone());
+                }
+            }
+            #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::TrayTheme(dark)) => {
+                tray_menu_state["dark"] = json!(dark);
+                refresh_tray_menu = true;
+            }
+            #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::TrayAction(action)) => {
+                if let Some(popup) = tray_popup.as_mut() {
+                    match action.as_str() {
+                        "ready" => popup.ready(),
+                        "shown" => popup.present(),
+                        "bridge" => {}
+                        _ => popup.hide(),
+                    }
+                }
+                let action = match action.as_str() {
+                    "open" => Some(UserEvent::ShowWindow),
+                    "settings" => Some(UserEvent::OpenSettings),
+                    "help" => Some(UserEvent::OpenHelp),
+                    "folder" => Some(UserEvent::OpenUserDirectory),
+                    "bridge" => Some(UserEvent::ToggleBridge),
+                    "stop" => Some(UserEvent::PanicStop),
+                    "quit" => Some(UserEvent::Quit),
+                    _ => None,
+                };
+                if let Some(action) = action {
+                    let _ = proxy.send_event(action);
+                }
+            }
             Event::UserEvent(UserEvent::ToWeb(payload)) => {
                 if let Ok(serialized) = serde_json::to_string(&payload) {
                     let _ = webview
@@ -435,6 +523,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::ToggleBridge) => {
+                if tray_menu_state["bridgeBusy"] == true {
+                    return;
+                }
+                tray_menu_state["bridgeBusy"] = json!(true);
+                refresh_tray_menu = true;
+                if let Some(tray) = tray.as_ref() {
+                    tray.bridge.set_enabled(false);
+                }
                 let enabled = !bridge_enabled.load(Ordering::Relaxed);
                 let controller = controller.clone();
                 let proxy = proxy.clone();
@@ -447,7 +543,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(_) => {
                             let _ = proxy.send_event(UserEvent::BridgeState(enabled));
                         }
-                        Err(error) => log::warn!("托盘切换 BetterGI 失败：{error}"),
+                        Err(error) => {
+                            log::warn!("托盘切换 BetterGI 失败：{error}");
+                            let _ = proxy.send_event(UserEvent::BridgeFailed(error.user_message()));
+                        }
                     }
                 });
             }
@@ -476,7 +575,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     // 隐藏要连句柄一起丢弃：close_window 按句柄是否存在决定收进托盘
                     // 还是退出。丢弃 TrayIcon 时图标也从通知区移除。
-                    (_, false) => tray = None,
+                    (_, false) => {
+                        tray = None;
+                        if let Some(popup) = tray_popup.as_mut() {
+                            popup.hide();
+                        }
+                    }
                 }
             }
             #[cfg(target_os = "windows")]
@@ -484,7 +588,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 bridge_enabled.store(enabled, Ordering::Relaxed);
                 if let Some(tray) = tray.as_ref() {
                     tray.bridge.set_checked(enabled);
+                    tray.bridge.set_enabled(true);
                 }
+                tray_menu_state["bridge"] = json!(enabled);
+                tray_menu_state["bridgeBusy"] = json!(false);
+                refresh_tray_menu = true;
+            }
+            #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::BridgeFailed(message)) => {
+                let enabled = bridge_enabled.load(Ordering::Relaxed);
+                if let Some(tray) = tray.as_ref() {
+                    tray.bridge.set_checked(enabled);
+                    tray.bridge.set_enabled(true);
+                }
+                tray_menu_state["bridgeBusy"] = json!(false);
+                refresh_tray_menu = true;
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.hide();
+                }
+                let _ = proxy.send_event(UserEvent::ShowWindow);
+                let _ = proxy.send_event(UserEvent::ToWeb(
+                    json!({"kind":"event","id":"trayError","result":{"message":message}}),
+                ));
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::RunActivity(active)) => {
@@ -492,6 +617,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(tray) = tray.as_ref() {
                     tray.set_active(active);
                 }
+                tray_menu_state["active"] = json!(active);
+                refresh_tray_menu = true;
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::PanicStop) => {
@@ -521,6 +648,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::ShutdownFinished) => *control_flow = ControlFlow::Exit,
             _ => {}
+        }
+        #[cfg(target_os = "windows")]
+        if refresh_tray_menu && let Some(popup) = tray_popup.as_mut() {
+            popup.update(tray_menu_state.clone());
         }
         if !matches!(*control_flow, ControlFlow::Exit) {
             if let Some(deadline) = placement_deadline {
@@ -773,17 +904,25 @@ fn create_tray(
 
     TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
         if let TrayIconEvent::Click {
-            button: MouseButton::Left,
+            button,
             button_state: MouseButtonState::Up,
+            position,
             ..
         } = event
         {
-            let _ = proxy.send_event(UserEvent::ShowWindow);
+            match button {
+                MouseButton::Left => {
+                    let _ = proxy.send_event(UserEvent::ShowWindow);
+                }
+                MouseButton::Right => {
+                    let _ = proxy.send_event(UserEvent::ShowTrayMenu(position.x, position.y));
+                }
+                _ => {}
+            }
         }
     }));
     let mut builder = TrayIconBuilder::new()
         .with_tooltip("Sleepy Doll · 关闭窗口后继续运行")
-        .with_menu(Box::new(menu))
         .with_menu_on_left_click(false);
     // 图标编在 exe 的资源里，界面、窗口和托盘共用同一份。
     match Icon::from_resource(APP_ICON, Some((32, 32))) {
@@ -796,6 +935,7 @@ fn create_tray(
         status: status_item,
         stop,
         quit,
+        menu,
     };
     handles.set_active(active);
     Ok(handles)
@@ -877,6 +1017,7 @@ fn menu_glyph(glyph: MenuGlyph, color: [u8; 4]) -> Option<tray_icon::menu::Icon>
 #[cfg(target_os = "windows")]
 struct TrayHandles {
     icon: tray_icon::TrayIcon,
+    menu: tray_icon::menu::Menu,
     bridge: tray_icon::menu::CheckMenuItem,
     /// 只读状态行：有运行进行中时提示急停热键。
     status: tray_icon::menu::MenuItem,
@@ -918,6 +1059,11 @@ fn dispatch_ipc(
     let parsed = serde_json::from_str::<IpcRequest>(request.body());
     if let Ok(request) = &parsed {
         match request.method.as_str() {
+            #[cfg(target_os = "windows")]
+            "window.setTheme" => {
+                let _ = proxy.send_event(UserEvent::TrayTheme(request.params["theme"] == "dark"));
+                return;
+            }
             "window.state" => {
                 #[cfg(target_os = "windows")]
                 let _ = proxy.send_event(UserEvent::SyncChrome);

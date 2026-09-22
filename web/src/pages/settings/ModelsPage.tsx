@@ -7,6 +7,7 @@ import { PlusIcon, TrashIcon } from "../../components/icons";
 import { Select } from "../../components/controls/Select";
 import { MotionSwitch } from "../../components/controls/MotionSwitch";
 import { DisclosureChevron } from "../../components/controls/DisclosureChevron";
+import { Switch } from "../../components/controls/Switch";
 import type { Bootstrap, ModelInfo } from "../../ipc/types";
 import {
   MODEL_PRESETS,
@@ -261,7 +262,7 @@ export function ModelsPage({
         <h2>{t.settings.models}</h2>
         <button className="secondary-action" type="button" onClick={add}>
           <PlusIcon className="button-icon" />
-          添加
+          添加模型
         </button>
       </header>
       <div className="model-workspace">
@@ -294,7 +295,9 @@ export function ModelsPage({
                   {model.model ? ` · ${model.model}` : ""}
                 </small>
               </span>
-              {model.active && <span className="tag tag-active">{t.models.default}</span>}
+              {model.active && (
+                <span className="tag tag-active">{t.models.default}</span>
+              )}
             </button>
           ))}
           {!bootstrap.models.length && !creating && (
@@ -314,7 +317,11 @@ export function ModelsPage({
             }}
           >
             <header className="model-form-head">
-              <h3>{creating ? t.models.addModel : (selected?.name ?? t.settings.models)}</h3>
+              <h3>
+                {creating
+                  ? t.models.addModel
+                  : (selected?.name ?? t.settings.models)}
+              </h3>
               {dirty && <span className="tag">{t.models.unsaved}</span>}
               {selected?.active && (
                 <span className="tag tag-active">{t.models.defaultModel}</span>
@@ -354,7 +361,7 @@ export function ModelsPage({
                       target="_blank"
                       rel="noreferrer"
                     >
-                      申请密钥
+                      获取 API 密钥
                     </a>
                   )}
                 </div>
@@ -397,7 +404,11 @@ export function ModelsPage({
                       autoComplete="off"
                       aria-label={t.models.apiKey}
                       required={creating}
-                      placeholder={selected ? t.models.apiKeyKeep : t.models.keyPlaceholderNew}
+                      placeholder={
+                        selected
+                          ? t.models.apiKeyKeep
+                          : t.models.keyPlaceholderNew
+                      }
                       value={form.apiKey}
                       onChange={(event) => change("apiKey", event.target.value)}
                     />
@@ -523,15 +534,13 @@ export function ModelsPage({
                   {form.protocol === "anthropic-messages" && (
                     <label className="toggle-row">
                       <span>{t.models.promptCacheLabel}</span>
-                      <button
-                        type="button"
-                        className={`switch ${form.promptCache ? "on" : ""}`}
-                        role="switch"
-                        aria-checked={form.promptCache}
-                        onClick={() =>
+                      <Switch
+                        label={t.models.promptCacheLabel}
+                        checked={form.promptCache}
+                        onChange={(promptCache) =>
                           updateForm((draft) => ({
                             ...draft,
-                            promptCache: !draft.promptCache,
+                            promptCache,
                           }))
                         }
                       />
@@ -558,7 +567,7 @@ export function ModelsPage({
                       .finally(() => setBusy(false));
                   }}
                 >
-                  设为默认
+                  设为默认模型
                 </button>
               )}
               {selected && (
@@ -569,7 +578,7 @@ export function ModelsPage({
                   onClick={() => setAskingDelete(true)}
                 >
                   <TrashIcon className="button-icon" />
-                  删除
+                  删除配置
                 </button>
               )}
             </footer>
@@ -603,7 +612,12 @@ export function ModelsPage({
             .finally(() => setBusy(false));
         }}
       >
-        <p>删除「{selected?.name}」。已绑定它的对话会改用默认模型。</p>
+        <p>确定删除模型配置「{selected?.name}」？</p>
+        <p>
+          {bootstrap.models.some((model) => model.id !== selected?.id)
+            ? "使用此配置的对话将改用默认模型。"
+            : "删除后，需要添加模型才能继续对话。"}
+        </p>
       </ConfirmDialog>
     </div>
   );

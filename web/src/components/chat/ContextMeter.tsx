@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import { formatTokens } from "../../session/context-usage";
 import "./ContextMeter.css";
 import { useT } from "../../i18n";
+import { useLocale } from "../../appearance/locale";
 
 export function ContextMeter({
   used,
@@ -15,6 +16,7 @@ export function ContextMeter({
   cacheHit?: number;
 }) {
   const t = useT();
+  const english = useLocale() === "en";
   const hintId = useId();
   const [hintDismissed, setHintDismissed] = useState(false);
   const safeUsed = Number.isFinite(used) ? Math.max(0, used) : 0;
@@ -38,7 +40,7 @@ export function ContextMeter({
     >
       <svg
         className="sd-context-ring"
-        viewBox="0 0 28 28"
+        viewBox="0 0 20 20"
         role="progressbar"
         aria-label={t.context.inModel}
         aria-valuemin={0}
@@ -46,36 +48,36 @@ export function ContextMeter({
         aria-valuenow={safeWindow > 0 ? percent : undefined}
         aria-valuetext={usage}
       >
-        <circle className="sd-context-track" cx="14" cy="14" r="10" />
+        <circle className="sd-context-track" cx="10" cy="10" r="8" />
         <circle
           className="sd-context-fill"
-          cx="14"
-          cy="14"
-          r="10"
+          cx="10"
+          cy="10"
+          r="8"
           pathLength="100"
           strokeDasharray={`${ratio * 100} 100`}
+          opacity={ratio > 0 ? 1 : 0}
         />
-        <circle className="sd-context-center" cx="14" cy="14" r="2" />
       </svg>
-      <span className="sd-context-copy">
-        <span className="sd-context-label">
-          Tokens <span>{safeWindow > 0 ? `${percent}%` : "—"}</span>
-        </span>
-        <span className="sd-context-numbers">{usage}</span>
-      </span>
       <span className="sd-context-hint" id={hintId} role="tooltip">
-        <span>{compacted ? t.context.compacted : t.context.inModel}</span>
+        <span className="sd-context-hint-title">
+          <span>{english ? "Context usage" : "上下文用量"}</span>
+          <span>{safeWindow > 0 ? `${percent}%` : "—"}</span>
+        </span>
+        <span className="sd-context-hint-row">
+          <span>{english ? "Used / limit" : "已用 / 总量"}</span>
+          <span>{usage}</span>
+        </span>
         {cacheHit > 0 && Number.isFinite(cacheHit) ? (
-          <em>{t.context.cacheHit(formatTokens(cacheHit))}</em>
+          <span className="sd-context-hint-row">
+            <span>{english ? "Cache hit" : "缓存命中"}</span>
+            <span>{formatTokens(cacheHit)}</span>
+          </span>
+        ) : null}
+        {compacted ? (
+          <span className="sd-context-hint-note">{t.context.compacted}</span>
         ) : null}
       </span>
-      {compacted && (
-        <span
-          className="sd-context-compacted"
-          aria-label={t.context.compactedShort}
-          title={t.context.compactedShort}
-        />
-      )}
     </div>
   );
 }
