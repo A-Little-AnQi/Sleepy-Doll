@@ -4,7 +4,6 @@ import type { Bootstrap } from "../../ipc/types";
 import { hostPluginEnabled } from "../../ipc/providers";
 import {
   BridgeIcon,
-  HelpIcon,
   ModelIcon,
   SettingsIcon,
   BrandIcon,
@@ -13,7 +12,8 @@ import { Select } from "../../components/controls/Select";
 import { ThemeSwitch } from "../../components/controls/ThemeSwitch";
 import { ModelsPage } from "./ModelsPage";
 import { BridgePage } from "../bridge/BridgePage";
-import { HelpPage, type HelpOpen } from "./HelpPage";
+/** 更新弹窗的指南链接要跳到的设置页（跨页面打开）。 */
+export type HelpOpen = "models" | "bridge" | "extensions" | "tasks";
 import { SettingRow } from "../../components/controls/SettingRow";
 import { SlidingTabs } from "../../components/controls/SlidingTabs";
 import { ConfigEditor } from "../../components/bridge/ConfigEditor";
@@ -27,7 +27,7 @@ import {
 } from "../../appearance/locale";
 import { useT } from "../../i18n";
 
-type Section = "settings" | "models" | "bridge" | "help" | "sponsor";
+type Section = "settings" | "models" | "bridge" | "sponsor";
 
 export function SettingsPage({
   bootstrap,
@@ -95,11 +95,6 @@ export function SettingsPage({
                 ]
               : []),
             {
-              id: "help",
-              name: t.settings.help,
-              icon: <HelpIcon className="button-icon" />,
-            },
-            {
               id: "sponsor",
               name: t.settings.sponsor,
               icon: <BrandIcon className="button-icon" />,
@@ -112,8 +107,6 @@ export function SettingsPage({
           <ModelsPage bootstrap={bootstrap} reload={reload} />
         ) : section === "bridge" ? (
           <BridgePage bootstrap={bootstrap} reload={reload} />
-        ) : section === "help" ? (
-          <HelpPage onOpen={(target) => onSection(target)} />
         ) : section === "sponsor" ? (
           <SponsorNote />
         ) : (

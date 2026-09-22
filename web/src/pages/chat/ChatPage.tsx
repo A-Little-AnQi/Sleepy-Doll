@@ -5,7 +5,6 @@ import { Transcript } from "../../components/chat/Transcript";
 import { api } from "../../ipc/api";
 import {
   CheckIcon,
-  HelpIcon,
   SendIcon,
   SettingsIcon,
   StopIcon,
@@ -37,7 +36,6 @@ interface Props {
   onConversation(id: string): void;
   reload(): Promise<void>;
   onComposerDraft?(active: boolean): void;
-  onOpenHelp?(): void;
   onOpenModels?(): void;
 }
 
@@ -115,7 +113,6 @@ export function ChatPage({
   onConversation,
   reload,
   onComposerDraft,
-  onOpenHelp,
   onOpenModels,
 }: Props) {
   const t = useT();
@@ -319,16 +316,6 @@ export function ChatPage({
                 ) : (
                   <p className="muted">{t.chat.addModelFirst}</p>
                 ))}
-              {onOpenHelp && (
-                <button
-                  type="button"
-                  className="subtle-action"
-                  onClick={onOpenHelp}
-                >
-                  <HelpIcon className="button-icon" />
-                  {t.account.help}
-                </button>
-              )}
             </div>
           ) : (
             <div className="conversation-scene">

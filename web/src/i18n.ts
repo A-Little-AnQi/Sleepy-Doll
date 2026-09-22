@@ -48,7 +48,6 @@ const zh = {
     localUser: "本地用户",
     onThisMachine: "本机",
     menu: "账户菜单",
-    help: "使用说明",
     settings: "设置",
   },
 
@@ -222,7 +221,6 @@ const zh = {
     general: "通用",
     models: "模型",
     bettergi: "BetterGI",
-    help: "使用说明",
     sponsor: "赞助作者",
     theme: "主题",
     language: "语言",
@@ -304,8 +302,6 @@ const zh = {
     faq: "常见问题",
     start: "开始使用",
   },
-
-  helpToc: "目录",
 
   bridge: {
     connecting: "正在连接",
@@ -491,7 +487,6 @@ const en: Dict = {
     localUser: "Local user",
     onThisMachine: "This machine",
     menu: "Account menu",
-    help: "Guide",
     settings: "Settings",
   },
 
@@ -668,7 +663,6 @@ const en: Dict = {
     general: "General",
     models: "Models",
     bettergi: "BetterGI",
-    help: "Guide",
     sponsor: "Support the author",
     theme: "Theme",
     language: "Language",
@@ -750,8 +744,6 @@ const en: Dict = {
     faq: "FAQ",
     start: "Get started",
   },
-
-  helpToc: "Contents",
 
   bridge: {
     connecting: "Connecting",

@@ -25,7 +25,6 @@ export type Page =
   | "extensions"
   | "bridge"
   | "settings"
-  | "help"
   | "sponsor";
 
 const PAGE_KEY = "sleepy-doll-active-page";
@@ -36,7 +35,6 @@ const PAGES = new Set<Page>([
   "extensions",
   "bridge",
   "settings",
-  "help",
   "sponsor",
 ]);
 
@@ -229,7 +227,6 @@ export default function App() {
             onConversation={openConversation}
             reload={reload}
             onComposerDraft={setComposingNewChat}
-            onOpenHelp={() => setPage("help")}
             onOpenModels={() => setPage("models")}
           />
         ) : visiblePage === "tasks" ? (
@@ -257,7 +254,6 @@ export default function App() {
             section={
               visiblePage === "models" ||
               visiblePage === "bridge" ||
-              visiblePage === "help" ||
               visiblePage === "sponsor"
                 ? visiblePage
                 : "settings"

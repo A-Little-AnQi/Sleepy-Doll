@@ -57,7 +57,6 @@ it("keeps sponsor behind its own last settings tab", () => {
     "通用",
     "模型",
     "BetterGI",
-    "使用说明",
     "赞助作者",
   ]);
   expect(screen.queryByRole("heading", { name: "赞助作者" })).toBeNull();
@@ -75,20 +74,6 @@ it("does not show the sponsor page on the model key path", () => {
   );
   expect(screen.queryByRole("heading", { name: "赞助作者" })).toBeNull();
   expect(screen.queryByLabelText("收款二维码")).toBeNull();
-});
-
-it("opens the product guide from the help tab", () => {
-  render(
-    <SettingsPage
-      bootstrap={bootstrap}
-      section="help"
-      onSection={() => undefined}
-      reload={async () => undefined}
-    />,
-  );
-  expect(screen.getByRole("heading", { name: "使用说明" })).toBeTruthy();
-  expect(screen.getByRole("heading", { name: "添加模型" })).toBeTruthy();
-  expect(screen.getByRole("heading", { name: "解决问题" })).toBeTruthy();
 });
 
 it("opens the QR slot from the last settings tab", () => {
