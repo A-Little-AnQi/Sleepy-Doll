@@ -79,6 +79,7 @@ const zh = {
     clearFilters: "清除筛选",
     createViaChat: "通过对话创建",
     stop: "停止",
+    panicStop: "已按急停：正在停止所有运行。",
   },
 
   chat: {
@@ -513,6 +514,7 @@ const en: Dict = {
     clearFilters: "Clear filters",
     createViaChat: "Create from a chat",
     stop: "Stop",
+    panicStop: "Panic stop pressed: stopping all runs.",
   },
 
   chat: {

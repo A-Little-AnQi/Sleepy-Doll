@@ -296,7 +296,7 @@ impl Bridge {
         if catalog.resolve(&binding.id, args)?.1 != resources {
             return Err(Error::Tool("资源绑定已变化".into()));
         }
-        let snapshot = self.get("/bridge/v1/state", cancel).await?;
+        let mut snapshot = self.get("/bridge/v1/state", cancel).await?;
         let requires_capture = !matches!(
             descriptor["effect"].as_str(),
             Some("configurationWrite" | "hostCommand")
@@ -308,6 +308,42 @@ impl Bridge {
                 "游戏尚未就绪：截图器未启动或游戏窗口未打开。先调用 bgi.start_game 启动原神，用 bgi.get_status 等到 ready=true，再重试本次调用；不要把启动这一步交回用户。"
                     .into(),
             ));
+        }
+        // 需要画面的动作必须让游戏前台：后台时模拟输入会被系统丢弃。这里
+        // 阻塞几秒是可接受的——就绪检查本来就在提交路径上。
+        let needs_foreground = !matches!(
+            descriptor["effect"].as_str(),
+            Some("configurationWrite" | "hostCommand")
+        );
+        if needs_foreground {
+            let game = &snapshot["runtime"];
+            let handle = game["gameHandle"].as_i64().unwrap_or(0);
+            let active = game["windowActive"].as_bool().unwrap_or(false);
+            if !active && handle != 0 {
+                journal.emit(
+                    run,
+                    "game.focus",
+                    json!({"attemptId":call_id,"window":handle}),
+                )?;
+                let window = handle as isize;
+                let focused = tokio::task::spawn_blocking(move || {
+                    super::foreground::focus_game_window(window, Duration::from_secs(5))
+                })
+                .await
+                .unwrap_or(false);
+                if !focused {
+                    return Err(Error::Tool(
+                        "无法把原神切到前台（可能被系统前台锁拒绝）。请手动点击一次游戏窗口，再重试。"
+                            .into(),
+                    ));
+                }
+                // 前台刚切过去，重取一次快照让后续观测反映最新状态。
+                snapshot = self.get("/bridge/v1/state", cancel).await?;
+                if snapshot["instanceId"] != instance || snapshot["runtime"]["captureReady"] != true
+                {
+                    return Err(Error::Tool("游戏状态在前置后不再就绪".into()));
+                }
+            }
         }
         request["preconditionSnapshot"] = snapshot["snapshotId"].clone();
         let mut a = journal.prepare(run, call_id, request, instance)?;

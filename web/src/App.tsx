@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { api } from "./ipc/api";
+import { api, subscribeNativeEvents } from "./ipc/api";
 import { Wordmark } from "./components/icons";
 import { AppShell } from "./components/shell/AppShell";
 import { DetailsPanel } from "./components/shell/DetailsPanel";
+import { Toast } from "./components/overlay/Toast";
 import { MotionSwitch } from "./components/controls/MotionSwitch";
 import { ChatPage } from "./pages/chat/ChatPage";
 import { ExtensionsPage } from "./pages/extensions/ExtensionsPage";
@@ -58,6 +59,7 @@ export default function App() {
   );
   const [selectedTask, setSelectedTask] = useState<string>();
   const [error, setError] = useState("");
+  const [panicNotice, setPanicNotice] = useState(false);
   const [composingNewChat, setComposingNewChat] = useState(false);
 
   useEffect(() => {
@@ -98,6 +100,15 @@ export default function App() {
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [reload]);
+
+  useEffect(
+    // 急停热键：掐掉运行后壳会把窗口带回前台，这里只负责告知。
+    () =>
+      subscribeNativeEvents((name) => {
+        if (name === "panicStop") setPanicNotice(true);
+      }),
+    [],
+  );
 
   useEffect(() => {
     // 运行列表靠会话事件推进，不定时打 task.list。
@@ -246,6 +257,13 @@ export default function App() {
           />
         )}
       </MotionSwitch>
+      {panicNotice && (
+        <Toast
+          message={t.app.panicStop}
+          duration={6000}
+          onDismiss={() => setPanicNotice(false)}
+        />
+      )}
     </AppShell>
   );
 }

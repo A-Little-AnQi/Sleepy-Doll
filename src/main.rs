@@ -74,6 +74,12 @@ enum UserEvent {
     /// 同步托盘菜单里桥开关的勾选态。
     #[cfg(target_os = "windows")]
     BridgeState(bool),
+    /// 有没有运行在执行（含排队）。托盘菜单与气泡文字随它切换。
+    #[cfg(target_os = "windows")]
+    RunActivity(bool),
+    /// 全局急停热键（Ctrl+Alt+Q）：取消正在进行的运行并把主窗口带回前台。
+    #[cfg(target_os = "windows")]
+    PanicStop,
     #[cfg(target_os = "windows")]
     Quit,
     #[cfg(target_os = "windows")]
@@ -187,12 +193,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+    #[cfg(target_os = "windows")]
+    install_panic_hotkey(proxy.clone());
     let placement_path = window_placement_path(&user_directory);
     let placement = load_window_placement(&placement_path)
         .filter(|placement| placement_is_visible(placement, &event_loop));
     // 桥开关的当前值。
     #[cfg(target_os = "windows")]
     let bridge_enabled = Arc::new(AtomicBool::new(startup_config.bridge.enabled));
+    // 有没有运行在执行。托盘文字随它切换，只由 RunActivity 事件写。
+    #[cfg(target_os = "windows")]
+    let run_active = Arc::new(AtomicBool::new(false));
+    #[cfg(target_os = "windows")]
+    if startup_config.tray.enabled {
+        // 运行活动靠轮询：任务从界面、任务页、对话等任何入口启动都能被看到。
+        let watcher = controller.clone();
+        let activity_proxy = proxy.clone();
+        let activity = run_active.clone();
+        thread::spawn(move || {
+            loop {
+                thread::sleep(Duration::from_secs(2));
+                let next = watcher.has_active_runs();
+                if next != activity.load(Ordering::Relaxed) {
+                    let _ = activity_proxy.send_event(UserEvent::RunActivity(next));
+                }
+            }
+        });
+    }
     #[cfg(target_os = "windows")]
     let mut tray = if startup_config.tray.enabled {
         Some(create_tray(
@@ -438,6 +465,35 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::RunActivity(active)) => {
+                run_active.store(active, Ordering::Relaxed);
+                if let Some(tray) = tray.as_ref() {
+                    tray.status.set_text(if active {
+                        "有运行进行中 · Ctrl+Alt+Q 急停"
+                    } else {
+                        "没有正在进行的运行"
+                    });
+                    let _ = tray.icon.set_tooltip(if active {
+                        Some("Sleepy Doll · 有运行进行中，Ctrl+Alt+Q 急停")
+                    } else {
+                        Some("Sleepy Doll · 关闭窗口后继续运行")
+                    });
+                }
+            }
+            #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::PanicStop) => {
+                // 游戏在前台时用户按不回主窗口：急停要先掐掉所有运行，
+                // 再把窗口带回前台，让对话重新可见。
+                let stopped = controller.cancel_active_runs();
+                window.request_user_attention(Some(tao::window::UserAttentionType::Critical));
+                let _ = proxy.send_event(UserEvent::ToWeb(
+                    json!({"kind":"event","event":"panicStop","stopped":stopped}),
+                ));
+                if stopped > 0 {
+                    log::warn!("急停热键：已请求停止 {stopped} 个运行");
+                }
+            }
+            #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::Quit) => {
                 let controller = controller.clone();
                 let proxy = proxy.clone();
@@ -541,6 +597,69 @@ fn close_window(
     });
 }
 
+/// 全局急停热键 Ctrl+Alt+Q。在自己的线程上注册并跑一个消息循环：
+/// RegisterHotKey 绑定线程，WM_HOTKEY 也投递到注册线程，收到后转发事件。
+#[cfg(target_os = "windows")]
+fn install_panic_hotkey(proxy: EventLoopProxy<UserEvent>) {
+    thread::spawn(move || {
+        use windows_sys::Win32::{
+            Foundation::HWND,
+            System::LibraryLoader::GetModuleHandleW,
+            UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, RegisterHotKey, UnregisterHotKey},
+            UI::WindowsAndMessaging::{
+                CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, RegisterClassW,
+                TranslateMessage, WM_HOTKEY, WNDCLASSW,
+            },
+        };
+        let class_name: Vec<u16> = "SleepyDollPanicHotkey\0".encode_utf16().collect();
+        unsafe {
+            let instance = GetModuleHandleW(std::ptr::null());
+            let class = WNDCLASSW {
+                lpfnWndProc: Some(DefWindowProcW),
+                hInstance: instance,
+                lpszClassName: class_name.as_ptr(),
+                ..std::mem::zeroed()
+            };
+            if RegisterClassW(&class) == 0 {
+                log::warn!("急停热键窗口类注册失败，热键不可用");
+                return;
+            }
+            let hwnd: HWND = CreateWindowExW(
+                0, // 不可见的仅消息窗口：无样式、无尺寸
+                class_name.as_ptr(),
+                class_name.as_ptr(),
+                0,
+                0,
+                0,
+                0,
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                instance,
+                std::ptr::null(),
+            );
+            if hwnd.is_null() {
+                log::warn!("急停热键消息窗口创建失败，热键不可用");
+                return;
+            }
+            // Ctrl+Alt+Q。0x51 是 'Q'。
+            if RegisterHotKey(hwnd, 1, MOD_CONTROL | MOD_ALT, 0x0051) == 0 {
+                log::warn!("急停热键 Ctrl+Alt+Q 注册失败，可能被其他程序占用");
+                return;
+            }
+            let mut message = std::mem::zeroed();
+            while GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) > 0 {
+                TranslateMessage(&message);
+                if message.message == WM_HOTKEY && message.wParam == 1 {
+                    let _ = proxy.send_event(UserEvent::PanicStop);
+                }
+                DispatchMessageW(&message);
+            }
+            let _ = UnregisterHotKey(hwnd, 1);
+        }
+    });
+}
+
 #[cfg(target_os = "windows")]
 fn create_tray(
     proxy: EventLoopProxy<UserEvent>,
@@ -548,10 +667,11 @@ fn create_tray(
 ) -> Result<TrayHandles, Box<dyn std::error::Error>> {
     use tray_icon::{
         Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent,
-        menu::{CheckMenuItem, IconMenuItem, Menu, MenuEvent, PredefinedMenuItem},
+        menu::{CheckMenuItem, IconMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem},
     };
 
     let menu = Menu::new();
+    let status = MenuItem::new("没有正在进行的运行", false, None);
     let show = IconMenuItem::new(
         "显示 Sleepy Doll",
         true,
@@ -572,6 +692,8 @@ fn create_tray(
         None,
     );
     menu.append_items(&[
+        &status,
+        &PredefinedMenuItem::separator(),
         &show,
         &PredefinedMenuItem::separator(),
         &bridge,
@@ -579,6 +701,7 @@ fn create_tray(
         &PredefinedMenuItem::separator(),
         &quit,
     ])?;
+    let status_item = status.clone();
     let show_id = show.id().clone();
     let bridge_id = bridge.id().clone();
     let open_user_id = open_user.id().clone();
@@ -623,6 +746,7 @@ fn create_tray(
     Ok(TrayHandles {
         icon: builder.build()?,
         bridge,
+        status: status_item,
     })
 }
 
@@ -671,6 +795,8 @@ fn menu_glyph(glyph: MenuGlyph, color: [u8; 4]) -> Option<tray_icon::menu::Icon>
 struct TrayHandles {
     icon: tray_icon::TrayIcon,
     bridge: tray_icon::menu::CheckMenuItem,
+    /// 只读状态行：有运行进行中时提示急停热键。
+    status: tray_icon::menu::MenuItem,
 }
 fn dispatch_ipc(
     request: Request<String>,

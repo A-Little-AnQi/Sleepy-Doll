@@ -701,6 +701,31 @@ impl Supervisor {
         }
         Ok(run)
     }
+
+    /// 取消所有正在执行和排队的运行（急停）。返回请求停止的数量。
+    pub fn cancel_active_runs(&self) -> usize {
+        let mut stopped = 0;
+        for token in self.active.lock().unwrap().values() {
+            token.cancel();
+            stopped += 1;
+        }
+        if let Ok(runs) = self.journal.pending() {
+            for run in runs {
+                if run.state == RunState::Queued {
+                    let _ = self.cancel(&run.id);
+                    stopped += 1;
+                }
+            }
+        }
+        stopped
+    }
+
+    /// 是否有执行中或排队的运行。托盘状态用它判断要不要提示急停热键。
+    pub fn has_active_runs(&self) -> bool {
+        self.journal
+            .pending()
+            .is_ok_and(|runs| runs.iter().any(|run| run.state.active()))
+    }
     pub fn resume(&self, id: &str, duration: Option<i64>) -> Result<Run> {
         let mut run = self.journal.get(id)?;
         if run.state != RunState::Blocked {

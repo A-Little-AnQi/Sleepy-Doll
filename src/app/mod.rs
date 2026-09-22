@@ -1072,6 +1072,16 @@ impl AppController {
         BgiClient::new(config).info().is_ok()
     }
 
+    /// 急停：请求停止所有执行中与排队的运行。返回请求停止的数量。
+    pub fn cancel_active_runs(&self) -> usize {
+        self.supervisor.cancel_active_runs()
+    }
+
+    /// 是否有运行在执行或排队。托盘状态用它判断要不要提示急停热键。
+    pub fn has_active_runs(&self) -> bool {
+        self.supervisor.has_active_runs()
+    }
+
     fn bootstrap(&self) -> Result<Value> {
         self.ensure_conversation_models()?;
         let extensions = self.extensions.read().unwrap();

@@ -77,7 +77,25 @@ const pending = new Map<
   }
 >();
 
+const nativeEventListeners = new Set<(name: string, payload: unknown) => void>();
+
+/** 桌面壳推送的原生事件（如急停）。仅桌面壳里有发送方。 */
+export function subscribeNativeEvents(
+  listener: (name: string, payload: unknown) => void,
+) {
+  nativeEventListeners.add(listener);
+  return () => {
+    nativeEventListeners.delete(listener);
+  };
+}
+
 window.__sleepyDollReceive = (message) => {
+  if (message.kind === "event" && message.id) {
+    nativeEventListeners.forEach((listener) =>
+      listener(message.id as string, message.result),
+    );
+    return;
+  }
   if (message.kind !== "response" || !message.id) return;
   const entry = pending.get(message.id);
   if (!entry) return;

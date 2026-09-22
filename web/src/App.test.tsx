@@ -5,6 +5,7 @@ vi.mock("./ipc/api", () => ({
   api: {
     bootstrap: vi.fn(),
   },
+  subscribeNativeEvents: () => () => {},
 }));
 
 import { api } from "./ipc/api";

@@ -4,6 +4,7 @@ pub mod adapter;
 pub mod attachments;
 pub mod bridge;
 pub mod catalog;
+pub mod foreground;
 pub mod hooks;
 pub mod installation;
 pub mod process;
