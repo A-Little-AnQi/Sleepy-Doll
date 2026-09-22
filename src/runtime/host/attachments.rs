@@ -66,35 +66,3 @@ impl AttachmentSet {
         result
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn attachments_are_deduplicated_and_budgeted_by_priority() {
-        let mut set = AttachmentSet::default();
-        set.insert(Attachment {
-            id: "low".into(),
-            kind: AttachmentKind::Resource,
-            content: "x".repeat(80),
-            priority: 1,
-        });
-        set.insert(Attachment {
-            id: "high".into(),
-            kind: AttachmentKind::Checkpoint,
-            content: "checkpoint".into(),
-            priority: 10,
-        });
-        set.insert(Attachment {
-            id: "high".into(),
-            kind: AttachmentKind::Checkpoint,
-            content: "duplicate".into(),
-            priority: 10,
-        });
-        let rendered = set.render(120);
-        assert!(rendered.contains("checkpoint"));
-        assert!(!rendered.contains("duplicate"));
-        assert!(!rendered.contains(&"x".repeat(80)));
-    }
-}

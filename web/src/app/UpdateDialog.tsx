@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Dialog } from "../components/overlay/Dialog";
@@ -9,7 +9,7 @@ import guideSource from "./release-notes/guide.md?raw";
 import faqSource from "./release-notes/faq.md?raw";
 
 /** 当前版本的更新日志。发新版本时：加一份 md、package.json 升版本号。 */
-const CHANGELOG_VERSION = "0.1.0";
+const CHANGELOG_VERSION = __APP_VERSION__;
 
 function tabs(t: Text): Array<{ key: string; title: string; source: string }> {
   return [
@@ -34,16 +34,62 @@ export function UpdateDialog({
   initialTab?: string;
 }) {
   const t = useT();
+  const id = useId();
+  const body = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState(initialTab);
   useEffect(() => {
     if (open) setTab(initialTab);
   }, [open, initialTab]);
   const items = useMemo(() => tabs(t), [t]);
   const active = items.find((item) => item.key === tab) ?? items[0];
+  useEffect(() => {
+    if (body.current) body.current.scrollTop = 0;
+  }, [tab, open]);
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement;
+    const timer = window.setTimeout(() => {
+      body.current
+        ?.closest(".sd-dialog")
+        ?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
+        ?.focus({ preventScroll: true });
+    }, 0);
+    const keepFocus = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const dialog = body.current?.closest(".sd-dialog");
+      if (!dialog) return;
+      const controls = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]):not([tabindex="-1"]), a[href], [tabindex="0"]',
+        ),
+      );
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (!first || !last) return;
+      if (!dialog.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", keepFocus);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("keydown", keepFocus);
+      if (previous instanceof HTMLElement && previous.isConnected) {
+        previous.focus({ preventScroll: true });
+      }
+    };
+  }, [open]);
   if (!active) return null;
   return (
     <Dialog
-      title={`${t.update.title} · ${CHANGELOG_VERSION}`}
+      title={t.update.title}
       open={open}
       onClose={onClose}
       footer={
@@ -53,22 +99,66 @@ export function UpdateDialog({
       }
     >
       <div className="update-dialog">
-        <div className="update-dialog-tabs" role="tablist">
-          {items.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              role="tab"
-              aria-selected={item.key === active.key}
-              className={item.key === active.key ? "is-active" : undefined}
-              onClick={() => setTab(item.key)}
-            >
-              {item.title}
-            </button>
-          ))}
+        <div className="update-dialog-toolbar">
+          <div
+            className="update-dialog-tabs"
+            role="tablist"
+            aria-label={t.update.title}
+          >
+            {items.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                role="tab"
+                id={`${id}-${item.key}`}
+                aria-controls={`${id}-panel`}
+                aria-selected={item.key === active.key}
+                tabIndex={item.key === active.key ? 0 : -1}
+                className={item.key === active.key ? "is-active" : undefined}
+                onClick={() => setTab(item.key)}
+                onKeyDown={(event) => {
+                  if (
+                    !["ArrowLeft", "ArrowRight", "Home", "End"].includes(
+                      event.key,
+                    )
+                  )
+                    return;
+                  event.preventDefault();
+                  const index = items.findIndex(
+                    (entry) => entry.key === active.key,
+                  );
+                  const nextIndex =
+                    event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? items.length - 1
+                        : (index +
+                            (event.key === "ArrowRight" ? 1 : -1) +
+                            items.length) %
+                          items.length;
+                  const next = items[nextIndex];
+                  if (!next) return;
+                  setTab(next.key);
+                  document.getElementById(`${id}-${next.key}`)?.focus();
+                }}
+              >
+                {item.title}
+              </button>
+            ))}
+          </div>
+          <span className="update-dialog-version">v{CHANGELOG_VERSION}</span>
         </div>
-        <div className="update-dialog-body" role="tabpanel">
-          <Markdown remarkPlugins={[remarkGfm]}>{active.source}</Markdown>
+        <div
+          ref={body}
+          id={`${id}-panel`}
+          className="update-dialog-body"
+          role="tabpanel"
+          aria-labelledby={`${id}-${active.key}`}
+          tabIndex={0}
+        >
+          <article className="update-dialog-article" key={active.key}>
+            <Markdown remarkPlugins={[remarkGfm]}>{active.source}</Markdown>
+          </article>
         </div>
       </div>
     </Dialog>

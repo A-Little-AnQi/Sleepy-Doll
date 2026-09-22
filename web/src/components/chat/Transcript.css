@@ -209,6 +209,42 @@
   overflow: hidden;
 }
 
+.process-group > .activity-summary {
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 7px;
+  padding: 3px 6px;
+  margin-left: -6px;
+}
+
+.process-group > .activity-summary:hover {
+  background: var(--hover);
+}
+
+.reasoning-entry {
+  margin: 8px 0 12px 7px;
+  padding: 4px 0 4px 16px;
+  border-left: 1px solid var(--chat-detail-rule);
+}
+
+.reasoning-text {
+  max-height: 320px;
+  margin: 0;
+  padding: 0 12px 0 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--secondary);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .activity-icon {
   width: 15px;
   height: 15px;

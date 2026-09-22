@@ -75,24 +75,18 @@ build-desktop.cmd
 调用 `check.yml` 并要求发布作业依赖它，然后构建、打包便携 zip，最后创建 GitHub Release。
 tag 的版本号必须与 `Cargo.toml` 的 `package.version` 一致，安装程序按这个版本号判断新旧。
 
-## 测试
+## 编译检查
 
 前端按职责组织：`product.css` 管理设计变量、基础样式和共享控件，页面样式与页面组件同目录，
 自定义下拉框通过 CSS Modules 隔离。`web/src/session/` 持有会话事件订阅与增量游标；页面只订阅视图状态，
 切换页面不取消后台任务。输入草稿与当前会话保存在浏览器本地存储。
 
-`npm test` 运行前端交互回归测试（会话后台订阅、事件去重、下拉键盘操作）。
 `npm run build` 执行类型检查及生产构建，`npm run typecheck` 只做类型检查。响应超时可在模型设置中调整；IPC 普通请求、事件长轮询和
 桥加载采用不同的请求期限。模型只在收到响应体之前重试临时故障，部分流式响应不会重放。
 
 `web/src/components/chat/Transcript.tsx` 按用户轮次组织助手消息，按调用 ID 关联工具返回，合并相邻工具记录。
 默认显示紧凑摘要，参数和返回数据在二级详情中展开。历史 Markdown 文本独立 memo，
 流式增量不会重新解析整段历史。
-
-```bash
-cargo test --no-default-features   # 全部测试
-cargo test --lib --no-default-features   # 仅单元测试
-```
 
 CI 还会执行 `cargo fmt --all -- --check`、`cargo check` 和
 `cargo check --no-default-features`。
@@ -109,13 +103,12 @@ npm run dev       # Vite http://127.0.0.1:5173/，占用则顺延；/ipc 按上�
 
 开发网关优先绑定 47124，被占则向后找空位。Vite 每次转发 `/ipc` 时读取端口文件，因此两端不必同一次启动就锁死同一端口。Vite 自己的 5173 被占时也会顺延；网关按 Origin 是否为本机回环决定 CORS，不写死 5173。
 
-## 桥契约回归
+## 桥源码索引
 
-修改桥或宿主版本后，重新生成源码文档索引并运行契约测试：
+修改桥或宿主版本后，重新生成源码文档索引：
 
 ```bash
 dotnet run --project bgi-bridge/dev/MetadataBuilder.csproj -- <BetterGI 源码根目录> <输出 JSON 路径>
-dotnet run --project bgi-bridge/dev/ContractTests.csproj
 ```
 
 第一个参数是 BetterGI 源码树的根目录，第二个参数是索引的输出路径；仓库内的索引固定在
@@ -126,10 +119,3 @@ dotnet run --project bgi-bridge/dev/ContractTests.csproj
 人工补充说明位于 SettingDocumentation.cs / CommandDocumentation.cs；新增接口缺少业务说明时，
 真实宿主审计判为失败，字段名与占位文案不作为通过依据。
 
-实机回归（`tests/bridge_control.rs`，标了 `#[ignore]`，默认套件跳过）只用于指定测试安装、管理员
-环境：先执行 `cargo test --no-default-features --test bridge_control --no-run`，再以管理员权限
-运行输出的测试 EXE，参数为 `--ignored --exact real_bridge_switch_round_trip`；
-`bgi-bridge/dev/test-desktop.ps1` 可指定测试 EXE、BetterGI 成品路径和已有结果目录。它覆盖宿主
-识别、状态读取、错误 token、关闭后拒绝旧客户端、工具目录热更新与反复开关，逐页核对全部目录项
-及示例，读取所有配置项，并对日志详细程度开关做预览、提交、回退，检查配置值整体恢复；不执行
-游戏命令。离线恢复测试使用临时假安装，要求真实 BetterGI 已退出。

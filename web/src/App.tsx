@@ -115,6 +115,11 @@ export default function App() {
     () =>
       subscribeNativeEvents((name) => {
         if (name === "panicStop") setPanicNotice(true);
+        if (name === "openSettings") setPage("settings");
+        if (name === "openHelp") {
+          setReleaseNotesTab("guide");
+          setReleaseNotesOpen(true);
+        }
       }),
     [],
   );

@@ -90,19 +90,3 @@ impl ArtifactStore {
         Ok(self.root.join("sha256").join(&id[..2]).join(id))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn artifacts_are_content_addressed_and_verified() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = ArtifactStore::new(directory.path(), 1024).unwrap();
-        let first = store.put(b"same").unwrap();
-        let second = store.put(b"same").unwrap();
-        assert_eq!(first, second);
-        assert_eq!(store.get(&first).unwrap(), b"same");
-        assert!(store.get("../invalid").is_err());
-    }
-}

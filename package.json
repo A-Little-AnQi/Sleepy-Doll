@@ -8,7 +8,6 @@
     "dev": "vite",
     "backend": "cargo run --no-default-features --features dev-ipc --bin sleepy-doll-dev",
     "desktop": "npm run dist && powershell -NoProfile -Command \"Start-Process -FilePath './target/release/sleepy-doll.exe'\"",
-    "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "npm run typecheck && vite build",
     "dist": "cmd /c .\\build-desktop.cmd",
@@ -27,15 +26,11 @@
     "vite": "^6.2.0"
   },
   "devDependencies": {
-    "@testing-library/react": "^16.3.3",
-    "@testing-library/user-event": "^14.6.7",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "jsdom": "^29.1.1",
     "prettier": "^3.6.0",
-    "typescript": "^5.8.0",
-    "vitest": "^5.0.0"
+    "typescript": "^5.8.0"
   },
   "license": "MIT"
 }

@@ -17,7 +17,7 @@
 | `native/` | 注入器与引导 DLL。C++，只依赖 kernel32 |
 | `managed/` | 桥本体。C#，运行于 BetterGI 进程内，无第三方依赖 |
 | `recovery/` | 离线恢复工具，随发布一起分发 |
-| `dev/` | 开发期专用：契约测试、元数据生成器、本地脚本 |
+| `dev/` | 开发期专用：元数据生成器、本地脚本 |
 
 ## 构建
 
@@ -59,7 +59,6 @@ build.cmd
 
 ```cmd
 dev\dev-rebuild.cmd    退出占用 DLL 的进程后重建
-dev\dev-cycle.cmd      完整循环：重建、启动测试用 BetterGI、注入
 ```
 
 已加载的 DLL 会锁定文件，重建前必须先退出宿主；`dev\dev-rebuild.cmd` 已包含该步骤。

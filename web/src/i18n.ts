@@ -1,7 +1,7 @@
 import { useLocale, type LocaleId } from "./appearance/locale";
 
 /**
- * 界面文案字典。zh 是唯一事实源，en 必须逐键对应（i18n.test 保证）。
+ * 界面文案字典。zh 是唯一事实源，en 必须逐键对应。
  * 动态文案的值是函数，参数即插值。
  */
 const zh = {

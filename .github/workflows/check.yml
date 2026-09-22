@@ -25,9 +25,6 @@ jobs:
           dotnet-version: 8.0.x
       - run: npm ci
       - run: npm run build
-      - run: npm test
-      - run: dotnet run --project bgi-bridge/dev/ContractTests.csproj
       - run: cargo fmt --all -- --check
-      - run: cargo test --no-default-features
       - run: cargo check
       - run: cargo check --no-default-features

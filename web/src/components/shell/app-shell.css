@@ -752,3 +752,64 @@ html[data-theme-reveal="true"] .app-group {
     padding: 0 22px;
   }
 }
+
+/* Account controls share the same compact, softly squared geometry. */
+.app-account-menu {
+  padding: 8px;
+  border-radius: 12px;
+  box-shadow:
+    0 12px 36px #00000014,
+    0 2px 6px #00000008;
+}
+.app-account-menu-prefs {
+  gap: 8px;
+  padding: 4px 4px 12px;
+}
+.app-account-menu-prefs .setting-row.is-compact {
+  min-height: 34px;
+}
+.app-account-menu .app-theme-switch,
+.app-account-menu [data-ui="select-trigger"] {
+  height: 32px;
+  border-radius: 8px;
+}
+.app-account-menu .app-theme-switch {
+  --theme-knob: 24px;
+  --theme-inset: 4px;
+}
+.app-account-menu .app-theme-switch-knob {
+  border-radius: 5px;
+}
+.app-account-menu-links {
+  gap: 3px;
+  padding-top: 8px;
+}
+.app-account-menu .app-account-more {
+  min-height: 36px;
+  padding: 0 8px;
+  border-radius: 8px;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+.app-account-menu .app-account-more .button-icon {
+  width: 17px;
+  height: 17px;
+}
+.app-account-menu :is(button, [role="switch"]):focus-visible {
+  outline: 2px solid var(--chat-user);
+  outline-offset: 2px;
+}
+:root[data-theme="dark"] .app-account-menu {
+  box-shadow:
+    0 12px 36px #0006,
+    0 2px 6px #0003;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-account-menu {
+    animation: none;
+  }
+  .app-account-menu .app-account-more {
+    transition: none;
+  }
+}

@@ -402,7 +402,7 @@ export function AppShell({
         try {
           event.currentTarget.setPointerCapture(event.pointerId);
         } catch {
-          /* jsdom 和部分嵌入预览没有 capture。 */
+          /* 部分嵌入预览没有 capture。 */
         }
       }
       next.preventDefault();
@@ -504,7 +504,7 @@ export function AppShell({
     try {
       handle.setPointerCapture(event.pointerId);
     } catch {
-      /* jsdom 和部分嵌入预览没有 capture，改听 window。 */
+      /* 部分嵌入预览没有 capture，改听 window。 */
     }
     resizingRef.current = true;
     setResizing(true);

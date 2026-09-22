@@ -102,8 +102,11 @@ class Session {
   private cursor = 0;
   private running = false;
   private runs = new Map<string, TaskInfo>();
-  private streams = new Map<string, string>();
-  private completedStreams = new Set<string>();
+  private streams = new Map<
+    string,
+    Array<{ sequence: number; text: string }>
+  >();
+  private streamBoundaries = new Map<string, number>();
   private questions = new Map<string, string>();
   private approvals = new Map<string, RunApproval>();
   private plans = new Map<string, Plan>();
@@ -120,6 +123,32 @@ class Session {
     this.snapshot = { ...this.snapshot, ...patch };
     this.listeners.forEach((listener) => listener());
   }
+  private acceptHistory(messages: MessageInfo[]) {
+    for (const message of messages) {
+      if (
+        message.role !== "assistant" ||
+        !message.runId ||
+        message.streamBoundary == null
+      )
+        continue;
+      const boundary = Math.max(
+        this.streamBoundaries.get(message.runId) ?? 0,
+        message.streamBoundary,
+      );
+      this.streamBoundaries.set(message.runId, boundary);
+      const stream = this.streams.get(message.runId);
+      if (stream)
+        this.streams.set(
+          message.runId,
+          stream.filter((part) => part.sequence > boundary),
+        );
+    }
+  }
+  private streamFor(runId?: string) {
+    return runId
+      ? (this.streams.get(runId) ?? []).map((part) => part.text).join("")
+      : "";
+  }
   start() {
     if (!this.running) {
       this.running = true;
@@ -135,7 +164,12 @@ class Session {
         try {
           if (needsHistory) {
             const history = await api.conversation(this.id);
-            this.publish({ messages: history.messages, loading: false });
+            this.acceptHistory(history.messages);
+            this.publish({
+              messages: history.messages,
+              stream: this.streamFor(this.snapshot.task?.id),
+              loading: false,
+            });
             needsHistory = false;
           }
           const batch = await api.events(this.id, this.cursor);
@@ -143,7 +177,6 @@ class Session {
             // 事件窗口被裁过，游标已经对不上：重取消息快照并从头续流。
             this.cursor = 0;
             this.streams.clear();
-            this.completedStreams.clear();
             needsHistory = true;
             continue;
           }
@@ -160,15 +193,27 @@ class Session {
                 this.questions.delete(run.id);
               }
             }
-            if (event.kind === "assistant.delta")
-              this.streams.set(
-                event.runId,
-                (this.streams.get(event.runId) ?? "") +
-                  String(event.data.text ?? ""),
-              );
+            if (
+              event.kind === "assistant.delta" &&
+              event.sequence > (this.streamBoundaries.get(event.runId) ?? 0)
+            ) {
+              const stream = this.streams.get(event.runId) ?? [];
+              stream.push({
+                sequence: event.sequence,
+                text: String(event.data.text ?? ""),
+              });
+              this.streams.set(event.runId, stream);
+            }
             if (event.kind === "assistant.completed") {
-              this.completedStreams.add(event.runId);
+              // Each completion closes only its own model response. A later
+              // delta in this batch belongs to the next response, not this one.
+              this.streams.delete(event.runId);
               refresh = true;
+            }
+            if (event.kind === "cancel.requested") {
+              const run = this.runs.get(event.runId);
+              if (run && isRunning(run))
+                this.runs.set(run.id, { ...run, state: "cancelling" });
             }
             if (["input.received", "tool.completed"].includes(event.kind))
               refresh = true;
@@ -209,36 +254,32 @@ class Session {
             runs.find((run) => isRunning(run) && run.state !== "queued") ??
             runs.find(isRunning) ??
             runs.at(-1);
-          this.publish({
-            task,
-            queued: runs.filter((run) => run.state === "queued"),
-            stream: task ? (this.streams.get(task.id) ?? "") : "",
-            question:
-              task?.state === "awaitingUser"
-                ? (this.questions.get(task.id) ?? "")
-                : "",
-            approval:
-              task?.state === "awaitingApproval"
-                ? this.approvals.get(task.id)
-                : undefined,
-            plan: task ? this.plans.get(task.id) : undefined,
-            error: "",
-            loading: false,
-          });
-          if (refresh || failures) {
-            const history = await api.conversation(this.id);
-            for (const id of this.completedStreams) this.streams.delete(id);
-            this.completedStreams.clear();
+          // Commit persisted messages and their stream replacement together.
+          // Publishing in between briefly duplicates answers and changes height.
+          const history =
+            refresh || failures ? await api.conversation(this.id) : undefined;
+          if (history) this.acceptHistory(history.messages);
+          if (batch.events.length || history || this.snapshot.error)
             this.publish({
-              messages: history.messages,
-              stream: task ? (this.streams.get(task.id) ?? "") : "",
+              ...(history ? { messages: history.messages } : {}),
+              task,
+              queued: runs.filter((run) => run.state === "queued"),
+              stream: this.streamFor(task?.id),
+              question:
+                task?.state === "awaitingUser"
+                  ? (this.questions.get(task.id) ?? "")
+                  : "",
+              approval:
+                task?.state === "awaitingApproval"
+                  ? this.approvals.get(task.id)
+                  : undefined,
+              plan: task ? this.plans.get(task.id) : undefined,
+              error: "",
+              loading: false,
             });
-          }
           failures = 0;
           if (
-            !batch.events.length &&
-            !window.ipc &&
-            import.meta.env.MODE !== "test"
+            !batch.events.length && !window.ipc
           ) {
             await new Promise((resolve) => setTimeout(resolve, 1000));
           }

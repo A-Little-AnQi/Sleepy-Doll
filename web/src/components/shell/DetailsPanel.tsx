@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../ipc/api";
 import {
   isRunning,
@@ -14,7 +14,7 @@ import type {
   TaskSummary,
   WorkflowDetail,
 } from "../../ipc/types";
-import { CloseIcon, HistoryIcon } from "../icons";
+import { ChevronIcon, CloseIcon, HistoryIcon } from "../icons";
 import { TaskCard, type TaskActions } from "../tasks/TaskCard";
 import { MotionSwitch } from "../controls/MotionSwitch";
 import "./details-panel.css";
@@ -47,6 +47,64 @@ export function DetailsPanel({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [pendingRemove, setPendingRemove] = useState<TaskSummary | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const [drawer, setDrawer] = useState(false);
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel?.closest(".details-drawer")) return;
+    setDrawer(true);
+    const previous = document.activeElement as HTMLElement | null;
+    const controls = () =>
+      Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), a[href], input:not(:disabled), summary, [tabindex="0"]',
+        ),
+      ).filter((element) => !element.closest('[hidden], [aria-hidden="true"]'));
+    controls()[0]?.focus();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        // An open task menu handles Escape first.
+        if (panel.querySelector('[aria-expanded="true"]')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        closeRef.current();
+      }
+      if (event.key !== "Tab") return;
+      const items = controls();
+      const first = items[0];
+      const last = items.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+    panel.addEventListener("keydown", handleKey);
+    return () => {
+      panel.removeEventListener("keydown", handleKey);
+      if (previous?.isConnected) previous.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    // Navigation replaces the task button; keep keyboard focus inside the drawer.
+    if (drawer)
+      panelRef.current
+        ?.querySelector<HTMLButtonElement>(".details-head button")
+        ?.focus();
+  }, [drawer, selectedTask]);
+  // Bootstrap also updates during streaming. Only refresh detail when this
+  // workflow changes, and never show the previous workflow while loading another.
+  const selectedVersion = JSON.stringify(
+    bootstrap.workflows.find((task) => task.id === selectedTask),
+  );
+  const currentDetail =
+    detail?.summary.id === selectedTask ? detail : undefined;
   const tasks = conversationId
     ? bootstrap.workflows.filter(
         (task) => task.sourceConversationId === conversationId,
@@ -62,6 +120,7 @@ export function DetailsPanel({
       return;
     }
     let alive = true;
+    setError("");
     void api
       .workflowGet(selectedTask)
       .then((value) => {
@@ -73,7 +132,7 @@ export function DetailsPanel({
     return () => {
       alive = false;
     };
-  }, [selectedTask, bootstrap.workflows]);
+  }, [selectedTask, selectedVersion]);
 
   const act = async (id: string, action: () => Promise<unknown>) => {
     setBusy(id);
@@ -121,11 +180,38 @@ export function DetailsPanel({
   };
 
   return (
-    <aside className="details-panel" aria-label={t.details.panel}>
+    <aside
+      ref={panelRef}
+      className="details-panel"
+      aria-label={t.details.panel}
+      role={drawer ? "dialog" : undefined}
+      aria-modal={drawer ? true : undefined}
+    >
       <header className="details-head">
-        <h2>
-          {selectedTask ? (detail?.summary.name ?? t.details.taskDetail) : t.chat.tasksPanel}
+        {selectedTask ? (
+          <button
+            className="icon-button details-back"
+            aria-label={t.details.backToTasks}
+            title={t.details.backToTasks}
+            onClick={() => onSelectTask(undefined)}
+          >
+            <ChevronIcon className="button-icon" />
+          </button>
+        ) : (
+          <span className="details-heading-icon" aria-hidden="true">
+            <HistoryIcon />
+          </span>
+        )}
+        <h2
+          title={selectedTask ? currentDetail?.summary.name : t.chat.tasksPanel}
+        >
+          {selectedTask
+            ? (currentDetail?.summary.name ?? t.details.taskDetail)
+            : t.chat.tasksPanel}
         </h2>
+        {!selectedTask && tasks.length > 0 && (
+          <span className="details-count">{tasks.length}</span>
+        )}
         <button
           className="icon-button"
           aria-label={t.nav.closeDetails}
@@ -140,35 +226,65 @@ export function DetailsPanel({
         <MotionSwitch
           viewKey={`${conversationId ?? "none"}:${selectedTask ?? "list"}`}
           kind="panel"
+          className="details-content"
         >
           {selectedTask ? (
-            detail ? (
+            currentDetail ? (
               <TaskDetail
-                detail={detail}
+                detail={currentDetail}
                 runs={runs}
                 busy={busy}
                 actions={actions}
-                onBack={() => onSelectTask(undefined)}
                 onOpenConversation={onOpenConversation}
               />
             ) : (
-              <p className="muted">{t.common.loading}</p>
+              <div className="details-loading" role="status" aria-busy={!error}>
+                {!error && (
+                  <>
+                    <span />
+                    <span />
+                    <span />
+                  </>
+                )}
+                <p>{error || t.common.loading}</p>
+              </div>
             )
           ) : tasks.length || runs.length ? (
             <>
-              {tasks.map((task) => (
-                <TaskCard
-                  key={task.id}
-                  task={task}
-                  busy={busy === task.id}
-                  actions={actions}
-                />
-              ))}
-              {runs.length > 0 && <RunList runs={runs} />}
+              {tasks.length > 0 && (
+                <section
+                  className="details-section"
+                  aria-label={t.tasks.tabTasks}
+                >
+                  <h3 className="details-section-title">{t.tasks.tabTasks}</h3>
+                  {tasks.map((task) => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      busy={busy === task.id}
+                      actions={actions}
+                    />
+                  ))}
+                </section>
+              )}
+              {runs.length > 0 && (
+                <section
+                  className="details-section"
+                  aria-label={t.details.recentRuns}
+                >
+                  <h3 className="details-section-title">
+                    {t.details.recentRuns}
+                    <span>{runs.length}</span>
+                  </h3>
+                  <RunList runs={runs} />
+                </section>
+              )}
             </>
           ) : (
-            <div className="empty-state is-compact">
-              <HistoryIcon />
+            <div className="details-empty">
+              <span className="details-empty-icon" aria-hidden="true">
+                <HistoryIcon />
+              </span>
               <h3>{t.tasks.empty}</h3>
               <p>{t.tasks.emptyHow}</p>
             </div>
@@ -190,9 +306,7 @@ export function DetailsPanel({
           <>
             <p>{t.tasks.deleteNote(pendingRemove.name)}</p>
             <p>{t.tasks.deleteKeepsRuns}</p>
-            {pendingRemove.runnable ? (
-              <p>{t.tasks.deleteKeepsActive}</p>
-            ) : null}
+            {pendingRemove.runnable ? <p>{t.tasks.deleteKeepsActive}</p> : null}
           </>
         ) : null}
       </ConfirmDialog>
@@ -205,14 +319,12 @@ function TaskDetail({
   runs,
   busy,
   actions,
-  onBack,
   onOpenConversation,
 }: {
   detail: WorkflowDetail;
   runs: TaskInfo[];
   busy: string;
   actions: TaskActions;
-  onBack(): void;
   onOpenConversation(id: string): void;
 }) {
   const t = useT();
@@ -224,9 +336,6 @@ function TaskDetail({
   );
   return (
     <>
-      <button className="subtle-action" onClick={onBack}>
-        {t.details.backToTasks}
-      </button>
       <section className="detail-block">
         <h3>{t.apiExplorer.purpose}</h3>
         <p>{summary.description || t.details.noDescriptionYet}</p>
@@ -345,20 +454,33 @@ function RunList({ runs }: { runs: TaskInfo[] }) {
   const t = useT();
   return (
     <ul className="detail-runs">
-      {runs.slice(0, 10).map((run) => (
-        <li key={run.id}>
-          <span>{taskLabels[run.state] ?? run.state}</span>
-          <small>
-            {new Date(run.createdAt).toLocaleString("zh-CN", {
-              month: "2-digit",
-              day: "2-digit",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </small>
-          {isRunning(run) && <em>{t.chat.statusRunning}</em>}
-        </li>
-      ))}
+      {[...runs]
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, 10)
+        .map((run) => (
+          <li key={run.id} data-running={isRunning(run)}>
+            <div className="detail-run-meta">
+              <span className="detail-run-state">
+                <i aria-hidden="true" />
+                {taskLabels[run.state] ?? run.state}
+              </span>
+              <time
+                dateTime={run.createdAt}
+                title={new Date(run.createdAt).toLocaleString()}
+              >
+                {new Date(run.createdAt).toLocaleString("zh-CN", {
+                  month: "2-digit",
+                  day: "2-digit",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </time>
+            </div>
+            <p className="detail-run-prompt" title={run.prompt}>
+              {run.prompt || t.details.noDescriptionYet}
+            </p>
+          </li>
+        ))}
     </ul>
   );
 }

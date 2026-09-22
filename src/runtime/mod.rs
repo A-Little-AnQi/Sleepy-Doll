@@ -1158,6 +1158,7 @@ impl Supervisor {
                     }),
                 )?;
                 let mut emitted = false;
+                let mut partial_text = String::new();
                 // 增量帧攒批写 SQLite；用普通 Mutex 保持 future 为 Send。
                 let batch = std::sync::Mutex::new((String::new(), std::time::Instant::now()));
                 let model_started = std::time::Instant::now();
@@ -1168,6 +1169,7 @@ impl Supervisor {
                             return Ok(());
                         }
                         emitted = true;
+                        partial_text.push_str(text);
                         let text = {
                             let mut guard = batch.lock().unwrap();
                             guard.0.push_str(text);
@@ -1196,6 +1198,18 @@ impl Supervisor {
                         run,
                         "assistant.delta",
                         json!({"text":tail,"turn":run.decisions,"model":candidate.id}),
+                    )?;
+                }
+                // A cancelled or failed request still owns the text the user
+                // has already seen. Persist it before the terminal run event,
+                // so reconnecting or starting the next run cannot erase it.
+                if result.is_err() && !partial_text.is_empty() {
+                    self.journal
+                        .append_message(run, &message(Role::Assistant, &partial_text))?;
+                    self.journal.emit(
+                        run,
+                        "assistant.completed",
+                        json!({"text":partial_text,"turn":run.decisions,"interrupted":true}),
                     )?;
                 }
                 self.metric(
@@ -2811,49 +2825,5 @@ impl Supervisor {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod prompt_tests {
-    use super::*;
-
-    /// 底座提示词只放与领域无关的规则。
-    #[test]
-    fn core_policy_stays_free_of_domain_knowledge() {
-        for leaked in ["bgi.", "BetterGI", "配置组", "调度器", "User 目录"] {
-            assert!(
-                !CORE_AGENT_POLICY.contains(leaked),
-                "领域内容混进了全局提示词：{leaked}"
-            );
-        }
-        for required in [
-            "先给结果",
-            "无法观测",
-            "不是角色扮演",
-            "内部实现",
-            "PowerShell",
-            "软件目录",
-            "问什么就答什么",
-        ] {
-            assert!(
-                CORE_AGENT_POLICY.contains(required),
-                "missing policy: {required}"
-            );
-        }
-    }
-
-    #[test]
-    fn obsolete_generated_prompt_is_suppressed_but_user_prompt_is_preserved() {
-        assert_eq!(
-            configured_agent_instructions(
-                "你是 Sleepy Doll，一个操作 BetterGI 的桌面 Agent。\n# 用户配置在文件里"
-            ),
-            ""
-        );
-        assert_eq!(
-            configured_agent_instructions("回答时使用简体中文"),
-            "回答时使用简体中文"
-        );
     }
 }

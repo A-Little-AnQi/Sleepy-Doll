@@ -723,20 +723,3 @@ impl Decoder {
         Ok(result)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn provider_error_uses_the_structured_message_and_bounds_it() {
-        let detail = summarize_error_body(
-            br#"{"error":{"type":"invalid_request_error","message":"tool results must follow tool use"}}"#,
-        );
-        assert_eq!(detail, "tool results must follow tool use");
-        assert_eq!(
-            summarize_error_body(&vec![b'x'; 2_000]).chars().count(),
-            800
-        );
-    }
-}

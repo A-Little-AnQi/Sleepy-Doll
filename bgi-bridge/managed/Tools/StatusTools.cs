@@ -11,7 +11,7 @@ public static class StatusTools
 {
     public const string Group = "lifecycle";
 
-    /// <summary>宿主启动原神的入口。契约测试按 host-documentation.json 核对这两个名字。</summary>
+    /// <summary>宿主启动原神的入口，名称对应 host-documentation.json。</summary>
     public const string StartViewModel = "BetterGenshinImpact.ViewModel.Pages.HomePageViewModel";
     public const string StartCommand = "StartTriggerCommand";
 

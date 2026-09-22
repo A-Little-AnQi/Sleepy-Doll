@@ -156,15 +156,18 @@ function outcome(activity: Activity) {
 function ActivityGroup({
   activities,
   labels,
+  active,
 }: {
   activities: Activity[];
   labels: ToolLabels;
+  active: boolean;
 }) {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
-  const running = activities.some(
+  const pending = activities.some(
     (activity) => outcome(activity) === "running",
   );
+  const running = active && pending;
   const failed = activities.some((activity) => outcome(activity) === "failed");
   const label = [
     ...new Set(
@@ -185,16 +188,20 @@ function ActivityGroup({
       >
         {running ? (
           <span className="activity-spinner" />
-        ) : failed ? (
+        ) : failed || pending ? (
           <AlertIcon className="activity-icon" />
         ) : (
           <CheckIcon className="activity-icon" />
         )}
         <span className="activity-label">{label}</span>
         {subject && <span className="activity-subject">{subject}</span>}
-        {(running || failed) && (
+        {(pending || failed) && (
           <span className="activity-outcome">
-            {running ? t.chat.statusRunning : t.transcript.callFailed}
+            {running
+              ? t.chat.statusRunning
+              : pending
+                ? "已中断"
+                : t.transcript.callFailed}
           </span>
         )}
         <DisclosureChevron expanded={expanded} className="activity-expand" />
@@ -403,12 +410,14 @@ export const Transcript = memo(function Transcript({
   phase,
   seconds,
   toolLabels,
+  running = Boolean(phase),
 }: {
   messages: MessageInfo[];
   stream: string;
   phase?: string | undefined;
   seconds: number;
   toolLabels: ToolLabels;
+  running?: boolean;
 }) {
   const turns = buildTurns(messages, stream);
   const last = turns.at(-1);
@@ -438,27 +447,23 @@ export const Transcript = memo(function Transcript({
           0,
         );
         // 只随「这一轮是否还在推进」变化；跟单条工具结果走会来回抖。
-        const turnActive =
-          index === turns.length - 1 &&
-          (Boolean(stream) || Boolean(phase) || pendingActivity);
+        const turnActive = index === turns.length - 1 && running;
         return (
           <article key={index} className={`message-turn ${turn.role}`}>
             <div className="message-content">
               {process.length > 0 && (
-                <ProcessGroup
-                  steps={processSteps}
-                  running={turnActive}
-                >
+                <ProcessGroup steps={processSteps} running={turnActive}>
                   {process.map((part, partIndex) =>
                     part.kind === "reasoning" ? (
-                      <div key={partIndex} className="reasoning-entry">
+                      <div key="reasoning" className="reasoning-entry">
                         <pre className="reasoning-text">{part.text}</pre>
                       </div>
                     ) : (
                       <ActivityGroup
-                        key={partIndex}
+                        key={part.activities[0]?.id ?? partIndex}
                         activities={part.activities}
                         labels={toolLabels}
+                        active={turnActive}
                       />
                     ),
                   )}
@@ -478,7 +483,7 @@ export const Transcript = memo(function Transcript({
                   </div>
                 ) : (
                   <div
-                    className="assistant-message is-streaming"
+                    className={`assistant-message${running ? " is-streaming" : ""}`}
                     key={partIndex}
                   >
                     <MarkdownText text={part.text} streaming />

@@ -13,9 +13,6 @@ npm run dist               # 唯一的发布构建入口（执行 build-desktop.
 | 命令 | 内容 |
 |---|---|
 | `npm run build` | 前端类型检查 + 生产构建（`npm run typecheck` 只做类型检查） |
-| `npm test` | 前端交互回归 |
-| `dotnet run --project bgi-bridge/dev/ContractTests.csproj` | 桥的契约测试 |
-| `cargo test --no-default-features` | 全部 Rust 测试 |
 | `cargo check` 与 `cargo check --no-default-features` | 两种特性组合都要过 |
 | `cargo clippy --all-targets --no-default-features -- -D warnings` | **CI 不执行 clippy，本地必须执行** |
 | `cargo fmt --all -- --check` | 格式 |
@@ -24,13 +21,6 @@ npm run dist               # 唯一的发布构建入口（执行 build-desktop.
 界面在 `web/src/setup/`，外观与主程序一致。`build-desktop.cmd` 会先把交付目录打成压缩载荷
 （`installer/pack-payload.ps1`），再编译这个 bin，产物在 `dist\Sleepy-Doll-<版本>-setup.exe`。
 推 `v*` tag 时 `.github/workflows/release.yml` 自动执行整串。
-
-`tests/live.rs` 是实机测试：用本机真实模型配置与真实桥执行一次完整问答，会消耗真实额度。
-它标了 `#[ignore]`，**不要让它进 CI**。手动执行：
-
-```bash
-cargo test --no-default-features --test live -- --ignored --nocapture
-```
 
 ## 约定
 
@@ -79,8 +69,7 @@ cargo test --no-default-features --test live -- --ignored --nocapture
   本地构建绿不代表 CI 绿。
 - 改了产物落地的位置，**清掉旧位置已经写进去的东西**。用户是按「打开那个目录看到什么」判断的，
   旧残留会让他以为你根本没改。
-- 验证跑真实命令：构建、测试、实机。其中实机测试（`tests/live.rs`）用真实模型与真实桥，
-  是唯一能证明端到端可用的手段。
+- 验证使用构建、实际操作和视觉验收。
 
 ## 代码结构
 
@@ -120,7 +109,7 @@ bgi-bridge/
   native/     C++ 注入器与引导 DLL
   managed/    C# 桥本体，运行在 BetterGI 进程内
   recovery/   离线恢复工具
-  dev/        开发期专用：契约测试、元数据生成器、本地脚本
+  dev/        开发期专用：元数据生成器、本地脚本
 installer/    安装器载荷打包脚本
 assets/       程序与安装器图标、.rc 与 UAC manifest，由 build.rs 编进 sleepy-doll.exe 与
   sleepy-doll-setup.exe

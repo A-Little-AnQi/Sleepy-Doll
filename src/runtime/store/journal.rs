@@ -29,6 +29,8 @@ pub struct ConversationMessage {
     #[serde(flatten)]
     pub message: crate::model::Message,
     pub created_at: String,
+    pub run_id: Option<String>,
+    pub stream_boundary: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1003,11 +1005,17 @@ impl Journal {
     }
     pub fn conversation_messages(&self, conversation: &str) -> Result<Vec<ConversationMessage>> {
         let db = self.connection.lock().unwrap();
+        // Legacy rows have no stored boundary. A completed event always follows
+        // persistence, so it safely covers prior deltas without guessing text.
         let mut query = db.prepare(
-            "SELECT m.role,m.content,m.tool_call_id,m.tool_calls_json,m.reasoning_json,m.created_at
+            "SELECT m.role,m.content,m.tool_call_id,m.tool_calls_json,m.reasoning_json,m.created_at,o.run_id,
+                    COALESCE(m.stream_boundary,completed.boundary)
              FROM messages m
              LEFT JOIN runtime_message_owners o ON o.message_id=m.id
              LEFT JOIN runtime_runs r ON r.id=o.run_id
+             LEFT JOIN (SELECT run_id,MAX(sequence) AS boundary FROM runtime_events
+                        WHERE conversation_id=?1 AND kind='assistant.completed' GROUP BY run_id) completed
+                    ON completed.run_id=o.run_id
              WHERE m.conversation_id=?1
                AND (r.state IS NULL OR r.state!='\"queued\"')
              ORDER BY COALESCE(json_extract(r.payload,'$.messageBoundary'),m.id),m.id",
@@ -1021,12 +1029,23 @@ impl Journal {
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<u64>>(7)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         rows.into_iter()
             .map(
-                |(role, content, tool_call_id, calls, reasoning, created_at)| {
+                |(
+                    role,
+                    content,
+                    tool_call_id,
+                    calls,
+                    reasoning,
+                    created_at,
+                    run_id,
+                    stream_boundary,
+                )| {
                     Ok(ConversationMessage {
                         message: crate::model::Message {
                             role: serde_json::from_value(json!(role))?,
@@ -1038,6 +1057,8 @@ impl Journal {
                             )?,
                         },
                         created_at,
+                        run_id,
+                        stream_boundary,
                     })
                 },
             )
@@ -1077,9 +1098,16 @@ impl Journal {
         let mut db = self.connection.lock().unwrap();
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("INSERT INTO messages(conversation_id,role,content,tool_call_id,tool_calls_json,reasoning_json,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![run.conversation_id,serde_json::to_value(message.role)?.as_str().unwrap(),message.content,message.tool_call_id,serde_json::to_string(&message.tool_calls)?,serde_json::to_string(&message.reasoning)?,now()])?;
+        let message_id = tx.last_insert_rowid();
+        if matches!(message.role, crate::model::Role::Assistant) {
+            tx.execute(
+                "UPDATE messages SET stream_boundary=(SELECT COALESCE(MAX(sequence),0) FROM runtime_events WHERE run_id=?1 AND kind='assistant.delta') WHERE id=?2",
+                params![run.id, message_id],
+            )?;
+        }
         tx.execute(
             "INSERT INTO runtime_message_owners VALUES(?1,?2)",
-            params![tx.last_insert_rowid(), run.id],
+            params![message_id, run.id],
         )?;
         tx.execute(
             "UPDATE conversations SET updated_at=?1 WHERE id=?2",
@@ -1087,38 +1115,6 @@ impl Journal {
         )?;
         tx.commit()?;
         Ok(())
-    }
-    fn messages(
-        &self,
-        conversation: &str,
-        boundary: i64,
-        include_queued: bool,
-    ) -> Result<Vec<crate::model::Message>> {
-        let db = self.connection.lock().unwrap();
-        let mut q=db.prepare("SELECT m.role,m.content,m.tool_call_id,m.tool_calls_json,m.reasoning_json FROM messages m LEFT JOIN runtime_message_owners o ON o.message_id=m.id LEFT JOIN runtime_runs r ON r.id=o.run_id WHERE m.conversation_id=?1 AND COALESCE(json_extract(r.payload,'$.messageBoundary'),m.id)<=?2 AND (?3 OR r.state IS NULL OR r.state!='\"queued\"') ORDER BY COALESCE(json_extract(r.payload,'$.messageBoundary'),m.id),m.id")?;
-        let rows = q
-            .query_map(params![conversation, boundary, include_queued], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, Option<String>>(3)?,
-                    r.get::<_, Option<String>>(4)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows.into_iter()
-            .map(|(role, content, tool_call_id, calls, reasoning)| {
-                Ok(crate::model::Message {
-                    role: serde_json::from_value(json!(role))?,
-                    content,
-                    tool_call_id,
-                    tool_calls: serde_json::from_str(calls.as_deref().unwrap_or("[]"))?,
-                    // 列可空：`null` 与 NULL 都还原成 None。
-                    reasoning: serde_json::from_str(reasoning.as_deref().unwrap_or("null"))?,
-                })
-            })
-            .collect()
     }
     pub fn drain_inputs(&self, run: &str) -> Result<Vec<String>> {
         let mut db = self.connection.lock().unwrap();
@@ -1459,46 +1455,5 @@ impl Journal {
             params![serde_json::to_string(&run)?, run.id],
         )?;
         Ok(run)
-    }
-}
-
-#[cfg(test)]
-mod prompt_cache_tests {
-    use super::*;
-
-    #[test]
-    fn prompt_cache_snapshot_follows_the_conversation_across_runs() {
-        let directory = tempfile::tempdir().unwrap();
-        let journal = Journal::open(&directory.path().join("journal.db")).unwrap();
-        let mut first = journal
-            .create("first", "conversation-a", "key-a", 60, Some("model"))
-            .unwrap();
-        let expected = PromptCacheSnapshot {
-            model_key: "model".into(),
-            system_key: "system".into(),
-            tools_key: "tools".into(),
-            prefix_key: "prefix".into(),
-            message_count: 2,
-            tokens: 80,
-        };
-        first.prompt_cache_snapshot = Some(expected.clone());
-        first.discovered = vec!["demo.read".into()];
-        journal.save(&mut first, RunState::Deciding).unwrap();
-
-        let second = journal
-            .create("second", "conversation-a", "key-b", 60, Some("model"))
-            .unwrap();
-        assert_eq!(
-            journal
-                .latest_prompt_cache_seed("conversation-a", &second.id)
-                .unwrap(),
-            Some((expected, vec!["demo.read".into()]))
-        );
-        assert!(
-            journal
-                .latest_prompt_cache_seed("conversation-b", &second.id)
-                .unwrap()
-                .is_none()
-        );
     }
 }

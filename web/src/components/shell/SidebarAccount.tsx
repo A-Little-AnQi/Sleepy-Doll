@@ -24,9 +24,17 @@ export function SidebarAccount({
   const theme = useTheme();
   const locale = useLocale();
   const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const keyboardOpen = useRef(false);
 
   useEffect(() => {
     if (!open) return;
+    if (keyboardOpen.current) {
+      root.current
+        ?.querySelector<HTMLButtonElement>(".app-account-menu button")
+        ?.focus();
+      keyboardOpen.current = false;
+    }
     const close = (event: MouseEvent) => {
       if (!(event.target instanceof Node)) return;
       if (root.current?.contains(event.target)) return;
@@ -40,7 +48,14 @@ export function SidebarAccount({
       setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key !== "Escape") return;
+      // Escape first dismisses the language list, then the account popover.
+      if (
+        root.current?.querySelector('[data-ui="select-root"][data-open="true"]')
+      )
+        return;
+      setOpen(false);
+      trigger.current?.focus({ preventScroll: true });
     };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", onKey);
@@ -55,12 +70,23 @@ export function SidebarAccount({
       <div className="app-account-slot">
         <button
           id="app-account-trigger"
+          ref={trigger}
+          type="button"
           className="app-account"
           aria-label={t.account.localUser}
           aria-haspopup="menu"
           aria-expanded={open}
           aria-controls="app-account-menu"
           onClick={() => setOpen((value) => !value)}
+          onKeyDown={(event) => {
+            if (["ArrowUp", "ArrowDown"].includes(event.key)) {
+              event.preventDefault();
+              keyboardOpen.current = true;
+              setOpen(true);
+            } else if (event.key === "Enter" || event.key === " ") {
+              keyboardOpen.current = !open;
+            }
+          }}
         >
           <span className="app-account-avatar">
             <BrandIcon />

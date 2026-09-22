@@ -58,6 +58,9 @@ export interface MessageInfo {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   createdAt?: string;
+  /** Persisted assistant text replaces deltas through this event sequence. */
+  runId?: string | null;
+  streamBoundary?: number | null;
   toolCallId?: string;
   toolCalls?: Array<{ id: string; name: string; arguments: unknown }>;
   /**

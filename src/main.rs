@@ -65,6 +65,10 @@ enum UserEvent {
     #[cfg(target_os = "windows")]
     ShowWindow,
     #[cfg(target_os = "windows")]
+    OpenSettings,
+    #[cfg(target_os = "windows")]
+    OpenHelp,
+    #[cfg(target_os = "windows")]
     ToggleBridge,
     #[cfg(target_os = "windows")]
     OpenUserDirectory,
@@ -205,7 +209,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "windows")]
     let run_active = Arc::new(AtomicBool::new(false));
     #[cfg(target_os = "windows")]
-    if startup_config.tray.enabled {
+    {
         // 运行活动靠轮询：任务从界面、任务页、对话等任何入口启动都能被看到。
         let watcher = controller.clone();
         let activity_proxy = proxy.clone();
@@ -225,6 +229,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(create_tray(
             proxy.clone(),
             bridge_enabled.load(Ordering::Relaxed),
+            run_active.load(Ordering::Relaxed),
         )?)
     } else {
         None
@@ -412,8 +417,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::ShowWindow) => {
+                window.set_minimized(false);
                 window.set_visible(true);
                 window.set_focus();
+            }
+            #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::OpenSettings | UserEvent::OpenHelp) => {
+                window.set_minimized(false);
+                window.set_visible(true);
+                window.set_focus();
+                let name = if matches!(event, Event::UserEvent(UserEvent::OpenSettings)) {
+                    "openSettings"
+                } else {
+                    "openHelp"
+                };
+                let _ = proxy.send_event(UserEvent::ToWeb(json!({"kind":"event","id":name})));
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::ToggleBridge) => {
@@ -447,7 +465,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     // 图标还没建过且要显示时才建，勾选态取当前桥状态。
                     (None, true) => {
-                        match create_tray(proxy.clone(), bridge_enabled.load(Ordering::Relaxed)) {
+                        match create_tray(
+                            proxy.clone(),
+                            bridge_enabled.load(Ordering::Relaxed),
+                            run_active.load(Ordering::Relaxed),
+                        ) {
                             Ok(handles) => tray = Some(handles),
                             Err(error) => log::warn!("托盘图标不可用: {error}"),
                         }
@@ -468,16 +490,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Event::UserEvent(UserEvent::RunActivity(active)) => {
                 run_active.store(active, Ordering::Relaxed);
                 if let Some(tray) = tray.as_ref() {
-                    tray.status.set_text(if active {
-                        "有运行进行中 · Ctrl+Alt+Q 急停"
-                    } else {
-                        "没有正在进行的运行"
-                    });
-                    let _ = tray.icon.set_tooltip(if active {
-                        Some("Sleepy Doll · 有运行进行中，Ctrl+Alt+Q 急停")
-                    } else {
-                        Some("Sleepy Doll · 关闭窗口后继续运行")
-                    });
+                    tray.set_active(active);
                 }
             }
             #[cfg(target_os = "windows")]
@@ -485,9 +498,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // 游戏在前台时用户按不回主窗口：急停要先掐掉所有运行，
                 // 再把窗口带回前台，让对话重新可见。
                 let stopped = controller.cancel_active_runs();
+                window.set_minimized(false);
+                window.set_visible(true);
+                window.set_focus();
                 window.request_user_attention(Some(tao::window::UserAttentionType::Critical));
                 let _ = proxy.send_event(UserEvent::ToWeb(
-                    json!({"kind":"event","event":"panicStop","stopped":stopped}),
+                    json!({"kind":"event","id":"panicStop","result":{"stopped":stopped}}),
                 ));
                 if stopped > 0 {
                     log::warn!("急停热键：已请求停止 {stopped} 个运行");
@@ -664,6 +680,7 @@ fn install_panic_hotkey(proxy: EventLoopProxy<UserEvent>) {
 fn create_tray(
     proxy: EventLoopProxy<UserEvent>,
     bridge_enabled: bool,
+    active: bool,
 ) -> Result<TrayHandles, Box<dyn std::error::Error>> {
     use tray_icon::{
         Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent,
@@ -671,39 +688,63 @@ fn create_tray(
     };
 
     let menu = Menu::new();
-    let status = MenuItem::new("没有正在进行的运行", false, None);
+    let status = MenuItem::new("Sleepy Doll · 就绪", false, None);
     let show = IconMenuItem::new(
-        "显示 Sleepy Doll",
+        "打开主窗口",
         true,
-        menu_glyph(MenuGlyph::Window, [151, 116, 38, 255]),
+        menu_glyph(MenuGlyph::Window, [104, 112, 122, 255]),
         None,
     );
-    let bridge = CheckMenuItem::new("BetterGI 桥", true, bridge_enabled, None);
-    let open_user = IconMenuItem::new(
-        "打开配置目录",
+    let bridge = CheckMenuItem::new("连接 BetterGI", true, bridge_enabled, None);
+    let settings = IconMenuItem::new(
+        "设置",
         true,
-        menu_glyph(MenuGlyph::Folder, [102, 102, 102, 255]),
+        menu_glyph(MenuGlyph::Settings, [104, 112, 122, 255]),
+        None,
+    );
+    let help = IconMenuItem::new(
+        "使用说明与更新",
+        true,
+        menu_glyph(MenuGlyph::Help, [104, 112, 122, 255]),
+        None,
+    );
+    let open_user = IconMenuItem::new(
+        "打开数据文件夹",
+        true,
+        menu_glyph(MenuGlyph::Folder, [104, 112, 122, 255]),
+        None,
+    );
+    let stop = IconMenuItem::new(
+        "停止所有任务\tCtrl+Alt+Q",
+        active,
+        menu_glyph(MenuGlyph::Stop, [180, 77, 64, 255]),
         None,
     );
     let quit = IconMenuItem::new(
-        "停止任务并退出",
+        "退出 Sleepy Doll",
         true,
-        menu_glyph(MenuGlyph::Exit, [196, 43, 28, 255]),
+        menu_glyph(MenuGlyph::Exit, [104, 112, 122, 255]),
         None,
     );
     menu.append_items(&[
         &status,
         &PredefinedMenuItem::separator(),
         &show,
+        &settings,
+        &help,
+        &open_user,
         &PredefinedMenuItem::separator(),
         &bridge,
-        &open_user,
+        &stop,
         &PredefinedMenuItem::separator(),
         &quit,
     ])?;
     let status_item = status.clone();
     let show_id = show.id().clone();
     let bridge_id = bridge.id().clone();
+    let settings_id = settings.id().clone();
+    let help_id = help.id().clone();
+    let stop_id = stop.id().clone();
     let open_user_id = open_user.id().clone();
     let quit_id = quit.id().clone();
     let menu_proxy = proxy.clone();
@@ -712,6 +753,12 @@ fn create_tray(
             Some(UserEvent::ShowWindow)
         } else if event.id == bridge_id {
             Some(UserEvent::ToggleBridge)
+        } else if event.id == settings_id {
+            Some(UserEvent::OpenSettings)
+        } else if event.id == help_id {
+            Some(UserEvent::OpenHelp)
+        } else if event.id == stop_id {
+            Some(UserEvent::PanicStop)
         } else if event.id == open_user_id {
             Some(UserEvent::OpenUserDirectory)
         } else if event.id == quit_id {
@@ -743,11 +790,15 @@ fn create_tray(
         Ok(icon) => builder = builder.with_icon(icon),
         Err(error) => log::warn!("托盘图标不可用: {error}"),
     }
-    Ok(TrayHandles {
+    let handles = TrayHandles {
         icon: builder.build()?,
         bridge,
         status: status_item,
-    })
+        stop,
+        quit,
+    };
+    handles.set_active(active);
+    Ok(handles)
 }
 
 #[cfg(target_os = "windows")]
@@ -756,6 +807,9 @@ enum MenuGlyph {
     Window,
     Folder,
     Exit,
+    Stop,
+    Settings,
+    Help,
 }
 
 #[cfg(target_os = "windows")]
@@ -778,7 +832,36 @@ fn menu_glyph(glyph: MenuGlyph, color: [u8; 4]) -> Option<tray_icon::menu::Icon>
                         || ((4..=12).contains(&y) && matches!(x, 2 | 13))
                 }
                 MenuGlyph::Exit => {
-                    (4..=11).contains(&x) && (4..=11).contains(&y) && (x == y || x + y == 15)
+                    (x == 7 && (2..=7).contains(&y))
+                        || (y == 13 && (5..=10).contains(&x))
+                        || (matches!(x, 2 | 13) && (6..=10).contains(&y))
+                        || (matches!(
+                            (x, y),
+                            (3, 4)
+                                | (4, 3)
+                                | (11, 3)
+                                | (12, 4)
+                                | (3, 11)
+                                | (4, 12)
+                                | (11, 12)
+                                | (12, 11)
+                        ))
+                }
+                MenuGlyph::Stop => {
+                    ((3..=12).contains(&x) && matches!(y, 3 | 12))
+                        || ((3..=12).contains(&y) && matches!(x, 3 | 12))
+                }
+                MenuGlyph::Settings => {
+                    ((3..=12).contains(&x) && matches!(y, 4 | 11))
+                        || (matches!(x, 5 | 6) && (2..=6).contains(&y))
+                        || (matches!(x, 9 | 10) && (9..=13).contains(&y))
+                }
+                MenuGlyph::Help => {
+                    ((3..=12).contains(&x) && matches!(y, 2 | 13))
+                        || ((3..=12).contains(&y) && matches!(x, 2 | 13))
+                        || (matches!(x, 7 | 8) && matches!(y, 4 | 7 | 8 | 10))
+                        || (x == 9 && matches!(y, 5 | 6))
+                        || (x == 6 && y == 5)
                 }
             };
             if on {
@@ -797,6 +880,30 @@ struct TrayHandles {
     bridge: tray_icon::menu::CheckMenuItem,
     /// 只读状态行：有运行进行中时提示急停热键。
     status: tray_icon::menu::MenuItem,
+    stop: tray_icon::menu::IconMenuItem,
+    quit: tray_icon::menu::IconMenuItem,
+}
+
+#[cfg(target_os = "windows")]
+impl TrayHandles {
+    fn set_active(&self, active: bool) {
+        self.status.set_text(if active {
+            "Sleepy Doll · 任务进行中"
+        } else {
+            "Sleepy Doll · 就绪"
+        });
+        self.stop.set_enabled(active);
+        self.quit.set_text(if active {
+            "停止任务并退出"
+        } else {
+            "退出 Sleepy Doll"
+        });
+        let _ = self.icon.set_tooltip(Some(if active {
+            "Sleepy Doll · 任务进行中\nCtrl+Alt+Q 停止所有任务"
+        } else {
+            "Sleepy Doll · 就绪\n单击打开主窗口，右键查看更多"
+        }));
+    }
 }
 fn dispatch_ipc(
     request: Request<String>,

@@ -1,45 +1,158 @@
 .sd-context {
-  display: grid;
-  justify-items: end;
-  align-content: center;
-  gap: 4px;
-  min-width: 72px;
-  color: var(--muted);
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 5px;
+  min-height: 32px;
+  padding: 3px 7px 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: var(--secondary);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  outline: none;
+  cursor: help;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
 }
-
-.sd-context.is-high {
-  color: var(--secondary);
+.sd-context:hover,
+.sd-context:focus-visible {
+  background: var(--subtle);
+  border-color: var(--border);
 }
-
-.sd-context-track {
+.sd-context:focus-visible {
+  outline: 2px solid var(--secondary);
+  outline-offset: 2px;
+}
+.sd-context-ring {
   display: block;
-  width: 56px;
-  height: 3px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--border);
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  overflow: visible;
 }
-
+.sd-context-track,
 .sd-context-fill {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: currentColor;
+  fill: none;
+  stroke-width: 2.5;
 }
-
+.sd-context-track {
+  stroke: var(--border);
+}
+.sd-context-fill {
+  stroke: var(--secondary);
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition:
+    stroke-dasharray 260ms ease-out,
+    stroke 160ms ease;
+}
+.sd-context-center {
+  fill: var(--muted);
+}
+.sd-context.is-high .sd-context-fill {
+  stroke: var(--gold);
+}
+.sd-context.is-high .sd-context-label > span {
+  color: var(--text);
+}
 .sd-context-copy {
-  font-weight: 550;
-  letter-spacing: 0.01em;
+  display: grid;
+  gap: 2px;
+  min-width: 80px;
+  line-height: 1;
 }
-
-.sd-context em {
-  font-style: normal;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: var(--hover);
+.sd-context-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
   color: var(--secondary);
   font-size: 10px;
+}
+.sd-context-label > span {
+  color: var(--secondary);
+}
+.sd-context-numbers {
+  font-weight: 550;
+  letter-spacing: 0.01em;
+  color: var(--secondary);
+}
+.sd-context-hint {
+  position: absolute;
+  z-index: 50;
+  bottom: calc(100% + 9px);
+  right: 0;
+  width: max-content;
+  max-width: min(260px, 70vw);
+  display: grid;
+  gap: 7px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  background: var(--surface);
+  color: var(--secondary);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.6;
+  white-space: normal;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(3px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 120ms;
+}
+.sd-context:hover .sd-context-hint,
+.sd-context:focus-visible .sd-context-hint {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.sd-context-hint em {
+  font-style: normal;
+  color: var(--text);
+}
+.sd-context[data-hint-dismissed="true"] .sd-context-hint {
+  opacity: 0;
+  visibility: hidden;
+}
+.sd-context-compacted {
+  position: absolute;
+  top: 5px;
+  left: 22px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+@media (max-width: 560px) {
+  .sd-context {
+    gap: 3px;
+    padding-right: 3px;
+  }
+  .sd-context-ring {
+    width: 22px;
+    height: 22px;
+  }
+  .sd-context-copy {
+    min-width: 74px;
+  }
+  .sd-context-compacted {
+    left: 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sd-context,
+  .sd-context-fill,
+  .sd-context-hint {
+    transition: none;
+  }
 }

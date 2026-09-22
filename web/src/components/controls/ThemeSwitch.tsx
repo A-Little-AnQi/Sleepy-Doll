@@ -25,10 +25,14 @@ export function ThemeSwitch({
       onPointerLeave={() => setHot(false)}
       onClick={(event) => {
         const button = event.currentTarget;
-        const x = event.clientX;
-        const y = event.clientY;
+        button.focus({ preventScroll: true });
+        const bounds = button.getBoundingClientRect();
+        const x =
+          event.detail === 0 ? bounds.left + bounds.width / 2 : event.clientX;
+        const y =
+          event.detail === 0 ? bounds.top + bounds.height / 2 : event.clientY;
         void Promise.resolve(onChange(next, { x, y })).finally(() => {
-          button.focus({ preventScroll: true });
+          if (!button.isConnected) return;
           const node =
             typeof document.elementFromPoint === "function"
               ? document.elementFromPoint(x, y)
@@ -41,7 +45,9 @@ export function ThemeSwitch({
       <span className="app-theme-switch-knob" aria-hidden="true" />
       <span className="app-theme-switch-copy">
         {dark ? <MoonIcon /> : <SunIcon />}
-        <span className="app-theme-switch-label">{dark ? t.settings.themeDark : t.settings.themeLight}</span>
+        <span className="app-theme-switch-label">
+          {dark ? t.settings.themeDark : t.settings.themeLight}
+        </span>
       </span>
     </button>
   );

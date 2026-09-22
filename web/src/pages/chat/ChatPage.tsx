@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import mascot from "../../brand/mascot.webp";
 import "./ChatPage.css";
 import { Transcript } from "../../components/chat/Transcript";
@@ -132,6 +132,7 @@ export function ChatPage({
   const [notice, setNotice] = useState("");
   const [unread, setUnread] = useState(false);
   const [sending, setSending] = useState(false);
+  const [stopping, setStopping] = useState(false);
   // 工具名取自工具定义里的 label，没有 label 的不进表。
   const toolLabels = useMemo(
     () =>
@@ -191,25 +192,35 @@ export function ChatPage({
     setConfirming(false);
   }, [approval?.id]);
   useEffect(() => {
+    setStopping(false);
+  }, [task?.id, busy]);
+  useEffect(() => {
     if (!busy && !approval) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [busy, approval]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (follow.current) {
       scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
       setUnread(false);
     } else {
       setUnread(true);
     }
-  }, [messages, stream, plan, task]);
+  }, [messages, stream, plan]);
   const setDraft = (value: string) => {
     setPrompt(value);
     localStorage.setItem(draftKey, value);
   };
   const send = async (queue = false) => {
     const value = prompt.trim();
-    if (!value || sending || !bootstrap.models.length) return;
+    if (
+      !value ||
+      sending ||
+      stopping ||
+      task?.state === "cancelling" ||
+      !bootstrap.models.length
+    )
+      return;
     const origin = conversationId;
     const retryKey = `${draftKey}:pending`;
     let pending: { key: string; prompt: string; runId?: string } | undefined;
@@ -343,6 +354,7 @@ export function ChatPage({
                   stream={stream}
                   phase={phase}
                   seconds={elapsed}
+                  running={busy}
                   toolLabels={toolLabels}
                 />
                 {plan && (
@@ -431,9 +443,18 @@ export function ChatPage({
                   ["failed", "cancelled", "partial", "blocked"].includes(
                     task.state,
                   ) && (
-                    <section className="run-error">
+                    <section
+                      className={
+                        task.state === "cancelled" ? "run-stopped" : "run-error"
+                      }
+                      role="status"
+                    >
                       <h3>{taskLabels[task.state]}</h3>
-                      <p>{task.error || task.result}</p>
+                      <p>
+                        {task.state === "cancelled"
+                          ? "已保留生成的内容，你可以继续发送消息。"
+                          : task.error || task.result}
+                      </p>
                       {task.state === "blocked" && (
                         <div className="detail-actions">
                           <button
@@ -549,7 +570,12 @@ export function ChatPage({
             {busy && (
               <button
                 className="subtle-action"
-                disabled={!prompt.trim() || sending}
+                disabled={
+                  !prompt.trim() ||
+                  sending ||
+                  stopping ||
+                  task?.state === "cancelling"
+                }
                 title={t.chat.waitCurrentRun}
                 onClick={() => void send(true)}
               >
@@ -592,10 +618,20 @@ export function ChatPage({
                   className="send-action"
                   aria-label={t.chat.stop}
                   title={t.chat.stop}
-                  disabled={task?.state === "cancelling"}
-                  onClick={() =>
-                    task && void act(() => api.cancelTask(task.id))
-                  }
+                  disabled={stopping || task?.state === "cancelling"}
+                  data-stopping={stopping || task?.state === "cancelling"}
+                  onClick={() => {
+                    if (!task || stopping) return;
+                    setStopping(true);
+                    setError("");
+                    void api
+                      .cancelTask(task.id)
+                      .then(reload)
+                      .catch((reason: unknown) => {
+                        setStopping(false);
+                        setError(readError(reason));
+                      });
+                  }}
                 >
                   <StopIcon className="button-icon" />
                 </button>
@@ -613,7 +649,11 @@ export function ChatPage({
                         : t.chat.send
                   }
                   disabled={
-                    sending || !prompt.trim() || !bootstrap.models.length
+                    sending ||
+                    stopping ||
+                    task?.state === "cancelling" ||
+                    !prompt.trim() ||
+                    !bootstrap.models.length
                   }
                   onClick={() => void send()}
                 >
