@@ -90,13 +90,7 @@ fn ensure_host_running(config: &BridgeConfig) -> Result<()> {
         .parent()
         .ok_or_else(|| Error::Config("BetterGI 安装路径无效。".into()))?
         .to_path_buf();
-    let mut command = std::process::Command::new(&executable);
-    command
-        .current_dir(&directory)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    command.spawn()?;
+    launch_host(&executable, &directory, config.launch_silently)?;
     let started = std::time::Instant::now();
     while !host_running() {
         if started.elapsed() >= Duration::from_secs(30) {
@@ -107,6 +101,114 @@ fn ensure_host_running(config: &BridgeConfig) -> Result<()> {
         std::thread::sleep(Duration::from_secs(1));
     }
     Ok(())
+}
+
+fn launch_host(executable: &Path, directory: &Path, silently: bool) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    if silently {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::{
+            Foundation::CloseHandle,
+            System::Threading::{
+                CREATE_NO_WINDOW, CREATE_SUSPENDED, CreateProcessW, PROCESS_INFORMATION,
+                ResumeThread, STARTF_USESHOWWINDOW, STARTUPINFOW,
+            },
+            UI::WindowsAndMessaging::{GetForegroundWindow, SW_HIDE},
+        };
+
+        let executable: Vec<u16> = executable.as_os_str().encode_wide().chain([0]).collect();
+        let directory: Vec<u16> = directory.as_os_str().encode_wide().chain([0]).collect();
+        let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
+        startup.cb = size_of::<STARTUPINFOW>() as u32;
+        startup.dwFlags = STARTF_USESHOWWINDOW;
+        startup.wShowWindow = SW_HIDE as u16;
+        let mut process: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+        let foreground = unsafe { GetForegroundWindow() } as isize;
+        let created = unsafe {
+            CreateProcessW(
+                executable.as_ptr(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+                CREATE_SUSPENDED | CREATE_NO_WINDOW,
+                std::ptr::null(),
+                directory.as_ptr(),
+                &startup,
+                &mut process,
+            )
+        };
+        if created == 0 {
+            return Err(Error::Tool(format!(
+                "后台启动 BetterGI 失败：{}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        let process_id = process.dwProcessId;
+        let process_handle = process.hProcess as isize;
+        std::thread::spawn(move || {
+            hide_process_windows(process_id, process_handle, foreground);
+        });
+        unsafe {
+            ResumeThread(process.hThread);
+            CloseHandle(process.hThread);
+        }
+        return Ok(());
+    }
+
+    let mut command = std::process::Command::new(executable);
+    command
+        .current_dir(directory)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    command.spawn()?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn hide_process_windows(process_id: u32, process_handle: isize, foreground: isize) {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, HWND, LPARAM, WAIT_OBJECT_0},
+        System::Threading::WaitForSingleObject,
+        UI::WindowsAndMessaging::{
+            EnumWindows, GetWindowThreadProcessId, IsWindowVisible, SW_HIDE, SetForegroundWindow,
+            ShowWindow,
+        },
+    };
+
+    struct Context {
+        process_id: u32,
+        hidden: bool,
+    }
+
+    unsafe extern "system" fn hide(hwnd: HWND, lparam: LPARAM) -> i32 {
+        let context = unsafe { &mut *(lparam as *mut Context) };
+        let mut owner = 0;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut owner) };
+        if owner == context.process_id && unsafe { IsWindowVisible(hwnd) } != 0 {
+            unsafe { ShowWindow(hwnd, SW_HIDE) };
+            context.hidden = true;
+        }
+        1
+    }
+
+    let process_handle = process_handle as *mut std::ffi::c_void;
+    for _ in 0..500 {
+        if unsafe { WaitForSingleObject(process_handle, 0) } == WAIT_OBJECT_0 {
+            break;
+        }
+        let mut context = Context {
+            process_id,
+            hidden: false,
+        };
+        unsafe { EnumWindows(Some(hide), (&mut context as *mut Context) as LPARAM) };
+        if context.hidden && foreground != 0 {
+            unsafe { SetForegroundWindow(foreground as HWND) };
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    unsafe { CloseHandle(process_handle) };
 }
 
 /// BetterGI 可执行文件的位置：上次连接记住的目录 → 卸载注册表 → 常见安装目录。
@@ -640,6 +742,7 @@ mod tests {
             instance_id: None,
             timeout_ms: 1000,
             host_install_path: None,
+            launch_silently: true,
         };
         assert_eq!(
             endpoint(&config).unwrap(),
@@ -791,6 +894,7 @@ HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Bett
             instance_id: None,
             timeout_ms: 30_000,
             host_install_path: None,
+            launch_silently: true,
         }
     }
 }

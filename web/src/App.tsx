@@ -26,9 +26,26 @@ export type Page =
   | "help"
   | "sponsor";
 
+const PAGE_KEY = "sleepy-doll-active-page";
+const PAGES = new Set<Page>([
+  "chat",
+  "tasks",
+  "models",
+  "extensions",
+  "bridge",
+  "settings",
+  "help",
+  "sponsor",
+]);
+
+function restorePage(): Page {
+  const saved = localStorage.getItem(PAGE_KEY) as Page | null;
+  return saved && PAGES.has(saved) ? saved : "chat";
+}
+
 export default function App() {
   const t = useT();
-  const [page, setPage] = useState<Page>("chat");
+  const [page, setPage] = useState<Page>(restorePage);
   const [extensionsTab, setExtensionsTab] = useState<"skills" | "plugins">(
     "skills",
   );
@@ -42,6 +59,10 @@ export default function App() {
   const [selectedTask, setSelectedTask] = useState<string>();
   const [error, setError] = useState("");
   const [composingNewChat, setComposingNewChat] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem(PAGE_KEY, page);
+  }, [page]);
 
   useEffect(() => {
     if (conversation)

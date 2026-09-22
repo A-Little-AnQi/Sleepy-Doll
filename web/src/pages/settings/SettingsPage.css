@@ -1,4 +1,5 @@
 .settings-layout {
+  --settings-gutter-pair: clamp(48px, 6vw, 88px);
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -9,7 +10,7 @@
 
 /* 滚动容器占满页框、滚动条贴边（与对话页同一模式），内容列在内部居中。 */
 .settings-nav {
-  width: min(100%, 920px);
+  width: min(calc(100% - var(--settings-gutter-pair)), 920px);
   margin-inline: auto;
   flex: 0 0 auto;
   padding: 12px 0 14px;
@@ -40,10 +41,11 @@
 .settings-content > .bridge-api-explorer,
 .settings-content > .bridge-recovery,
 .settings-content > .help-page,
+.settings-content > .model-settings,
 .settings-content .page-sheet,
 .settings-content .bridge-api-explorer,
 .settings-content .bridge-recovery {
-  width: min(100%, 920px);
+  width: min(calc(100% - var(--settings-gutter-pair)), 920px);
   margin-inline: auto;
   max-width: none;
   height: auto;
@@ -115,10 +117,9 @@
 
 @media (max-width: 700px) {
   .settings-layout {
-    padding: 18px 18px 0;
+    --settings-gutter-pair: 36px;
+    padding: 18px 0 0;
   }
-
-
   .settings-nav {
     overflow-x: auto;
     scrollbar-width: none;

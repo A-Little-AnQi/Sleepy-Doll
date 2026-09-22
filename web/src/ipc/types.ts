@@ -347,6 +347,7 @@ export interface Bootstrap {
     enabled: boolean;
     connected: boolean;
     baseUrl: string;
+    launchSilently?: boolean;
     error?: string;
   };
 }

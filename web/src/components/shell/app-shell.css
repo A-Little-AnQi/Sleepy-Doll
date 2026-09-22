@@ -359,7 +359,7 @@
 }
 .app-conversations li.is-current > button {
   color: var(--text);
-  font-weight: 550;
+  font-weight: 400;
 }
 .app-conversation-title {
   flex: 1;

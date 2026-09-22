@@ -19,7 +19,7 @@ use sleepy_doll::{app::AppController, logging, runtime::types::Event as AgentEve
 #[cfg(target_os = "windows")]
 use tao::platform::windows::{IconExtWindows, WindowBuilderExtWindows};
 use tao::{
-    dpi::{LogicalSize, PhysicalSize, Size},
+    dpi::{LogicalSize, PhysicalPosition, PhysicalSize, Position, Size},
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
     window::{Window, WindowBuilder},
@@ -64,6 +64,10 @@ enum UserEvent {
     SyncChrome,
     #[cfg(target_os = "windows")]
     ShowWindow,
+    #[cfg(target_os = "windows")]
+    ToggleBridge,
+    #[cfg(target_os = "windows")]
+    OpenUserDirectory,
     /// 显隐托盘图标。开关的持久化在发起侧完成，这里只在主线程上改界面。
     #[cfg(target_os = "windows")]
     TrayVisible(bool),
@@ -89,6 +93,16 @@ struct IpcRequest {
 struct IpcError {
     code: &'static str,
     message: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowPlacement {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    maximized: bool,
 }
 
 fn main() {
@@ -173,6 +187,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+    let placement_path = window_placement_path(&user_directory);
+    let placement = load_window_placement(&placement_path)
+        .filter(|placement| placement_is_visible(placement, &event_loop));
     // 桥开关的当前值。
     #[cfg(target_os = "windows")]
     let bridge_enabled = Arc::new(AtomicBool::new(startup_config.bridge.enabled));
@@ -180,8 +197,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut tray = if startup_config.tray.enabled {
         Some(create_tray(
             proxy.clone(),
-            user_directory.clone(),
-            bridge_enabled.clone(),
+            bridge_enabled.load(Ordering::Relaxed),
         )?)
     } else {
         None
@@ -190,8 +206,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // DWM 状态变化打破，不能用。
     let builder = WindowBuilder::new()
         .with_title("Sleepy Doll")
-        .with_inner_size(Size::Logical(LogicalSize::new(1360.0, 860.0)))
+        .with_inner_size(placement.map_or(
+            Size::Logical(LogicalSize::new(1360.0, 860.0)),
+            |placement| Size::Physical(PhysicalSize::new(placement.width, placement.height)),
+        ))
         .with_min_inner_size(Size::Logical(LogicalSize::new(900.0, 620.0)));
+    let builder = if let Some(placement) = placement {
+        builder
+            .with_position(Position::Physical(PhysicalPosition::new(
+                placement.x,
+                placement.y,
+            )))
+            .with_maximized(placement.maximized)
+    } else {
+        builder
+    };
     // tao 建窗口的过程中会把图标置空，两个图标要在窗口创建时就设上；
     // window_chrome::install() 要等 WebView2 启动完。
     #[cfg(target_os = "windows")]
@@ -254,8 +283,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // 子窗口在 WebView2 建好后才存在，边缘命中测试要交给它。
     window_chrome::install(&window);
     let mut maximized = window.is_maximized();
+    let mut normal_position = placement
+        .map(|placement| PhysicalPosition::new(placement.x, placement.y))
+        .or_else(|| window.outer_position().ok())
+        .unwrap_or_default();
+    let mut normal_size = placement
+        .map(|placement| PhysicalSize::new(placement.width, placement.height))
+        .unwrap_or_else(|| window.inner_size());
+    let mut placement_deadline = None;
 
     event_loop.run(move |event, _, control_flow| {
+        if placement_deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+            save_window_placement(
+                &placement_path,
+                normal_position,
+                normal_size,
+                window.is_maximized(),
+            );
+            placement_deadline = None;
+        }
         *control_flow = ControlFlow::Wait;
         match event {
             Event::UserEvent(UserEvent::ToWeb(payload)) => {
@@ -265,11 +311,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Event::WindowEvent {
+                window_id,
                 event: WindowEvent::CloseRequested,
                 ..
-            } => {
+            } if window_id == window.id() => {
                 #[cfg(target_os = "windows")]
-                close_window(tray.as_ref(), &window, &controller, &proxy);
+                {
+                    save_window_placement(
+                        &placement_path,
+                        normal_position,
+                        normal_size,
+                        window.is_maximized(),
+                    );
+                    close_window(tray.as_ref(), &window, &controller, &proxy);
+                }
                 #[cfg(not(target_os = "windows"))]
                 {
                     controller.shutdown();
@@ -277,9 +332,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Event::WindowEvent {
-                event: WindowEvent::Resized(_),
+                window_id,
+                event: WindowEvent::Resized(size),
                 ..
-            } => {
+            } if window_id == window.id() => {
+                if !window.is_maximized() && !window.is_minimized() {
+                    normal_size = size;
+                }
+                placement_deadline = Some(std::time::Instant::now() + Duration::from_millis(250));
                 // 只有真正变了才通知。
                 let current = window.is_maximized();
                 if current != maximized {
@@ -290,9 +350,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     ));
                 }
             }
+            Event::WindowEvent {
+                window_id,
+                event: WindowEvent::Moved(position),
+                ..
+            } if window_id == window.id() => {
+                if !window.is_maximized() && !window.is_minimized() {
+                    normal_position = position;
+                }
+                placement_deadline = Some(std::time::Instant::now() + Duration::from_millis(250));
+            }
             Event::UserEvent(UserEvent::Window(action)) => {
                 #[cfg(target_os = "windows")]
                 if action == window_chrome::Action::Close {
+                    save_window_placement(
+                        &placement_path,
+                        normal_position,
+                        normal_size,
+                        window.is_maximized(),
+                    );
                     close_window(tray.as_ref(), &window, &controller, &proxy);
                 } else {
                     window_chrome::perform(&window, action);
@@ -313,20 +389,42 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 window.set_focus();
             }
             #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::ToggleBridge) => {
+                let enabled = !bridge_enabled.load(Ordering::Relaxed);
+                let controller = controller.clone();
+                let proxy = proxy.clone();
+                thread::spawn(move || {
+                    match controller.handle(
+                        "bridge.setEnabled",
+                        json!({"enabled":enabled}),
+                        Arc::new(|_, _| {}),
+                    ) {
+                        Ok(_) => {
+                            let _ = proxy.send_event(UserEvent::BridgeState(enabled));
+                        }
+                        Err(error) => log::warn!("托盘切换 BetterGI 失败：{error}"),
+                    }
+                });
+            }
+            #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::OpenUserDirectory) => {
+                let _ = std::process::Command::new("explorer.exe")
+                    .arg(&user_directory)
+                    .spawn();
+            }
+            #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::TrayVisible(visible)) => {
                 match (tray.as_mut(), visible) {
                     (Some(tray), true) => {
                         let _ = tray.icon.set_visible(true);
                     }
                     // 图标还没建过且要显示时才建，勾选态取当前桥状态。
-                    (None, true) => match create_tray(
-                        proxy.clone(),
-                        user_directory.clone(),
-                        bridge_enabled.clone(),
-                    ) {
-                        Ok(handles) => tray = Some(handles),
-                        Err(error) => log::warn!("托盘图标不可用: {error}"),
-                    },
+                    (None, true) => {
+                        match create_tray(proxy.clone(), bridge_enabled.load(Ordering::Relaxed)) {
+                            Ok(handles) => tray = Some(handles),
+                            Err(error) => log::warn!("托盘图标不可用: {error}"),
+                        }
+                    }
                     // 隐藏要连句柄一起丢弃：close_window 按句柄是否存在决定收进托盘
                     // 还是退出。丢弃 TrayIcon 时图标也从通知区移除。
                     (_, false) => tray = None,
@@ -352,12 +450,69 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Event::UserEvent(UserEvent::ShutdownFinished) => *control_flow = ControlFlow::Exit,
             _ => {}
         }
+        if !matches!(*control_flow, ControlFlow::Exit) {
+            if let Some(deadline) = placement_deadline {
+                *control_flow = ControlFlow::WaitUntil(deadline);
+            }
+        }
     });
 }
 
 /// WebView2 的用户数据目录，与配置、日志同级。
 fn webview_data_directory(user_directory: &Path) -> std::path::PathBuf {
     user_directory.join(".sleepy-doll").join("webview2")
+}
+
+fn window_placement_path(user_directory: &Path) -> PathBuf {
+    user_directory
+        .join(".sleepy-doll")
+        .join("window-placement.json")
+}
+
+fn load_window_placement(path: &Path) -> Option<WindowPlacement> {
+    let placement: WindowPlacement = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    (placement.width >= 900 && placement.height >= 620).then_some(placement)
+}
+
+fn placement_is_visible(
+    placement: &WindowPlacement,
+    event_loop: &tao::event_loop::EventLoop<UserEvent>,
+) -> bool {
+    let right = i64::from(placement.x) + i64::from(placement.width);
+    let bottom = i64::from(placement.y) + i64::from(placement.height);
+    event_loop.available_monitors().any(|monitor| {
+        let origin = monitor.position();
+        let size = monitor.size();
+        let monitor_right = i64::from(origin.x) + i64::from(size.width);
+        let monitor_bottom = i64::from(origin.y) + i64::from(size.height);
+        let visible_width = right.min(monitor_right) - i64::from(placement.x.max(origin.x));
+        let visible_height = bottom.min(monitor_bottom) - i64::from(placement.y.max(origin.y));
+        visible_width >= 80 && visible_height >= 80
+    })
+}
+
+fn save_window_placement(
+    path: &Path,
+    position: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+    maximized: bool,
+) {
+    let placement = WindowPlacement {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+        maximized,
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let result = serde_json::to_vec(&placement)
+        .map_err(|error| error.to_string())
+        .and_then(|value| std::fs::write(path, value).map_err(|error| error.to_string()));
+    if let Err(error) = result {
+        log::warn!("窗口位置保存失败：{error}");
+    }
 }
 
 /// 把窗口收进托盘。
@@ -389,45 +544,63 @@ fn close_window(
 #[cfg(target_os = "windows")]
 fn create_tray(
     proxy: EventLoopProxy<UserEvent>,
-    user_directory: PathBuf,
-    bridge_enabled: Arc<AtomicBool>,
+    bridge_enabled: bool,
 ) -> Result<TrayHandles, Box<dyn std::error::Error>> {
     use tray_icon::{
         Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent,
-        menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem},
+        menu::{CheckMenuItem, IconMenuItem, Menu, MenuEvent, PredefinedMenuItem},
     };
 
     let menu = Menu::new();
-    let bridge = CheckMenuItem::new(
-        "BetterGI 桥",
+    let show = IconMenuItem::new(
+        "显示 Sleepy Doll",
         true,
-        bridge_enabled.load(Ordering::Relaxed),
+        menu_glyph(MenuGlyph::Window, [151, 116, 38, 255]),
         None,
     );
-    let open_user = MenuItem::new("打开配置目录", true, None);
-    let quit = MenuItem::new("停止任务并退出", true, None);
-    menu.append_items(&[&bridge, &open_user, &PredefinedMenuItem::separator(), &quit])?;
+    let bridge = CheckMenuItem::new("BetterGI 桥", true, bridge_enabled, None);
+    let open_user = IconMenuItem::new(
+        "打开配置目录",
+        true,
+        menu_glyph(MenuGlyph::Folder, [102, 102, 102, 255]),
+        None,
+    );
+    let quit = IconMenuItem::new(
+        "停止任务并退出",
+        true,
+        menu_glyph(MenuGlyph::Exit, [196, 43, 28, 255]),
+        None,
+    );
+    menu.append_items(&[
+        &show,
+        &PredefinedMenuItem::separator(),
+        &bridge,
+        &open_user,
+        &PredefinedMenuItem::separator(),
+        &quit,
+    ])?;
+    let show_id = show.id().clone();
     let bridge_id = bridge.id().clone();
     let open_user_id = open_user.id().clone();
     let quit_id = quit.id().clone();
     let menu_proxy = proxy.clone();
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-        if event.id == bridge_id {
-            // 界面入口触发的桥开关也写这同一个原子值。
-            let next = !bridge_enabled.load(Ordering::Relaxed);
-            bridge_enabled.store(next, Ordering::Relaxed);
-            let _ = menu_proxy.send_event(UserEvent::BridgeState(next));
-        }
-        if event.id == open_user_id {
-            let _ = std::process::Command::new("explorer.exe")
-                .arg(&user_directory)
-                .spawn();
-        }
-        if event.id == quit_id {
-            let _ = menu_proxy.send_event(UserEvent::Quit);
+        let action = if event.id == show_id {
+            Some(UserEvent::ShowWindow)
+        } else if event.id == bridge_id {
+            Some(UserEvent::ToggleBridge)
+        } else if event.id == open_user_id {
+            Some(UserEvent::OpenUserDirectory)
+        } else if event.id == quit_id {
+            Some(UserEvent::Quit)
+        } else {
+            None
+        };
+        if let Some(action) = action {
+            let _ = menu_proxy.send_event(action);
         }
     }));
-    // 左键（松开）直接呼出主窗口；菜单只挂在右键上。
+
     TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
         if let TrayIconEvent::Click {
             button: MouseButton::Left,
@@ -451,6 +624,46 @@ fn create_tray(
         icon: builder.build()?,
         bridge,
     })
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy)]
+enum MenuGlyph {
+    Window,
+    Folder,
+    Exit,
+}
+
+#[cfg(target_os = "windows")]
+fn menu_glyph(glyph: MenuGlyph, color: [u8; 4]) -> Option<tray_icon::menu::Icon> {
+    let mut rgba = vec![0; 16 * 16 * 4];
+    for y in 0..16 {
+        for x in 0..16 {
+            let on = match glyph {
+                MenuGlyph::Window => {
+                    ((2..=13).contains(&x) && matches!(y, 2 | 10))
+                        || ((2..=10).contains(&y) && matches!(x, 2 | 13))
+                        || (y == 13 && (5..=10).contains(&x))
+                        || (y == 11 && (7..=8).contains(&x))
+                        || (y == 12 && (6..=9).contains(&x))
+                }
+                MenuGlyph::Folder => {
+                    (y == 3 && (2..=6).contains(&x))
+                        || (y == 4 && (2..=13).contains(&x))
+                        || (y == 12 && (2..=13).contains(&x))
+                        || ((4..=12).contains(&y) && matches!(x, 2 | 13))
+                }
+                MenuGlyph::Exit => {
+                    (4..=11).contains(&x) && (4..=11).contains(&y) && (x == y || x + y == 15)
+                }
+            };
+            if on {
+                let offset = (y * 16 + x) * 4;
+                rgba[offset..offset + 4].copy_from_slice(&color);
+            }
+        }
+    }
+    tray_icon::menu::Icon::from_rgba(rgba, 16, 16).ok()
 }
 
 /// 事件循环持有的托盘句柄。

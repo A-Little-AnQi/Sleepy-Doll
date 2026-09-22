@@ -143,6 +143,7 @@ impl AppController {
             method,
             "model.use"
                 | "bridge.setEnabled"
+                | "bridge.setLaunchSilently"
                 | "bridge.restore"
                 | "model.save"
                 | "model.delete"
@@ -755,6 +756,12 @@ impl AppController {
                     .ok_or_else(|| Error::Config("enabled 必须是布尔值".into()))?;
                 self.set_bridge_enabled(enabled)
             }
+            "bridge.setLaunchSilently" => {
+                let silently = params["silently"]
+                    .as_bool()
+                    .ok_or_else(|| Error::Config("silently 必须是布尔值".into()))?;
+                self.set_bridge_launch_silently(silently)
+            }
             _ => Err(Error::Config(format!("unknown IPC method: {method}"))),
         }
     }
@@ -1044,6 +1051,15 @@ impl AppController {
         Ok(())
     }
 
+    fn set_bridge_launch_silently(&self, silently: bool) -> Result<Value> {
+        let mut current = self.config.lock().expect("config mutex poisoned");
+        let mut bridge = current.bridge.clone();
+        bridge.launch_silently = silently;
+        AppConfig::set_bridge(&self.config_path, &bridge)?;
+        current.bridge = bridge;
+        Ok(json!({"launchSilently":silently}))
+    }
+
     /// 桥开关当前是否打开。给桌面壳的监视循环用。
     pub fn bridge_enabled(&self) -> bool {
         self.config.lock().unwrap().bridge.enabled
@@ -1129,14 +1145,14 @@ impl AppController {
         let bridge_status = if config.bridge.enabled {
             match crate::bridge::control::info(&config.bridge) {
                 Ok(info) => {
-                    json!({"enabled":true,"connected":info["enabled"] != false,"baseUrl":config.bridge.base_url})
+                    json!({"enabled":true,"connected":info["enabled"] != false,"baseUrl":config.bridge.base_url,"launchSilently":config.bridge.launch_silently})
                 }
                 Err(error) => {
-                    json!({"enabled":true,"connected":false,"baseUrl":config.bridge.base_url,"error":error.to_string()})
+                    json!({"enabled":true,"connected":false,"baseUrl":config.bridge.base_url,"launchSilently":config.bridge.launch_silently,"error":error.to_string()})
                 }
             }
         } else {
-            json!({"enabled":false,"connected":false,"baseUrl":config.bridge.base_url})
+            json!({"enabled":false,"connected":false,"baseUrl":config.bridge.base_url,"launchSilently":config.bridge.launch_silently})
         };
         let plugins = extensions
             .plugins

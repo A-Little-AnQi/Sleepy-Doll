@@ -149,7 +149,8 @@ const zh = {
     noMatch: "没有找到匹配任务",
     empty: "还没有快捷任务",
     emptyHint: "换个词试试，或者清掉筛选条件。",
-    emptyHow: "在对话里说明你想反复做的那件事，Agent 会把它做成一键运行的任务。",
+    emptyHow:
+      "在对话里说明你想反复做的那件事，Agent 会把它做成一键运行的任务。",
     runsNoMatch: "没有找到匹配的运行记录",
     runsEmpty: "还没有运行记录",
     runsEmptyHint: "换个词试试。",
@@ -204,7 +205,8 @@ const zh = {
     disableFirst: "请先停用插件",
     remove: "移除插件",
     removeNote: (name: string) => `移除「${name}」。它提供的工具会从本机卸下。`,
-    skillDirHintLong: "目录里要有 SKILL.md。导入后出现在本机技能目录，可随时开关。",
+    skillDirHintLong:
+      "目录里要有 SKILL.md。导入后出现在本机技能目录，可随时开关。",
     import: "导入",
     commandsHeading: "指令",
     bundledNote: "随产品提供，不能移除。",
@@ -290,7 +292,8 @@ const zh = {
     maxOutputLabel: "最大输出",
     promptCacheLabel: "提示缓存",
     setDefault: "设为默认",
-    deleteNote: (name: string) => `删除「${name}」。已绑定它的对话会改用默认模型。`,
+    deleteNote: (name: string) =>
+      `删除「${name}」。已绑定它的对话会改用默认模型。`,
   },
 
   helpToc: "目录",
@@ -303,6 +306,10 @@ const zh = {
     connectButton: "连接 BetterGI",
     reconnect: "重新连接",
     connectingShort: "连接中…",
+    launchBehavior: "自动启动方式",
+    launchBehaviorHint: "BetterGI 未运行时如何启动",
+    launchSilent: "后台启动",
+    launchVisible: "显示窗口",
     viewMethods: "查看可用接口",
     connectToView: "连接后可查看",
     statusDiag: "状态与诊断",
@@ -510,7 +517,8 @@ const en: Dict = {
 
   chat: {
     composerPlaceholderNew: "Tell me what you want to get done",
-    composerPlaceholderBusy: "Add details… (Enter to send, Shift+Enter for a new line)",
+    composerPlaceholderBusy:
+      "Add details… (Enter to send, Shift+Enter for a new line)",
     composerPlaceholderReply: "Reply…",
     message: "Message",
     send: "Send",
@@ -551,7 +559,8 @@ const en: Dict = {
   },
 
   context: {
-    compacted: "Older context was compacted; the full record stays on this machine",
+    compacted:
+      "Older context was compacted; the full record stays on this machine",
     compactedShort: "Compacted",
     inModel: "Context currently in the model",
     cacheHit: (tokens: string) => `Cache hit ${tokens}`,
@@ -734,6 +743,10 @@ const en: Dict = {
     connectButton: "Connect BetterGI",
     reconnect: "Reconnect",
     connectingShort: "Connecting…",
+    launchBehavior: "Automatic launch",
+    launchBehaviorHint: "How to start BetterGI when it is not running",
+    launchSilent: "Start in background",
+    launchVisible: "Show window",
     viewMethods: "Browse methods",
     connectToView: "Connect to browse",
     statusDiag: "Status & diagnostics",
@@ -805,7 +818,8 @@ const en: Dict = {
     install: "Install",
     preparing: "Preparing…",
     notStarted: "Not started. Run sleepy-doll.exe from the install directory.",
-    uninstallNote: "Uninstalling removes program files; your data is kept by default.",
+    uninstallNote:
+      "Uninstalling removes program files; your data is kept by default.",
     installNote: "Program and data both live in the chosen directory.",
     unknown: "Unknown",
     dataDeleted: "Data was deleted.",
@@ -816,7 +830,8 @@ const en: Dict = {
     progressLabel: (action: string) => `${action} in progress…`,
     progressAria: (action: string) => `${action} progress`,
     keepWindowOpen: "Keep this window open until it finishes.",
-    incomplete: (action: string) => `The ${action.toLowerCase()} did not complete.`,
+    incomplete: (action: string) =>
+      `The ${action.toLowerCase()} did not complete.`,
     retryHint: "You can go back and pick another location.",
     installLocation: "Install location",
     version: "Version",

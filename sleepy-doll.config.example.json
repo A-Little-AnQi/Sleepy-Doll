@@ -18,7 +18,8 @@
     "token": "${ENV:BGI_BRIDGE_TOKEN}",
     "instanceId": "",
     "timeoutMs": 30000,
-    "hostInstallPath": null
+    "hostInstallPath": null,
+    "launchSilently": true
   },
   "plugins": {
     "directories": ["../plugins", "./plugins"],

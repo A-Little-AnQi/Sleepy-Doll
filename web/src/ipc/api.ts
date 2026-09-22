@@ -84,7 +84,12 @@ window.__sleepyDollReceive = (message) => {
   window.clearTimeout(entry.timer);
   pending.delete(message.id);
   if (message.ok) entry.resolve(message.result);
-  else entry.reject(new Error(message.error?.message ?? dictOf(readLocale()).ipc.requestFailed));
+  else
+    entry.reject(
+      new Error(
+        message.error?.message ?? dictOf(readLocale()).ipc.requestFailed,
+      ),
+    );
 };
 
 async function invokeHttp<T>(
@@ -245,6 +250,10 @@ export const api = {
   setBridgeEnabled: (enabled: boolean) =>
     invoke<{ enabled: boolean; warning?: string }>("bridge.setEnabled", {
       enabled,
+    }),
+  setBridgeLaunchSilently: (silently: boolean) =>
+    invoke<{ launchSilently: boolean }>("bridge.setLaunchSilently", {
+      silently,
     }),
   installPlugin: (path: string) =>
     invoke<{ id: string }>("plugin.install", { path }),

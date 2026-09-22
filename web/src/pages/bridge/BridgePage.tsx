@@ -6,6 +6,8 @@ import type { Bootstrap } from "../../ipc/types";
 import { BridgeApiExplorer } from "../../components/bridge/BridgeApiExplorer";
 import { BridgeRecovery } from "../../components/bridge/BridgeRecovery";
 import { Toast } from "../../components/overlay/Toast";
+import { Select } from "../../components/controls/Select";
+import { SettingRow } from "../../components/controls/SettingRow";
 import "./BridgePage.css";
 import { useT } from "../../i18n";
 export function BridgePage({
@@ -22,9 +24,16 @@ export function BridgePage({
   const [showCatalog, setShowCatalog] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
   const bridge = bootstrap.bridge;
+  const [launchSilently, setLaunchSilently] = useState(
+    bridge.launchSilently ?? true,
+  );
+  const [savingLaunch, setSavingLaunch] = useState(false);
   useEffect(() => {
     void reload();
   }, [reload]);
+  useEffect(() => {
+    setLaunchSilently(bridge.launchSilently ?? true);
+  }, [bridge.launchSilently]);
   const toggle = async (enabled: boolean) => {
     setBusy(true);
     setError("");
@@ -74,13 +83,47 @@ export function BridgePage({
             disabled={busy}
             onClick={() => void toggle(true)}
           >
-            {busy ? t.bridge.connectingShort : bridge.connected ? t.bridge.reconnect : t.bridge.connectButton}
+            {busy
+              ? t.bridge.connectingShort
+              : bridge.connected
+                ? t.bridge.reconnect
+                : t.bridge.connectButton}
           </button>
         </div>
         <div className="bridge-endpoint">
           <span>{t.bridge.addrLabel}</span>
           <code>{bridge.baseUrl}</code>
         </div>
+      </section>
+      <section className="bridge-preferences" data-motion="panel">
+        <SettingRow
+          label={t.bridge.launchBehavior}
+          hint={t.bridge.launchBehaviorHint}
+        >
+          <Select
+            label={t.bridge.launchBehavior}
+            value={launchSilently ? "silent" : "visible"}
+            disabled={savingLaunch}
+            options={[
+              { value: "silent", label: t.bridge.launchSilent },
+              { value: "visible", label: t.bridge.launchVisible },
+            ]}
+            onChange={(value) => {
+              const next = value === "silent";
+              setLaunchSilently(next);
+              setSavingLaunch(true);
+              setError("");
+              void api
+                .setBridgeLaunchSilently(next)
+                .then(reload)
+                .catch((reason) => {
+                  setLaunchSilently(!next);
+                  setError(readError(reason));
+                })
+                .finally(() => setSavingLaunch(false));
+            }}
+          />
+        </SettingRow>
       </section>
       <div className="bridge-feature-grid" data-motion="panel">
         <button
@@ -92,7 +135,9 @@ export function BridgePage({
           <BridgeIcon />
           <span>
             <strong>{t.bridge.methodCatalog}</strong>
-            <small>{bridge.connected ? t.bridge.viewMethods : t.bridge.connectToView}</small>
+            <small>
+              {bridge.connected ? t.bridge.viewMethods : t.bridge.connectToView}
+            </small>
           </span>
           <ChevronIcon />
         </button>

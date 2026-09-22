@@ -11,10 +11,19 @@
 }
 
 .bridge-connection-card,
+.bridge-preferences,
 .bridge-feature {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
+}
+
+.bridge-preferences {
+  padding: 0 16px;
+}
+
+.bridge-preferences .setting-row {
+  border-bottom: 0;
 }
 
 .bridge-connection-card {

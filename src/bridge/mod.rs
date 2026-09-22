@@ -834,6 +834,7 @@ mod tests {
             instance_id: None,
             timeout_ms: 1000,
             host_install_path: None,
+            launch_silently: true,
         }));
         let mut registry = ToolRegistry::default();
         register_tools(&mut registry, client).unwrap();

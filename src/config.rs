@@ -185,6 +185,9 @@ pub struct BridgeConfig {
     /// 上次连接成功时宿主的安装目录，连接前用它自动启动 BetterGI。
     #[serde(default)]
     pub host_install_path: Option<PathBuf>,
+    /// 自动启动宿主时不显示主窗口，也不抢占当前前台。
+    #[serde(default = "default_true")]
+    pub launch_silently: bool,
 }
 
 const fn default_bridge_timeout() -> u64 {
@@ -1078,6 +1081,7 @@ mod tests {
         assert!(config.models.is_empty());
         // 底座规则编译在二进制里（`CORE_AGENT_POLICY`），这个槽位只留给用户自己的话。
         assert_eq!(config.agent.system_prompt, "");
+        assert!(config.bridge.launch_silently);
         // 模板把资源根建在配置文件旁。
         assert!(directory.path().join("user").join("skills").is_dir());
         assert!(directory.path().join("user").join(".sleepy-doll").is_dir());
@@ -1106,6 +1110,7 @@ mod tests {
                 instance_id: None,
                 timeout_ms: 1000,
                 host_install_path: None,
+                launch_silently: true,
             },
             plugins: PluginsConfig::default(),
             storage: StorageConfig {
