@@ -355,8 +355,8 @@ impl AppConfig {
 
     pub fn validate(&self) -> Result<()> {
         self.runtime.validate()?;
-        if !(1..=4).contains(&self.version) {
-            return Err(Error::Config("version must be 1, 2, 3 or 4".into()));
+        if !(1..=5).contains(&self.version) {
+            return Err(Error::Config("version must be 1, 2, 3, 4 or 5".into()));
         }
         if self.models.is_empty() {
             if !self.active_model.is_empty() {
