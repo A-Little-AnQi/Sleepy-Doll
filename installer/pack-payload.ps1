@@ -37,15 +37,32 @@ $ErrorActionPreference = 'Stop'
 if (-not $Source) { $Source = Join-Path $PSScriptRoot '..\dist\Sleepy-Doll' }
 if (-not $Output) { $Output = Join-Path $PSScriptRoot '..\target\setup' }
 
+$bridgeFiles = @(
+    'BgiBridge.Injector.exe',
+    'BgiBridge.Bootstrap.dll',
+    'BgiBridge.dll',
+    'BgiBridge.runtimeconfig.json',
+    'BgiBridge.deps.json',
+    'BgiBridge.Recovery.exe',
+    'BgiBridge.Recovery.dll',
+    'BgiBridge.Recovery.runtimeconfig.json',
+    'BgiBridge.Recovery.deps.json'
+)
+$pluginRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\plugins\bgi'))
+$pluginPrefix = $pluginRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+$pluginFiles = @(
+    Get-ChildItem -LiteralPath $pluginRoot -Recurse -File |
+        ForEach-Object { 'plugins/bgi/' + $_.FullName.Substring($pluginPrefix.Length).Replace('\', '/') }
+)
+
 function Test-Included([string]$relative) {
-    if ($relative -like 'user/*') { return $false }
-    if ($relative -like 'bridge/user/*') { return $false }
-    if ($relative -like '*.log') { return $false }
-    # Replaced by the example below; setup installs either name as
-    # bridge.config.json.
-    if ($relative -eq 'bridge.config.json') { return $false }
-    if ($relative -eq 'bridge/bridge.config.json') { return $false }
-    return $true
+    if ($relative -eq 'sleepy-doll.exe') { return $true }
+    if ($relative -like 'plugins/bgi/*') { return $relative -in $pluginFiles }
+    if ($relative -like 'bridge/*') {
+        return $relative.Substring('bridge/'.Length) -in $bridgeFiles
+    }
+    # Runtime data (user/, bridge-cache/, WebView2/) must never enter setup.
+    return $false
 }
 
 $source = (Resolve-Path -LiteralPath $Source).Path
