@@ -296,41 +296,6 @@ function TurnSeparator({ turn }: { turn: Turn }) {
 
 /// 中间评述：独立的可折叠块，默认收起成一行摘要，不与工具过程组捆绑。
 /// 进行中的流式评述保持展开，让用户看得见 AI 正在说什么。
-type CommentaryPart = Extract<Part, { kind: "text" | "stream" }>;
-
-function CommentaryBlock({ parts }: { parts: CommentaryPart[] }) {
-  const t = useT();
-  const streaming = parts.some((part) => part.kind === "stream");
-  const [expanded, setExpanded] = useState(streaming);
-  const text = parts.map((part) => part.text).join("\n\n");
-  const firstLine =
-    text
-      .split("\n")
-      .map((line) => line.trim())
-      .find(Boolean) ?? "";
-  const heading = firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine;
-  return (
-    <section className="commentary-block" data-expanded={expanded}>
-      <button
-        type="button"
-        className="commentary-summary"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((open) => !open)}
-      >
-        <span className="commentary-heading">{heading || t.transcript.commentary}</span>
-        <DisclosureChevron expanded={expanded} className="activity-expand" />
-      </button>
-      <div className="activity-disclosure-motion" aria-hidden={!expanded} inert={!expanded}>
-        <div className="activity-disclosure-inner">
-          <div className="assistant-message is-commentary">
-            <MarkdownText text={text} streaming={streaming} />
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function ProcessGroup({
   steps,
   running,
@@ -565,7 +530,11 @@ export const Transcript = memo(function Transcript({
                     )}
                   </ProcessGroup>
                 ) : (
-                  <CommentaryBlock key={blockIndex} parts={block.parts} />
+                  <div className="assistant-message" key={blockIndex}>
+                    <MarkdownText
+                      text={block.parts.map((part) => part.text).join("\n\n")}
+                    />
+                  </div>
                 ),
               )}
               {finalText?.kind === "text" ? (
