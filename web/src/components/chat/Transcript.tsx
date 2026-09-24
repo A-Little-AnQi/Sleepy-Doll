@@ -296,7 +296,6 @@ function ProcessGroup({
                 ? t.transcript.thinkingSteps(steps)
                 : t.transcript.thinking}
         </span>
-        {running && <span className="activity-spinner" />}
         <DisclosureChevron expanded={expanded} className="activity-expand" />
       </button>
       <div
@@ -425,13 +424,6 @@ export const Transcript = memo(function Transcript({
 }) {
   const turns = buildTurns(messages, stream);
   const last = turns.at(-1);
-  const pendingActivity =
-    last?.role === "assistant" &&
-    last.parts.some(
-      (part) =>
-        part.kind === "activities" &&
-        part.activities.some((activity) => activity.result === undefined),
-    );
   return (
     <>
       {turns.map((turn, index) => {
@@ -502,9 +494,8 @@ export const Transcript = memo(function Transcript({
                 index === turns.length - 1 &&
                 phase &&
                 !stream &&
-                !pendingActivity && (
+                process.length === 0 && (
                   <div className="response-phase" role="status">
-                    <span className="activity-spinner" />
                     {phase}
                     <time>{seconds}s</time>
                   </div>
@@ -528,7 +519,6 @@ export const Transcript = memo(function Transcript({
       {phase && last?.role !== "assistant" && (
         <article className="message-turn assistant">
           <div className="response-phase" role="status">
-            <span className="activity-spinner" />
             {phase}
             <time>{seconds}s</time>
           </div>

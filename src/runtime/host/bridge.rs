@@ -177,14 +177,16 @@ impl Bridge {
         let plan = journal.plan(&run.id)?;
         let attempts = journal.attempts(&run.id)?;
         let mut step_id = None;
+        // 同参数动作不重复执行：取原请求重发，桥按幂等键返回同一个 Job 的最新
+        // 状态。之前这里直接拒绝并要求模型「核对结果」，却不告诉它结果在哪，
+        // 模型只能反复撞墙，白烧大量 token。
+        let mut replay: Option<Value> = None;
         if plan.is_none()
-            && attempts
-                .iter()
-                .any(|a| a.request["capabilityId"] == binding.id && a.request["arguments"] == *args)
+            && let Some(original) = attempts.iter().find(|a| {
+                a.request["capabilityId"] == binding.id && a.request["arguments"] == *args
+            })
         {
-            return Err(Error::Tool(
-                "该动作已有执行记录，需要核对结果，不能直接重复提交".into(),
-            ));
+            replay = Some(original.request["wire"].clone());
         }
         if let Some(plan) = &plan {
             let completed_reads = journal.completed_read_steps(&run.id, plan)?;
@@ -432,7 +434,9 @@ impl Bridge {
         a.request_hash = hash(&a.request);
         a.outcome = "submitting".into();
         journal.attempt(&a)?;
-        let wire = json!({"requestId":a.id,"instanceId":instance,"catalogVersion":version,"methodId":id,"arguments":args,"execution":a.request["execution"]});
+        let wire = replay.unwrap_or_else(|| {
+            json!({"requestId":a.id,"instanceId":instance,"catalogVersion":version,"methodId":id,"arguments":args,"execution":a.request["execution"]})
+        });
         a.request["wire"] = wire.clone();
         a.request_hash = hash(&wire);
         journal.attempt(&a)?;

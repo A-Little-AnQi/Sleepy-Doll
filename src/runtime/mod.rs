@@ -1645,10 +1645,13 @@ impl Supervisor {
         result_limit: usize,
         history: &mut Vec<Message>,
     ) -> Result<()> {
+        // 观测时刻跟着每个工具结果走：模型据此判断间隔与超时，而不是盲目重试。
+        // 不写进 system——那会改写缓存前缀，让整段历史重新计费。
+        let observed = observed_at(run);
         let value = match result {
             Ok(v) => {
                 log::info!("工具 {} 成功", call.name);
-                json!({"ok":true,"value":v})
+                json!({"ok":true,"observedAt":observed,"value":v})
             }
             Err(Error::Cancelled) => return Err(Error::Cancelled),
             Err(Error::Storage(e)) => return Err(Error::Storage(e)),
@@ -1656,7 +1659,7 @@ impl Supervisor {
             Err(e) => {
                 // 工具失败的原因只在这里记录。
                 log::warn!("工具 {} 失败：{e}", call.name);
-                json!({"ok":false,"error":e.to_string()})
+                json!({"ok":false,"observedAt":observed,"error":e.to_string()})
             }
         };
         self.journal
@@ -2826,4 +2829,21 @@ impl Supervisor {
             }
         }
     }
+}
+
+/// 给模型看的观测时刻：UTC 时间加上距运行开始的秒数，便于推算间隔与超时。
+fn observed_at(run: &Run) -> String {
+    let now = time::OffsetDateTime::now_utc();
+    let started = time::OffsetDateTime::parse(
+        &run.created_at,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .map(|t| t.unix_timestamp())
+    .unwrap_or_else(|_| now.unix_timestamp());
+    let elapsed = (now.unix_timestamp() - started).max(0);
+    format!(
+        "{} (运行开始后 {elapsed} 秒)",
+        now.format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| now.unix_timestamp().to_string())
+    )
 }
