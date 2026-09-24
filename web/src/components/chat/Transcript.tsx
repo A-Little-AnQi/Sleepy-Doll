@@ -457,8 +457,9 @@ export const Transcript = memo(function Transcript({
       {turns.map((turn, index) => {
         const copy = turnCopyText(turn);
         const time = formatMessageTime(turn.createdAt);
-        // 过程（思考与工具调用）收进默认折叠的组，文本就地显示，并保持
-        // parts 的原始顺序：中间说明在过程前、结论在过程后，和执行时序一致。
+        // 整轮只收一个过程组（对齐 Codex 的合并活动组）：组插在首个过程
+        // 出现的位置，其前的说明就地显示、其后的结论自然压轴；按段切开会
+        // 得到一串重复的「思考过程」标签。
         type ProcessPart = Extract<
           Part,
           { kind: "reasoning" } | { kind: "activities" }
@@ -482,13 +483,27 @@ export const Transcript = memo(function Transcript({
             );
           }
         }
-        const hasProcess = segments.some((segment) => segment.kind === "process");
+        const merged: typeof segments = [];
+        let processSlot: { kind: "process"; parts: ProcessPart[] } | undefined;
+        for (const segment of segments) {
+          if (segment.kind === "process") {
+            if (!processSlot) {
+              processSlot = segment;
+              merged.push(segment);
+            } else {
+              processSlot.parts.push(...segment.parts);
+            }
+          } else {
+            merged.push(segment);
+          }
+        }
+        const hasProcess = Boolean(processSlot);
         // 只随「这一轮是否还在推进」变化；跟单条工具结果走会来回抖。
         const turnActive = index === turns.length - 1 && running;
         return (
           <article key={index} className={`message-turn ${turn.role}`}>
             <div className="message-content">
-              {segments.map((segment, segmentIndex) =>
+              {merged.map((segment, segmentIndex) =>
                 segment.kind === "process" ? (
                   <ProcessGroup
                     key={segmentIndex}

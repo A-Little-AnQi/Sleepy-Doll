@@ -89,8 +89,8 @@ const CORE_AGENT_POLICY: &str = r#"你是 Sleepy Doll，一个本地桌面助手
 6. 软件目录内的本机操作使用 workspace 工具。用户没有 Node、Python、Git 或其他开发环境，命令只通过 PowerShell 执行；不要让用户安装中间件或运行时。路径必须落在软件目录内，越界或被拒绝就停止，不要改用其他方式绕过。宿主软件的配置只能走对应的桥，不能用 workspace 文件或 PowerShell 改。
 
 对用户说话：
-- 多步骤执行时，在关键节点用一句话说明进展与发现（正在查什么、刚确认了什么），
-  让用户跟得上方向；琐碎的重复检查不逐条报。
+- 多步骤执行时，在关键节点用一两句话说明进展与发现（正在查什么、刚确认了什么），
+  让用户跟得上方向；琐碎的重复检查不逐条报，中间说明不写长文、不展开细节。
 - 全部完成后给一段总结：先给结果与结论，再覆盖过程要点、生效条件或阻塞项。
   逐步的工具调用细节留在界面的过程时间线里（用户可展开），总结不复述每一笔。
 - 问什么就答什么。范围跟问句走：问入口只给入口，问能不能只答能不能。不要把相邻功能、产品总览、未点名的步骤或「接下来还可以」写进答复；问 1 不要答成 123456。
@@ -864,12 +864,14 @@ impl Supervisor {
             ));
         }
         let mut summary_model = model.clone();
+        // 摘要按模型自身的输出上限走，不再额外压到 4096：长历史的标准摘要
+        // 会超过 4096，顶线截断曾把整次运行直接打死。
         summary_model.options.max_output_tokens = Some(
             summary_model
                 .options
                 .max_output_tokens
-                .unwrap_or(4096)
-                .min(4096),
+                .unwrap_or(8192)
+                .max(8192),
         );
         let _guard = self.model_gate.read().await;
         let response = tokio::time::timeout(
@@ -878,12 +880,17 @@ impl Supervisor {
         )
         .await
         .map_err(|_| Error::Timeout("上下文压缩等待模型超时".into()))??;
-        if !response.tool_calls.is_empty()
-            || gateway::output_truncated(response.finish_reason.as_deref())
-        {
+        if !response.tool_calls.is_empty() {
             return Err(Error::ModelProtocol(
                 "上下文压缩响应不完整或包含工具调用".into(),
             ));
+        }
+        // 截断的摘要仍有价值：继续跑远好过把运行打死；空摘要才真正失败。
+        if gateway::output_truncated(response.finish_reason.as_deref()) {
+            log::warn!(
+                "上下文压缩响应被输出上限截断（{} 字），按现有内容继续",
+                response.text.chars().count()
+            );
         }
         let summary = clean_compaction_summary(&response.text);
         if summary.is_empty() {
@@ -1734,8 +1741,8 @@ impl Supervisor {
             (
                 "plan.update",
                 "更新计划",
-                "为两个以上相互依赖的写入或执行动作建立计划。纯查询、一次读取或单项修改不需要计划。",
-                json!({"goal":{"type":"string"},"steps":{"type":"array","items":{"type":"object"}}}),
+                "为两个以上相互依赖的写入或执行动作建立计划。纯查询、一次读取或单项修改不需要计划。每个步骤二选一绑定：宿主动作用 capabilityId（api.describe 的 methodId），内部动作用 tool（工具名）；arguments 严格符合对应契约。",
+                json!({"goal":{"type":"string"},"steps":{"type":"array","minItems":1,"items":{"type":"object","required":["id","title","arguments"],"properties":{"id":{"type":"string","description":"步骤标识，依赖引用它"},"title":{"type":"string"},"capabilityId":{"type":"string","description":"宿主接口 methodId；与 tool 二选一"},"tool":{"type":"string","description":"内部工具名；与 capabilityId 二选一"},"arguments":{"type":"object"},"dependsOn":{"type":"array","items":{"type":"string"},"description":"必须先完成的步骤 id"}}}}}),
                 json!(["goal", "steps"]),
                 ToolExecution {
                     effect: ToolEffect::InternalState,
