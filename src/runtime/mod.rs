@@ -857,15 +857,25 @@ impl Supervisor {
             Role::User,
             "请依据以上历史生成结构化继续工作摘要。只输出摘要正文。",
         ));
-        let estimated = context::estimate_messages_tokens(&messages);
-        if estimated + 4096 > token_budget {
+        // 输入超窗时按 Codex 的做法降级：从最老的历史消息删起（保留压缩
+        // 指令与结尾要求，缓存前缀也尽量保住），删到能塞下为止；只剩骨架
+        // 还超窗才是真失败。对应 Codex 对 ContextWindowExceeded 的逐条删除重试。
+        let output_reserve: u64 = 8192;
+        let floor = 2; // 开头的 system 提示与结尾的 user 指令
+        while context::estimate_messages_tokens(&messages) + output_reserve > token_budget
+            && messages.len() > floor
+        {
+            messages.remove(1);
+        }
+        if context::estimate_messages_tokens(&messages) + output_reserve > token_budget {
             return Err(Error::Conflict(
                 "上下文压缩输入本身超过模型窗口，未使用硬裁剪".into(),
             ));
         }
         let mut summary_model = model.clone();
-        // 摘要按模型自身的输出上限走，不再额外压到 4096：长历史的标准摘要
-        // 会超过 4096，顶线截断曾把整次运行直接打死。
+        // 输出上限不人为压低（对齐 Codex：压缩请求不设特殊输出限制，截断也
+        // 不致命）。Anthropic 协议的 max_tokens 是必填项，故取模型配置与
+        // 8192 的较大者，而不是旧实现的额外压到 4096。
         summary_model.options.max_output_tokens = Some(
             summary_model
                 .options
@@ -896,7 +906,10 @@ impl Supervisor {
         if summary.is_empty() {
             return Err(Error::ModelProtocol("上下文压缩返回空摘要".into()));
         }
-        let input_tokens = response.usage.input_tokens.unwrap_or(estimated);
+        let input_tokens = response
+            .usage
+            .input_tokens
+            .unwrap_or_else(|| context::estimate_messages_tokens(&messages));
         let output_tokens = response
             .usage
             .output_tokens
