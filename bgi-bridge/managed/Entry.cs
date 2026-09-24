@@ -12,6 +12,9 @@ namespace BgiBridge;
 /// <summary>原生引导的托管入口。由 hostfxr 以 UNMANAGEDCALLERSONLY_METHOD 解析，签名必须 blittable。</summary>
 public static class Entry
 {
+    /// <summary>桥所在目录（注入时传入，影拷贝目录或安装目录）。</summary>
+    public static string BridgeDir { get; private set; } = string.Empty;
+
     public const string Version = "0.1.0";
 
     private static BridgeHost? _host;
@@ -24,6 +27,7 @@ public static class Entry
         {
             // 原生侧传进来的是桥目录的纯路径。先接日志。
             var bridgeDir = Marshal.PtrToStringUni(parameters) ?? "";
+            BridgeDir = bridgeDir;
             Diagnostics.Attach(bridgeDir);
             InstallPaths.Ensure(bridgeDir);
             Diagnostics.Write($"Entry.Start 被调用。bridgeDir={bridgeDir}");

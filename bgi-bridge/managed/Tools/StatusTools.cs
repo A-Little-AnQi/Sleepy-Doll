@@ -134,7 +134,7 @@ public static class StatusTools
     private static string ResolutionWarning() =>
         Host.GameClientSize() is { } size
             ? $"截图器已就绪，但游戏窗口分辨率 {size.Width}x{size.Height} 不是 16:9，BetterGI 的截图识别与脚本无法运行。"
-                + "启动参数 -screen-width/-screen-height 对已初始化过的原神不生效；请改游戏内显示设置或把远程桌面会话调到 16:9（如 1920x1080）后再试。"
+                + "启动参数 -screen-width/-screen-height 对已初始化过的原神不生效。彻底修正：关闭游戏后改注册表 HKCU\\Software\\miHoYo 下的 Screenmanager Resolution Width/Height（原神键），或把远程桌面会话调到 16:9（如 1920x1080），再重新启动游戏。"
             : "截图器已就绪，但读不到游戏窗口尺寸。";
 
     /// <summary>在宿主 UI 线程上执行启动命令。返回的任务代表宿主启动流程：命令发出后不受调用方取消影响。</summary>

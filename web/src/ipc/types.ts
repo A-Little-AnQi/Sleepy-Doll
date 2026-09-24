@@ -352,6 +352,8 @@ export interface Bootstrap {
     baseUrl: string;
     launchSilently?: boolean;
     error?: string;
+    /** 进程里驻留的桥落后于安装目录：重启 BetterGI 后重连生效。 */
+    stale?: boolean;
   };
 }
 

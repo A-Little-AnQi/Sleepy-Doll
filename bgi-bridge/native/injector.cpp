@@ -200,8 +200,10 @@ void* WriteRemoteString(HANDLE process, const std::wstring& text) {
     return remote;
 }
 
-// 返回 -1 检查不了，0 未加载，1 已加载。重复 LoadLibrary 只加引用计数，不会重新执行 DllMain。
-int BootstrapLoaded(DWORD pid) {
+// 返回 -1 检查不了，0 未加载，1 已加载。
+// 按完整路径比对：影拷贝机制下新旧两份 Bootstrap.dll 文件名相同但路径不同，
+// 同进程共存是新版本接管旧版本的前提——按文件名拒绝会挡死升级。
+int BootstrapLoaded(DWORD pid, const std::wstring& expectPath) {
     HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid);
     if (snapshot == INVALID_HANDLE_VALUE) return -1;
     MODULEENTRY32W module{};
@@ -209,7 +211,7 @@ int BootstrapLoaded(DWORD pid) {
     int result = 0;
     if (::Module32FirstW(snapshot, &module)) {
         do {
-            if (_wcsicmp(module.szModule, kBootstrapDll) == 0) { result = 1; break; }
+            if (_wcsicmp(module.szExePath, expectPath.c_str()) == 0) { result = 1; break; }
         } while (::Module32NextW(snapshot, &module));
     } else { result = -1; }
     ::CloseHandle(snapshot);
@@ -260,7 +262,7 @@ int Inject(const std::wstring& processName, DWORD requestedPid, const std::wstri
             result = 12;
             break;
         }
-        const int loaded = BootstrapLoaded(target.pid);
+        const int loaded = BootstrapLoaded(target.pid, dllPath);
         if (loaded != 0) {
             Fail(loaded > 0 ? L"桥已加载；请通过连接开关启用。若连接失败，请检查 token 或重启 BetterGI。"
                             : L"无法检查目标模块，请确认目标为 x64 并检查权限。");
@@ -309,7 +311,7 @@ int Inject(const std::wstring& processName, DWORD requestedPid, const std::wstri
         ::CloseHandle(thread);
         ::VirtualFreeEx(target.process, remotePath, 0, MEM_RELEASE);
 
-        if (!gotExit || BootstrapLoaded(target.pid) != 1) {
+        if (!gotExit || BootstrapLoaded(target.pid, dllPath) != 1) {
             Fail(L"加载线程结束，但目标进程中没有检测到引导 DLL。"
                  L"确认它与目标同为 x64。");
             result = 9;

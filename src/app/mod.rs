@@ -1048,6 +1048,24 @@ impl AppController {
         self.reload_runtime()?;
         self.reload_extensions()?;
         log::info!("BetterGI 已连接（{}）", config.base_url);
+        if self.bridge_stale() {
+            // 驻留旧桥：静默接管——哑化旧桥（disable 后它对 info 拒答，prepare
+            // 会分派新端口并注入新指纹副本），不需要用户重启 BetterGI。
+            log::info!("检测到旧版桥驻留，开始自动接管");
+            let _ = crate::bridge::control::disable(&config);
+            let mut config = config.clone();
+            crate::bridge::control::prepare(&mut config)?;
+            AppConfig::set_bridge(&self.config_path, &config)?;
+            self.reload_runtime()?;
+            crate::bridge::control::enable(&config)
+                .inspect_err(|error| log::warn!("接管注入失败：{error}"))?;
+            config.enabled = true;
+            config.instance_id = None;
+            AppConfig::set_bridge(&self.config_path, &config)?;
+            self.reload_runtime()?;
+            self.reload_extensions()?;
+            log::info!("新版桥已接管（{}）", config.base_url);
+        }
         Ok(())
     }
 
@@ -1070,6 +1088,20 @@ impl AppController {
         let mut config = self.config.lock().unwrap().bridge.clone();
         config.timeout_ms = config.timeout_ms.min(2000);
         BgiClient::new(config).info().is_ok()
+    }
+
+    /// 已连接的桥是否落后于安装目录。旧桥没有 bridgeCode 字段时视为一致，避免误报。
+    pub fn bridge_stale(&self) -> bool {
+        let mut config = self.config.lock().unwrap().bridge.clone();
+        config.timeout_ms = config.timeout_ms.min(2000);
+        let Some(live) = BgiClient::new(config)
+            .info()
+            .ok()
+            .and_then(|info| info["bridgeCode"].as_str().map(str::to_owned))
+        else {
+            return false;
+        };
+        crate::bridge::control::installed_bridge_code().is_some_and(|installed| installed != live)
     }
 
     /// 急停：请求停止所有执行中与排队的运行。返回请求停止的数量。
@@ -1155,7 +1187,11 @@ impl AppController {
         let bridge_status = if config.bridge.enabled {
             match crate::bridge::control::info(&config.bridge) {
                 Ok(info) => {
-                    json!({"enabled":true,"connected":info["enabled"] != false,"baseUrl":config.bridge.base_url,"launchSilently":config.bridge.launch_silently})
+                    let stale = info["bridgeCode"]
+                        .as_str()
+                        .zip(crate::bridge::control::installed_bridge_code())
+                        .is_some_and(|(live, installed)| live != installed);
+                    json!({"enabled":true,"connected":info["enabled"] != false,"baseUrl":config.bridge.base_url,"launchSilently":config.bridge.launch_silently,"stale":stale})
                 }
                 Err(error) => {
                     json!({"enabled":true,"connected":false,"baseUrl":config.bridge.base_url,"launchSilently":config.bridge.launch_silently,"error":error.to_string()})

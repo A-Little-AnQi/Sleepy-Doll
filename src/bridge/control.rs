@@ -70,6 +70,20 @@ fn host_running() -> bool {
     })
 }
 
+/// 安装目录里桥代码的指纹（BgiBridge.dll 内容 SHA256 前 8 位）。
+/// 与桥上报的 bridgeCode 比对，不一致说明进程里驻留旧版桥。
+pub fn installed_bridge_code() -> Option<String> {
+    let bytes = std::fs::read(directory().ok()?.join("BgiBridge.dll")).ok()?;
+    use sha2::{Digest, Sha256};
+    Some(
+        Sha256::digest(&bytes)
+            .iter()
+            .take(4)
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    )
+}
+
 /// 宿主是否在运行。给桌面壳的监视循环用。
 pub fn is_host_running() -> bool {
     host_running()

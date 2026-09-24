@@ -215,11 +215,30 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
         System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
             Encoding.UTF8.GetBytes(a), Encoding.UTF8.GetBytes(b));
 
+    /// <summary>桥代码指纹：自身 BgiBridge.dll 内容 SHA256 前 8 位。宿主侧与安装目录
+    /// 比对，不一致说明进程里驻留的是旧版桥（升级后需重启 BetterGI 重新注入）。</summary>
+    private static string BridgeCode()
+    {
+        try
+        {
+            var dll = Path.Combine(Entry.BridgeDir, "BgiBridge.dll");
+            if (!File.Exists(dll)) return "unknown";
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            using var stream = File.OpenRead(dll);
+            return Convert.ToHexString(sha.ComputeHash(stream))[..8].ToLowerInvariant();
+        }
+        catch
+        {
+            return "unknown";
+        }
+    }
+
     private object Info() => new
     {
         protocol = "bridge/v1",
         protocolVersion = "1",
         bridge = version,
+        bridgeCode = BridgeCode(),
         catalogVersion = _catalogVersion,
         instanceId = _instanceId,
         processId = Environment.ProcessId,
