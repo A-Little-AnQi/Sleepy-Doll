@@ -985,11 +985,16 @@ impl Supervisor {
                 return Err(Error::Cancelled);
             }
             if unix_now() > run.deadline
-                || run.decisions >= policy.max_decisions
-                || run.tool_calls >= policy.max_tools
+                || (policy.max_decisions > 0 && run.decisions >= policy.max_decisions)
+                || (policy.max_tools > 0 && run.tool_calls >= policy.max_tools)
             {
-                // 轮次、工具次数与时限约束一次运行的总量；token 只按当轮上下文判断。
-                run.error = Some("已达到本次运行预算".into());
+                // 时限是默认的唯一硬约束；轮次/工具次数仅在用户显式配置时生效
+                //（0 表示不限制），防失控交给停止按钮与急停热键。
+                run.error = Some(if unix_now() > run.deadline {
+                    "任务时限已到".into()
+                } else {
+                    "已达到配置的运行轮次或工具上限".into()
+                });
                 self.journal.save(run, RunState::NeedsReview)?;
                 return Ok(());
             }

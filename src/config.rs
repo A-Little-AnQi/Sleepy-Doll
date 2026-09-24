@@ -306,6 +306,22 @@ impl AppConfig {
             atomic_write(path, &value)?;
             log::info!("配置已从 3 迁移到 4，领域技能改由 plugins/bgi 提供");
         }
+        // v5：旧模板把人为轮次/工具上限（32 与 128 的组合）当成默认值写进了
+        // 每份配置，长任务会被它掐断。防失控交给时限、停止按钮与急停热键，
+        // 这两个数字重置为 0（不限制）；用户显式改过的其它值不动。
+        if declared == 4 {
+            value["version"] = serde_json::json!(5);
+            if value["runtime"]["maxDecisions"] == serde_json::json!(32)
+                && value["runtime"]["maxTools"] == serde_json::json!(128)
+            {
+                value["runtime"]["maxDecisions"] = serde_json::json!(0);
+                value["runtime"]["maxTools"] = serde_json::json!(0);
+            }
+            let candidate: Self = serde_json::from_value(value.clone())?;
+            candidate.validate()?;
+            atomic_write(path, &value)?;
+            log::info!("配置已从 4 迁移到 5，运行轮次与工具上限默认不限制");
+        }
         expand_env(&mut value)?;
         let mut config: Self = serde_json::from_value(value)?;
         let base = path
@@ -387,7 +403,7 @@ impl AppConfig {
                 "fallbackModels must contain unique configured non-active models".into(),
             ));
         }
-        if self.agent.max_turns == 0 || self.agent.max_turns > 128 {
+        if self.agent.max_turns > 128 {
             return Err(Error::Config(
                 "agent.maxTurns must be between 1 and 128".into(),
             ));

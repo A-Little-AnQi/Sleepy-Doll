@@ -24,9 +24,9 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             catalog_directory: ".".into(),
-            // 长任务（诊断→修正→执行→收尾）实测 32 轮不够：修分辨率再跑采集就撞线。
-            max_decisions: 64,
-            max_tools: 128,
+            // 人为轮次/工具上限默认不限制（0）：防失控靠时限、停止按钮与急停热键。
+            max_decisions: 0,
+            max_tools: 0,
             max_replans: 2,
             duration_sec: 1800,
             // 留空：按当前模型的窗口推导，见 `budget`。
@@ -78,11 +78,7 @@ pub fn budget(policy: &RuntimeConfig, model: &crate::config::ModelConfig) -> (us
 
 impl RuntimeConfig {
     pub fn validate(&self) -> Result<()> {
-        if self.max_decisions == 0
-            || self.max_decisions > 128
-            || self.max_tools == 0
-            || self.max_tools > 1024
-            || self.duration_sec < 1
+        if self.duration_sec < 1
             || self.duration_sec > 86400
             || self.context_chars.is_some_and(|chars| chars < 4096)
             || self.max_tokens.is_some_and(|tokens| tokens < 1024)
