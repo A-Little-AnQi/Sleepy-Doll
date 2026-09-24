@@ -2,7 +2,8 @@
 setlocal
 cd /d "%~dp0"
 
-rem One-command build. Produces dist\Sleepy-Doll\ with only the files that ship.
+rem One-command build. Updates the working install in dist\Sleepy-Doll\ and
+rem creates a clean installer using installer\pack-payload.ps1's allowlist.
 rem
 rem dist\Sleepy-Doll is the only product output; every intermediate lands under
 rem target\ (target\bridge, target\dotnet, target\ui, target\release). The bridge
@@ -10,8 +11,8 @@ rem components are copied into a bridge\ subdirectory of the product (bridge\
 rem control.rs looks for them there), so the product folder keeps the executable
 rem on its own instead of carrying eleven bridge files beside it.
 rem
-rem The product folder is what gets handed out, so unzipping it yields a folder
-rem instead of a pile of loose files.
+rem The working install may also contain user\, bridge-cache\ and WebView2 data.
+rem Distribute the setup executable, not a copy of this working install.
 
 set "OUT=%~dp0dist\Sleepy-Doll"
 
@@ -142,4 +143,5 @@ for %%F in ("%OUT%\*") do echo    %%~nxF
 for %%F in ("%OUT%\bridge\*") do echo    bridge\%%~nxF
 echo.
 echo Done: %SETUP%
+echo Distribute the setup executable; %OUT% is a working install with user data.
 endlocal
