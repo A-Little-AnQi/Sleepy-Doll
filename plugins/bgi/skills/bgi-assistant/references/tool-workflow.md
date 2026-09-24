@@ -15,6 +15,7 @@
 | `task.cancel` | `bgi.job.cancel` | 取消 Job |
 | 一条龙 | `bgi.run_one_dragon` | 运行宿主原生日常任务链（每日/清体力/周常）；`configName` 可选 |
 | 退出游戏 | `bgi.exit_game` | 结束原神进程（正常关闭，超时强结束）；收尾或用户要求退出时用 |
+| 游戏分辨率 | `bgi.set_game_resolution` | 关游戏状态下写入原神显示记录（16:9 修正链：exit_game → set_game_resolution → start_game） |
 | 用户资源 | `bgi.user.resolve` / `bgi.user.list` / `bgi.user.read` / `bgi.user.inspect_script` / `bgi.user.write` / `bgi.user.restore` | 采集和运行先 `resolve`；其余读写见 `bgi-operator` |
 | 插件语义能力 | `bgi.capability.search` / `bgi.capability.describe` / `bgi.capability.invoke` | 仅在任务明确涉及已安装插件时使用 |
 

@@ -24,7 +24,8 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             catalog_directory: ".".into(),
-            max_decisions: 32,
+            // 长任务（诊断→修正→执行→收尾）实测 32 轮不够：修分辨率再跑采集就撞线。
+            max_decisions: 64,
             max_tools: 128,
             max_replans: 2,
             duration_sec: 1800,
