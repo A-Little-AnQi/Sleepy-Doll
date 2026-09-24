@@ -294,6 +294,43 @@ function TurnSeparator({ turn }: { turn: Turn }) {
   );
 }
 
+/// 中间评述：独立的可折叠块，默认收起成一行摘要，不与工具过程组捆绑。
+/// 进行中的流式评述保持展开，让用户看得见 AI 正在说什么。
+type CommentaryPart = Extract<Part, { kind: "text" | "stream" }>;
+
+function CommentaryBlock({ parts }: { parts: CommentaryPart[] }) {
+  const t = useT();
+  const streaming = parts.some((part) => part.kind === "stream");
+  const [expanded, setExpanded] = useState(streaming);
+  const text = parts.map((part) => part.text).join("\n\n");
+  const firstLine =
+    text
+      .split("\n")
+      .map((line) => line.trim())
+      .find(Boolean) ?? "";
+  const heading = firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine;
+  return (
+    <section className="commentary-block" data-expanded={expanded}>
+      <button
+        type="button"
+        className="commentary-summary"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((open) => !open)}
+      >
+        <span className="commentary-heading">{heading || t.transcript.commentary}</span>
+        <DisclosureChevron expanded={expanded} className="activity-expand" />
+      </button>
+      <div className="activity-disclosure-motion" aria-hidden={!expanded} inert={!expanded}>
+        <div className="activity-disclosure-inner">
+          <div className="assistant-message is-commentary">
+            <MarkdownText text={text} streaming={streaming} />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ProcessGroup({
   steps,
   running,
@@ -457,11 +494,14 @@ export const Transcript = memo(function Transcript({
       {turns.map((turn, index) => {
         const copy = turnCopyText(turn);
         const time = formatMessageTime(turn.createdAt);
-        // 过程与中间评述全部收进一个默认折叠的组，只有最后一段文本（最终
-        // 答案）留在组外压轴：中间说明与工具调用同级平铺会把正文挤得没法读。
-        type ProcessPart =
-          | Extract<Part, { kind: "reasoning" | "activities" }>
-          | Extract<Part, { kind: "text" | "stream" }>;
+        // 三类块按 parts 原始顺序各自独立：过程组只装思考与工具调用；中间
+        // 评述是独立的可折叠块（不与过程组捆绑，后续叙述不会被连带折叠）；
+        // 最后一段文本是最终答案，正常显示。
+        type ProcessPart = Extract<
+          Part,
+          { kind: "reasoning" | "activities" }
+        >;
+        type TextPart = Extract<Part, { kind: "text" | "stream" }>;
         const lastTextIndex = (() => {
           for (let i = turn.parts.length - 1; i >= 0; i -= 1) {
             const part = turn.parts[i];
@@ -470,56 +510,63 @@ export const Transcript = memo(function Transcript({
           }
           return -1;
         })();
-        const processParts = turn.parts.filter(
-          (_, index) => index !== lastTextIndex,
-        ) as ProcessPart[];
+        type Block =
+          | { kind: "process"; parts: ProcessPart[] }
+          | { kind: "commentary"; parts: TextPart[] };
+        const blocks: Block[] = [];
+        let hasProcess = false;
+        for (let i = 0; i < turn.parts.length; i += 1) {
+          const part = turn.parts[i];
+          if (!part) continue;
+          if (i === lastTextIndex) continue;
+          const tail = blocks.at(-1);
+          if (part.kind === "reasoning" || part.kind === "activities") {
+            hasProcess = true;
+            if (tail?.kind === "process") tail.parts.push(part);
+            else blocks.push({ kind: "process", parts: [part] });
+          } else if (tail?.kind === "commentary") {
+            tail.parts.push(part);
+          } else {
+            blocks.push({ kind: "commentary", parts: [part] });
+          }
+        }
         const finalText = lastTextIndex >= 0 ? turn.parts[lastTextIndex] : undefined;
-        const hasProcess = processParts.length > 0;
         // 只随「这一轮是否还在推进」变化；跟单条工具结果走会来回抖。
         const turnActive = index === turns.length - 1 && running;
         return (
           <article key={index} className={`message-turn ${turn.role}`}>
             <div className="message-content">
-              {hasProcess && (
-                <ProcessGroup
-                  steps={processParts.reduce(
-                    (count, part) =>
-                      count +
-                      (part.kind === "activities" ? part.activities.length : 1),
-                    0,
-                  )}
-                  running={turnActive}
-                  stopping={turnActive && phase === "正在停止"}
-                >
-                  {processParts.map((part, partIndex) =>
-                    part.kind === "reasoning" ? (
-                      <div key="reasoning" className="reasoning-entry">
-                        <pre className="reasoning-text">{part.text}</pre>
-                      </div>
-                    ) : part.kind === "activities" ? (
-                      <ActivityGroup
-                        key={part.activities[0]?.id ?? partIndex}
-                        activities={part.activities}
-                        labels={toolLabels}
-                        active={turnActive}
-                      />
-                    ) : part.kind === "text" ? (
-                      <div
-                        className="assistant-message is-commentary"
-                        key={partIndex}
-                      >
-                        <MarkdownText text={part.text} />
-                      </div>
-                    ) : (
-                      <div
-                        className="assistant-message is-commentary"
-                        key={partIndex}
-                      >
-                        <MarkdownText text={part.text} streaming />
-                      </div>
-                    ),
-                  )}
-                </ProcessGroup>
+              {blocks.map((block, blockIndex) =>
+                block.kind === "process" ? (
+                  <ProcessGroup
+                    key={blockIndex}
+                    steps={block.parts.reduce(
+                      (count, part) =>
+                        count +
+                        (part.kind === "activities" ? part.activities.length : 1),
+                      0,
+                    )}
+                    running={turnActive}
+                    stopping={turnActive && phase === "正在停止"}
+                  >
+                    {block.parts.map((part, partIndex) =>
+                      part.kind === "reasoning" ? (
+                        <div key="reasoning" className="reasoning-entry">
+                          <pre className="reasoning-text">{part.text}</pre>
+                        </div>
+                      ) : (
+                        <ActivityGroup
+                          key={part.activities[0]?.id ?? partIndex}
+                          activities={part.activities}
+                          labels={toolLabels}
+                          active={turnActive}
+                        />
+                      ),
+                    )}
+                  </ProcessGroup>
+                ) : (
+                  <CommentaryBlock key={blockIndex} parts={block.parts} />
+                ),
               )}
               {finalText?.kind === "text" ? (
                 <div
