@@ -21,8 +21,8 @@ public static class ScriptGroupTools
             ["用户要求运行一个已从 User/ScriptGroup 确认存在的配置组时。"],
             ["截图器和游戏窗口已就绪。", "没有其他独立任务持锁。", "groupName 来自 User/ScriptGroup 的真实 name。"],
             ["启动配置组中的游戏自动化、脚本、路线或 Shell 任务；具体影响由组内已启用任务决定。"],
-            "返回 resolved=true 和 executed=true 只表示目标组已解析且 BetterGI 执行方法已返回；任务业务结果仍需继续读取 Job 和运行状态。",
-            "等待桥 Job 终态，并按配置组任务产物或 BetterGI 运行状态核验；不得只凭 executed=true 报告任务完成。",
+            "返回 resolved=true 和 executed=true 表示目标组已解析且执行方法已返回；Job 终态即执行结束。",
+            "Job 到终态后读一次 bgi.read_host_log（过滤「执行结束」或 ERR）即可收尾：无错误即报告完成，有错误列出到场的问题；不要反复轮询或多方取证。",
             "已经发送的游戏输入和脚本副作用不能自动撤销；需要停止时使用对应停止操作并核验终态。",
             [JsonSerializer.SerializeToElement(new { groupName = "用户目录中读取到的精确配置组名称" })],
             "bridge-stable-operation");
@@ -45,6 +45,12 @@ public static class ScriptGroupTools
         var requested = arguments.GetProperty("groupName").GetString()!.Trim();
         if (!Host.CaptureReady)
             throw BridgeException.GameNotReady("截图器或游戏窗口尚未就绪。");
+        // 脚本依赖 16:9 截图；非 16:9 时整组会逐条异常退出，宁可在这里拦下。
+        if (!Host.GameSixteenToNine())
+            throw BridgeException.GameNotReady(
+                Host.GameClientSize() is { } size
+                    ? $"游戏窗口分辨率 {size.Width}x{size.Height} 不是 16:9，配置组无法运行。请先把游戏或远程桌面会话调到 16:9（如 1920x1080）。"
+                    : "游戏窗口尺寸未知，无法确认 16:9，配置组不执行。");
         if (Host.TaskSemaphoreCount() is not > 0)
             throw BridgeException.Busy("已有独立任务运行或任务锁状态未知。");
 

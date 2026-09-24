@@ -457,100 +457,85 @@ export const Transcript = memo(function Transcript({
       {turns.map((turn, index) => {
         const copy = turnCopyText(turn);
         const time = formatMessageTime(turn.createdAt);
-        // 整轮只收一个过程组（对齐 Codex 的合并活动组）：组插在首个过程
-        // 出现的位置，其前的说明就地显示、其后的结论自然压轴；按段切开会
-        // 得到一串重复的「思考过程」标签。
-        type ProcessPart = Extract<
-          Part,
-          { kind: "reasoning" } | { kind: "activities" }
-        >;
-        type TextPart = Extract<Part, { kind: "text" } | { kind: "stream" }>;
-        const segments: Array<
-          | { kind: "process"; parts: ProcessPart[] }
-          | { kind: "text"; part: TextPart }
-        > = [];
-        for (const part of turn.parts) {
-          const isProcess =
-            part.kind === "reasoning" || part.kind === "activities";
-          const tail = segments.at(-1);
-          if (isProcess && tail?.kind === "process") {
-            tail.parts.push(part);
-          } else {
-            segments.push(
-              isProcess
-                ? { kind: "process", parts: [part] }
-                : { kind: "text", part },
-            );
+        // 过程与中间评述全部收进一个默认折叠的组，只有最后一段文本（最终
+        // 答案）留在组外压轴：中间说明与工具调用同级平铺会把正文挤得没法读。
+        type ProcessPart =
+          | Extract<Part, { kind: "reasoning" | "activities" }>
+          | Extract<Part, { kind: "text" | "stream" }>;
+        const lastTextIndex = (() => {
+          for (let i = turn.parts.length - 1; i >= 0; i -= 1) {
+            const part = turn.parts[i];
+            if (!part) continue;
+            if (part.kind === "text" || part.kind === "stream") return i;
           }
-        }
-        const merged: typeof segments = [];
-        let processSlot: { kind: "process"; parts: ProcessPart[] } | undefined;
-        for (const segment of segments) {
-          if (segment.kind === "process") {
-            if (!processSlot) {
-              processSlot = segment;
-              merged.push(segment);
-            } else {
-              processSlot.parts.push(...segment.parts);
-            }
-          } else {
-            merged.push(segment);
-          }
-        }
-        const hasProcess = Boolean(processSlot);
+          return -1;
+        })();
+        const processParts = turn.parts.filter(
+          (_, index) => index !== lastTextIndex,
+        ) as ProcessPart[];
+        const finalText = lastTextIndex >= 0 ? turn.parts[lastTextIndex] : undefined;
+        const hasProcess = processParts.length > 0;
         // 只随「这一轮是否还在推进」变化；跟单条工具结果走会来回抖。
         const turnActive = index === turns.length - 1 && running;
         return (
           <article key={index} className={`message-turn ${turn.role}`}>
             <div className="message-content">
-              {merged.map((segment, segmentIndex) =>
-                segment.kind === "process" ? (
-                  <ProcessGroup
-                    key={segmentIndex}
-                    steps={segment.parts.reduce(
-                      (count, part) =>
-                        count +
-                        (part.kind === "activities" ? part.activities.length : 1),
-                      0,
-                    )}
-                    running={turnActive}
-                    stopping={turnActive && phase === "正在停止"}
-                  >
-                    {segment.parts.map((part, partIndex) =>
-                      part.kind === "reasoning" ? (
-                        <div key="reasoning" className="reasoning-entry">
-                          <pre className="reasoning-text">{part.text}</pre>
-                        </div>
-                      ) : (
-                        <ActivityGroup
-                          key={part.activities[0]?.id ?? partIndex}
-                          activities={part.activities}
-                          labels={toolLabels}
-                          active={turnActive}
-                        />
-                      ),
-                    )}
-                  </ProcessGroup>
-                ) : segment.part.kind === "text" ? (
-                  <div
-                    className={
-                      turn.role === "user"
-                        ? "user-message"
-                        : "assistant-message"
-                    }
-                    key={segmentIndex}
-                  >
-                    <MarkdownText text={segment.part.text} />
-                  </div>
-                ) : (
-                  <div
-                    className={`assistant-message${running ? " is-streaming" : ""}`}
-                    key={segmentIndex}
-                  >
-                    <MarkdownText text={segment.part.text} streaming />
-                  </div>
-                ),
+              {hasProcess && (
+                <ProcessGroup
+                  steps={processParts.reduce(
+                    (count, part) =>
+                      count +
+                      (part.kind === "activities" ? part.activities.length : 1),
+                    0,
+                  )}
+                  running={turnActive}
+                  stopping={turnActive && phase === "正在停止"}
+                >
+                  {processParts.map((part, partIndex) =>
+                    part.kind === "reasoning" ? (
+                      <div key="reasoning" className="reasoning-entry">
+                        <pre className="reasoning-text">{part.text}</pre>
+                      </div>
+                    ) : part.kind === "activities" ? (
+                      <ActivityGroup
+                        key={part.activities[0]?.id ?? partIndex}
+                        activities={part.activities}
+                        labels={toolLabels}
+                        active={turnActive}
+                      />
+                    ) : part.kind === "text" ? (
+                      <div
+                        className="assistant-message is-commentary"
+                        key={partIndex}
+                      >
+                        <MarkdownText text={part.text} />
+                      </div>
+                    ) : (
+                      <div
+                        className="assistant-message is-commentary"
+                        key={partIndex}
+                      >
+                        <MarkdownText text={part.text} streaming />
+                      </div>
+                    ),
+                  )}
+                </ProcessGroup>
               )}
+              {finalText?.kind === "text" ? (
+                <div
+                  className={
+                    turn.role === "user" ? "user-message" : "assistant-message"
+                  }
+                >
+                  <MarkdownText text={finalText.text} />
+                </div>
+              ) : finalText?.kind === "stream" ? (
+                <div
+                  className={`assistant-message${running ? " is-streaming" : ""}`}
+                >
+                  <MarkdownText text={finalText.text} streaming />
+                </div>
+              ) : null}
               {turn.role === "assistant" &&
                 index === turns.length - 1 &&
                 phase &&

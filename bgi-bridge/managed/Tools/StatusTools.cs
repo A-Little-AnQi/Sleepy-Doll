@@ -77,7 +77,9 @@ public static class StatusTools
                         ready = runningReady,
                         stillLoading = false,
                         elapsedMs = 0L,
-                        note = "截图器已经在运行，不需要重复启动。",
+                        note = Host.GameSixteenToNine()
+                            ? "截图器已经在运行，不需要重复启动。"
+                            : ResolutionWarning(),
                         runtime = runningDetail,
                     };
                 }
@@ -108,12 +110,25 @@ public static class StatusTools
                     // 未等到启动流程结束表示仍在加载；这是过程状态。
                     stillLoading = settled != launch,
                     elapsedMs = watch.ElapsedMilliseconds,
-                    note = ready ? "截图器已就绪，可以运行任务了。" : "原神仍在加载，用 bgi.get_status 继续查看。",
+                    note = ResolutionNote(ready),
                     runtime = detail,
                 };
             },
             readOnly: false);
     }
+
+    /// <summary>就绪提示按分辨率区分：非 16:9 时如实说，别让上层以为能直接跑任务。</summary>
+    private static string ResolutionNote(bool ready)
+    {
+        if (!ready) return "原神仍在加载，用 bgi.get_status 继续查看。";
+        return Host.GameSixteenToNine() ? "截图器已就绪，可以运行任务了。" : ResolutionWarning();
+    }
+
+    private static string ResolutionWarning() =>
+        Host.GameClientSize() is { } size
+            ? $"截图器已就绪，但游戏窗口分辨率 {size.Width}x{size.Height} 不是 16:9，BetterGI 的截图识别与脚本无法运行。"
+                + "启动参数 -screen-width/-screen-height 对已初始化过的原神不生效；请改游戏内显示设置或把远程桌面会话调到 16:9（如 1920x1080）后再试。"
+            : "截图器已就绪，但读不到游戏窗口尺寸。";
 
     /// <summary>在宿主 UI 线程上执行启动命令。返回的任务代表宿主启动流程：命令发出后不受调用方取消影响。</summary>
     private static Task Launch() => Ui.InvokeAsync(async () =>

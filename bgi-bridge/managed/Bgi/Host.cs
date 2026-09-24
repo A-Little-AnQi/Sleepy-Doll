@@ -27,6 +27,39 @@ public static class Host
     public static bool CaptureReady =>
         TaskContext() is { } context && Reflect.Get(context, "IsInitialized") is true;
 
+    /// <summary>游戏客户区尺寸。截图器没起来（句柄为 0）时是 null。</summary>
+    public static (int Width, int Height)? GameClientSize()
+    {
+        var handle = GameHandle;
+        if (handle == 0) return null;
+        return NativeMethods.GetClientSize((IntPtr)handle) is { } size && size.Width > 0 && size.Height > 0
+            ? (size.Width, size.Height)
+            : null;
+    }
+
+    /// <summary>客户区宽高比是否为 16:9（容差约一行像素的 9 倍）。BetterGI 的截图与脚本
+    /// 依赖 16:9；远程桌面等环境会得到非 16:9 的窗口，必须如实暴露给上层。</summary>
+    public static bool GameSixteenToNine() =>
+        GameClientSize() is { } size && Math.Abs(size.Width * 9 - size.Height * 16) <= size.Height;
+
+    private static class NativeMethods
+    {
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct RECT
+        {
+            public int Left, Top, Right, Bottom;
+        }
+
+        public static (int Width, int Height)? GetClientSize(IntPtr hWnd)
+        {
+            if (!GetClientRect(hWnd, out var rect)) return null;
+            return (rect.Right - rect.Left, rect.Bottom - rect.Top);
+        }
+    }
+
     /// <summary>截图器没启动时是 <c>IntPtr.Zero</c>，此时前台判断不可信。</summary>
     public static long GameHandle
     {

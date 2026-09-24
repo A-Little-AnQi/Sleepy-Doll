@@ -40,11 +40,20 @@ public static class BridgeState
             }
         }
 
+        var clientSize = Host.GameClientSize();
         var detail = new
         {
             hostLoaded,
             captureReady,
             gameHandle = handle,
+            gameResolution = clientSize is { } size
+                ? new
+                {
+                    width = size.Width,
+                    height = size.Height,
+                    sixteenToNine = Host.GameSixteenToNine(),
+                }
+                : null,
             windowActive,
             // CurrentCount == 0 表示有独立任务持锁。
             taskLockHeld = semaphore is 0,

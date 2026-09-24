@@ -556,3 +556,12 @@
 .turn-separator time {
   font-variant-numeric: tabular-nums;
 }
+
+/* 折叠组内的中间评述：与工具调用同处过程层，视觉上低于最终答案。 */
+.process-group .assistant-message.is-commentary {
+  margin: 6px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+  color: var(--secondary);
+  font-size: var(--font-meta);
+}

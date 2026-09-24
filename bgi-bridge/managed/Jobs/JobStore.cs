@@ -84,7 +84,7 @@ public sealed class JobStore(int keep = 200)
             State = JobState.Completed,
             Result = result,
             VerificationStatus = verified ? "succeeded" : Verification.Unknown,
-            VerificationReason = verified ? "配置内存值与原子落盘结果已核验。" : "处理器返回不代表业务目标已验证。",
+            VerificationReason = verified ? "配置内存值与原子落盘结果已核验。" : "处理器已返回；结果含义按该接口 guide 的 verification 字段判定。",
             EndedAt = DateTimeOffset.UtcNow,
         });
 
