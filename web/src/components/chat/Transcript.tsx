@@ -28,7 +28,10 @@ type Part =
 export interface Turn {
   role: "user" | "assistant";
   parts: Part[];
+  /** 轮次首条消息的时刻，只在开轮时写入。 */
   createdAt?: string;
+  /** 轮次内最新一条消息的时刻，随消息推进。 */
+  lastAt?: string;
 }
 
 /** 工具在界面上显示的名字。 */
@@ -98,9 +101,8 @@ export function buildTurns(messages: MessageInfo[], stream: string): Turn[] {
       };
       turns.push(nextTurn);
       turn = nextTurn;
-    } else if (message.createdAt) {
-      turn.createdAt = message.createdAt;
     }
+    if (message.createdAt) turn.lastAt = message.createdAt;
     if (reasoning) pushReasoning(turn, reasoning);
     if (message.content)
       turn.parts.push({ kind: "text", text: message.content });
@@ -266,6 +268,32 @@ function ActivityDetailDisclosure({
 }
 
 /** 单轮的执行过程（思考与工具调用）：默认折叠，回答是主角。 */
+/** 轮次完成分隔：耗时长（>60s）的轮次在末尾标注完成时刻与用时，把长过程
+ * 收在它前面——最终答案压轴，过程展开在上方。 */
+function TurnSeparator({ turn }: { turn: Turn }) {
+  const t = useT();
+  if (!turn.createdAt || !turn.lastAt) return null;
+  const started = new Date(turn.createdAt).getTime();
+  const finished = new Date(turn.lastAt).getTime();
+  if (!Number.isFinite(started) || !Number.isFinite(finished)) return null;
+  const elapsed = Math.max(0, Math.round((finished - started) / 1000));
+  if (elapsed <= 60) return null;
+  const minutes = Math.floor(elapsed / 60);
+  const label =
+    elapsed >= 3600
+      ? t.transcript.turnElapsedHms(
+          Math.floor(elapsed / 3600),
+          Math.floor(minutes % 60),
+        )
+      : t.transcript.turnElapsedM(minutes);
+  return (
+    <p className="turn-separator" title={new Date(finished).toLocaleString()}>
+      {t.transcript.turnDone}
+      <time>{label}</time>
+    </p>
+  );
+}
+
 function ProcessGroup({
   steps,
   running,
@@ -518,6 +546,9 @@ export const Transcript = memo(function Transcript({
                     <time>{seconds}s</time>
                   </div>
                 )}
+              {turn.role === "assistant" && !turnActive && (
+                <TurnSeparator turn={turn} />
+              )}
             </div>
             {copy || time ? (
               <div

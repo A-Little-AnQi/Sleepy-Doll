@@ -535,3 +535,24 @@
     opacity: 0;
   }
 }
+
+/* 轮次完成分隔：长耗时轮次的收尾标记，弱化不抢戏。 */
+.turn-separator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: var(--font-label);
+  color: var(--muted);
+}
+
+.turn-separator::before {
+  content: "";
+  flex: 0 0 16px;
+  height: 1px;
+  background: var(--border-strong);
+}
+
+.turn-separator time {
+  font-variant-numeric: tabular-nums;
+}

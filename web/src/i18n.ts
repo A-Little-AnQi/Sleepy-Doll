@@ -124,6 +124,9 @@ const zh = {
     thinking: "思考过程",
     thinkingRunning: "思考中",
     thinkingSteps: (n: number) => `思考过程 · ${n} 步`,
+    turnDone: "已完成",
+    turnElapsedM: (m: number) => `用时 ${m} 分钟`,
+    turnElapsedHms: (h: number, m: number) => `用时 ${h} 时 ${m} 分`,
   },
 
   context: {
@@ -566,6 +569,9 @@ const en: Dict = {
     thinking: "Thinking",
     thinkingRunning: "Thinking",
     thinkingSteps: (n: number) => `Thinking · ${n} steps`,
+    turnDone: "Completed",
+    turnElapsedM: (m: number) => `in ${m} min`,
+    turnElapsedHms: (h: number, m: number) => `in ${h} h ${m} min`,
   },
 
   context: {
