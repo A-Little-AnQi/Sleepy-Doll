@@ -336,6 +336,7 @@ export interface Bootstrap {
   skills: SkillInfo[];
   plugins: PluginInfo[];
   tools: ToolInfo[];
+  runtimeToolLabels?: Record<string, string>;
   conversations: ConversationInfo[];
   conversationGroups?: GroupLayout;
   tasks: TaskInfo[];

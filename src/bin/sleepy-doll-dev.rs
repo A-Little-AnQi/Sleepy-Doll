@@ -45,7 +45,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    let config = PathBuf::from(CONFIG);
+    let config = env::var_os("SLEEPY_DOLL_DEV_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(CONFIG));
     sleepy_doll::config::seed(&config)?;
     if let Some(directory) = config.parent()
         && let Err(error) = sleepy_doll::logging::init(directory)

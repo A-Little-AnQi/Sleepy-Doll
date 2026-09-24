@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, subscribeNativeEvents } from "./ipc/api";
 import { Wordmark } from "./components/icons";
@@ -53,6 +53,7 @@ export default function App() {
     () => localStorage.getItem("sleepy-doll-active-conversation") ?? undefined,
   );
   const [bootstrap, setBootstrap] = useState<Bootstrap>();
+  const initialConversationChecked = useRef(false);
   const [detailsOpen, setDetailsOpen] = useState(
     () => localStorage.getItem("sleepy-doll-details-open") === "true",
   );
@@ -88,7 +89,16 @@ export default function App() {
 
   const reload = useCallback(async () => {
     try {
-      setBootstrap(await api.bootstrap());
+      const next = await api.bootstrap();
+      if (!initialConversationChecked.current) {
+        initialConversationChecked.current = true;
+        setConversation((current) =>
+          current && !next.conversations.some((entry) => entry.id === current)
+            ? undefined
+            : current,
+        );
+      }
+      setBootstrap(next);
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : readError(reason));

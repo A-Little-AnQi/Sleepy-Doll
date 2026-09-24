@@ -282,6 +282,42 @@ fn group_cost(group: &[Message]) -> usize {
         .sum()
 }
 
+/// 默认按 token 计量；显式设置 contextChars 时沿用字符上限。
+#[derive(Clone, Copy)]
+pub enum ContextBudget {
+    Chars(usize),
+    Tokens(usize),
+}
+
+impl ContextBudget {
+    fn limit(self) -> usize {
+        match self {
+            Self::Chars(limit) | Self::Tokens(limit) => limit,
+        }
+    }
+
+    fn margin(self) -> usize {
+        match self {
+            Self::Chars(_) => 2048,
+            Self::Tokens(_) => 512,
+        }
+    }
+
+    fn text_cost(self, text: &str) -> usize {
+        match self {
+            Self::Chars(_) => text.chars().count(),
+            Self::Tokens(_) => estimate_tokens(text) as usize,
+        }
+    }
+
+    fn message_cost(self, messages: &[Message]) -> usize {
+        match self {
+            Self::Chars(_) => group_cost(messages),
+            Self::Tokens(_) => estimate_messages_tokens(messages) as usize,
+        }
+    }
+}
+
 fn grouped_entries(history: &[HistoryEntry]) -> Vec<Vec<HistoryEntry>> {
     let mut groups: Vec<Vec<HistoryEntry>> = Vec::new();
     for entry in history.iter().cloned() {
@@ -316,18 +352,18 @@ fn grouped_entries(history: &[HistoryEntry]) -> Vec<Vec<HistoryEntry>> {
 pub fn plan_compaction(
     history: &[HistoryEntry],
     previous: Option<&StoredSummary>,
-    budget: usize,
+    budget: ContextBudget,
 ) -> Option<CompactionPlan> {
     let groups = grouped_entries(history);
     if groups.len() < 3 {
         return None;
     }
-    let protected_budget = (budget / 2).max(2048);
+    let protected_budget = (budget.limit() / 2).max(budget.margin());
     let mut protected_cost = 0usize;
     let mut split = groups.len();
     // 至少保留最近两个完整轮次；如果还有预算，继续向前保留。
     while split > 1 {
-        let next = group_cost(
+        let next = budget.message_cost(
             &groups[split - 1]
                 .iter()
                 .map(|entry| entry.message.clone())
@@ -344,11 +380,11 @@ pub fn plan_compaction(
     if let Some(previous) = previous {
         source.push(summary_message(&previous.content));
     }
-    let mut source_cost = source.iter().map(estimate_message_tokens).sum::<u64>() as usize;
-    let source_budget = (budget.saturating_mul(3) / 4).max(4096);
+    let mut source_cost = budget.message_cost(&source);
+    let source_budget = (budget.limit().saturating_mul(3) / 4).max(budget.margin() * 2);
     let mut source_end = 0usize;
     for group in &groups[..split] {
-        let next = group_cost(
+        let next = budget.message_cost(
             &group
                 .iter()
                 .map(|entry| entry.message.clone())
@@ -387,7 +423,11 @@ pub fn used(messages: &[Message]) -> usize {
 /// 构造一轮模型上下文。程序只会微压缩可重新读取的旧工具结果；如果完整历史
 /// 仍然超预算，就返回 `needs_model_compaction`，由调用方交给模型生成语义摘要。
 /// 这里绝不删除、截取或拼接对话正文来冒充压缩。
-pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<PackedContext> {
+pub fn build(
+    system: String,
+    history: Vec<Message>,
+    budget: ContextBudget,
+) -> Result<PackedContext> {
     let mut groups: Vec<Vec<Message>> = Vec::new();
     for m in history {
         if m.role == Role::Tool {
@@ -409,8 +449,11 @@ pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<Pac
                 .any(|m| m.role == Role::Tool && m.tool_call_id.as_ref() == Some(&c.id))
         })
     });
-    let cost = |g: &Vec<Message>| group_cost(g);
-    let mut total = system.chars().count() + groups.iter().map(cost).sum::<usize>();
+    let mut total = budget.text_cost(&system)
+        + groups
+            .iter()
+            .map(|group| budget.message_cost(group))
+            .sum::<usize>();
     let mut cleared_results = 0usize;
 
     // 预算不够时仅清理可重新读取的旧工具结果正文；调用与结果的配对必须保留。
@@ -428,7 +471,9 @@ pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<Pac
                 .find(|c| Some(&c.id) == m.tool_call_id.as_ref())
                 .map(|c| c.name.as_str())
                 .unwrap_or_default();
-            if reobtainable(produced_by) {
+            if reobtainable(produced_by)
+                && budget.text_cost(&m.content) > budget.text_cost(CLEARED_TOOL_RESULT)
+            {
                 clearable.push((gi, mi));
             }
         }
@@ -436,20 +481,25 @@ pub fn build(system: String, history: Vec<Message>, budget: usize) -> Result<Pac
     // 最旧的先清，最近的 KEEP_RECENT_RESULTS 条留全文。
     let stale = clearable.len().saturating_sub(KEEP_RECENT_RESULTS);
     for (gi, mi) in clearable.drain(..stale) {
-        if total + 2048 <= budget {
+        if total + budget.margin() <= budget.limit() {
             break;
         }
         let m = &mut groups[gi][mi];
-        let freed = m.content.chars().count() - CLEARED_TOOL_RESULT.chars().count();
+        let freed = budget.text_cost(&m.content) - budget.text_cost(CLEARED_TOOL_RESULT);
         m.content = CLEARED_TOOL_RESULT.into();
         total = total.saturating_sub(freed);
         cleared_results += 1;
     }
 
-    let needs_model_compaction = total + 2048 > budget && groups.len() > 2;
-    if total + 2048 > budget && !needs_model_compaction {
+    let needs_model_compaction = total + budget.margin() > budget.limit() && groups.len() > 2;
+    if total + budget.margin() > budget.limit() && !needs_model_compaction {
         return Err(Error::Conflict(format!(
-            "当前消息超过上下文预算（可用 {budget} 字符），请缩短内容或调大 runtime.contextChars"
+            "当前消息超过上下文预算（可用 {} {}），请缩短内容或调整模型上下文设置",
+            budget.limit(),
+            match budget {
+                ContextBudget::Chars(_) => "字符",
+                ContextBudget::Tokens(_) => "token",
+            }
         )));
     }
     let mut result = vec![message(Role::System, system)];

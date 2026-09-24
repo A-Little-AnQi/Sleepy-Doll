@@ -137,12 +137,15 @@ export function ChatPage({
   // 工具名取自工具定义里的 label，没有 label 的不进表。
   const toolLabels = useMemo(
     () =>
-      Object.fromEntries(
-        bootstrap.tools
-          .filter((tool) => tool.label)
-          .map((tool) => [tool.name, tool.label] as const),
-      ),
-    [bootstrap.tools],
+      ({
+        ...bootstrap.runtimeToolLabels,
+        ...Object.fromEntries(
+          bootstrap.tools
+            .filter((tool) => tool.label)
+            .map((tool) => [tool.name, tool.label] as const),
+        ),
+      }),
+    [bootstrap.tools, bootstrap.runtimeToolLabels],
   );
   const [error, setError] = useState("");
   const [confirming, setConfirming] = useState(false);
@@ -368,6 +371,8 @@ export function ChatPage({
                   seconds={elapsed}
                   running={busy}
                   toolLabels={toolLabels}
+                  tasks={bootstrap.tasks}
+                  currentTask={task}
                 />
                 {plan && (
                   <RunPlanCard

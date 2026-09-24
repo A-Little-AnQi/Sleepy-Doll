@@ -1049,22 +1049,39 @@ impl AppController {
         self.reload_extensions()?;
         log::info!("BetterGI 已连接（{}）", config.base_url);
         if self.bridge_stale() {
-            // 驻留旧桥：静默接管——哑化旧桥（disable 后它对 info 拒答，prepare
-            // 会分派新端口并注入新指纹副本），不需要用户重启 BetterGI。
             log::info!("检测到旧版桥驻留，开始自动接管");
-            let _ = crate::bridge::control::disable(&config);
-            let mut config = config.clone();
-            crate::bridge::control::prepare(&mut config)?;
-            AppConfig::set_bridge(&self.config_path, &config)?;
-            self.reload_runtime()?;
-            crate::bridge::control::enable(&config)
-                .inspect_err(|error| log::warn!("接管注入失败：{error}"))?;
-            config.enabled = true;
-            config.instance_id = None;
-            AppConfig::set_bridge(&self.config_path, &config)?;
-            self.reload_runtime()?;
-            self.reload_extensions()?;
-            log::info!("新版桥已接管（{}）", config.base_url);
+            if crate::bridge::control::disable(&config).is_some() {
+                return Err(Error::Tool(
+                    "旧版 BetterGI 连接未能停用，请稍后重试。".into(),
+                ));
+            }
+            let mut replacement = config.clone();
+            let takeover = (|| {
+                crate::bridge::control::prepare(&mut replacement)?;
+                crate::bridge::control::enable(&replacement)?;
+                replacement.enabled = true;
+                replacement.instance_id = None;
+                AppConfig::set_bridge(&self.config_path, &replacement)?;
+                self.reload_runtime()?;
+                self.reload_extensions()?;
+                Ok::<(), Error>(())
+            })();
+            if let Err(error) = takeover {
+                log::warn!("新版桥接管失败：{error}");
+                if replacement.base_url != config.base_url {
+                    let _ = crate::bridge::control::disable(&replacement);
+                }
+                AppConfig::set_bridge(&self.config_path, &config)?;
+                self.reload_runtime()?;
+                self.reload_extensions()?;
+                crate::bridge::control::enable(&config).map_err(|restore| {
+                    Error::Tool(format!(
+                        "新版桥接管失败，旧连接也未恢复：{error}；{restore}"
+                    ))
+                })?;
+                return Err(error);
+            }
+            log::info!("新版桥已接管（{}）", replacement.base_url);
         }
         Ok(())
     }
@@ -1216,7 +1233,7 @@ impl AppController {
             })
             .collect::<Vec<_>>();
         Ok(
-            json!({"permission":permission,"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.supervisor.task_summaries(None)?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"conversationGroups":self.supervisor.journal.conversation_groups()?,"bridge":bridge_status}),
+            json!({"permission":permission,"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"runtimeToolLabels":self.supervisor.runtime_tool_labels(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.supervisor.task_summaries(None)?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"conversationGroups":self.supervisor.journal.conversation_groups()?,"bridge":bridge_status}),
         )
     }
 

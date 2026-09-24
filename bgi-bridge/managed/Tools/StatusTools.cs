@@ -53,6 +53,7 @@ public static class StatusTools
                 {
                     ready,
                     observedAt = DateTimeOffset.UtcNow,
+                    note = ResolutionNote(ready),
                     runtime = detail,
                 });
             });
@@ -77,11 +78,7 @@ public static class StatusTools
                         ready = runningReady,
                         stillLoading = false,
                         elapsedMs = 0L,
-                        note = Host.CaptureReady && !Host.InMainUi()
-                            ? "截图器在运行，但游戏还没进入主界面；用 bgi.get_status 等到 ready=true 再运行任务。"
-                            : Host.GameSixteenToNine()
-                                ? "截图器已经在运行，不需要重复启动。"
-                                : ResolutionWarning(),
+                        note = ResolutionNote(runningReady),
                         runtime = runningDetail,
                     };
                 }
@@ -122,6 +119,8 @@ public static class StatusTools
     /// <summary>就绪提示按阶段区分：未到主界面、非 16:9 都如实说，别让上层以为能直接跑任务。</summary>
     private static string ResolutionNote(bool ready)
     {
+        if (Host.CaptureReady && Host.GameClientSize() is not null && !Host.GameSixteenToNine())
+            return ResolutionWarning();
         if (!ready)
             return Host.CaptureReady
                 ? "截图器已就绪，但游戏还没进入主界面；用 bgi.get_status 等到 ready=true（以主界面为准）再运行任务。"

@@ -1086,9 +1086,19 @@ impl Supervisor {
             let plan = self.journal.plan(&run.id)?;
             let definitions = self.definitions(&exposed);
             let definitions_json = serde_json::to_string(&definitions)?;
-            // `context::build` 的预算以字符计，工具契约也按字符扣减。
-            let reserve = definitions_json.chars().count();
-            let context_budget = char_budget.saturating_sub(reserve);
+            let context_budget = if policy.context_chars.is_some() {
+                context::ContextBudget::Chars(
+                    char_budget.saturating_sub(definitions_json.chars().count()),
+                )
+            } else {
+                let input_budget = policy::input_token_budget(&policy, &model)
+                    .saturating_mul(budget_scale as u64)
+                    / 100;
+                context::ContextBudget::Tokens(
+                    input_budget.saturating_sub(context::estimate_tokens(&definitions_json) + 1024)
+                        as usize,
+                )
+            };
             let mut packed = context::build(system.clone(), history.clone(), context_budget)?;
             // 微压缩仍放在 build 内；完整历史装不下时，build 只发出压缩信号，
             // 不会生成删减过的候选消息。摘要成功后从 SQLite 边界重新装载，
@@ -1732,6 +1742,14 @@ impl Supervisor {
             .into_iter()
             .find(|definition| definition.name == name)
     }
+    pub fn runtime_tool_labels(&self) -> HashMap<String, String> {
+        self.definitions(&HashSet::new())
+            .into_iter()
+            .filter(|definition| definition.source == "core:runtime")
+            .map(|definition| (definition.name, definition.label))
+            .collect()
+    }
+
     fn definitions(&self, exposed: &HashSet<String>) -> Vec<ToolDefinition> {
         let mut definitions = self
             .tools()

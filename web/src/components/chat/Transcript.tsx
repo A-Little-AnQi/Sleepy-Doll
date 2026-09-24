@@ -12,7 +12,7 @@ import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 import { AlertIcon, CheckIcon, CopyIcon } from "../icons";
 import { DisclosureChevron } from "../controls/DisclosureChevron";
-import type { MessageInfo } from "../../ipc/types";
+import type { MessageInfo, TaskInfo } from "../../ipc/types";
 import "./Transcript.css";
 import { useT } from "../../i18n";
 
@@ -28,6 +28,7 @@ type Part =
 export interface Turn {
   role: "user" | "assistant";
   parts: Part[];
+  runId?: string;
   /** 轮次首条消息的时刻，只在开轮时写入。 */
   createdAt?: string;
   /** 轮次内最新一条消息的时刻，随消息推进。 */
@@ -61,19 +62,8 @@ function subjectOf(args: unknown) {
 }
 
 function pushReasoning(turn: Turn, text: string) {
-  const existing = turn.parts.find((part) => part.kind === "reasoning");
-  if (existing?.kind === "reasoning") {
-    existing.text = `${existing.text}\n\n${text}`;
-    return;
-  }
-  const anchor = turn.parts.findLastIndex(
-    (part) => part.kind === "text" || part.kind === "stream",
-  );
-  const part = { kind: "reasoning" as const, text };
-  // 插在第一条回答文本之前；没有文本时追加。part 顺序保持稳定，
-  // 流式重挂载不再把答案顶得来回跳。
-  if (anchor >= 0) turn.parts.splice(anchor, 0, part);
-  else turn.parts.push(part);
+  // 每条消息的思考放在该消息正文之前，保留跨消息的真实执行顺序。
+  turn.parts.push({ kind: "reasoning", text });
 }
 
 /** 把消息组装成对话轮次。 */
@@ -97,11 +87,13 @@ export function buildTurns(messages: MessageInfo[], stream: string): Turn[] {
       const nextTurn: Turn = {
         role: message.role,
         parts: [],
+        ...(message.runId ? { runId: message.runId } : {}),
         ...(message.createdAt ? { createdAt: message.createdAt } : {}),
       };
       turns.push(nextTurn);
       turn = nextTurn;
     }
+    if (!turn.runId && message.runId) turn.runId = message.runId;
     if (message.createdAt) turn.lastAt = message.createdAt;
     if (reasoning) pushReasoning(turn, reasoning);
     if (message.content)
@@ -267,35 +259,71 @@ function ActivityDetailDisclosure({
   );
 }
 
-/** 单轮的执行过程（思考与工具调用）：默认折叠，回答是主角。 */
-/** 轮次完成分隔：耗时长（>60s）的轮次在末尾标注完成时刻与用时，把长过程
- * 收在它前面——最终答案压轴，过程展开在上方。 */
-function TurnSeparator({ turn }: { turn: Turn }) {
+/** 完成后将过程收为一行，回复正文单独留在下方。 */
+function ProcessDisclosure({
+  turn,
+  task,
+  children,
+}: {
+  turn: Turn;
+  task?: TaskInfo | undefined;
+  children: ReactNode;
+}) {
   const t = useT();
-  if (!turn.createdAt || !turn.lastAt) return null;
-  const started = new Date(turn.createdAt).getTime();
-  const finished = new Date(turn.lastAt).getTime();
-  if (!Number.isFinite(started) || !Number.isFinite(finished)) return null;
-  const elapsed = Math.max(0, Math.round((finished - started) / 1000));
-  if (elapsed <= 60) return null;
+  const [expanded, setExpanded] = useState(false);
+  const started = new Date(task?.createdAt ?? turn.createdAt ?? "").getTime();
+  const finished = new Date(task?.updatedAt ?? turn.lastAt ?? "").getTime();
+  const elapsed =
+    Number.isFinite(started) && Number.isFinite(finished)
+      ? Math.max(0, Math.round((finished - started) / 1000))
+      : 0;
   const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
   const label =
-    elapsed >= 3600
-      ? t.transcript.turnElapsedHms(
-          Math.floor(elapsed / 3600),
-          Math.floor(minutes % 60),
-        )
-      : t.transcript.turnElapsedM(minutes);
+    elapsed <= 0
+      ? t.transcript.turnProcess
+      : elapsed < 60
+        ? t.transcript.turnElapsedS(elapsed)
+        : elapsed >= 3600
+          ? t.transcript.turnElapsedHms(
+              Math.floor(elapsed / 3600),
+              Math.floor(minutes % 60),
+              seconds,
+            )
+          : t.transcript.turnElapsedM(minutes, seconds);
   return (
-    <p className="turn-separator" title={new Date(finished).toLocaleString()}>
-      {t.transcript.turnDone}
-      <time>{label}</time>
-    </p>
+    <section className="process-disclosure" data-expanded={expanded}>
+      <button
+        type="button"
+        className="process-disclosure-summary"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((open) => !open)}
+      >
+        <time
+          title={
+            Number.isFinite(finished)
+              ? new Date(finished).toLocaleString()
+              : undefined
+          }
+        >
+          {label}
+        </time>
+        <DisclosureChevron expanded={expanded} />
+      </button>
+      <div
+        className="activity-disclosure-motion"
+        aria-hidden={!expanded}
+        inert={!expanded}
+      >
+        <div className="activity-disclosure-inner process-disclosure-inner">
+          {children}
+        </div>
+      </div>
+    </section>
   );
 }
 
-/// 中间评述：独立的可折叠块，默认收起成一行摘要，不与工具过程组捆绑。
-/// 进行中的流式评述保持展开，让用户看得见 AI 正在说什么。
+/** 只折叠模型的内部思考；说明文字与工具记录按发生顺序显示。 */
 function ProcessGroup({
   steps,
   running,
@@ -443,6 +471,8 @@ export const Transcript = memo(function Transcript({
   phase,
   seconds,
   toolLabels,
+  tasks = [],
+  currentTask,
   running = Boolean(phase),
 }: {
   messages: MessageInfo[];
@@ -450,6 +480,8 @@ export const Transcript = memo(function Transcript({
   phase?: string | undefined;
   seconds: number;
   toolLabels: ToolLabels;
+  tasks?: TaskInfo[];
+  currentTask?: TaskInfo | undefined;
   running?: boolean;
 }) {
   const turns = buildTurns(messages, stream);
@@ -459,89 +491,94 @@ export const Transcript = memo(function Transcript({
       {turns.map((turn, index) => {
         const copy = turnCopyText(turn);
         const time = formatMessageTime(turn.createdAt);
-        // 三类块按 parts 原始顺序各自独立：过程组只装思考与工具调用；中间
-        // 评述是独立的可折叠块（不与过程组捆绑，后续叙述不会被连带折叠）；
-        // 最后一段文本是最终答案，正常显示。
-        type ProcessPart = Extract<
-          Part,
-          { kind: "reasoning" | "activities" }
-        >;
+        const turnActive =
+          turn.role === "assistant" && index === turns.length - 1 && running;
+        // 说明文字与每次工具调用直接进入时间线，最后一段文字作为最终回答。
         type TextPart = Extract<Part, { kind: "text" | "stream" }>;
-        const lastTextIndex = (() => {
-          for (let i = turn.parts.length - 1; i >= 0; i -= 1) {
-            const part = turn.parts[i];
-            if (!part) continue;
-            if (part.kind === "text" || part.kind === "stream") return i;
-          }
-          return -1;
-        })();
+        const terminalPart = turn.parts.at(-1);
+        const finalTextIndex =
+          !turnActive &&
+          (terminalPart?.kind === "text" || terminalPart?.kind === "stream")
+            ? turn.parts.length - 1
+            : -1;
         type Block =
-          | { kind: "process"; parts: ProcessPart[] }
+          | { kind: "reasoning"; text: string }
+          | { kind: "tool"; activity: Activity }
           | { kind: "commentary"; parts: TextPart[] };
         const blocks: Block[] = [];
-        let hasProcess = false;
         for (let i = 0; i < turn.parts.length; i += 1) {
           const part = turn.parts[i];
           if (!part) continue;
-          if (i === lastTextIndex) continue;
+          if (i === finalTextIndex) continue;
           const tail = blocks.at(-1);
-          if (part.kind === "reasoning" || part.kind === "activities") {
-            hasProcess = true;
-            if (tail?.kind === "process") tail.parts.push(part);
-            else blocks.push({ kind: "process", parts: [part] });
+          if (part.kind === "reasoning") {
+            blocks.push({ kind: "reasoning", text: part.text });
+          } else if (part.kind === "activities") {
+            for (const activity of part.activities)
+              blocks.push({ kind: "tool", activity });
           } else if (tail?.kind === "commentary") {
             tail.parts.push(part);
           } else {
             blocks.push({ kind: "commentary", parts: [part] });
           }
         }
-        const finalText = lastTextIndex >= 0 ? turn.parts[lastTextIndex] : undefined;
+        const hasProcess = blocks.length > 0;
+        const finalText =
+          finalTextIndex >= 0 ? turn.parts[finalTextIndex] : undefined;
         // 只随「这一轮是否还在推进」变化；跟单条工具结果走会来回抖。
-        const turnActive = index === turns.length - 1 && running;
+        const process = blocks.map((block, blockIndex) =>
+          block.kind === "reasoning" ? (
+            <ProcessGroup
+              key={`reasoning-${blockIndex}`}
+              steps={1}
+              running={turnActive}
+              stopping={turnActive && phase === "正在停止"}
+            >
+              <div className="reasoning-entry">
+                <pre className="reasoning-text">{block.text}</pre>
+              </div>
+            </ProcessGroup>
+          ) : block.kind === "tool" ? (
+            <ActivityGroup
+              key={block.activity.id}
+              activities={[block.activity]}
+              labels={toolLabels}
+              active={turnActive}
+            />
+          ) : (
+            <div
+              className={`assistant-message${block.parts.some((part) => part.kind === "stream") ? " is-streaming" : ""}`}
+              key={blockIndex}
+            >
+              <MarkdownText
+                text={block.parts.map((part) => part.text).join("\n\n")}
+                streaming={block.parts.some((part) => part.kind === "stream")}
+              />
+            </div>
+          ),
+        );
         return (
           <article key={index} className={`message-turn ${turn.role}`}>
             <div className="message-content">
-              {blocks.map((block, blockIndex) =>
-                block.kind === "process" ? (
-                  <ProcessGroup
-                    key={blockIndex}
-                    steps={block.parts.reduce(
-                      (count, part) =>
-                        count +
-                        (part.kind === "activities" ? part.activities.length : 1),
-                      0,
-                    )}
-                    running={turnActive}
-                    stopping={turnActive && phase === "正在停止"}
-                  >
-                    {block.parts.map((part, partIndex) =>
-                      part.kind === "reasoning" ? (
-                        <div key="reasoning" className="reasoning-entry">
-                          <pre className="reasoning-text">{part.text}</pre>
-                        </div>
-                      ) : (
-                        <ActivityGroup
-                          key={part.activities[0]?.id ?? partIndex}
-                          activities={part.activities}
-                          labels={toolLabels}
-                          active={turnActive}
-                        />
-                      ),
-                    )}
-                  </ProcessGroup>
-                ) : (
-                  <div className="assistant-message" key={blockIndex}>
-                    <MarkdownText
-                      text={block.parts.map((part) => part.text).join("\n\n")}
-                    />
-                  </div>
-                ),
+              {hasProcess && !turnActive ? (
+                <ProcessDisclosure
+                  turn={turn}
+                  task={
+                    tasks.find((task) => task.id === turn.runId) ??
+                    (currentTask?.id === turn.runId ? currentTask : undefined)
+                  }
+                >
+                  {process}
+                </ProcessDisclosure>
+              ) : (
+                process
               )}
               {finalText?.kind === "text" ? (
                 <div
                   className={
                     turn.role === "user" ? "user-message" : "assistant-message"
                   }
+                  data-final={turn.role === "assistant" && hasProcess}
                 >
                   <MarkdownText text={finalText.text} />
                 </div>
@@ -562,9 +599,6 @@ export const Transcript = memo(function Transcript({
                     <time>{seconds}s</time>
                   </div>
                 )}
-              {turn.role === "assistant" && !turnActive && (
-                <TurnSeparator turn={turn} />
-              )}
             </div>
             {copy || time ? (
               <div

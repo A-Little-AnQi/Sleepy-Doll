@@ -184,7 +184,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let mut last_failure = String::new();
             loop {
                 thread::sleep(Duration::from_secs(5));
-                if !watcher.bridge_enabled() || watcher.bridge_connected() {
+                if !watcher.bridge_enabled() || watcher.has_active_runs() {
+                    continue;
+                }
+                let connected = watcher.bridge_connected();
+                if connected && !watcher.bridge_stale() {
                     continue;
                 }
                 if !sleepy_doll::bridge::control::is_host_running()

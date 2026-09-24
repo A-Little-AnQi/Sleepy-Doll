@@ -457,12 +457,18 @@ pub fn prepare(config: &mut BridgeConfig) -> Result<()> {
         );
     }
     if occupied {
-        // 占用方已是本产品的桥：listen 与 token 不改，只钉数据根。
-        if info(config).is_ok() {
-            if pin_configured_root(&mut settings, &exe_dir()?, &dir) {
-                crate::config::atomic_write(&path, &settings)?;
+        // 旧桥停用后仍会响应 info；内容指纹不同则必须选新端口注入。
+        if let Ok(live) = info(config) {
+            let stale_and_disabled = live["enabled"] == false
+                && live["bridgeCode"].as_str().is_some_and(|code| {
+                    installed_bridge_code().is_some_and(|installed| installed != code)
+                });
+            if !stale_and_disabled {
+                if pin_configured_root(&mut settings, &exe_dir()?, &dir) {
+                    crate::config::atomic_write(&path, &settings)?;
+                }
+                return Ok(());
             }
-            return Ok(());
         }
         if !host_running() {
             return Err(Error::Tool("请先启动 BetterGI。".into()));

@@ -162,6 +162,54 @@
   width: 100%;
 }
 
+.message-content > .activity-group:not(.process-group) {
+  margin: -5px 0;
+}
+
+.message-content > .activity-group:not(.process-group) .activity-summary {
+  min-height: 27px;
+  font-size: 12px;
+}
+
+.process-disclosure {
+  min-width: 0;
+}
+
+.process-disclosure-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 0 7px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  font-size: var(--font-meta);
+}
+
+.process-disclosure-summary:hover,
+.process-disclosure-summary:focus-visible {
+  color: var(--text);
+}
+
+.process-disclosure-summary time {
+  font-variant-numeric: tabular-nums;
+}
+
+.process-disclosure-summary .sd-chevron {
+  width: 14px;
+  height: 14px;
+}
+
+.process-disclosure-inner {
+  display: grid;
+  gap: 12px;
+  padding: 10px 0 5px;
+}
+
 .activity-summary {
   width: 100%;
   display: flex;
@@ -410,6 +458,10 @@
   overflow-wrap: anywhere;
 }
 
+.assistant-message[data-final="true"] {
+  margin-top: 8px;
+}
+
 .assistant-message > p:first-child,
 .user-message > p:first-child {
   margin-top: 0;
@@ -556,4 +608,3 @@
 .turn-separator time {
   font-variant-numeric: tabular-nums;
 }
-

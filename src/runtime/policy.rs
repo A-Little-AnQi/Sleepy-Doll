@@ -76,6 +76,20 @@ pub fn budget(policy: &RuntimeConfig, model: &crate::config::ModelConfig) -> (us
     )
 }
 
+pub fn input_token_budget(policy: &RuntimeConfig, model: &crate::config::ModelConfig) -> u64 {
+    let window = policy
+        .max_tokens
+        .unwrap_or(model.options.context_window.max(8_192));
+    let reserve = model
+        .options
+        .max_output_tokens
+        .unwrap_or(8_192)
+        .min(MAX_OUTPUT_RESERVE);
+    window
+        .saturating_sub(reserve)
+        .saturating_sub(THRESHOLD_BUFFER)
+}
+
 impl RuntimeConfig {
     pub fn validate(&self) -> Result<()> {
         if self.duration_sec < 1
