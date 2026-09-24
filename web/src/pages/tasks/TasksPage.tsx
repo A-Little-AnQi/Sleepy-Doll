@@ -130,10 +130,12 @@ export function TasksPage({
     },
   };
 
+  // 运行记录只收快捷任务的运行；普通对话的记录留在对话里，不混进来。
   const runs = bootstrap.tasks.filter(
     (run) =>
-      !query.trim() ||
-      run.prompt.toLowerCase().includes(query.trim().toLowerCase()),
+      run.source?.kind !== "agent" &&
+      (!query.trim() ||
+        run.prompt.toLowerCase().includes(query.trim().toLowerCase())),
   );
 
   return (

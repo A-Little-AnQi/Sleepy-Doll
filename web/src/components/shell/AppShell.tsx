@@ -13,6 +13,7 @@ import type { Page } from "../../App";
 import { api, framelessWindow } from "../../ipc/api";
 import {
   isRunning,
+  isTaskRunActive,
   needsConfirmation,
   readError,
   taskLabels,
@@ -579,9 +580,9 @@ export function AppShell({
             <Icon className="app-nav-icon" />
             <span>{t.nav[labelKey]}</span>
             {target === "tasks" &&
-              bootstrap.tasks.some((task) => isRunning(task)) && (
+              bootstrap.tasks.some(isTaskRunActive) && (
                 <span className="app-nav-badge" title={t.nav.runningBadge}>
-                  {bootstrap.tasks.filter((task) => isRunning(task)).length}
+                  {bootstrap.tasks.filter(isTaskRunActive).length}
                 </span>
               )}
           </button>

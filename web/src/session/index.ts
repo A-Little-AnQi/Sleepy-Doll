@@ -48,6 +48,10 @@ export const isRunning = (task?: TaskInfo) =>
     "blocked",
   ].includes(task.state);
 
+/** 快捷任务的运行是否在推进：对话（agent 来源）的运行不算，别点亮任务入口。 */
+export const isTaskRunActive = (task?: TaskInfo) =>
+  isRunning(task) && task?.source?.kind !== "agent";
+
 /** 阶段文案：显示当前在哪一步。 */
 export function phaseLabel(task?: TaskInfo): string | undefined {
   if (!isRunning(task) || !task) return undefined;
