@@ -68,7 +68,8 @@ public static class OneDragonTools
             destructive: false,
             inputSchema: JsonSerializer.SerializeToElement(new { type = "object", additionalProperties = false }),
             guide: guide,
-            requiresGameReady: true);
+            // 退出必须在登录/加载画面和非 16:9 时也能执行，不能要求主界面就绪。
+            requiresGameReady: false);
     }
 
     private static JsonElement OneDragonSchema() =>

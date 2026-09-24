@@ -172,7 +172,9 @@ public static class StatusTools
                 ? "截图器已就绪，但游戏还没进入主界面；用 bgi.get_status 等到 ready=true（以主界面为准）再运行任务。"
                 : Host.GameProcessRunning()
                     ? "原神进程已启动，截图器尚未就绪；稍后读取状态。"
-                    : "原神进程未运行；先确认所需分辨率，再用 bgi.start_game 启动。";
+                    : Host.DisplaySize() is { } display
+                        ? $"原神进程未运行；当前桌面会话为 {display.Width}x{display.Height}。先确认它能容纳目标游戏分辨率，再启动。"
+                        : "原神进程未运行；先确认所需分辨率，再用 bgi.start_game 启动。";
         return Host.GameSixteenToNine()
             ? "已进入游戏主界面，可以运行任务了。"
             : ResolutionWarning();
@@ -181,7 +183,10 @@ public static class StatusTools
     private static string ResolutionWarning() =>
         Host.GameClientSize() is { } size
             ? $"截图器已就绪，但游戏窗口分辨率 {size.Width}x{size.Height} 不是 16:9，BetterGI 的截图识别与脚本无法运行。"
-                + "启动参数 -screen-width/-screen-height 对已初始化过的原神不生效。彻底修正：先用 bgi.exit_game 关闭游戏，再用 bgi.set_game_resolution 写入目标分辨率，然后 bgi.start_game；远程桌面下窗口尺寸受会话分辨率限制。"
+                + (Host.DisplaySize() is { } display
+                    ? $"当前桌面会话为 {display.Width}x{display.Height}；若目标分辨率超过它，先调整远程桌面会话，不能靠重写游戏配置解决。"
+                    : "先核对当前桌面会话尺寸。")
+                + "尺寸足够时再用 bgi.exit_game 关闭游戏、bgi.set_game_resolution 写入目标分辨率，然后 bgi.start_game 核对实际窗口。"
             : "截图器已就绪，但读不到游戏窗口尺寸。";
 
     /// <summary>在宿主 UI 线程上执行启动命令。返回的任务代表宿主启动流程：命令发出后不受调用方取消影响。</summary>

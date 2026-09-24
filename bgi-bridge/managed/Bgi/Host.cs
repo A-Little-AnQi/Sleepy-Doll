@@ -51,6 +51,14 @@ public static class Host
         return false;
     }
 
+    /// <summary>当前会话主屏幕的可用像素尺寸，不使用显卡声明的物理最大模式。</summary>
+    public static (int Width, int Height)? DisplaySize()
+    {
+        var width = NativeMethods.GetSystemMetrics(0);
+        var height = NativeMethods.GetSystemMetrics(1);
+        return width > 0 && height > 0 ? (width, height) : null;
+    }
+
     /// <summary>游戏客户区尺寸。截图器没起来（句柄为 0）时是 null。</summary>
     public static (int Width, int Height)? GameClientSize()
     {
@@ -92,6 +100,9 @@ public static class Host
 
     private static class NativeMethods
     {
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        internal static extern int GetSystemMetrics(int index);
+
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
 

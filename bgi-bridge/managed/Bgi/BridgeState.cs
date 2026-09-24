@@ -42,6 +42,7 @@ public static class BridgeState
         }
 
         var clientSize = Host.GameClientSize();
+        var displaySize = Host.DisplaySize();
         var inMainUi = false;
         try
         {
@@ -65,6 +66,9 @@ public static class BridgeState
                     height = size.Height,
                     sixteenToNine = Host.GameSixteenToNine(),
                 }
+                : null,
+            displayResolution = displaySize is { } display
+                ? new { width = display.Width, height = display.Height }
                 : null,
             windowActive,
             // CurrentCount == 0 表示有独立任务持锁。
