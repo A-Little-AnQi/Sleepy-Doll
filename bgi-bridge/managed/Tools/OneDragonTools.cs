@@ -153,7 +153,7 @@ public static class OneDragonTools
         CancellationToken cancellation)
     {
         cancellation.ThrowIfCancellationRequested();
-        if (!Host.CaptureReady)
+        if (!Host.CaptureReady && !Host.GameProcessRunning())
             throw BridgeException.GameNotReady("原神没有在运行，无需退出。");
         var systemControl = Reflect.FindType(SystemControlType)
             ?? throw BridgeException.Missing("当前 BetterGI 没有公开的 SystemControl。");

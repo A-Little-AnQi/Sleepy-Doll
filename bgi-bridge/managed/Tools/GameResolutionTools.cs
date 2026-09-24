@@ -62,7 +62,7 @@ public static class GameResolutionTools
     private static Task<object?> Invoke(JsonElement arguments, CancellationToken cancellation)
     {
         cancellation.ThrowIfCancellationRequested();
-        if (Host.CaptureReady)
+        if (Host.CaptureReady || Host.GameProcessRunning())
             throw BridgeException.GameNotReady(
                 "原神正在运行，注册表修改不会生效。先用 bgi.exit_game 关闭游戏，再调用本接口。");
         var width = arguments.GetProperty("width").GetInt32();

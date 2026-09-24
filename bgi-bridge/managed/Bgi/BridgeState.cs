@@ -15,7 +15,8 @@ public static class BridgeState
         try
         {
             captureReady = Host.CaptureReady;
-            handle = Host.GameHandle;
+            // TaskContext 在截图器停止后可能保留旧窗口句柄；它不是进程存活证据。
+            handle = captureReady ? Host.GameHandle : 0;
             semaphore = Host.TaskSemaphoreCount();
             hasProject = Host.CurrentScriptProject is not null;
         }
@@ -54,6 +55,7 @@ public static class BridgeState
         {
             hostLoaded,
             captureReady,
+            gameProcessRunning = Host.GameProcessRunning(),
             inMainUi,
             gameHandle = handle,
             gameResolution = clientSize is { } size

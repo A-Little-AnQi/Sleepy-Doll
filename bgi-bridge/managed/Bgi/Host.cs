@@ -1,4 +1,5 @@
 using BgiBridge.Protocol;
+using System.Diagnostics;
 
 namespace BgiBridge.Bgi;
 
@@ -26,6 +27,29 @@ public static class Host
     /// <summary><c>TaskContext.Instance().IsInitialized</c> —— 截图器是否已启动。</summary>
     public static bool CaptureReady =>
         TaskContext() is { } context && Reflect.Get(context, "IsInitialized") is true;
+
+    /// <summary>独立于截图器核对游戏进程；TaskContext 的句柄可能在关闭后残留。</summary>
+    public static bool GameProcessRunning()
+    {
+        foreach (var name in new[] { "YuanShen", "GenshinImpact" })
+        {
+            foreach (var process in Process.GetProcessesByName(name))
+            {
+                using (process)
+                {
+                    try
+                    {
+                        if (!process.HasExited) return true;
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // 枚举后进程刚好退出。
+                    }
+                }
+            }
+        }
+        return false;
+    }
 
     /// <summary>游戏客户区尺寸。截图器没起来（句柄为 0）时是 null。</summary>
     public static (int Width, int Height)? GameClientSize()
