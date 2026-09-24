@@ -9,6 +9,15 @@ use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
 
+/// 游戏是否真正可执行动作：截图器就绪且已在主界面。旧版桥没有 inMainUi
+/// 字段时退化为仅检查截图器，避免新旧混合窗口期把一切调用都拒掉。
+fn game_ready(snapshot: &Value) -> bool {
+    if snapshot["runtime"]["captureReady"] != true {
+        return false;
+    }
+    snapshot["runtime"]["inMainUi"].as_bool().unwrap_or(true)
+}
+
 /// Bridge 观测可以作为执行依据的最大年龄（秒）。
 const OBSERVATION_MAX_AGE_SEC: i64 = 15;
 
@@ -303,11 +312,9 @@ impl Bridge {
             descriptor["effect"].as_str(),
             Some("configurationWrite" | "hostCommand")
         );
-        if snapshot["instanceId"] != instance
-            || (requires_capture && snapshot["runtime"]["captureReady"] != true)
-        {
+        if snapshot["instanceId"] != instance || (requires_capture && !game_ready(&snapshot)) {
             return Err(Error::Tool(
-                "游戏尚未就绪：截图器未启动或游戏窗口未打开。先调用 bgi.start_game 启动原神，用 bgi.get_status 等到 ready=true，再重试本次调用；不要把启动这一步交回用户。"
+                "游戏尚未就绪（以进入主界面为准）。先调用 bgi.start_game 启动原神，用 bgi.get_status 等到 ready=true 再重试；截图器就绪但仍在登录或加载画面时不要提交动作。"
                     .into(),
             ));
         }
@@ -341,8 +348,7 @@ impl Bridge {
                 }
                 // 前台刚切过去，重取一次快照让后续观测反映最新状态。
                 snapshot = self.get("/bridge/v1/state", cancel).await?;
-                if snapshot["instanceId"] != instance || snapshot["runtime"]["captureReady"] != true
-                {
+                if snapshot["instanceId"] != instance || !game_ready(&snapshot) {
                     return Err(Error::Tool("游戏状态在前置后不再就绪".into()));
                 }
             }
@@ -402,9 +408,7 @@ impl Bridge {
                 return Err(Error::Tool("排队期间资源变化".into()));
             }
             let fresh = self.get("/bridge/v1/state", cancel).await?;
-            if fresh["instanceId"] != instance
-                || (requires_capture && fresh["runtime"]["captureReady"] != true)
-            {
+            if fresh["instanceId"] != instance || (requires_capture && !game_ready(&fresh)) {
                 return Err(Error::Tool("游戏状态不再满足前置条件".into()));
             }
             let stamp = fresh["observedAt"]

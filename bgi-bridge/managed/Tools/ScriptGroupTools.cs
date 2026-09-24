@@ -19,7 +19,7 @@ public static class ScriptGroupTools
             "按名称运行配置组",
             "调用 BetterGI 自带的按名称执行入口，运行指定配置组中的已启用任务。无需用户预先在脚本调度页选中目标。",
             ["用户要求运行一个已从 User/ScriptGroup 确认存在的配置组时。"],
-            ["截图器和游戏窗口已就绪。", "没有其他独立任务持锁。", "groupName 来自 User/ScriptGroup 的真实 name。"],
+            ["截图器就绪且已进入游戏主界面。", "窗口分辨率为 16:9。", "没有其他独立任务持锁。", "groupName 来自 User/ScriptGroup 的真实 name。"],
             ["启动配置组中的游戏自动化、脚本、路线或 Shell 任务；具体影响由组内已启用任务决定。"],
             "返回 resolved=true 和 executed=true 表示目标组已解析且执行方法已返回；Job 终态即执行结束。",
             "Job 到终态后读一次 bgi.read_host_log（过滤「执行结束」或 ERR）即可收尾：无错误即报告完成，有错误列出到场的问题；不要反复轮询或多方取证。",
@@ -45,6 +45,10 @@ public static class ScriptGroupTools
         var requested = arguments.GetProperty("groupName").GetString()!.Trim();
         if (!Host.CaptureReady)
             throw BridgeException.GameNotReady("截图器或游戏窗口尚未就绪。");
+        // 对齐 BetterGI 原生调度前置：主界面才算在游戏里；登录/加载画面跑配置组必然失败。
+        if (!Host.InMainUi())
+            throw BridgeException.GameNotReady(
+                "游戏还没进入主界面（登录或加载画面）。用 bgi.get_status 等到 ready=true 后再运行配置组。");
         // 脚本依赖 16:9 截图；非 16:9 时整组会逐条异常退出，宁可在这里拦下。
         if (!Host.GameSixteenToNine())
             throw BridgeException.GameNotReady(

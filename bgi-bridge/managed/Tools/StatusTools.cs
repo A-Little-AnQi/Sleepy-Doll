@@ -77,9 +77,11 @@ public static class StatusTools
                         ready = runningReady,
                         stillLoading = false,
                         elapsedMs = 0L,
-                        note = Host.GameSixteenToNine()
-                            ? "截图器已经在运行，不需要重复启动。"
-                            : ResolutionWarning(),
+                        note = Host.CaptureReady && !Host.InMainUi()
+                            ? "截图器在运行，但游戏还没进入主界面；用 bgi.get_status 等到 ready=true 再运行任务。"
+                            : Host.GameSixteenToNine()
+                                ? "截图器已经在运行，不需要重复启动。"
+                                : ResolutionWarning(),
                         runtime = runningDetail,
                     };
                 }
@@ -97,7 +99,7 @@ public static class StatusTools
                 if (settled == launch) await launch.ConfigureAwait(false);
 
                 var (ready, detail) = BridgeState.Capture();
-                if (!ready && settled == launch)
+                if (!Host.CaptureReady && settled == launch)
                     throw BridgeException.Failed(
                         "BetterGI 的启动流程已经结束，但截图器仍未就绪：没有找到原神窗口，BetterGI 也就没有开始截图。"
                             + "请确认原神能正常启动，或让用户在 BetterGI 的启动页手动点击启动。");
@@ -117,11 +119,16 @@ public static class StatusTools
             readOnly: false);
     }
 
-    /// <summary>就绪提示按分辨率区分：非 16:9 时如实说，别让上层以为能直接跑任务。</summary>
+    /// <summary>就绪提示按阶段区分：未到主界面、非 16:9 都如实说，别让上层以为能直接跑任务。</summary>
     private static string ResolutionNote(bool ready)
     {
-        if (!ready) return "原神仍在加载，用 bgi.get_status 继续查看。";
-        return Host.GameSixteenToNine() ? "截图器已就绪，可以运行任务了。" : ResolutionWarning();
+        if (!ready)
+            return Host.CaptureReady
+                ? "截图器已就绪，但游戏还没进入主界面；用 bgi.get_status 等到 ready=true（以主界面为准）再运行任务。"
+                : "原神仍在加载，用 bgi.get_status 继续查看。";
+        return Host.GameSixteenToNine()
+            ? "已进入游戏主界面，可以运行任务了。"
+            : ResolutionWarning();
     }
 
     private static string ResolutionWarning() =>

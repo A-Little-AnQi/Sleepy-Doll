@@ -41,10 +41,20 @@ public static class BridgeState
         }
 
         var clientSize = Host.GameClientSize();
+        var inMainUi = false;
+        try
+        {
+            inMainUi = Host.InMainUi();
+        }
+        catch
+        {
+            // 同上。
+        }
         var detail = new
         {
             hostLoaded,
             captureReady,
+            inMainUi,
             gameHandle = handle,
             gameResolution = clientSize is { } size
                 ? new
@@ -74,7 +84,7 @@ public static class BridgeState
             },
         };
 
-        return (hostLoaded && captureReady, detail);
+        return (hostLoaded && captureReady && inMainUi, detail);
     }
 
     /// <summary>解除暂停 → 手动取消 → 释放模拟键。顺序不能调换。</summary>

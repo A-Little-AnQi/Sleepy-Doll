@@ -42,6 +42,30 @@ public static class Host
     public static bool GameSixteenToNine() =>
         GameClientSize() is { } size && Math.Abs(size.Width * 9 - size.Height * 16) <= size.Height;
 
+    /// <summary>是否已进入游戏主界面。对齐 BetterGI 原生调度前置（BvStatus.IsInMainUi
+    /// 识别派蒙菜单元素，纯视觉判定无副作用）：截图器就绪只说明窗口在，游戏可能
+    /// 还停在登录或加载画面，此时运行任务必然失败。识别失败或未就绪一律按 false。</summary>
+    public static bool InMainUi()
+    {
+        if (!CaptureReady) return false;
+        var bv = Reflect.FindType("BetterGenshinImpact.GameTask.Common.BgiVision.BvStatus");
+        var taskControl = Reflect.FindType("BetterGenshinImpact.GameTask.Common.TaskControl");
+        if (bv is null || taskControl is null) return false;
+        try
+        {
+            if (Reflect.CallStatic(taskControl, "CaptureToRectArea", false) is not IDisposable capture)
+                return false;
+            using (capture)
+            {
+                return Reflect.CallStatic(bv, "IsInMainUi", capture) is true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static class NativeMethods
     {
         [System.Runtime.InteropServices.DllImport("user32.dll")]
