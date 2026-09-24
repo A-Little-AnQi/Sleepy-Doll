@@ -1306,11 +1306,16 @@ impl Supervisor {
             // 一轮里要的调用数超上限时，执行允许的部分，其余作为错误结果回给
             // 模型让它分批重试。
             let per_turn = current.agent.max_tool_calls_per_turn;
-            let remaining = policy.max_tools.saturating_sub(run.tool_calls);
-            if remaining == 0 {
-                return Err(Error::Conflict("工具调用超过预算".into()));
-            }
-            let allowed = per_turn.min(remaining);
+            // max_tools 为 0 表示不限制总量；只受每轮上限约束。
+            let allowed = if policy.max_tools > 0 {
+                let remaining = policy.max_tools.saturating_sub(run.tool_calls);
+                if remaining == 0 {
+                    return Err(Error::Conflict("工具调用超过预算".into()));
+                }
+                per_turn.min(remaining)
+            } else {
+                per_turn
+            };
             let mut calls = response.tool_calls;
             let mut deferred = if calls.len() > allowed {
                 calls.split_off(allowed)
@@ -1504,7 +1509,7 @@ impl Supervisor {
             .ok_or_else(|| Error::Conflict("保存的策略缺少执行计划".into()))?;
         self.journal.save(run, RunState::Deciding)?;
         let mut seen = HashSet::new();
-        if plan.steps.is_empty() || plan.steps.len() > policy.max_tools {
+        if plan.steps.is_empty() || (policy.max_tools > 0 && plan.steps.len() > policy.max_tools) {
             return Err(Error::Conflict("保存的策略步骤数量无效".into()));
         }
         for step in &plan.steps {
@@ -2422,7 +2427,7 @@ impl Supervisor {
                     }
                 }
                 let mut seen = HashSet::new();
-                if steps.len() > policy.max_tools {
+                if policy.max_tools > 0 && steps.len() > policy.max_tools {
                     return Err(Error::Tool("计划步骤过多".into()));
                 }
                 for step in &mut steps {
@@ -2498,8 +2503,14 @@ impl Supervisor {
                     if self.journal.has_inputs(&run.id)? {
                         break;
                     }
-                    if run.tool_calls >= policy.max_tools || unix_now() > run.deadline {
-                        return Err(Error::Conflict("计划执行达到预算上限".into()));
+                    if (policy.max_tools > 0 && run.tool_calls >= policy.max_tools)
+                        || unix_now() > run.deadline
+                    {
+                        return Err(Error::Conflict(if unix_now() > run.deadline {
+                            "任务时限已到".into()
+                        } else {
+                            "计划执行达到工具上限".into()
+                        }));
                     }
                     if cancel.is_cancelled() {
                         return Err(Error::Cancelled);
