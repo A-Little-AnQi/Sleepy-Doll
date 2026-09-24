@@ -162,6 +162,32 @@ public static class Reflect
         }
     }
 
+    /// <summary>写实例属性/字段（ObservableProperty 生成的属性可写）。</summary>
+    public static void Set(object? target, string member, object? value)
+    {
+        if (target is null) throw BridgeException.Missing("目标对象为空。");
+        var info = FindMember(target.GetType(), member) ?? throw BridgeException.Missing(
+            $"{target.GetType().Name}.{member} 在当前 BetterGI 版本里不存在。");
+        try
+        {
+            switch (info)
+            {
+                case PropertyInfo { CanWrite: true } p:
+                    p.SetValue(target, value);
+                    return;
+                case FieldInfo f:
+                    f.SetValue(target, value);
+                    return;
+                default:
+                    throw BridgeException.Missing($"{target.GetType().Name}.{member} 不可写。");
+            }
+        }
+        catch (TargetInvocationException ex)
+        {
+            throw BridgeException.Failed($"{target.GetType().Name}.{member} 赋值抛异常：{Root(ex).Message}");
+        }
+    }
+
     public static object? Get(object? target, string member)
     {
         if (target is null) return null;

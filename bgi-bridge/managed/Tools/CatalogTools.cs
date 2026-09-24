@@ -58,6 +58,7 @@ public static class CatalogTools
     public static void Register(MethodRegistry registry)
     {
         ScriptGroupTools.Register(registry);
+        OneDragonTools.Register(registry);
         ScriptRepositoryTools.Register(registry);
         registry.Register("bgi.list_setting_sections", "settings", "",
             (_, _) => Ui.InvokeAsync<object?>(() => new { sections = SettingsCatalog.BuildSections() }));
