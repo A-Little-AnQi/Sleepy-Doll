@@ -31,7 +31,7 @@ alwaysLoad: true
 | JS 脚本 | `JsScript\<目录>\` | 目录名由任务的 `folderName` 引用 |
 | 地图追踪路线 | `AutoPathing\...` | 层级和名称由已安装数据决定 |
 | 键鼠脚本 | `KeyMouseScript\` | 录制与回放文件 |
-| 一条龙 | `OneDragon\` | 与调度器配置组不是同一种对象 |
+| 一条龙 | `OneDragon\` | 与调度器配置组不是同一种对象；运行走 `bgi.run_one_dragon` |
 | 战斗/卡牌/音乐等资源 | 对应 `AutoFight\`、`AutoGeniusInvokation\`、`Music\` | 以磁盘实际内容为准 |
 | 全局设置 | `config.json` | 运行中以内存 `AllConfig` 为准，修改走设置事务 |
 
@@ -82,7 +82,8 @@ alwaysLoad: true
 1. 运行现有配置组或采集材料时，先调用一次 `bgi.user.resolve`。不要先 `bgi.api.search`，也不要列 AutoPathing 或逐条读取路线 JSON。
 2. `verdict=run` 时直接读取 `bgi.run_script_group` 契约并传入精确 `name`。路径缺失时运行时会拒绝执行；不要在 `repair` 状态下调用它。
 3. `verdict=repair` 时只处理 `missing` 列出的路径：更新仓库或订阅后再次 `resolve`。
-4. 只有准备提交执行时才调用一次 `bgi.state.get`，检查截图器、游戏句柄、任务锁和窗口状态。纯查询或文件编辑不需要状态快照。
+4. 只有准备提交执行时才调用一次 `bgi.state.get`，检查截图器、游戏句柄、任务锁和窗口状态。纯查询或文件编辑不需要状态快照。`ready` 以**进入游戏主界面**为准：截图器就绪但仍在登录或加载画面时调用会被拒绝，等 `bgi.get_status` 的 `ready=true` 再提交。`gameResolution.sixteenToNine=false` 时先把游戏或远程桌面会话调到 16:9（如 1920x1080），启动参数 `-screen-width` 对已初始化过的原神不生效。
+4a. 目标是每日/清体力/周常一条龙时用 `bgi.run_one_dragon`（宿主原生任务链，`configName` 可选），不要为它建调度器配置组；它收尾可能自动退出游戏。用户要求退出原神或任务链收尾时用 `bgi.exit_game`（正常关闭，超时强结束），核验 `gameHandle` 回落后即完成。
 5. 其他动作若已知道精确 `methodId`，直接 `bgi.api.describe`；否则只在 `command` 组按一个动作词搜索一次。
 6. 契约必须同时满足：`callable=true`、参数可提供、接口确实作用于目标对象。其他低层命令仍依赖界面当前选择时，不得声称能按名称执行。
 7. 调用 `bgi.api.invoke` 后用返回的 Job ID 查询到终态。完成只证明处理器返回；按契约要求复查状态或结果。
@@ -124,7 +125,7 @@ alwaysLoad: true
 
 不要询问 BetterGI 是否运行、目录在哪里、有哪些配置组、接口是否可用、是否需要保存、是否允许执行已明确要求的写操作。程序会获取这些事实；普通写入直接执行，只有删除和大范围配置变更会让用户确认一次真实范围。
 
-用户要求运行游戏任务而宿主或游戏还没启动时，**自己把它启动起来**：用 `bgi.api.invoke` 调用 `bgi.start_game`（没有这个接口时，用 `bgi.api.search` 在 `command` 组找启动触发器的命令 `cmd.home_page.start_trigger`），再用 `bgi.get_status` 等到 `ready=true`，然后继续原任务。运行类调用返回「游戏尚未就绪」不是终点，那是让你先启动再重试。不要把「请你先启动游戏」当成结论交回用户 —— `bgi.start_game` 失败时会带上缺的那一项（未配置安装路径、未开启联动启动、没有游戏窗口），照它说的做或如实转述。
+用户要求运行游戏任务而宿主或游戏还没启动时，**自己把它启动起来**：用 `bgi.api.invoke` 调用 `bgi.start_game`（没有这个接口时，用 `bgi.api.search` 在 `command` 组找启动触发器的命令 `cmd.home_page.start_trigger`），再用 `bgi.get_status` 等到 `ready=true`（以进入主界面为准），然后继续原任务。运行类调用返回「游戏尚未就绪」不是终点，那是让你先启动再重试。不要把「请你先启动游戏」当成结论交回用户 —— `bgi.start_game` 失败时会带上缺的那一项（未配置安装路径、未开启联动启动、没有游戏窗口），照它说的做或如实转述。
 
 ## 调用纪律
 
