@@ -1121,6 +1121,7 @@ fn dispatch_ipc(
             "window.setDragStrip" => {
                 window_chrome::set_drag_strip(
                     request.params["height"].as_f64().unwrap_or(0.0),
+                    request.params["left"].as_f64().unwrap_or(0.0),
                     request.params["controls"].as_f64().unwrap_or(0.0),
                     request.params["maximize"].as_bool().unwrap_or(true),
                 );

@@ -10,13 +10,15 @@ import { api } from "../../ipc/api";
 import { useT } from "../../i18n";
 import "./title-bar.css";
 
-/** 自绘的窗口标题栏。 */
+/** 自绘的窗口标题栏。left 是条带让出的左侧宽度（停靠侧栏的宽度）。 */
 export function TitleBar({
   canMaximize = true,
   closeDisabled = false,
+  left = 0,
 }: {
   canMaximize?: boolean;
   closeDisabled?: boolean;
+  left?: number;
 } = {}) {
   const [maximized, setMaximized] = useState(false);
   const t = useT();
@@ -60,12 +62,13 @@ export function TitleBar({
         method: "window.setDragStrip",
         params: {
           height: bar.offsetHeight,
+          left,
           controls: controls.offsetWidth,
           maximize: canMaximize,
         },
       }),
     );
-  }, [canMaximize]);
+  }, [canMaximize, left]);
 
   const onDragPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     // 只响应主键，控制按钮自己处理点击。条带上报后由原生命中测试接管。

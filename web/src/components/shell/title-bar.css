@@ -7,20 +7,18 @@
 .title-bar {
   position: fixed;
   top: 0;
+  /* 侧栏顶到窗口上缘：条带从侧栏右缘开始，融进界面，不画底色和下边线。 */
   right: 0;
-  left: 0;
-  /* 高于所有弹窗遮罩（sd-dialog-layer 是 200）：弹窗开着也能拖动窗口。 */
+  left: var(--sidebar-width, 0px);
   z-index: 300;
-  width: 100%;
+  width: auto;
   height: var(--title-bar-height);
   display: flex;
   align-items: center;
   justify-content: flex-end;
   /* 窗口控制贴物理右缘，不随界面语言方向翻转。 */
   direction: ltr;
-  /* 用内阴影代替下边框，不占高度。 */
-  box-shadow: inset 0 -1px 0 var(--border);
-  background: var(--surface);
+  transition: left var(--sidebar-motion);
   /* 裁掉按钮悬停底色的方角。 */
   overflow: hidden;
   user-select: none;

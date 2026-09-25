@@ -20,9 +20,10 @@
 }
 .app-sidebar-peek {
   position: fixed;
-  inset: var(--title-bar-height) auto 0 0;
+  inset: 0 auto 0 0;
   width: 10px;
-  z-index: 40;
+  /* 压过标题栏：折叠态下唤出条贴着窗口左缘，否则摸不到。 */
+  z-index: 310;
 }
 .app-sidebar-resize {
   position: absolute;
@@ -44,22 +45,24 @@
 }
 .app-shell[data-drawer="true"] .app-sidebar {
   box-shadow: var(--shadow);
+  /* 抽屉铺开时盖过标题栏，顶部内容完整可点。 */
+  z-index: 320;
 }
 .app-shell[data-drawer="true"] .app-main {
   z-index: 0;
 }
 .app-scrim {
   position: fixed;
-  inset: var(--title-bar-height) 0 0 0;
+  inset: 0;
   z-index: 45;
   padding: 0;
   border: 0;
   background: #0005;
 }
 .app-sidebar {
-  /* 停靠与悬浮用同一层固定侧栏加 translateX 定位。 */
+  /* 停靠与悬浮用同一层固定侧栏加 translateX 定位。侧栏顶到窗口上缘。 */
   position: fixed;
-  inset: var(--title-bar-height) auto 0 0;
+  inset: 0 auto 0 0;
   z-index: 80;
   width: min(var(--sidebar-user-width), 88vw);
   display: flex;
