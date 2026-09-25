@@ -2,7 +2,7 @@
 .sd-dialog:has(.update-dialog) {
   width: min(760px, 100%);
   height: min(740px, calc(100dvh - 64px));
-  border-radius: 16px;
+  border-radius: var(--layout-radius);
   box-shadow:
     0 24px 80px #0003,
     0 2px 8px #0001;

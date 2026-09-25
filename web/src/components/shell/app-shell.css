@@ -3,7 +3,6 @@
   --sidebar-width: 248px;
   --sidebar-motion: var(--motion-slow) var(--ease-enter);
   --details-width: clamp(280px, 28vw, 336px);
-  --layout-radius: 16px;
   --layout-gap: 10px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -774,7 +773,7 @@ html[data-theme-reveal="true"] .app-group {
 /* Account controls share the same compact, softly squared geometry. */
 .app-account-menu {
   padding: 8px;
-  border-radius: 12px;
+  border-radius: var(--layout-radius);
   animation: account-menu-in 180ms var(--ease-enter) both;
   box-shadow:
     0 12px 36px #00000014,

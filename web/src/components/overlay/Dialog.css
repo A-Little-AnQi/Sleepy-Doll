@@ -29,7 +29,7 @@
   height: 50vh;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--layout-radius);
   background: var(--surface);
   box-shadow: var(--shadow);
 }

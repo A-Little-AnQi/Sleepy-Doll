@@ -30,6 +30,8 @@
   --sidebar-pad-x: 12px;
   --radius: 8px;
   --radius-sm: 6px;
+  /* 大区域的圆角：输入区、浮层菜单与面板统一用这一个值。 */
+  --layout-radius: 16px;
   --control-height: 32px;
   --font-body: 13px;
   --font-meta: 12px;
