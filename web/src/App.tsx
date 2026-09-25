@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { api, subscribeNativeEvents } from "./ipc/api";
 import { Wordmark } from "./components/icons";
@@ -27,33 +27,15 @@ export type Page =
   | "settings"
   | "sponsor";
 
-const PAGE_KEY = "sleepy-doll-active-page";
-const PAGES = new Set<Page>([
-  "chat",
-  "tasks",
-  "models",
-  "extensions",
-  "bridge",
-  "settings",
-  "sponsor",
-]);
-
-function restorePage(): Page {
-  const saved = localStorage.getItem(PAGE_KEY) as Page | null;
-  return saved && PAGES.has(saved) ? saved : "chat";
-}
-
 export default function App() {
   const t = useT();
-  const [page, setPage] = useState<Page>(restorePage);
+  // 每次启动都从对话页开始；要记住的是窗口在桌面上的位置与尺寸，由桌面壳负责。
+  const [page, setPage] = useState<Page>("chat");
   const [extensionsTab, setExtensionsTab] = useState<"skills" | "plugins">(
     "skills",
   );
-  const [conversation, setConversation] = useState<string | undefined>(
-    () => localStorage.getItem("sleepy-doll-active-conversation") ?? undefined,
-  );
+  const [conversation, setConversation] = useState<string | undefined>();
   const [bootstrap, setBootstrap] = useState<Bootstrap>();
-  const initialConversationChecked = useRef(false);
   const [detailsOpen, setDetailsOpen] = useState(
     () => localStorage.getItem("sleepy-doll-details-open") === "true",
   );
@@ -74,31 +56,12 @@ export default function App() {
   }, [releaseNotesOpen]);
 
   useEffect(() => {
-    localStorage.setItem(PAGE_KEY, page);
-  }, [page]);
-
-  useEffect(() => {
-    if (conversation)
-      localStorage.setItem("sleepy-doll-active-conversation", conversation);
-    else localStorage.removeItem("sleepy-doll-active-conversation");
-  }, [conversation]);
-
-  useEffect(() => {
     localStorage.setItem("sleepy-doll-details-open", String(detailsOpen));
   }, [detailsOpen]);
 
   const reload = useCallback(async () => {
     try {
-      const next = await api.bootstrap();
-      if (!initialConversationChecked.current) {
-        initialConversationChecked.current = true;
-        setConversation((current) =>
-          current && !next.conversations.some((entry) => entry.id === current)
-            ? undefined
-            : current,
-        );
-      }
-      setBootstrap(next);
+      setBootstrap(await api.bootstrap());
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : readError(reason));
