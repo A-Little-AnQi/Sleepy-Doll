@@ -2,14 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { BrandIcon, HelpIcon, SettingsIcon } from "../icons";
 import { ThemeSwitch } from "../controls/ThemeSwitch";
 import { SettingRow } from "../controls/SettingRow";
-import { Select } from "../controls/Select";
 import { useTheme, writeTheme } from "../../appearance";
-import {
-  LOCALE_OPTIONS,
-  useLocale,
-  writeLocale,
-  type LocaleId,
-} from "../../appearance/locale";
 import { useT } from "../../i18n";
 
 export function SidebarAccount({
@@ -23,7 +16,6 @@ export function SidebarAccount({
   const [present, setPresent] = useState(false);
   const t = useT();
   const theme = useTheme();
-  const locale = useLocale();
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const keyboardOpen = useRef(false);
@@ -53,27 +45,14 @@ export function SidebarAccount({
     const close = (event: MouseEvent) => {
       if (!(event.target instanceof Node)) return;
       if (root.current?.contains(event.target)) return;
-      // 语言下拉挂在 body 上，点选项不能当成点了菜单外面。
-      if (
-        event.target instanceof Element &&
-        event.target.closest("[data-ui='select-menu']")
-      ) {
-        return;
-      }
       setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      // Escape first dismisses the language list, then the account popover.
-      if (
-        root.current?.querySelector('[data-ui="select-root"][data-open="true"]')
-      )
-        return;
       setOpen(false);
       trigger.current?.focus({ preventScroll: true });
     };
     document.addEventListener("mousedown", close);
-    // Inspect the nested list before its target handler closes it.
     document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("mousedown", close);
@@ -88,8 +67,6 @@ export function SidebarAccount({
       onBlur={(event) => {
         const next = event.relatedTarget;
         if (!(next instanceof Node) || event.currentTarget.contains(next))
-          return;
-        if (next instanceof Element && next.closest('[data-ui="select-menu"]'))
           return;
         setOpen(false);
       }}
@@ -137,14 +114,6 @@ export function SidebarAccount({
           <div className="app-account-menu-prefs">
             <SettingRow label={t.settings.theme} compact>
               <ThemeSwitch theme={theme} onChange={writeTheme} />
-            </SettingRow>
-            <SettingRow label={t.settings.language} compact>
-              <Select
-                label={t.settings.language}
-                value={locale}
-                options={LOCALE_OPTIONS}
-                onChange={(value) => writeLocale(value as LocaleId)}
-              />
             </SettingRow>
           </div>
           <div className="app-account-menu-links">

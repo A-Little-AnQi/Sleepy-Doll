@@ -786,15 +786,8 @@ html[data-theme-reveal="true"] .app-group {
 .app-account-menu-prefs .setting-row.is-compact {
   min-height: 34px;
 }
-.app-account-menu .app-theme-switch,
-.app-account-menu [data-ui="select-trigger"] {
-  height: 32px;
-}
-/* 菜单里的两行控件统一成药丸形：圆形开关配同形状的下拉，不做方圆混搭。 */
-.app-account-menu [data-ui="select-trigger"] {
-  border-radius: 999px;
-}
 .app-account-menu .app-theme-switch {
+  height: 32px;
   --theme-knob: 24px;
   --theme-inset: 4px;
 }
