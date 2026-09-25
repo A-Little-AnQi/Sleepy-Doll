@@ -3,7 +3,7 @@
   --sidebar-width: 248px;
   --sidebar-motion: var(--motion-slow) var(--ease-enter);
   --details-width: clamp(280px, 28vw, 336px);
-  --layout-gap: 10px;
+  --layout-gap: 14px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   height: 100%;
@@ -59,9 +59,11 @@
   background: #0005;
 }
 .app-sidebar {
-  /* 停靠与悬浮用同一层固定侧栏加 translateX 定位。侧栏顶到窗口上缘。 */
+  /* 停靠与悬浮用同一层固定侧栏加 translateX 定位。背景顶到窗口上缘，
+     内容仍从标题栏条带下方开始，收起按钮与页首的展开按钮同一高度。 */
   position: fixed;
   inset: 0 auto 0 0;
+  padding-top: var(--title-bar-height);
   z-index: 80;
   width: min(var(--sidebar-user-width), 88vw);
   display: flex;
