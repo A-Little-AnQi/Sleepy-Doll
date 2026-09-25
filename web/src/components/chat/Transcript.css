@@ -29,10 +29,6 @@
 }
 
 .message-actions {
-  position: absolute;
-  top: calc(100% + var(--chat-message-meta-offset));
-  left: 0;
-  z-index: 2;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -50,8 +46,6 @@
 }
 
 .message-actions.is-user {
-  right: 0;
-  left: auto;
   justify-content: flex-end;
 }
 

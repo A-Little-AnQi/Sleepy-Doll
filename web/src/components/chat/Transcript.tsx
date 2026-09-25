@@ -693,7 +693,8 @@ export const Transcript = memo(function Transcript({
                   </div>
                 )}
             </div>
-            {copy || time ? (
+            {/* 运行结束前不出时间和复制；结束后悬停整行都能唤出。 */}
+            {!running && (copy || time) ? (
               <div
                 className={`message-actions${turn.role === "user" ? " is-user" : ""}`}
               >
