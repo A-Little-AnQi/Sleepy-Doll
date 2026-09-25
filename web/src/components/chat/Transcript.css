@@ -214,7 +214,6 @@
   flex: 0 0 auto;
   color: var(--muted);
   opacity: 0;
-  transition: opacity 140ms var(--ease-standard);
 }
 
 .process-disclosure-summary:hover .process-caret,

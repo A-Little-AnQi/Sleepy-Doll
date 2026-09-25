@@ -71,10 +71,6 @@ button:active:not(:disabled),
   animation: menu-enter var(--motion-base) var(--ease-enter) both;
 }
 
-[data-ui="select-trigger"] svg {
-  transition: none;
-}
-
 details > :not(summary) {
   animation: disclosure-enter var(--motion-base) var(--ease-enter) both;
 }

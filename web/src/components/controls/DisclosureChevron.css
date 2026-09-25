@@ -1,10 +1,15 @@
-.sd-chevron {
+/* svg.sd-chevron 的特异性压过单类覆盖（如 .process-caret），
+   旋转与透明度过渡不被整条顶掉。 */
+svg.sd-chevron {
   display: block;
   overflow: visible;
   flex: 0 0 auto;
+  align-self: center;
   color: var(--muted);
   transform: rotate(0deg);
-  transition: transform 160ms var(--ease-standard);
+  transition:
+    transform 220ms var(--ease-standard),
+    opacity 140ms var(--ease-standard);
 }
 
 .sd-chevron path {

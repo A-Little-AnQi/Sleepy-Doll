@@ -347,14 +347,6 @@
   color: var(--secondary);
 }
 /* 对齐文字字面和箭头图形，而不只对齐各自的外框。 */
-.composer-menu [data-ui="select-trigger"] > span {
-  line-height: 16px;
-  transform: translateY(-1px);
-}
-.composer-menu [data-ui="select-trigger"] > .sd-chevron {
-  /* 用 translate 独立属性微调，避免覆盖箭头展开时的 rotate。 */
-  translate: 0 1px;
-}
 .composer-menu [data-ui="select-trigger"]:hover,
 .composer-menu [data-ui="select-trigger"][aria-expanded="true"] {
   background: var(--hover);
