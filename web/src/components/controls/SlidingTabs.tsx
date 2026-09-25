@@ -69,7 +69,7 @@ export function SlidingTabs<T extends string>({
         },
       ],
       {
-        duration: 720,
+        duration: 1080,
         easing: "cubic-bezier(0.22, 1.18, 0.36, 1)",
       },
     );
