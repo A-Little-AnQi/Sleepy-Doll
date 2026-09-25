@@ -963,16 +963,15 @@ impl Supervisor {
                 )
                 .await;
         }
-        if run.prompt_cache_snapshot.is_none() {
-            if let Some((snapshot, discovered)) = self
+        if run.prompt_cache_snapshot.is_none()
+            && let Some((snapshot, discovered)) = self
                 .journal
                 .latest_prompt_cache_seed(&run.conversation_id, &run.id)?
-            {
-                run.prompt_cache_snapshot = Some(snapshot);
-                run.discovered.extend(discovered);
-                run.discovered.sort();
-                run.discovered.dedup();
-            }
+        {
+            run.prompt_cache_snapshot = Some(snapshot);
+            run.discovered.extend(discovered);
+            run.discovered.sort();
+            run.discovered.dedup();
         }
         self.journal.save(run, RunState::Deciding)?;
         let mut exposed: HashSet<String> = run.discovered.iter().cloned().collect();
