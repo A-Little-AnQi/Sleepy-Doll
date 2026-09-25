@@ -60,6 +60,27 @@
   background: var(--hover);
 }
 
+.select-footer {
+  display: block;
+  width: 100%;
+  /* 弹层自身 overflow: auto 会按圆角裁掉子元素，这里不用再倒角。 */
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--secondary);
+  text-align: left;
+  font-size: var(--font-body);
+  cursor: pointer;
+}
+
+.select-footer:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
 .select-option > span {
   display: grid;
   gap: 4px;

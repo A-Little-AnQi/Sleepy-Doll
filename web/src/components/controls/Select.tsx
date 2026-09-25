@@ -16,6 +16,8 @@ interface Props {
   label: string;
   placeholder?: string;
   disabled?: boolean;
+  /** 菜单底部常驻的入口，与选项列表用分隔线隔开。 */
+  footer?: { label: string; onClick(): void } | undefined;
 }
 
 /** 弹层与触发器之间留的空隙。 */
@@ -67,6 +69,7 @@ export function Select({
   label,
   placeholder,
   disabled,
+  footer,
 }: Props) {
   const t = useT();
   const id = useId();
@@ -292,6 +295,20 @@ export function Select({
                 )}
               </div>
             ))}
+            {footer && (
+              <button
+                type="button"
+                className={styles["select-footer"]}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  setOpen(false);
+                  footer.onClick();
+                  trigger.current?.focus();
+                }}
+              >
+                {footer.label}
+              </button>
+            )}
           </div>,
           document.body,
         )}

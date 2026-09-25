@@ -627,6 +627,14 @@ export function ChatPage({
                     label: model.name,
                     description: model.model,
                   }))}
+                  footer={
+                    onOpenModels
+                      ? {
+                          label: t.chat.configureModels,
+                          onClick: () => onOpenModels(),
+                        }
+                      : undefined
+                  }
                   onChange={(id) => {
                     if (!conversationId) {
                       setPendingModel(id);
