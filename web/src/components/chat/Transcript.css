@@ -16,9 +16,16 @@
 
 .message-content {
   display: grid;
-  gap: 12px;
+  gap: 6px;
   min-width: 0;
   width: 100%;
+}
+
+/* 段内与段间用同一个间隙，折叠行到上下文字的间距一致。 */
+.turn-segment {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
 }
 
 .message-actions {
@@ -162,11 +169,7 @@
   width: 100%;
 }
 
-.message-content > .activity-group:not(.process-group) {
-  margin: -5px 0;
-}
-
-.message-content > .activity-group:not(.process-group) .activity-summary {
+.turn-segment > .activity-group:not(.process-group) .activity-summary {
   min-height: 27px;
   font-size: 12px;
 }
@@ -180,7 +183,7 @@
   align-items: center;
   gap: 7px;
   width: 100%;
-  min-height: 32px;
+  min-height: 0;
   padding: 4px 0;
   border: 0;
   background: transparent;
