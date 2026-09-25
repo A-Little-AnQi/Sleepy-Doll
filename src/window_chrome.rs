@@ -41,7 +41,7 @@ pub fn install(_window: &Window) {}
 pub fn perform(_window: &Window, _action: Action) {}
 
 #[cfg(not(target_os = "windows"))]
-pub fn set_drag_strip(_height: f64, _left: f64, _controls_width: f64, _can_maximize: bool) {}
+pub fn set_drag_strip(_height: f64, _controls_width: f64, _can_maximize: bool) {}
 
 #[cfg(not(target_os = "windows"))]
 pub fn begin_system_drag(_hwnd: isize) {}
@@ -92,8 +92,6 @@ mod platform {
     /// 自绘标题栏的可拖动条带，由界面在挂载后经 `set_drag_strip` 上报，单位是 CSS 像素。
     /// 高度为 0 表示还没有上报（页面刚启动），此时拖动退回界面发起的 `Action::Drag`。
     static STRIP_HEIGHT: AtomicU32 = AtomicU32::new(0);
-    /// 条带让出的左侧宽度：侧栏顶到窗口上缘，这一条不归标题栏。
-    static STRIP_LEFT: AtomicU32 = AtomicU32::new(0);
     /// 标题栏右侧控制按钮组的宽度，条带要让出这段区域。
     static CONTROLS_WIDTH: AtomicU32 = AtomicU32::new(0);
     /// 上报条带时声明的最大化能力。
@@ -135,10 +133,9 @@ mod platform {
 
     /// 界面挂载标题栏后上报可拖动条带的几何信息（CSS 像素）。上报之后条带区域
     /// 由原生命中测试答 HTCAPTION。
-    pub fn set_drag_strip(height: f64, left: f64, controls_width: f64, can_maximize: bool) {
-        if height >= 0.0 && left >= 0.0 && controls_width >= 0.0 {
+    pub fn set_drag_strip(height: f64, controls_width: f64, can_maximize: bool) {
+        if height >= 0.0 && controls_width >= 0.0 {
             STRIP_HEIGHT.store(height as u32, Ordering::Relaxed);
-            STRIP_LEFT.store(left as u32, Ordering::Relaxed);
             CONTROLS_WIDTH.store(controls_width as u32, Ordering::Relaxed);
             CAN_MAXIMIZE.store(can_maximize, Ordering::Relaxed);
         }
@@ -282,11 +279,9 @@ mod platform {
         let strip_height = strip as f64 * scale;
         let y = (y - rect.top) as f64;
         if (0.0..strip_height).contains(&y) {
-            let left = STRIP_LEFT.load(Ordering::Relaxed) as f64 * scale;
             let controls = CONTROLS_WIDTH.load(Ordering::Relaxed) as f64 * scale;
             let limit = (rect.right - rect.left) as f64 - controls;
-            let x = (x - rect.left) as f64;
-            x >= left && x < limit
+            (x as f64 - rect.left as f64) < limit
         } else {
             false
         }

@@ -227,10 +227,8 @@ fn dispatch_ipc(request: Request<String>, proxy: EventLoopProxy<UserEvent>, hwnd
             return;
         }
         "window.setDragStrip" => {
-            // 安装器没有侧栏，条带从窗口左缘开始。
             window_chrome::set_drag_strip(
                 request.params["height"].as_f64().unwrap_or(0.0),
-                request.params["left"].as_f64().unwrap_or(0.0),
                 request.params["controls"].as_f64().unwrap_or(0.0),
                 request.params["maximize"].as_bool().unwrap_or(false),
             );

@@ -721,9 +721,7 @@ export function AppShell({
 
   return (
     <>
-      {framelessWindow() && (
-        <TitleBar left={docked ? sidebarWidth : 0} />
-      )}
+      {framelessWindow() && <TitleBar />}
       <div
         className="app-shell"
         data-collapsed={!docked}
