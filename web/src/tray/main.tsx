@@ -25,7 +25,6 @@ declare global {
     __TRAY_STATE__?: TrayState;
     updateMenu?: (state: TrayState) => void;
     showMenu?: (state: TrayState) => void;
-    enterMenu?: () => void;
   }
 }
 
@@ -50,20 +49,13 @@ function TrayMenu() {
       update(next);
       if (document.activeElement instanceof HTMLElement)
         document.activeElement.blur();
-      send("shown");
-    };
-    window.enterMenu = () => {
-      if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
-        menu.current?.animate([{ opacity: 0.7 }, { opacity: 1 }], {
-          duration: 130,
-          easing: "ease-out",
-        });
+      // 过两帧再让宿主收尾：首帧提交样式与布局，第二帧确认合成。
+      requestAnimationFrame(() => requestAnimationFrame(() => send("shown")));
     };
     send("ready");
     return () => {
       delete window.updateMenu;
       delete window.showMenu;
-      delete window.enterMenu;
     };
   }, []);
   return (

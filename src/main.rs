@@ -22,7 +22,7 @@ use sleepy_doll::{app::AppController, logging, runtime::types::Event as AgentEve
 use tao::platform::windows::{IconExtWindows, WindowBuilderExtWindows};
 use tao::{
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize, Position, Size},
-    event::{Event, WindowEvent},
+    event::{Event, StartCause, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
     window::{Window, WindowBuilder},
 };
@@ -341,7 +341,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "windows")]
     let mut tray_popup: Option<tray_popup::TrayPopup> = None;
     #[cfg(target_os = "windows")]
-    let mut tray_menu_state = json!({"dark":false,"active":false,"bridge":bridge_enabled.load(Ordering::Relaxed),"bridgeBusy":false});
+    // 上次会话的主题落在用户目录，托盘面板预热不依赖前端回传的时序。
+    let tray_theme_path = user_directory.join("tray-theme.txt");
+    #[cfg(target_os = "windows")]
+    let mut tray_menu_state = json!({
+        "dark": std::fs::read_to_string(&tray_theme_path)
+            .map(|text| text.trim() == "dark")
+            .unwrap_or(false),
+        "active": false,
+        "bridge": bridge_enabled.load(Ordering::Relaxed),
+        "bridgeBusy": false,
+    });
 
     event_loop.run(move |event, event_target, control_flow| {
         #[cfg(target_os = "windows")]
@@ -369,6 +379,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(popup) = tray_popup.as_mut() {
                     popup.hide();
                 }
+            }
+            #[cfg(target_os = "windows")]
+            Event::NewEvents(StartCause::Init) => {
+                // 预热托盘 WebView：页面按持久化主题在启动时渲染好，
+                // 首次右键不等 WebView2 冷启动，宿主擦除层也是主题色，不闪白。
+                if tray_popup.is_none()
+                    && let Err(error) = tray_popup::TrayPopup::new(
+                        event_target,
+                        proxy.clone(),
+                        &user_directory,
+                        tray_menu_state.clone(),
+                    )
+                {
+                    log::warn!("托盘面板预热失败，将在首次使用时重试：{error}");
+                }
+                tray_popup::install_outside_click_hook(proxy.clone());
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::ShowTrayMenu(x, y)) => {
@@ -402,6 +428,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::TrayTheme(dark)) => {
                 tray_menu_state["dark"] = json!(dark);
+                // 持久化给下次启动的托盘预热用，绕开前端回传的时序。
+                let _ = std::fs::write(&tray_theme_path, if dark { "dark" } else { "light" });
+                // 托盘面板不在了就重建：主题切换也可能发生在关闭托盘面板之后。
+                if tray_popup.is_none()
+                    && let Err(error) = tray_popup::TrayPopup::new(
+                        event_target,
+                        proxy.clone(),
+                        &user_directory,
+                        tray_menu_state.clone(),
+                    )
+                {
+                    log::warn!("托盘面板预热失败，将在首次使用时重试：{error}");
+                }
                 refresh_tray_menu = true;
             }
             #[cfg(target_os = "windows")]
@@ -657,10 +696,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if refresh_tray_menu && let Some(popup) = tray_popup.as_mut() {
             popup.update(tray_menu_state.clone());
         }
-        if !matches!(*control_flow, ControlFlow::Exit) {
-            if let Some(deadline) = placement_deadline {
-                *control_flow = ControlFlow::WaitUntil(deadline);
-            }
+        if !matches!(*control_flow, ControlFlow::Exit)
+            && let Some(deadline) = placement_deadline
+        {
+            *control_flow = ControlFlow::WaitUntil(deadline);
         }
     });
 }
