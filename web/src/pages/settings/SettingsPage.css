@@ -1,5 +1,10 @@
 .settings-layout {
   --settings-gutter-pair: clamp(48px, 6vw, 88px);
+  /* 设置页的正文比全局大一档半：正文 15、说明 14、标签 13。 */
+  --font-body: 15px;
+  --font-meta: 14px;
+  --font-label: 13px;
+  --setting-control-width: 140px;
   display: flex;
   flex-direction: column;
   width: 100%;
