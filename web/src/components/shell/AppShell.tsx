@@ -554,7 +554,16 @@ export function AppShell({
       onPointerEnter={!docked ? showPeek : undefined}
       onPointerLeave={!docked ? hidePeek : undefined}
     >
-      <div className="app-brand">
+      {/* 品牌行占着窗口顶部条带的位置，空白处按住即可拖动窗口。 */}
+      <div
+        className="app-brand"
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          if (event.target instanceof Element && event.target.closest("button"))
+            return;
+          void api.windowDrag();
+        }}
+      >
         <Wordmark />
         <button
           className="icon-button"
@@ -712,6 +721,9 @@ export function AppShell({
 
   return (
     <>
+      {framelessWindow() && (
+        <TitleBar left={docked ? sidebarWidth : 0} />
+      )}
       <div
         className="app-shell"
         data-collapsed={!docked}
@@ -725,9 +737,6 @@ export function AppShell({
           } as CSSProperties
         }
       >
-        {framelessWindow() && (
-          <TitleBar left={docked ? sidebarWidth : 0} />
-        )}
         {!docked && (
           <div
             className="app-sidebar-peek"
@@ -748,26 +757,27 @@ export function AppShell({
           {showHeader ? (
             <header className="app-header">
               <div className="app-header-title">
-                {collapsed && (
-                  <>
-                    <button
-                      className="icon-button"
-                      title={t.nav.expandSidebar}
-                      aria-label={t.nav.expandSidebar}
-                      onClick={pinSidebar}
-                    >
-                      <SidebarIcon className="button-icon" />
-                    </button>
-                    <button
-                      className="icon-button"
-                      title={t.nav.newChat}
-                      aria-label={t.nav.newChat}
-                      onClick={() => startNew(null)}
-                    >
-                      <PlusIcon className="button-icon" />
-                    </button>
-                  </>
-                )}
+                {/* 常驻并随侧栏滑动渐现，按钮增减不再跳。 */}
+                <div className="app-header-fold" data-collapsed={collapsed}>
+                  <button
+                    className="icon-button"
+                    title={t.nav.expandSidebar}
+                    aria-label={t.nav.expandSidebar}
+                    tabIndex={collapsed ? 0 : -1}
+                    onClick={pinSidebar}
+                  >
+                    <SidebarIcon className="button-icon" />
+                  </button>
+                  <button
+                    className="icon-button"
+                    title={t.nav.newChat}
+                    aria-label={t.nav.newChat}
+                    tabIndex={collapsed ? 0 : -1}
+                    onClick={() => startNew(null)}
+                  >
+                    <PlusIcon className="button-icon" />
+                  </button>
+                </div>
                 {page === "chat" ? (
                   <h1>{conversation?.title ?? t.nav.newConversation}</h1>
                 ) : null}

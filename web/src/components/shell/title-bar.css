@@ -7,18 +7,18 @@
 .title-bar {
   position: fixed;
   top: 0;
-  /* 侧栏顶到窗口上缘：条带从侧栏右缘开始，融进界面，不画底色和下边线。 */
+  /* 侧栏顶到窗口上缘：条带从侧栏右缘开始（left 由组件内联给出），
+     融进界面，不画底色和下边线。 */
   right: 0;
-  left: var(--sidebar-width, 0px);
   z-index: 300;
-  width: auto;
   height: var(--title-bar-height);
   display: flex;
   align-items: center;
   justify-content: flex-end;
   /* 窗口控制贴物理右缘，不随界面语言方向翻转。 */
   direction: ltr;
-  transition: left var(--sidebar-motion);
+  /* 与侧栏同拍的让位动画；这里取不到 .app-shell 上的变量。 */
+  transition: left 320ms var(--ease-enter);
   /* 裁掉按钮悬停底色的方角。 */
   overflow: hidden;
   user-select: none;

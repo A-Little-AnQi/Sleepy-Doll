@@ -87,6 +87,7 @@ export function TitleBar({
     <div
       ref={barRef}
       className="title-bar"
+      style={{ left }}
       onPointerDown={onDragPointerDown}
       onDoubleClick={onDragDoubleClick}
     >

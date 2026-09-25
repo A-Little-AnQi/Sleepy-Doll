@@ -572,6 +572,21 @@
   gap: 12px;
   min-width: 0;
 }
+/* 折叠时页首补的两个按钮：常驻并随侧栏同拍展开，不再瞬间弹出。 */
+.app-header-fold {
+  display: flex;
+  gap: 4px;
+  overflow: hidden;
+  max-width: 0;
+  opacity: 0;
+  transition:
+    max-width 320ms var(--ease-enter),
+    opacity 240ms var(--ease-standard);
+}
+.app-header-fold[data-collapsed="true"] {
+  max-width: 72px;
+  opacity: 1;
+}
 .app-header h1 {
   font-size: var(--font-body);
   font-weight: 550;
