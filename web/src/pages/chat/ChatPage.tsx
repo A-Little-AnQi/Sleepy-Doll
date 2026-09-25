@@ -454,31 +454,13 @@ export function ChatPage({
                     )}
                   </section>
                 )}
+                {/* 已停止与待核对不再单开一栏，标注行由对话记录给出。 */}
                 {task &&
                   !busy &&
-                  [
-                    "failed",
-                    "cancelled",
-                    "partial",
-                    "blocked",
-                    "needsReview",
-                  ].includes(task.state) && (
-                    <section
-                      className={
-                        ["cancelled", "needsReview"].includes(task.state)
-                          ? "run-stopped"
-                          : "run-error"
-                      }
-                      role="status"
-                    >
+                  ["failed", "partial", "blocked"].includes(task.state) && (
+                    <section className="run-error" role="status">
                       <h3>{taskLabels[task.state]}</h3>
-                      <p>
-                        {task.state === "cancelled"
-                          ? "可以继续发送消息。"
-                          : task.state === "needsReview"
-                            ? `${task.error || task.result || "运行已结束。"}可以继续发送消息。`
-                            : task.error || task.result}
-                      </p>
+                      <p>{task.error || task.result}</p>
                       {task.state === "blocked" && (
                         <div className="detail-actions">
                           <button

@@ -101,6 +101,14 @@
   color: var(--muted);
 }
 
+.turn-stopped-note {
+  height: var(--chat-message-meta-height);
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
 .copy-action-icon {
   width: 15px;
   height: 15px;

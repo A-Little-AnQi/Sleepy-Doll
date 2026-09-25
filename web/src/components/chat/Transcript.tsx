@@ -646,6 +646,12 @@ export const Transcript = memo(function Transcript({
                   </div>
                 )}
             </div>
+            {turn.role === "assistant" &&
+              !running &&
+              isRunLast[index] &&
+              ["cancelled", "needsReview"].includes(task?.state ?? "") && (
+                <div className="turn-stopped-note">已停止</div>
+              )}
             {/* 运行结束前不出时间和复制；结束后悬停整行都能唤出。 */}
             {!running && (copy || time) ? (
               <div

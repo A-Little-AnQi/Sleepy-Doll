@@ -361,27 +361,6 @@
   color: var(--text);
   border-color: transparent;
 }
-.run-stopped {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 10px;
-  padding: 10px 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.run-stopped h3,
-.run-stopped p {
-  margin: 0;
-  font-size: inherit;
-  line-height: 1.6;
-}
-
-.run-stopped h3 {
-  font-weight: 500;
-  color: var(--secondary);
-}
 
 .send-action[data-stopping="true"] {
   cursor: wait;
