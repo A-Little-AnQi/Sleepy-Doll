@@ -304,23 +304,7 @@ function ProcessDisclosure({
       >
         <span className="process-disclosure-label">{label}</span>
         {elapsed && <time>{elapsed}</time>}
-        <svg
-          className="process-caret"
-          viewBox="0 0 16 16"
-          width="14"
-          height="14"
-          fill="none"
-          aria-hidden="true"
-          data-expanded={expanded ? "true" : "false"}
-        >
-          <path
-            d="M6 4 L10.6 8 L6 12"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        <DisclosureChevron expanded={expanded} className="process-caret" />
       </button>
       <div
         className="activity-disclosure-motion"
@@ -333,47 +317,27 @@ function ProcessDisclosure({
   );
 }
 
-/** 只折叠模型的内部思考；说明文字与工具记录按发生顺序显示。 */
+/** 思考状态行：只报进度，思考原文不进界面。 */
 function ProcessGroup({
   steps,
   running,
   stopping,
-  children,
 }: {
   steps: number;
   running: boolean;
   stopping: boolean;
-  children: ReactNode;
 }) {
   const t = useT();
-  const [expanded, setExpanded] = useState(false);
   return (
-    <section className="activity-group process-group" data-expanded={expanded}>
-      <button
-        type="button"
-        className="activity-summary"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((open) => !open)}
-      >
-        <span className="activity-label">
-          {stopping
-            ? "正在停止"
-            : running
-              ? t.transcript.thinkingRunning
-              : steps > 0
-                ? t.transcript.thinkingSteps(steps)
-                : t.transcript.thinking}
-        </span>
-        <DisclosureChevron expanded={expanded} className="activity-expand" />
-      </button>
-      <div
-        className="activity-disclosure-motion"
-        aria-hidden={!expanded}
-        inert={!expanded}
-      >
-        <div className="activity-disclosure-inner">{children}</div>
-      </div>
-    </section>
+    <div className="process-status" role="status">
+      {stopping
+        ? "正在停止"
+        : running
+          ? t.transcript.thinkingRunning
+          : steps > 0
+            ? t.transcript.thinkingSteps(steps)
+            : t.transcript.thinking}
+    </div>
   );
 }
 
@@ -551,18 +515,18 @@ export const Transcript = memo(function Transcript({
         type ProcessBlock = Exclude<Block, { kind: "commentary" }>;
         const blockDone = (block: ProcessBlock) =>
           block.kind !== "tool" || outcome(block.activity) !== "running";
-        // 折叠行显示这段实际做的事：思考与工具名去重拼接，不放笼统的阶段词。
+        // 折叠行只列这段实际调用的工具；思考原文不进界面。
         const segmentLabel = (process: ProcessBlock[]) => {
           const names: string[] = [];
           for (const block of process) {
-            const name =
-              block.kind === "reasoning"
-                ? t.transcript.thinking
-                : (toolLabels[block.activity.name] ?? block.activity.name);
+            if (block.kind !== "tool") continue;
+            const name = toolLabels[block.activity.name] ?? block.activity.name;
             if (!names.includes(name)) names.push(name);
           }
           const label = names.slice(0, 3).join(" · ");
-          return process.length > 3 ? `${label} …` : label;
+          return process.filter((block) => block.kind === "tool").length > 3
+            ? `${label} …`
+            : label;
         };
         // 说明文字常驻时间线，并把过程按它分段：两次说明之间的思考与工具
         // 收成一行，运行中正在进行的那几条留在行外。
@@ -579,18 +543,14 @@ export const Transcript = memo(function Transcript({
         }
         segments.push(current);
         const lastSegment = segments.at(-1);
-        const renderBlock = (block: ProcessBlock, blockIndex: number) =>
+        const renderBlock = (block: ProcessBlock) =>
           block.kind === "reasoning" ? (
             <ProcessGroup
-              key={`reasoning-${blockIndex}`}
+              key="thinking"
               steps={1}
               running={turnActive}
               stopping={turnActive && phase === "正在停止"}
-            >
-              <div className="reasoning-entry">
-                <pre className="reasoning-text">{block.text}</pre>
-              </div>
-            </ProcessGroup>
+            />
           ) : (
             <ActivityGroup
               key={block.activity.id}
@@ -612,14 +572,16 @@ export const Transcript = memo(function Transcript({
                 const visibleBlocks = live
                   ? segment.process.filter((block) => !blockDone(block))
                   : [];
-                const archivedBlocks = live
+                // 折叠行只收工具调用；思考不占界面。
+                const archivedBlocks = (live
                   ? segment.process.filter((block) => blockDone(block))
-                  : segment.process;
+                  : segment.process
+                ).filter((block) => block.kind === "tool");
                 const elapsed =
                   !turnActive &&
                   isLast &&
                   isRunLast[index] &&
-                  segment.process.length > 0
+                  archivedBlocks.length > 0
                     ? elapsedLabel(turn, task, t)
                     : undefined;
                 return (
@@ -644,23 +606,14 @@ export const Transcript = memo(function Transcript({
                         label={segmentLabel(archivedBlocks)}
                         elapsed={elapsed}
                       >
-                        {archivedBlocks.map((block, blockIndex) =>
-                          block.kind === "reasoning" ? (
-                            <div
-                              className="reasoning-entry"
-                              key={`reasoning-${blockIndex}`}
-                            >
-                              <pre className="reasoning-text">{block.text}</pre>
-                            </div>
-                          ) : (
-                            <ActivityGroup
-                              key={block.activity.id}
-                              activities={[block.activity]}
-                              labels={toolLabels}
-                              active={false}
-                            />
-                          ),
-                        )}
+                        {archivedBlocks.map((block) => (
+                          <ActivityGroup
+                            key={block.activity.id}
+                            activities={[block.activity]}
+                            labels={toolLabels}
+                            active={false}
+                          />
+                        ))}
                       </ProcessDisclosure>
                     )}
                   </div>

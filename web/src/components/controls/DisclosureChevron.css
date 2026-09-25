@@ -3,89 +3,28 @@
   overflow: visible;
   flex: 0 0 auto;
   color: var(--muted);
+  transform: rotate(0deg);
+  transition: transform 160ms var(--ease-standard);
 }
 
-.sd-chevron-stroke {
+.sd-chevron path {
   stroke: currentColor;
-  stroke-width: 2.2;
+  stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
   fill: none;
-  transform-box: view-box;
 }
 
-.sd-chevron-joined {
-  transform-origin: 10px 8.925px;
+.sd-chevron[data-expanded="true"] {
+  transform: rotate(90deg);
 }
 
-.sd-chevron[data-expanded="true"] .sd-chevron-joined {
-  transform: rotate(180deg);
-}
-
-.sd-chevron-motion {
-  opacity: 0;
-}
-
-.sd-chevron[data-motion] .sd-chevron-joined {
-  opacity: 0;
-}
-
-.sd-chevron[data-motion] .sd-chevron-motion {
-  opacity: 1;
-}
-
-.sd-chevron[data-motion="opening"] .sd-chevron-left {
-  animation: sd-chevron-open-left 160ms cubic-bezier(0.4, 0, 0.2, 1) both;
-}
-.sd-chevron[data-motion="opening"] .sd-chevron-right {
-  animation: sd-chevron-open-right 160ms cubic-bezier(0.4, 0, 0.2, 1) both;
-}
-.sd-chevron[data-motion="closing"] .sd-chevron-left {
-  animation: sd-chevron-close-left 160ms cubic-bezier(0.4, 0, 0.2, 1) both;
-}
-.sd-chevron[data-motion="closing"] .sd-chevron-right {
-  animation: sd-chevron-close-right 160ms cubic-bezier(0.4, 0, 0.2, 1) both;
-}
-
-:root[data-reduced-motion="true"] .sd-chevron-motion {
-  animation: none !important;
+:root[data-reduced-motion="true"] .sd-chevron {
+  transition: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sd-chevron-motion {
-    animation: none !important;
-  }
-}
-
-@keyframes sd-chevron-open-left {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(5.2px);
-  }
-}
-@keyframes sd-chevron-open-right {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(-5.2px);
-  }
-}
-@keyframes sd-chevron-close-left {
-  from {
-    transform: translateX(5.2px);
-  }
-  to {
-    transform: translateX(0);
-  }
-}
-@keyframes sd-chevron-close-right {
-  from {
-    transform: translateX(-5.2px);
-  }
-  to {
-    transform: translateX(0);
+  .sd-chevron {
+    transition: none;
   }
 }

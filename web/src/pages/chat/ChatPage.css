@@ -352,7 +352,8 @@
   transform: translateY(-1px);
 }
 .composer-menu [data-ui="select-trigger"] > .sd-chevron {
-  transform: translateY(1px);
+  /* 用 translate 独立属性微调，避免覆盖箭头展开时的 rotate。 */
+  translate: 0 1px;
 }
 .composer-menu [data-ui="select-trigger"]:hover,
 .composer-menu [data-ui="select-trigger"][aria-expanded="true"] {
