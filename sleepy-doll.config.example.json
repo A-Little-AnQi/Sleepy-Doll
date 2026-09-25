@@ -35,7 +35,7 @@
     "maxTools": 0,
     "maxReplans": 2,
     "durationSec": 1800,
-    "permissionMode": "standard",
+    "permissionMode": "askEach",
     "grants": [],
     "trustGrants": []
   },

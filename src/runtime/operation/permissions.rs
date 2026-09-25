@@ -5,17 +5,16 @@ use crate::{
     extension::{RiskLevel, ToolEffect, UnattendedPolicy},
 };
 
-/// 审批级别：运行时据此决定写入是否需要询问。默认 `Standard`。
+/// 审批级别：运行时据此决定写入是否需要询问。默认 `AskEach`。
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum PermissionMode {
     /// 只读：任何写入都拒绝。
     PlanOnly,
     /// 每次写入都问。
-    AskEach,
-    /// 按实际影响判定；删除与大范围变更需要确认。
     #[default]
-    Standard,
+    #[serde(alias = "standard")]
+    AskEach,
     /// 完全控制：一律直接执行，不再询问。
     FullAccess,
     /// 旧值：按资源授权范围放行。
@@ -33,11 +32,6 @@ impl PermissionMode {
             ),
             (PermissionMode::AskEach, "请求审批", "每次修改前都问你一次"),
             (
-                PermissionMode::Standard,
-                "替我审批",
-                "普通修改直接执行；删除文件和大幅改配置才问你一次",
-            ),
-            (
                 PermissionMode::FullAccess,
                 "完全控制",
                 "一律直接执行，不再询问。删除和大范围覆盖也直接做",
@@ -49,7 +43,7 @@ impl PermissionMode {
             .iter()
             .find(|(mode, _, _)| *mode == self)
             .map(|(_, label, _)| *label)
-            .unwrap_or("替我审批")
+            .unwrap_or("请求审批")
     }
     pub fn description(self) -> &'static str {
         Self::levels()
@@ -211,17 +205,6 @@ impl PermissionEngine {
         }
         if mode == PermissionMode::AskEach {
             return PermissionDecision::Ask;
-        }
-        // 标准模式：普通写入直接执行。
-        if mode == PermissionMode::Standard {
-            // 未声明效果的工具需要一次确认。
-            if request.effect == ToolEffect::Unknown {
-                return PermissionDecision::Ask;
-            }
-            return match request.scope {
-                Some(scope) if scope.is_large() => PermissionDecision::Ask,
-                _ => PermissionDecision::Allow,
-            };
         }
         if request.resource_ids.is_empty() && request.resource_kinds.is_empty() {
             return PermissionDecision::Ask;

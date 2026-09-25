@@ -295,9 +295,9 @@ export interface PermissionState {
 
 /** bootstrap 缺 permission 字段时垫一层，文案与 `PermissionMode::levels` 对齐。 */
 export const PREVIEW_PERMISSION: PermissionState = {
-  mode: "standard",
-  label: "替我审批",
-  description: "普通修改直接执行；删除文件和大幅改配置才问你一次",
+  mode: "askEach",
+  label: "请求审批",
+  description: "每次修改前都问你一次",
   levels: [
     {
       value: "planOnly",
@@ -308,11 +308,6 @@ export const PREVIEW_PERMISSION: PermissionState = {
       value: "askEach",
       label: "请求审批",
       description: "每次修改前都问你一次",
-    },
-    {
-      value: "standard",
-      label: "替我审批",
-      description: "普通修改直接执行；删除文件和大幅改配置才问你一次",
     },
     {
       value: "fullAccess",
