@@ -259,38 +259,41 @@ function ActivityDetailDisclosure({
   );
 }
 
-/** 完成后将过程收为一行，回复正文单独留在下方。 */
-function ProcessDisclosure({
-  turn,
-  task,
-  children,
-}: {
-  turn: Turn;
-  task?: TaskInfo | undefined;
-  children: ReactNode;
-}) {
-  const t = useT();
-  const [expanded, setExpanded] = useState(false);
+/** 运行总用时。task 缺席时退回轮次首尾消息的间隔。 */
+function elapsedLabel(
+  turn: Turn,
+  task: TaskInfo | undefined,
+  t: ReturnType<typeof useT>,
+): string | undefined {
   const started = new Date(task?.createdAt ?? turn.createdAt ?? "").getTime();
   const finished = new Date(task?.updatedAt ?? turn.lastAt ?? "").getTime();
-  const elapsed =
-    Number.isFinite(started) && Number.isFinite(finished)
-      ? Math.max(0, Math.round((finished - started) / 1000))
-      : 0;
+  if (!Number.isFinite(started) || !Number.isFinite(finished)) return undefined;
+  const elapsed = Math.max(0, Math.round((finished - started) / 1000));
+  if (elapsed <= 0) return undefined;
   const minutes = Math.floor(elapsed / 60);
   const seconds = elapsed % 60;
-  const label =
-    elapsed <= 0
-      ? t.transcript.turnProcess
-      : elapsed < 60
-        ? t.transcript.turnElapsedS(elapsed)
-        : elapsed >= 3600
-          ? t.transcript.turnElapsedHms(
-              Math.floor(elapsed / 3600),
-              Math.floor(minutes % 60),
-              seconds,
-            )
-          : t.transcript.turnElapsedM(minutes, seconds);
+  return elapsed < 60
+    ? t.transcript.turnElapsedS(elapsed)
+    : elapsed >= 3600
+      ? t.transcript.turnElapsedHms(
+          Math.floor(elapsed / 3600),
+          Math.floor(minutes % 60),
+          seconds,
+        )
+      : t.transcript.turnElapsedM(minutes, seconds);
+}
+
+/** 轮次结束后把思考与工具调用收进一行；说明文字与回复正文留在时间线上。 */
+function ProcessDisclosure({
+  label,
+  elapsed,
+  children,
+}: {
+  label: string;
+  elapsed?: string | undefined;
+  children: ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(false);
   return (
     <section className="process-disclosure" data-expanded={expanded}>
       <button
@@ -299,25 +302,32 @@ function ProcessDisclosure({
         aria-expanded={expanded}
         onClick={() => setExpanded((open) => !open)}
       >
-        <time
-          title={
-            Number.isFinite(finished)
-              ? new Date(finished).toLocaleString()
-              : undefined
-          }
+        <span className="process-disclosure-label">{label}</span>
+        {elapsed && <time>{elapsed}</time>}
+        <svg
+          className="process-caret"
+          viewBox="0 0 16 16"
+          width="14"
+          height="14"
+          fill="none"
+          aria-hidden="true"
+          data-expanded={expanded ? "true" : "false"}
         >
-          {label}
-        </time>
-        <DisclosureChevron expanded={expanded} />
+          <path
+            d="M6 4 L10.6 8 L6 12"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
       </button>
       <div
         className="activity-disclosure-motion"
         aria-hidden={!expanded}
         inert={!expanded}
       >
-        <div className="activity-disclosure-inner process-disclosure-inner">
-          {children}
-        </div>
+        <div className="activity-disclosure-inner">{children}</div>
       </div>
     </section>
   );
@@ -484,7 +494,17 @@ export const Transcript = memo(function Transcript({
   currentTask?: TaskInfo | undefined;
   running?: boolean;
 }) {
+  const t = useT();
   const turns = buildTurns(messages, stream);
+  // 每个运行只在它的最后一轮收尾处显示一次总用时。
+  const isRunLast = turns.map(() => false);
+  const seenRuns = new Set<string>();
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const runId = turns[i]!.runId;
+    if (!runId || seenRuns.has(runId)) continue;
+    seenRuns.add(runId);
+    isRunLast[i] = true;
+  }
   const last = turns.at(-1);
   return (
     <>
@@ -493,7 +513,7 @@ export const Transcript = memo(function Transcript({
         const time = formatMessageTime(turn.createdAt);
         const turnActive =
           turn.role === "assistant" && index === turns.length - 1 && running;
-        // 说明文字与每次工具调用直接进入时间线，最后一段文字作为最终回答。
+        // 说明文字常驻时间线；思考与工具默认收进「过程」一行，运行中的那几条留在行外。
         type TextPart = Extract<Part, { kind: "text" | "stream" }>;
         const terminalPart = turn.parts.at(-1);
         const finalTextIndex =
@@ -525,8 +545,41 @@ export const Transcript = memo(function Transcript({
         const hasProcess = blocks.length > 0;
         const finalText =
           finalTextIndex >= 0 ? turn.parts[finalTextIndex] : undefined;
-        // 只随「这一轮是否还在推进」变化；跟单条工具结果走会来回抖。
-        const process = blocks.map((block, blockIndex) =>
+        const task =
+          tasks.find((task) => task.id === turn.runId) ??
+          (currentTask?.id === turn.runId ? currentTask : undefined);
+        type ProcessBlock = Exclude<Block, { kind: "commentary" }>;
+        const blockDone = (block: ProcessBlock) =>
+          block.kind !== "tool" || outcome(block.activity) !== "running";
+        // 折叠行显示这段实际做的事：思考与工具名去重拼接，不放笼统的阶段词。
+        const segmentLabel = (process: ProcessBlock[]) => {
+          const names: string[] = [];
+          for (const block of process) {
+            const name =
+              block.kind === "reasoning"
+                ? t.transcript.thinking
+                : (toolLabels[block.activity.name] ?? block.activity.name);
+            if (!names.includes(name)) names.push(name);
+          }
+          const label = names.slice(0, 3).join(" · ");
+          return process.length > 3 ? `${label} …` : label;
+        };
+        // 说明文字常驻时间线，并把过程按它分段：两次说明之间的思考与工具
+        // 收成一行，运行中正在进行的那几条留在行外。
+        type Segment = { commentary?: Block; process: ProcessBlock[] };
+        const segments: Segment[] = [];
+        let current: Segment = { process: [] };
+        for (const block of blocks) {
+          if (block.kind === "commentary") {
+            segments.push(current);
+            current = { commentary: block, process: [] };
+          } else {
+            current.process.push(block);
+          }
+        }
+        segments.push(current);
+        const lastSegment = segments.at(-1);
+        const renderBlock = (block: ProcessBlock, blockIndex: number) =>
           block.kind === "reasoning" ? (
             <ProcessGroup
               key={`reasoning-${blockIndex}`}
@@ -538,41 +591,81 @@ export const Transcript = memo(function Transcript({
                 <pre className="reasoning-text">{block.text}</pre>
               </div>
             </ProcessGroup>
-          ) : block.kind === "tool" ? (
+          ) : (
             <ActivityGroup
               key={block.activity.id}
               activities={[block.activity]}
               labels={toolLabels}
               active={turnActive}
             />
-          ) : (
-            <div
-              className={`assistant-message${block.parts.some((part) => part.kind === "stream") ? " is-streaming" : ""}`}
-              key={blockIndex}
-            >
-              <MarkdownText
-                text={block.parts.map((part) => part.text).join("\n\n")}
-                streaming={block.parts.some((part) => part.kind === "stream")}
-              />
-            </div>
-          ),
-        );
+          );
         return (
           <article key={index} className={`message-turn ${turn.role}`}>
             <div className="message-content">
-              {hasProcess && !turnActive ? (
-                <ProcessDisclosure
-                  turn={turn}
-                  task={
-                    tasks.find((task) => task.id === turn.runId) ??
-                    (currentTask?.id === turn.runId ? currentTask : undefined)
-                  }
-                >
-                  {process}
-                </ProcessDisclosure>
-              ) : (
-                process
-              )}
+              {segments.map((segment, segmentIndex) => {
+                const isLast = segment === lastSegment;
+                // 运行中：最后一段里未完成的块（以及正在思考）保持平铺。
+                const live =
+                  turnActive &&
+                  isLast &&
+                  segment.process.some((block) => !blockDone(block));
+                const visibleBlocks = live
+                  ? segment.process.filter((block) => !blockDone(block))
+                  : [];
+                const archivedBlocks = live
+                  ? segment.process.filter((block) => blockDone(block))
+                  : segment.process;
+                const elapsed =
+                  !turnActive &&
+                  isLast &&
+                  isRunLast[index] &&
+                  segment.process.length > 0
+                    ? elapsedLabel(turn, task, t)
+                    : undefined;
+                return (
+                  <div key={segmentIndex} className="turn-segment">
+                    {segment.commentary?.kind === "commentary" && (
+                      <div
+                        className={`assistant-message${segment.commentary.parts.some((part) => part.kind === "stream") ? " is-streaming" : ""}`}
+                      >
+                        <MarkdownText
+                          text={segment.commentary.parts
+                            .map((part) => part.text)
+                            .join("\n\n")}
+                          streaming={segment.commentary.parts.some(
+                            (part) => part.kind === "stream",
+                          )}
+                        />
+                      </div>
+                    )}
+                    {visibleBlocks.map(renderBlock)}
+                    {archivedBlocks.length > 0 && (
+                      <ProcessDisclosure
+                        label={segmentLabel(archivedBlocks)}
+                        elapsed={elapsed}
+                      >
+                        {archivedBlocks.map((block, blockIndex) =>
+                          block.kind === "reasoning" ? (
+                            <div
+                              className="reasoning-entry"
+                              key={`reasoning-${blockIndex}`}
+                            >
+                              <pre className="reasoning-text">{block.text}</pre>
+                            </div>
+                          ) : (
+                            <ActivityGroup
+                              key={block.activity.id}
+                              activities={[block.activity]}
+                              labels={toolLabels}
+                              active={false}
+                            />
+                          ),
+                        )}
+                      </ProcessDisclosure>
+                    )}
+                  </div>
+                );
+              })}
               {finalText?.kind === "text" ? (
                 <div
                   className={

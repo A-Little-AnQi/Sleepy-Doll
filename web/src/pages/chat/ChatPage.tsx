@@ -136,15 +136,14 @@ export function ChatPage({
   const interrupting = stopping || task?.state === "cancelling";
   // 工具名取自工具定义里的 label，没有 label 的不进表。
   const toolLabels = useMemo(
-    () =>
-      ({
-        ...bootstrap.runtimeToolLabels,
-        ...Object.fromEntries(
-          bootstrap.tools
-            .filter((tool) => tool.label)
-            .map((tool) => [tool.name, tool.label] as const),
-        ),
-      }),
+    () => ({
+      ...bootstrap.runtimeToolLabels,
+      ...Object.fromEntries(
+        bootstrap.tools
+          .filter((tool) => tool.label)
+          .map((tool) => [tool.name, tool.label] as const),
+      ),
+    }),
     [bootstrap.tools, bootstrap.runtimeToolLabels],
   );
   const [error, setError] = useState("");
@@ -457,12 +456,18 @@ export function ChatPage({
                 )}
                 {task &&
                   !busy &&
-                  ["failed", "cancelled", "partial", "blocked"].includes(
-                    task.state,
-                  ) && (
+                  [
+                    "failed",
+                    "cancelled",
+                    "partial",
+                    "blocked",
+                    "needsReview",
+                  ].includes(task.state) && (
                     <section
                       className={
-                        task.state === "cancelled" ? "run-stopped" : "run-error"
+                        ["cancelled", "needsReview"].includes(task.state)
+                          ? "run-stopped"
+                          : "run-error"
                       }
                       role="status"
                     >
@@ -470,7 +475,9 @@ export function ChatPage({
                       <p>
                         {task.state === "cancelled"
                           ? "可以继续发送消息。"
-                          : task.error || task.result}
+                          : task.state === "needsReview"
+                            ? `${task.error || task.result || "运行已结束。"}可以继续发送消息。`
+                            : task.error || task.result}
                       </p>
                       {task.state === "blocked" && (
                         <div className="detail-actions">

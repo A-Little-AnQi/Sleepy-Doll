@@ -181,9 +181,8 @@
   gap: 7px;
   width: 100%;
   min-height: 32px;
-  padding: 0 0 7px;
+  padding: 4px 0;
   border: 0;
-  border-bottom: 1px solid var(--border);
   background: transparent;
   color: var(--muted);
   text-align: left;
@@ -199,15 +198,31 @@
   font-variant-numeric: tabular-nums;
 }
 
-.process-disclosure-summary .sd-chevron {
-  width: 14px;
-  height: 14px;
+.process-disclosure-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.process-disclosure-inner {
-  display: grid;
-  gap: 12px;
-  padding: 10px 0 5px;
+.process-caret {
+  flex: 0 0 auto;
+  color: var(--muted);
+  opacity: 0;
+  transform: rotate(0deg);
+  transition:
+    opacity 140ms var(--ease-standard),
+    transform 160ms var(--ease-standard);
+}
+
+.process-disclosure-summary:hover .process-caret,
+.process-disclosure-summary:focus-visible .process-caret,
+.process-disclosure[data-expanded="true"] .process-caret {
+  opacity: 1;
+}
+
+.process-disclosure[data-expanded="true"] .process-caret {
+  transform: rotate(90deg);
 }
 
 .activity-summary {
