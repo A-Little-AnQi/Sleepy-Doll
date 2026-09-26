@@ -13,11 +13,19 @@ public static class CatalogTools
         foreach (var command in CommandCatalog.All)
         {
             var item = command;
-            var schema = item.ParameterType is null ? ArgumentSchema.Empty
-                : AgentSchemas.Object(("argument", item.ParameterSchema ?? ArgumentSchema.Parse("""{"description":"需要 BetterGI 对象，当前不能通过 JSON 提供。"}"""), true));
+            var context = ("contextId", ArgumentSchema.Parse("""{"type":"string","minLength":1,"maxLength":64,"description":"list_command_targets 返回的当前上下文引用；多实例或泛型命令必须指定。"}"""), false);
+            var selection = ("selection", item.SelectionSchema, false);
+            var dialog = ("dialogInput", NativeDialogScope.Schema, item.NeedsDialogInput);
+            var implementation = ("implementationInput",item.ImplementationInput ?? ArgumentSchema.Empty,item.RequiresImplementationInput);
+            var schema = item.ParameterType is null ? AgentSchemas.Object(context, selection, dialog, implementation)
+                : AgentSchemas.Object(context, selection, dialog, implementation, ("argument", item.ParameterSchema!.Value, item.ImplementationInput is null));
             registry.Register($"cmd.{item.Name}", "command", item.Guide.Purpose,
                 (arguments, cancellation) => CommandCatalog.Invoke(item.Name,
-                    arguments.TryGetProperty("argument", out var value) ? value : null, cancellation),
+                    arguments.TryGetProperty("argument", out var value) ? value : null, cancellation,
+                    arguments.TryGetProperty("contextId", out var contextId) ? contextId.GetString() : null,
+                    arguments.TryGetProperty("selection", out var selected) ? selected : null,
+                    arguments.TryGetProperty("dialogInput", out var input) ? input : null,
+                    arguments.TryGetProperty("implementationInput",out var implemented) ? implemented : null),
                 readOnly: false, destructive: true, inputSchema: schema, guide: item.Guide,
                 unavailableReason: item.UnavailableReason, requiresGameReady: item.RequiresGameReady);
         }
@@ -57,6 +65,7 @@ public static class CatalogTools
 
     public static void Register(MethodRegistry registry)
     {
+        CommandTargetTools.Register(registry);
         ScriptGroupTools.Register(registry);
         ScriptGroupDeletionTools.Register(registry);
         TaskStopTools.Register(registry);
@@ -118,7 +127,11 @@ public static class CatalogTools
         });
         registry.Register("bgi.invoke_command", "command", "", (arguments, cancellation) =>
             CommandCatalog.Invoke(arguments.GetProperty("command").GetString()!,
-                arguments.TryGetProperty("argument", out var argument) ? argument : null, cancellation),
+                arguments.TryGetProperty("argument", out var argument) ? argument : null, cancellation,
+                arguments.TryGetProperty("contextId", out var context) ? context.GetString() : null,
+                arguments.TryGetProperty("selection", out var selection) ? selection : null,
+                arguments.TryGetProperty("dialogInput", out var dialog) ? dialog : null,
+                arguments.TryGetProperty("implementationInput",out var implementation) ? implementation : null),
             readOnly: false, destructive: true);
     }
 

@@ -68,7 +68,9 @@ public static class AgentSchemas
             ("limit", Limit, false)),
         "bgi.get_script_errors" => Object(("date", Date, false), ("limit", Limit, false)),
         "bgi.list_commands" => Object(("filter", Text("命令名或用途关键词。"), false), ("includeDangerous", Flag("是否同时列出有破坏性副作用的命令；不影响调用权限。"), false)),
-        "bgi.invoke_command" => Object(("command", Text("来自命令目录的精确 name。"), true), ("argument", ArgumentSchema.Parse("""{"description":"必须符合该命令的 parameterSchema；无参命令省略此字段。"}"""), false)),
+        "bgi.invoke_command" => Object(("command", Text("来自命令目录的精确 name。"), true), ("argument", ArgumentSchema.Parse("""{"description":"必须符合该命令的 parameterSchema；无参命令省略此字段。"}"""), false),
+            ("contextId",Text("真实上下文引用。",64),false), ("selection",ArgumentSchema.Parse("""{"type":"object","maxProperties":32}"""),false), ("dialogInput", Bgi.NativeDialogScope.Schema,false),
+            ("implementationInput",ArgumentSchema.Parse("""{"type":"object","maxProperties":32,"description":"补充实现的业务输入，必须满足对应 cmd 的当前 implementationInput 契约。"}"""),false)),
         _ => throw new InvalidOperationException($"接口 {id} 缺少参数契约。"),
     };
 
@@ -155,6 +157,9 @@ public static class AgentSchemas
                 ("verified", Flag("删除结果已复查。"), true), ("path", Text("User 下的原配置组文件路径。", 1024), true), ("backup", Text("User 下的原始内容备份，脚本与路线保留。", 1024), true),
                 ("previousSha256", Text("删除前文件的 SHA-256。"), true), ("resourcesPreserved", Flag("脚本、路线、订阅资源未删除。"), true)),
             "bgi.update_subscribed_scripts" => ResultObject(description, ("mode", Text("实际执行的更新范围。"), true), ("repositoryChanged", Any("中央仓库是否拉到新内容；all 模式可能无法单独报告。"), false), ("updatedPaths", ArrayOf(Text("交给 BetterGI 更新的精确订阅路径。", 512), "selected/all 模式涉及的订阅路径。"), true), ("completed", Flag("BetterGI 更新函数已返回；仍需回读目标文件验证内容。"), true)),
+            "bgi.list_command_targets" => ResultObject(description, ("ownerType", Text("原生上下文类型。"), true), ("contexts", ArrayOf(Any("当前 contextId/objectId、类型和显示名称。"), "上下文。"), true), ("arguments", ArrayOf(Any("真实参数对象引用。"), "参数对象。"), true), ("constructors", ArrayOf(Any("构造参数契约。"), "构造器。"), true)),
+            "bgi.create_command_target" or "bgi.create_command_argument" => ResultObject(description, ("created", Flag("对象已构造，不表示命令已执行。"), true), ("target", Any("真实 objectId。"), true), ("verified", Flag("上下文建立已核验。"), true)),
+            "bgi.release_command_target" => ResultObject(description, ("released", Flag("桥创建的上下文已释放。"), true), ("verified", Flag("已核验。"), true)),
             _ => ResultObject(description, ("command", Text("实际命令名。"), true), ("executed", Flag("命令处理器已返回；不是业务成功标记。"), true), ("configurationCheckpoint", Any("执行前的配置备份记录，可用于离线恢复。"), true)),
         };
     }

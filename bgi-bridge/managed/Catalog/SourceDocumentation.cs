@@ -4,7 +4,8 @@ namespace BgiBridge.Catalog;
 
 public sealed record SourceEntry(string Summary, string? Label, string Kind, string? ValueType,
     string? Initial, string[]? Range, string Source, int Line, bool HasCustomChangeHook, bool HasImplementation = true,
-    string DocumentationSource = "host-source", bool NeedsDialogInput = false, bool UsesSelection = false, bool AsyncVoid = false);
+    string DocumentationSource = "host-source", bool NeedsDialogInput = false, bool UsesSelection = false, bool AsyncVoid = false,
+    bool HasAwait = true, string[]? DialogTitles = null);
 
 public static class SourceDocumentation
 {
@@ -28,8 +29,14 @@ public static class SourceDocumentation
     }
 
     /// <summary>按宿主类型全名查找。硬编码宿主成员名的桥代码用它核对文档里的真实成员。</summary>
-    public static SourceEntry? Find(string prefix, string ownerFullName, string name) =>
-        Entries.TryGetValue($"{prefix}:{ownerFullName}.{name}", out var entry) ? entry : null;
+    public static SourceEntry? Find(string prefix, string ownerFullName, string name)
+    {
+        if (Entries.TryGetValue($"{prefix}:{ownerFullName}.{name}", out var entry)) return entry;
+        if (!ownerFullName.Contains('`')) return null;
+        var owner = System.Text.RegularExpressions.Regex.Replace(ownerFullName.Split('[')[0], @"`\d+", "");
+        return Entries.FirstOrDefault(pair => pair.Key.StartsWith(prefix + ":", StringComparison.Ordinal)
+            && System.Text.RegularExpressions.Regex.Replace(pair.Key, @"<[^>]+>", "") == $"{prefix}:{owner}.{name}").Value;
+    }
 
     public static string[]? StringEnum(SourceEntry? entry)
     {

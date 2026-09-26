@@ -131,12 +131,12 @@ def make_inventory(source, metadata, live):
         name = item["name"].removesuffix("Command")
         if name in internal or item.get("hasImplementation") is False:
             chain = "内部事件／空实现，不作为业务入口"
-        elif item.get("asyncVoid"):
+        elif item.get("asyncVoid") and item.get("hasAwait", True):
             chain = "异步不可跟踪，需稳定替代"
         elif item.get("needsDialogInput") and not name.startswith(("Open", "Show")):
-            chain = "需弹窗输入，不能自动完成"
+            chain = "需 dialogInput 绑定本次弹窗并核验"
         elif parameter and parameter not in supported and parameter not in {"string[]", "List<string>"}:
-            chain = "对象参数需绑定，不能任意 JSON 重建"
+            chain = "原生对象引用或声明类型构造，需上下文绑定"
         elif item.get("usesSelection"):
             chain = "需核对当前选择，不能仅按名称宣称完成"
         else:

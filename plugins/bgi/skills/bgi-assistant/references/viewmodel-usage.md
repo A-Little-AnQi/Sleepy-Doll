@@ -31,6 +31,10 @@ ViewModel 中确实存在用户可用能力，不能一概隐藏。应按实际�
 
 ## 能力元数据建议
 
+动态命令已经覆盖窗口、子对象和泛型类型，不再以是否注册 IViewModel 决定目录可见性。对象绑定走 `bgi.list_command_targets` 的真实引用；未创建的上下文显式构造，目录读取不会偷偷创建窗口。数据选择以 selection Schema 为准，弹窗输入以 dialogInput 为准；所需原生参数类型与构造参数均从当前契约取得，不根据显示名拼 CLR 类型。
+
+UI 生命周期事件与普通业务分别判断，必须匹配真实上下文、输入和时序；命令返回不能证明业务已完成。Bgi 源码空实现保持明确限制。
+
 ViewModel 派生能力应增加 `surface_role`：`navigation`、`ui_command`、`config`、`task` 或 `internal`；再增加 `completes_goal` 表示它是否真正完成用户目标。搜索排序中，`navigation` 不应在“收集、刷取、运行”请求中排在 `task` 前面，但应在“打开、带我去、显示”请求中优先。
 
 普通回复始终说页面或功能名称。例如说“已经打开地图追踪页面”，不要说“已调用 MapPathingViewModel 的导航方法”。

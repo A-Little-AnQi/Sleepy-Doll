@@ -178,6 +178,15 @@ mod tests {
             .iter()
             .chain(audit["settings"].as_array().unwrap())
         {
+            if matches!(
+                item["methodId"].as_str(),
+                Some(
+                    "cmd.task_settings_page.switch_auto_track"
+                        | "cmd.task_settings_page.go_to_auto_track_url"
+                )
+            ) {
+                continue; // 用户要求从 BGI Agent 功能目录隐藏。
+            }
             let card = index.read(item["methodId"].as_str().unwrap()).unwrap();
             assert!(!card["item"]["steps"].as_array().unwrap().is_empty());
             assert!(!card["item"]["references"].as_array().unwrap().is_empty());

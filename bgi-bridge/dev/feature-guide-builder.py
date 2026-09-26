@@ -82,13 +82,15 @@ def build(data):
     result = list(WORKFLOWS)
     revision = data["sourceRevision"]
     for item in data["commands"]:
+        if item["methodId"] in {"cmd.task_settings_page.switch_auto_track", "cmd.task_settings_page.go_to_auto_track_url"}:
+            continue  # 用户明确要求暂不对 Agent 披露遗留剧情跟踪。
         assessment = item["chainAssessment"]
         alternative = item.get("stableAlternative", "")
         result.append({"id": item["methodId"], "kind": "command", "title": item.get("label") or item.get("summary") or item["name"],
                        "summary": item.get("summary") or item["name"], "keywords": [item["name"], item["owner"].split(".")[-1]],
                        "availability": assessment, "methodIds": [item["methodId"]], "inputSources": item.get("parameters") or [],
                        "dependencies": {key: item[key] for key in ["needsDialogInput", "usesSelection", "asyncVoid", "hasImplementation"]},
-                       "steps": ["先 describe 当前 methodId，不把源码索引当作已注册契约", "核对 callable、参数、选择对象、游戏前置和实际副作用", "契约可提交且目标一致时 invoke；否则按具体限制找稳定替代或说明缺项"],
+                       "steps": ["先 describe 当前 methodId，不把源码索引当作已注册契约", "对象／泛型／多实例用 list_command_targets；必要时按契约 create_command_target，参数引用真实 objectId", "按 selectionSchema 绑定目标；需要弹窗时传 dialogInput，具体参数不猜测", "核对游戏前置和实际副作用后 invoke，回读业务证据；释放桥创建的无用上下文"],
                        "branches": [assessment] + (["稳定替代：" + alternative] if alternative else []),
                        "verification": "按当前契约 verification 读取目标状态／文件／日志；async void、弹窗或内部事件不能凭处理器返回报完成",
                        "references": [ref("execution.md"), ref("viewmodel-usage.md", "bgi-assistant")],

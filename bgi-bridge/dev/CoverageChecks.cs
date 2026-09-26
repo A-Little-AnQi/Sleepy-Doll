@@ -18,6 +18,7 @@ using Vm = BetterGenshinImpact.ViewModel.Pages.ScriptControlViewModel;
 
 class CoverageChecks
 {
+    sealed class DialogFields { public string Name { get; set; } = "原值"; }
     public static readonly string Root = Path.Combine(AppContext.BaseDirectory, "User");
     public static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private static int passed;
@@ -104,6 +105,8 @@ class CoverageChecks
         await CancellationChecks();
         await SettingsChecks();
         await JavaScriptChecks(registry);
+        await ReflectionChecks();
+        await ImplementedChecks();
         foreach (var (path, boundary) in SettingMutationAdapters.Bounded)
         {
             var schema = ValueContract.Schema(typeof(double), path:path)!.Value;
@@ -188,6 +191,84 @@ class CoverageChecks
         await Reject(() => Call(registry, "bgi.prepare_js_group", new { folderName = "本机JS", settings = new { bad = true } }), "INVALID_ARGUMENT");
         await Reject(() => Call(registry, "bgi.prepare_js_group", new { folderName = "本机JS", settings = new { mode = "C" } }), "INVALID_ARGUMENT");
     }
+
+    static async Task ReflectionChecks()
+    {
+        var registry = new MethodRegistry(); CommandTargetTools.Register(registry);
+        CommandCatalog.Configure(new BgiBridge.BridgeConfig { });
+        var config = new BetterGenshinImpact.Core.Config.AllConfig();
+        var file = Path.Combine(Root, "reflection-config.json"); File.WriteAllText(file, JsonSerializer.Serialize(config, Json));
+        Directory.CreateDirectory(Path.Combine(Root,"reflection-records"));
+        typeof(SettingsTransactions).GetProperty("Engine")!.SetValue(null, new SettingsTransactionEngine(() => config, () => file, () => Json, Path.Combine(Root,"reflection-records")));
+        Check(CommandCatalog.All.Any(c => c.Name == "reflection_fixture.apply" && c.ParameterSchema.HasValue && c.UnavailableReason is null), "未注册且无 IViewModel 的命令仍被过滤");
+        var target = await Call(registry, "bgi.create_command_target", new { command = "reflection_fixture.apply", arguments = new { name = "原生记录" } });
+        var context = target.GetProperty("target").GetProperty("objectId").GetString()!;
+        var list = await Call(registry, "bgi.list_command_targets", new { command = "reflection_fixture.apply", query = "原生记录" });
+        var argument = list.GetProperty("arguments")[0].GetProperty("objectId").GetString()!;
+        var native = (BetterGenshinImpact.ViewModel.ReflectionFixtureViewModel)CommandTargets.Resolve(context, typeof(BetterGenshinImpact.ViewModel.ReflectionFixtureViewModel));
+        await CommandCatalog.Invoke("reflection_fixture.apply", JsonSerializer.SerializeToElement(new { objectId = argument }), CancellationToken.None, context,
+            JsonSerializer.SerializeToElement(new { SelectedItem = new { objectId = argument } }));
+        Check(ReferenceEquals(native.Applied, native.Items[0]) && ReferenceEquals(native.SelectedItem, native.Items[0]), "对象参数被伪造／未绑定目标选择");
+        await Reject(() => CommandCatalog.Invoke("reflection_fixture.apply", JsonSerializer.SerializeToElement(new { objectId = "forged" }), CancellationToken.None, context), "STALE_TARGET");
+        native.Items.Clear(); native.SelectedItem = null; native.Applied = null;
+        await Reject(() => CommandCatalog.Invoke("reflection_fixture.apply", JsonSerializer.SerializeToElement(new { objectId = argument }), CancellationToken.None, context), "STALE_TARGET");
+        await CommandCatalog.Invoke("reflection_fixture.prompt", null, CancellationToken.None, context, null, JsonSerializer.SerializeToElement(new { text = "实际弹窗输入", confirm = true }));
+        Check(native.Input == "实际弹窗输入", "弹窗填写没有进入原生处理器");
+        var fields = new DialogFields();
+        using (var scope = new NativeDialogScope(JsonSerializer.SerializeToElement(new { values = new { Name = "不应保存", Missing = "无效" } }), [], CancellationToken.None))
+        {
+            new BetterGenshinImpact.ViewModel.PromptDialog { DataContext = fields }.ShowDialog();
+            await Reject(() => Ui.InvokeAsync(scope.Verify), "INVALID_ARGUMENT");
+            Check(fields.Name == "原值", "后续字段无效却已修改前一个字段");
+        }
+        using (var scope = new NativeDialogScope(JsonSerializer.SerializeToElement(new { selectedValues = new[] { "不存在的选择" } }), [], CancellationToken.None))
+        {
+            new BetterGenshinImpact.ViewModel.PromptDialog().ShowDialog();
+            await Reject(() => Ui.InvokeAsync(scope.Verify), "INVALID_ARGUMENT");
+            Check(scope.Handled == 0, "选择完全不匹配仍确认了弹窗");
+        }
+        await Call(registry, "bgi.release_command_target", new { objectId = context });
+        await Reject(() => Ui.InvokeAsync(() => CommandTargets.Resolve(context, typeof(BetterGenshinImpact.ViewModel.ReflectionFixtureViewModel))), "STALE_TARGET");
+        Check(BetterGenshinImpact.ViewModel.ReflectionFixtureViewModel.Disposed, "桥创建的上下文未释放");
+    }
+
+    static async Task ImplementedChecks()
+    {
+        var config = BetterGenshinImpact.Service.ConfigService.Config;
+        var owner = new CompletionFixture(config);
+        var empty = ArgumentSchema.Parse("{}");
+        config.MaskWindowConfig.MaskEnabled = true;
+        var mask = JsonSerializer.SerializeToElement(await ImplementedCommands.Run("common_settings_page.switch_mask_enabled",owner,empty,CancellationToken.None));
+        Check(mask.GetProperty("verified").GetBoolean() && BetterGenshinImpact.View.MaskWindow.Instance().IsVisible, "遮罩未显示");
+        config.MaskWindowConfig.MaskEnabled = false;
+        await ImplementedCommands.Run("common_settings_page.switch_mask_enabled",owner,empty,CancellationToken.None);
+        Check(!BetterGenshinImpact.View.MaskWindow.Instance().IsVisible, "遮罩未隐藏");
+        config.CommonConfig.ScreenshotEnabled = true;
+        var screenshot = JsonSerializer.SerializeToElement(await ImplementedCommands.Run("common_settings_page.switch_taken_screenshot_enabled",owner,empty,CancellationToken.None));
+        Check(screenshot.GetProperty("enabled").GetBoolean() && BetterGenshinImpact.Service.ConfigService.Saved, "截图开关未保存");
+        var capture = JsonSerializer.SerializeToElement(await ImplementedCommands.Run("home_page.test",owner,empty,CancellationToken.None));
+        Check(capture.GetProperty("verified").GetBoolean() && BetterGenshinImpact.View.CaptureTestWindow.Current?.Captured == true,"截图测试没有启动");
+        BetterGenshinImpact.View.CaptureTestWindow.Current!.Close();
+        var map = JsonSerializer.SerializeToElement(await ImplementedCommands.Run("map_pathing_dev.drop_down_changed",owner,empty,CancellationToken.None));
+        Check(map.GetProperty("mapName").GetString() == "Teyvat" && map.GetProperty("verified").GetBoolean(),"录制地图未应用");
+        await ImplementedCommands.Run("form.edit_at",owner,JsonSerializer.SerializeToElement(new { index=0,value="新条目" }),CancellationToken.None);
+        Check(owner.List[0] == "新条目", "表单编辑没有写入元素");
+        await ImplementedCommands.Run("form.save",owner,empty,CancellationToken.None);
+        Check(owner.Saved, "表单保存未执行具体类型方法");
+        Check(!CommandCatalog.All.Any(c => c.Name == "task_settings_page.switch_auto_track"), "剧情跟踪仍对外开放");
+        var path = Path.Combine(Root,"AutoPathing","适配路线.json"); File.WriteAllText(path,"{\"positions\":[{\"id\":1}]}");
+        var route = JsonSerializer.SerializeToElement(await ImplementedCommands.Run("task_settings_page.switch_auto_track_path",owner,JsonSerializer.SerializeToElement(new { path="适配路线.json" }),CancellationToken.None));
+        Check(route.GetProperty("verified").GetBoolean(), "路线跟踪没有核验 SuccessEnd");
+        Check(BetterGenshinImpact.GameTask.Common.TaskControl.TaskSemaphore.CurrentCount==1,"任务结束未释放宿主锁");
+    }
+}
+public class CompletionFixture(BetterGenshinImpact.Core.Config.AllConfig config)
+{
+    public BetterGenshinImpact.Core.Config.AllConfig Config { get; } = config;
+    public BetterGenshinImpact.Core.Config.DevConfig DevConfig => Config.DevConfig;
+    public object[] MapTypeItems { get; } = [new { EnumName="Teyvat" }];
+    public ObservableCollection<string> List { get; } = ["旧条目"]; public bool Saved;
+    public void OnSave() => Saved=true;
 }
 
 public class OneDragonFixture
@@ -205,7 +286,7 @@ namespace BetterGenshinImpact
     public class Services : IServiceProvider
     {
         public Vm Groups { get; } = new(); public Wpf.Ui.NavigationService Navigation { get; } = new();
-        public object? GetService(Type type) => type == typeof(Vm) ? Groups : type == typeof(Wpf.Ui.INavigationService) ? Navigation : null;
+        public object? GetService(Type type) => type == typeof(Vm) ? Groups : type == typeof(Wpf.Ui.INavigationService) ? Navigation : type==typeof(BetterGenshinImpact.Service.Interface.IConfigService) ? new BetterGenshinImpact.Service.ConfigService() : null;
     }
 }
 namespace BetterGenshinImpact.GameTask.Common { public static class TaskControl { public static SemaphoreSlim TaskSemaphore { get; } = new(1,1); } }
@@ -231,6 +312,49 @@ namespace BetterGenshinImpact.ViewModel.Pages
         private void ScriptProjectsPChanged(object? sender,PropertyChangedEventArgs args) { }
         public void OnDeleteScriptGroup(Group group) { ScriptGroups.Remove(group); if(!FailDelete)File.Delete(Path.Combine(ScriptGroupPath,group.Name+".json")); }
         public void Reset(Group group) { ScriptGroups.Clear(); ScriptGroups.Add(group); }
+    }
+}
+namespace BetterGenshinImpact.ViewModel
+{
+    public sealed record ReflectionItem(string Name);
+    public interface IRelayCommand<T> : System.Windows.Input.ICommand { }
+    public sealed class FixtureCommand<T>(Action<T> action) : IRelayCommand<T>
+    {
+        public event EventHandler? CanExecuteChanged { add { } remove { } }
+        public bool CanExecute(object? p) => true;
+        public void Execute(object? p) => action((T)p!);
+    }
+    public sealed class FixturePlainCommand(Action action) : System.Windows.Input.ICommand
+    {
+        public event EventHandler? CanExecuteChanged { add { } remove { } }
+        public bool CanExecute(object? p) => true;
+        public void Execute(object? p) => action();
+    }
+    public sealed class ReflectionFixtureViewModel : IDisposable
+    {
+        public ObservableCollection<ReflectionItem> Items { get; } = [];
+        public ReflectionItem? SelectedItem { get; set; }
+        public ReflectionItem? Applied;
+        public string? Input;
+        public static bool Disposed;
+        public IRelayCommand<ReflectionItem> ApplyCommand { get; }
+        public System.Windows.Input.ICommand PromptCommand { get; }
+        public ReflectionFixtureViewModel(string name)
+        {
+            Items.Add(new(name)); ApplyCommand = new FixtureCommand<ReflectionItem>(item => Applied = item);
+            PromptCommand = new FixturePlainCommand(() => { var window = new PromptDialog(); window.ShowDialog(); Input = window.Box.Text; });
+        }
+        public void Dispose() => Disposed = true;
+    }
+    public sealed class PromptDialog : Window
+    {
+        public System.Windows.Controls.TextBox Box { get; } = new();
+        public PromptDialog()
+        {
+            Left = -32000; Top = -32000; Width = 200; Height = 100; Opacity = 0; ShowInTaskbar = false; ShowActivated = false;
+            var panel = new System.Windows.Controls.StackPanel(); panel.Children.Add(Box);
+            var button = new System.Windows.Controls.Button { Content = "确定" }; button.Click += (_, _) => DialogResult = true; panel.Children.Add(button); Content = panel;
+        }
     }
 }
 namespace BetterGenshinImpact.Core.Script.Group
@@ -265,7 +389,38 @@ namespace BetterGenshinImpact.Core.Script.Project
 }
 namespace BetterGenshinImpact.Core.Config
 {
-    public class AllConfig { public Action? OnAnyChangedAction { get; set; } public GameTask.AutoBoss.AutoBossConfig AutoBossConfig { get; set; } = new(); }
+    public class AllConfig { public Action? OnAnyChangedAction { get; set; } public GameTask.AutoBoss.AutoBossConfig AutoBossConfig { get; set; } = new(); public MaskConfig MaskWindowConfig {get;set;}=new(); public CommonConfig CommonConfig {get;set;}=new(); public DevConfig DevConfig {get;set;}=new(); public string CaptureMode {get;set;}="BitBlt"; }
+    public class MaskConfig { public bool MaskEnabled {get;set;} }
+    public class CommonConfig { public bool ScreenshotEnabled {get;set;} }
+    public class DevConfig { public string RecordMapName {get;set;}="Teyvat"; }
+}
+namespace BetterGenshinImpact.Service.Interface { public interface IConfigService { void Save(); } }
+namespace BetterGenshinImpact.Service { public class ConfigService : Interface.IConfigService { public static Core.Config.AllConfig Config {get;}=new(); public static bool Saved; public void Save()=>Saved=true; } }
+namespace BetterGenshinImpact.GameTask
+{
+    public class TaskContext { public static TaskContext Instance()=>Current; public static TaskContext Current {get;}=new(); public bool IsInitialized {get;set;}=true; public IntPtr GameHandle {get;}=(IntPtr)1; }
+    public class TaskRunner
+    {
+        public async Task RunCurrentAsync(Func<Task> action,bool reset,bool clear)
+        {
+            if(!await Common.TaskControl.TaskSemaphore.WaitAsync(0))return;
+            try { Core.Script.CancellationContext.Instance.Set(); await action(); } catch { }
+            finally { Common.TaskControl.TaskSemaphore.Release(); }
+        }
+    }
+}
+namespace BetterGenshinImpact.GameTask.AutoSkip.Model { public class AutoTrackParam { } }
+namespace BetterGenshinImpact.GameTask.AutoSkip
+{
+    public class AutoTrackTask { private CancellationToken _ct=CancellationToken.None; public static bool Called; public AutoTrackTask(Model.AutoTrackParam parameter){ ArgumentNullException.ThrowIfNull(parameter); } private void TrackMission() { _ct.ThrowIfCancellationRequested(); Called=true; } }
+}
+namespace BetterGenshinImpact.GameTask.AutoPathing.Model { public class PathingTask { public static PathingTask BuildFromJson(string json) { JsonDocument.Parse(json); return new(); } } }
+namespace BetterGenshinImpact.GameTask.AutoPathing { public class PathExecutor(CancellationToken token) { public bool SuccessEnd; public Task Pathing(Model.PathingTask task) { token.ThrowIfCancellationRequested(); SuccessEnd=true; return Task.CompletedTask; } } }
+namespace Fischless.GameCapture { public static class CaptureModeExtensions { public static string ToCaptureMode(string mode)=>mode; } }
+namespace BetterGenshinImpact.View
+{
+    public class MaskWindow : Window { private static readonly MaskWindow Current=new(); public static MaskWindow Instance()=>Current; public MaskWindow(){ Left=-32000;Top=-32000;Width=100;Height=100;Opacity=0;ShowInTaskbar=false;ShowActivated=false; } }
+    public class CaptureTestWindow : Window { public static CaptureTestWindow? Current; public bool Captured; public CaptureTestWindow(){ Current=this;Left=-32000;Top=-32000;Width=100;Height=100;Opacity=0;ShowInTaskbar=false;ShowActivated=false; } public void StartCapture(IntPtr handle,string mode)=>Captured=handle!=IntPtr.Zero; }
 }
 namespace BetterGenshinImpact.GameTask.AutoBoss
 {

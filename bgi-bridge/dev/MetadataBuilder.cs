@@ -181,6 +181,12 @@ foreach (var (path, tree) in trees)
                 needsDialogInput = member is MethodDeclarationSyntax dialogMethod && new[] { "PromptDialog.Prompt", "OpenFileDialog", "SaveFileDialog", "FolderBrowserDialog", "PromptDialog.User" }.Any(dialog => dialogMethod.ToString().Contains(dialog, StringComparison.Ordinal)),
                 usesSelection = member is MethodDeclarationSyntax selectedMethod && Regex.IsMatch(selectedMethod.ToString(), @"\bSelected\w+"),
                 asyncVoid = member is MethodDeclarationSyntax asyncMethod && asyncMethod.Modifiers.Any(SyntaxKind.AsyncKeyword) && asyncMethod.ReturnType.ToString() == "void",
+                hasAwait = member is MethodDeclarationSyntax awaitMethod && awaitMethod.DescendantNodes().OfType<AwaitExpressionSyntax>().Any(),
+                dialogTitles = member is MethodDeclarationSyntax titleMethod ? titleMethod.DescendantNodes().OfType<AssignmentExpressionSyntax>()
+                    .Where(a => a.Left.ToString() == "Title").Select(a => a.Right).OfType<LiteralExpressionSyntax>().Select(a => a.Token.ValueText)
+                    .Concat(titleMethod.DescendantNodes().OfType<InvocationExpressionSyntax>().Where(i => i.Expression.ToString().Contains("PromptDialog", StringComparison.Ordinal)
+                        || i.Expression.ToString().Contains("MessageBox", StringComparison.Ordinal)).Select(i => i.ArgumentList.Arguments.ElementAtOrDefault(1)?.Expression)
+                        .OfType<LiteralExpressionSyntax>().Select(a => a.Token.ValueText)).Distinct().ToArray() : null,
             };
         }
     }

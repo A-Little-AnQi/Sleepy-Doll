@@ -19,7 +19,11 @@
 
 ## 动态命令的完整链路
 
-- `callable=true` 仅表示契约可提交，还必须确认参数、当前选择和验证证据。需要弹窗输入、async void 或无法绑定的宿主对象时，先找稳定入口或资源操作，不能把弹窗出现当完成。
+- `callable=true` 仅表示契约可提交，还必须确认参数、当前选择和验证证据。稳定业务入口优先；动态命令需要对象时，describe/read `bgi.list_command_targets`，按真实 `contextId/objectId` 绑定，不能让用户手动选中来替代。
+- 当前窗口或子对象尚未创建时，按返回的构造契约 invoke `bgi.create_command_target`；原服务依赖来自宿主容器。开放泛型和抽象基类使用已有具体上下文，不猜类型。新增参数对象只用 `bgi.create_command_argument` 声明的类型；不能指定任意 CLR 类型。
+- `selection` 按当前 Schema 绑定 Selected 字段；多实例必须显式给 contextId。旧引用、类型不符、未匹配的构造器和缺少弹窗输入应根据错误重新取得必要证据，不能扫描 DLL 或换无关接口绕过。
+- 需要输入的命令提供 `dialogInput`：名称用 text，文件／目录用 filePath，资源选择用真实 Tag 的 selectedValues，确认用明确 confirm。作用域只接管本次新建窗口，不能操作用户已有窗口。`dialogsHandled` 不是业务成功标记，修改后仍回读目标。
+- 使用结束后释放桥创建的无用上下文；用户已有实例保留。遗留空入口已经由 BGI 提供方补充：表单编辑传 implementationInput.index/value，路线跟踪传 implementationInput.path，通过可等待、可取消的任务包装器执行；表单保存必须绑定实际具体上下文。接口 Schema 是当前版本的权威输入，不把静态旧空实现标记当最终结论。
 - 独立任务的目标参数先走 settings 读取与事务，例如首领名称、指定次数模式和次数。联动字段在 preview 的 differences 中一并核对，不能只写 runCount 却遗漏 specifyRunCount。
 - 设置的 writable=false 是具体写入限制，不代表整个功能不存在；不通过 workspace 或磁盘全局配置绕过。
 - 打开页面是明确 UI 目标；使用 bgi.list_pages/open_page。对采集、运行、删除请求，页面导航不能代替操作结果。
