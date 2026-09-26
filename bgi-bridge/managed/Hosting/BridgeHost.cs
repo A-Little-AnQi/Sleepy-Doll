@@ -322,7 +322,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
             effect = descriptor.Effect,
             executionMode = descriptor.ReadOnly ? "inline" : "job",
             concurrency = descriptor.ReadOnly ? "parallel" : "gameExclusive",
-            cancellation = !descriptor.ReadOnly && descriptor.Group != "settings" ? "waitOnly" : "cooperative",
+            cancellation = descriptor.ReadOnly || descriptor.Group == "settings" || descriptor.RequiresGameReady ? "cooperative" : "waitOnly",
             resultReliability = descriptor.Group == "settings" ? "readBackVerified" : descriptor.ReadOnly ? "immediate" : "completionOnly",
             requiresConfirmation = !descriptor.ReadOnly,
             callable = Unavailable(descriptor) is null, unavailableReason = Unavailable(descriptor),
@@ -392,8 +392,11 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
                 {
                     cancellation.Token.ThrowIfCancellationRequested();
                     jobs.MarkRunning(job.JobId);
+                    using var hostCancellation = descriptor.RequiresGameReady
+                        ? new HostTaskCancellation(cancellation.Token) : null;
                     var result = await handler(arguments, cancellation.Token).ConfigureAwait(false);
-                    var verified = descriptor.Group == "settings" && JsonSerializer.SerializeToElement(result).TryGetProperty("verified", out var check) && check.ValueKind == JsonValueKind.True;
+                    if (hostCancellation is not null) await hostCancellation.CompleteAsync().ConfigureAwait(false);
+                    var verified = JsonSerializer.SerializeToElement(result).TryGetProperty("verified", out var check) && check.ValueKind == JsonValueKind.True;
                     jobs.MarkCompleted(job.JobId, result, verified);
                 }
                 catch (OperationCanceledException) { jobs.MarkCancelled(job.JobId); }
@@ -415,7 +418,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
         return new
         {
             jobId = id, state = jobs.Get(id)?.State, cancelled = false, cancellationRequested = true,
-            note = "请求仅作用于此桥 Job；已开始的 BetterGI 命令可能继续运行，必须继续查询终态。",
+            note = "执行游戏任务的 Job 会向宿主发送停止请求；取消请求不等于已经停止，必须查询 Job 终态。非游戏命令已发生的副作用不回退。",
         };
     }
 

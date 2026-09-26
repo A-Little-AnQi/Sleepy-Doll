@@ -58,6 +58,10 @@ public static class CatalogTools
     public static void Register(MethodRegistry registry)
     {
         ScriptGroupTools.Register(registry);
+        ScriptGroupDeletionTools.Register(registry);
+        TaskStopTools.Register(registry);
+        NavigationTools.Register(registry);
+        JavaScriptPreparationTools.Register(registry);
         OneDragonTools.Register(registry);
         GameResolutionTools.Register(registry);
         ScriptRepositoryTools.Register(registry);

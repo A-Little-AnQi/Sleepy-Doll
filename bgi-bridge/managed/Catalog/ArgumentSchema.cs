@@ -36,6 +36,7 @@ public static class ArgumentSchema
             throw BridgeException.InvalidArgument($"{path} 不在允许值列表中。");
         if (value.ValueKind == JsonValueKind.Object)
         {
+            CheckBound(value.EnumerateObject().Count(), schema, "minProperties", "maxProperties", path);
             if (schema.TryGetProperty("required", out var required))
                 foreach (var item in required.EnumerateArray())
                     if (!value.TryGetProperty(item.GetString()!, out _)) throw BridgeException.InvalidArgument($"{path} 缺少 {item.GetString()}。");
@@ -45,6 +46,8 @@ public static class ArgumentSchema
                 if (properties.ValueKind == JsonValueKind.Object && properties.TryGetProperty(property.Name, out var child)) Validate(property.Value, child, $"{path}.{property.Name}");
                 else if (schema.TryGetProperty("additionalProperties", out var extra) && extra.ValueKind == JsonValueKind.False)
                     throw BridgeException.InvalidArgument($"{path} 不接受参数 {property.Name}。");
+                else if (schema.TryGetProperty("additionalProperties", out var additional) && additional.ValueKind == JsonValueKind.Object)
+                    Validate(property.Value, additional, $"{path}.{property.Name}");
             }
         }
         if (value.ValueKind == JsonValueKind.Array)
@@ -53,7 +56,13 @@ public static class ArgumentSchema
             if (schema.TryGetProperty("items", out var itemSchema))
                 foreach (var item in value.EnumerateArray()) Validate(item, itemSchema, $"{path}[]");
         }
-        if (value.ValueKind == JsonValueKind.String) CheckBound(value.GetString()!.Length, schema, "minLength", "maxLength", path);
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            CheckBound(value.GetString()!.Length, schema, "minLength", "maxLength", path);
+            if (schema.TryGetProperty("pattern", out var pattern)
+                && !System.Text.RegularExpressions.Regex.IsMatch(value.GetString()!, pattern.GetString()!, System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
+                throw BridgeException.InvalidArgument($"{path} 不符合允许格式。");
+        }
         if (value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var n)) CheckBound(n, schema, "minimum", "maximum", path);
     }
 

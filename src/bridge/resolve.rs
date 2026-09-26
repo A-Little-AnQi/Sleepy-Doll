@@ -64,7 +64,8 @@ pub fn resolve_local(root: &Path, query: &str) -> Value {
         })
         .cloned()
         .collect::<Vec<_>>();
-    let candidates = scan_pathing(root, query);
+    let mut candidates = scan_pathing(root, query);
+    candidates.extend(scan_javascript(root, query));
 
     if !matched_groups.is_empty() {
         let runnable = matched_groups
@@ -129,6 +130,7 @@ fn report(
         "candidates": candidates.iter().map(|candidate| json!({
             "path": path_display(&candidate.path),
             "children": candidate.children,
+            "kind": candidate.kind,
         })).collect::<Vec<_>>(),
         "groups": groups.iter().map(|group| json!({
             "name": group.name,
@@ -149,7 +151,9 @@ fn next_action(verdict: &str) -> &'static str {
     match verdict {
         "run" => "直接运行该配置组，不要再搜索或读取路线文件",
         "repair" => "只补 missing 里的路径（更新/订阅），不要重写无关配置，补完后再 resolve",
-        "create" => "用 candidates 的父节点建配置组，不要读取叶子 JSON",
+        "create" => {
+            "本机已有资源；Pathing 用完整父目录准备配置组，不读取叶子 JSON；Javascript 先 inspect_script 读取 manifest 指定的设置定义，再用 bgi.prepare_js_group，使用返回的 groupName 运行。"
+        }
         "ambiguous" => "只问真正不同的配置组，不要并列所有路线文件",
         _ => {
             "仅本机未安装，不代表仓库不存在。采集/地图追踪用 bgi.repo.search category=pathing（或 all）查询完整父节点；已有索引先查询，不先反复刷新。选择作者包后直接 describe/invoke bgi.subscribe_script_resources、bgi.prepare_pathing_group；游戏就绪再 bgi.run_script_group。不要扫描软件目录或桥程序集。"
@@ -176,6 +180,34 @@ struct Project {
 struct Candidate {
     path: PathBuf,
     children: Vec<String>,
+    kind: &'static str,
+}
+
+fn scan_javascript(root: &Path, query: &str) -> Vec<Candidate> {
+    let Ok(entries) = fs::read_dir(root.join("JsScript")) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !path.is_dir() || path.symlink_metadata().ok()?.file_type().is_symlink() {
+                return None;
+            }
+            let text = fs::read_to_string(path.join("manifest.json")).ok()?;
+            let manifest: Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
+            let folder = entry.file_name().to_string_lossy().into_owned();
+            let name = manifest["name"].as_str().unwrap_or(&folder);
+            if !matches_query(query, name) && !matches_query(query, &folder) {
+                return None;
+            }
+            Some(Candidate {
+                path: path.strip_prefix(root).ok()?.to_path_buf(),
+                children: vec!["manifest.json".into()],
+                kind: "Javascript",
+            })
+        })
+        .collect()
 }
 
 fn scan_groups(root: &Path) -> Vec<Group> {
@@ -308,6 +340,7 @@ fn walk_pathing(
                 .unwrap_or(current)
                 .to_path_buf(),
             children,
+            kind: "Pathing",
         });
         return;
     }
@@ -340,6 +373,24 @@ fn path_display(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "需要隔离的本机 JS 资源目录"]
+    fn installed_custom_js_is_found_without_a_repository_or_group() {
+        let root = PathBuf::from(
+            std::env::var_os("SLEEPY_DOLL_LOCAL_JS_FIXTURE").expect("缺少隔离资源目录"),
+        );
+        let result = resolve_local(&root, "运行下仅本机脚本");
+        assert_eq!(result["verdict"], "create");
+        assert!(
+            result["candidates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|candidate| candidate["kind"] == "Javascript"
+                    && candidate["path"] == "JsScript/custom-only")
+        );
+    }
 
     #[test]
     fn missing_local_target_searches_all_categories_and_continues_with_evidence() {

@@ -1,0 +1,17 @@
+<Project>
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>../../target/dotnet/coverage-checks-obj/</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>../../target/dotnet/coverage-checks-obj/</MSBuildProjectExtensionsPath>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF>
+    <AssemblyName>BetterGI</AssemblyName><UseAppHost>false</UseAppHost><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems><OutputPath>../../target/dotnet/coverage-checks/</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="CoverageChecks.cs" />
+    <Reference Include="BgiBridge"><HintPath>../../target/bridge/BgiBridge.dll</HintPath></Reference>
+  </ItemGroup>
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+</Project>

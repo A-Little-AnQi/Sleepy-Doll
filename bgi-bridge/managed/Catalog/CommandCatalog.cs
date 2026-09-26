@@ -90,7 +90,12 @@ public static partial class CommandCatalog
                         : DescribeParameter(ValueContract.Schema(parameterType), title, parameterType);
                     var unavailable = source?.HasImplementation == false ? "当前 BetterGI 版本该命令为空实现。"
                         : purpose.Contains("不安排自动调用", StringComparison.Ordinal) ? "BetterGI 没有提供足以确定目标、副作用和结果的业务说明。"
-                        : parameterType is not null && parameterSchema is null ? $"需要 BetterGI 的 {parameterType.Name} 对象，不能从任意 JSON 重建；应在 BetterGI 界面完成该交互。"
+                        : source?.AsyncVoid == true ? "宿主使用 async void，命令返回无法跟踪完成或异常；使用可等待并核验的稳定接口。"
+                        : parameterType is null && source?.NeedsDialogInput == true && !commandName.StartsWith("Open", StringComparison.Ordinal) && !commandName.StartsWith("Show", StringComparison.Ordinal)
+                            ? "此命令通过宿主弹窗取得输入，空参数不能完成指定目标；优先使用用户资源读写或按目标绑定的稳定接口。"
+                        : parameterType is not null && parameterSchema is null ? property.Name == "DeleteScriptGroupCommand"
+                            ? "此界面命令需要真实 ScriptGroup 对象；删除配置组使用 bgi.delete_script_group，以精确 groupName 和 user.read 返回的 expectedSha256 调用，不要求用户手动选中。"
+                            : $"需要 BetterGI 的 {parameterType.Name} 对象，不能从任意 JSON 重建；此界面命令不能直接调用，核对是否已有按目标绑定的稳定接口。"
                         : CommandDocumentation.UnavailableReason(type.Name, property.Name);
                     var guide = new AgentGuide(
                         title, purpose,

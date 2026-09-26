@@ -569,11 +569,15 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
                         }
                         profiles.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
                     }
+                    let manifest = read_small_json(&path.join("manifest.json"), 64 * 1024);
+                    let settings_name = manifest.as_ref().and_then(|value| value["settingsUi"].as_str()).filter(|name| !name.is_empty());
+                    let settings_path = settings_name.map(|name| user_path(&path, name)).transpose()?;
                     Ok(json!({
                         "folderName":folder,
                         "entries":entries,
-                        "manifest":read_small_json(&path.join("manifest.json"), 64 * 1024),
-                        "settings":read_small_json(&path.join("settings.json"), 128 * 1024),
+                        "manifest":manifest,
+                        "settingsPath":settings_name,
+                        "settings":settings_path.as_ref().and_then(|path| read_small_json(path, 128 * 1024)),
                         "readme":readme,
                         "profiles":profiles,
                     }))

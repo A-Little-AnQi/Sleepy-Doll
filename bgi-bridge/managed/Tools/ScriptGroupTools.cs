@@ -82,19 +82,10 @@ public static class ScriptGroupTools
                     409);
 
             var resolved = matches[0];
-            // 新建的配置组可能尚未进入页面 ViewModel 的内存集合。
-            try
-            {
-                Reflect.Call(viewModel, "ReadScriptGroup");
-            }
-            catch (BridgeException ex) when (ex.Code == "HOST_CAPABILITY_MISSING")
-            {
-            }
+            var groups = BindGroupsFromDisk(Path.Combine(AppContext.BaseDirectory, "User", "ScriptGroup"), resolved);
             cancellation.ThrowIfCancellationRequested();
-            var execution = Reflect.Call(
-                viewModel,
-                RunMethod,
-                (object)new[] { resolved });
+            // 直接执行已绑定对象，不刷新会重写其他配置组的界面集合。
+            var execution = Reflect.Call(viewModel, "StartGroups", groups, null, false);
             await Reflect.Await(execution);
             return new
             {
@@ -103,6 +94,22 @@ public static class ScriptGroupTools
                 executed = true,
             };
         }).ConfigureAwait(false);
+    }
+
+    /// <summary>构造指定配置组的真实宿主对象，不修改页面缓存或其他组文件。</summary>
+    public static System.Collections.IList BindGroupsFromDisk(string directory, string name)
+    {
+        var files = Directory.EnumerateFiles(directory, "*.json").Where(file =>
+        {
+            try { using var json = JsonDocument.Parse(File.ReadAllText(file)); return json.RootElement.GetProperty("name").GetString() == name; }
+            catch (JsonException) { return false; }
+        }).ToArray();
+        if (files.Length != 1) throw new BridgeException("AMBIGUOUS_TARGET", "配置组文件未唯一定位，未执行。", 409);
+        var type = Reflect.FindType("BetterGenshinImpact.Core.Script.Group.ScriptGroup") ?? throw BridgeException.Missing("宿主配置组类型不可用。");
+        var group = Reflect.CallStatic(type, "FromJson", File.ReadAllText(files[0])) ?? throw BridgeException.Failed("配置组解析失败。");
+        var groups = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(type))!;
+        groups.Add(group);
+        return groups;
     }
 
     private static string[] ResolveGroupsFromDisk(string? requested)

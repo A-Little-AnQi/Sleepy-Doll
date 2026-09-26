@@ -109,36 +109,9 @@ public static class OneDragonTools
                 ?? throw BridgeException.Missing("当前 BetterGI 没有公开的一条龙 ViewModel。");
             var viewModel = services.GetService(type)
                 ?? throw BridgeException.Missing("一条龙 ViewModel 未注册。");
-
-            if (arguments.ValueKind == JsonValueKind.Object
-                && arguments.TryGetProperty("configName", out var named)
-                && named.GetString() is { Length: > 0 } configName)
-            {
-                var configNameTrimmed = configName.Trim();
-                if (Reflect.Get(viewModel, "ConfigList") is not System.Collections.IEnumerable list)
-                    throw BridgeException.Missing("一条龙配置列表不可读。");
-                object? matched = null;
-                var available = new List<string>();
-                foreach (var item in list)
-                {
-                    var itemName = Reflect.Get(item, "Name") as string;
-                    if (string.IsNullOrEmpty(itemName)) continue;
-                    available.Add(itemName);
-                    if (string.Equals(itemName, configNameTrimmed, StringComparison.OrdinalIgnoreCase))
-                        matched = item;
-                }
-                if (matched is null)
-                    throw BridgeException.NotFound(
-                        $"一条龙配置不存在：{configNameTrimmed}。当前可用：{string.Join("、", available)}");
-                Reflect.Set(viewModel, "SelectedConfig", matched);
-            }
-
-            var selected = Reflect.Get(viewModel, "SelectedConfig")
-                ?? throw BridgeException.GameNotReady(
-                    "一条龙没有选中的配置。传 configName 指定一个，或在 BetterGI 的一条龙页面先创建配置。");
-
-            // OnOneKeyExecute 是 UI 线程上的长任务，不接收取消令牌：桥的取消
-            // 语义与 run_script_group 相同（waitOnly），执行不受影响。
+            var requested = arguments.TryGetProperty("configName", out var named) ? named.GetString() : null;
+            var selected = BindConfiguration(viewModel, requested);
+            cancellation.ThrowIfCancellationRequested();
             await (Reflect.Call(viewModel, "OnOneKeyExecute")
                 as Task ?? throw BridgeException.Missing("一条龙执行入口不可调用。"));
             return new
@@ -147,6 +120,26 @@ public static class OneDragonTools
                 configName = Reflect.Get(selected, "Name") as string,
             };
         });
+    }
+
+    /// <summary>从磁盘刷新配置并同步任务列表，避免只更换名称仍执行旧任务。</summary>
+    public static object BindConfiguration(object viewModel, string? requested)
+    {
+        var prior = Reflect.Get(viewModel, "SelectedConfig");
+        var name = requested?.Trim() ?? (prior is null ? null : Reflect.Get(prior, "Name") as string);
+        Reflect.Call(viewModel, "InitConfigList");
+        if (name is not null)
+        {
+            var list = Reflect.Get(viewModel, "ConfigList") as System.Collections.IEnumerable
+                ?? throw BridgeException.Missing("一条龙配置列表不可读。");
+            var matches = list.Cast<object>().Where(item => string.Equals(Reflect.Get(item, "Name") as string, name, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (matches.Length == 0) throw BridgeException.NotFound($"一条龙配置不存在：{name}");
+            if (matches.Length > 1) throw new BridgeException("AMBIGUOUS_TARGET", "同名一条龙配置不唯一，未执行。", 409);
+            Reflect.Set(viewModel, "SelectedConfig", matches[0]);
+        }
+        var selected = Reflect.Get(viewModel, "SelectedConfig") ?? throw BridgeException.NotFound("没有可运行的一条龙配置。");
+        Reflect.Call(viewModel, "SetSomeSelectedConfig", selected);
+        return selected;
     }
 
     private static Task<object?> ExitInvoke(

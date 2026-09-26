@@ -40,6 +40,18 @@
 
 ## 精确执行
 
+用户：“删除植绒草那个配置组，路线留着。”
+
+预期：定位唯一组、读取 name/sha256，直接调用 bgi.delete_script_group；不要求当前界面选中、不查生命周期、不改成禁用；验证文件与列表删除、其他组与路线保留，记录备份。
+
+用户：“运行一下我自己装的 JS。”
+
+预期：user.resolve 能按本机 manifest 标题定位；无需中央仓库同名资源，先 inspect_script 按 settingsUi 阅读参数，再 prepare_js_group/run_script_group，不写猜测参数。
+
+用户：“停止刚才的任务。”
+
+预期：关联原 Job 取消并核对宿主停止；没有 Job ID 时 stop_current_task。不能把取消请求或超时当已经停止。已完成旧 Job 的取消不能影响之后的新任务。
+
 用户：“收集一下清心。”
 
 预期：先调用 `bgi.user.resolve`。若本地配置组可运行则直接启动，不搜索接口、不读路线 JSON。未安装时由同一入口查当前全仓索引，`resourceFound` 直接订阅、准备并运行，不重复刷新；`repair` 只补缺失路径；`lookupFailed` 报告查询失败，不能声称路线不存在。只有本机和全仓均未命中的 `notFound` 才考虑核对名称或刷新一次。

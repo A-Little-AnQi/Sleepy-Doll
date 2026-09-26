@@ -4,7 +4,7 @@ namespace BgiBridge.Catalog;
 
 public sealed record SourceEntry(string Summary, string? Label, string Kind, string? ValueType,
     string? Initial, string[]? Range, string Source, int Line, bool HasCustomChangeHook, bool HasImplementation = true,
-    string DocumentationSource = "host-source");
+    string DocumentationSource = "host-source", bool NeedsDialogInput = false, bool UsesSelection = false, bool AsyncVoid = false);
 
 public static class SourceDocumentation
 {

@@ -136,6 +136,13 @@ foreach (var (path, tree) in trees)
                 kind = "command";
                 valueType = method.ParameterList.Parameters.FirstOrDefault()?.Type?.ToString();
             }
+            else if (member is MethodDeclarationSyntax api && api.Modifiers.Any(SyntaxKind.PublicKeyword)
+                && owner.StartsWith("BetterGenshinImpact.Core.Script.Dependence.", StringComparison.Ordinal))
+            {
+                name = api.Identifier.ValueText + "(" + string.Join(",", api.ParameterList.Parameters.Select(parameter => parameter.Type?.ToString())) + ")";
+                kind = "scriptApi";
+                valueType = api.ReturnType.ToString();
+            }
             if (name is null) continue;
             var summary = Summary(member);
             if (string.IsNullOrWhiteSpace(summary))
@@ -152,7 +159,7 @@ foreach (var (path, tree) in trees)
                 documentationSource = "host-ui-binding";
             }
             var range = attributes.FirstOrDefault(a => a.Name.ToString().EndsWith("Range"))?.ArgumentList?.Arguments.Select(a => a.Expression.ToString()).ToArray();
-            var key = (kind == "command" ? "C:" : "P:") + owner + "." + name;
+            var key = (kind == "command" ? "C:" : kind == "scriptApi" ? "M:" : "P:") + owner + "." + name;
             entries[key] = new
             {
                 summary,
@@ -166,6 +173,14 @@ foreach (var (path, tree) in trees)
                 line = tree.GetLineSpan(member.Span).StartLinePosition.Line + 1,
                 hasCustomChangeHook = type.Members.OfType<MethodDeclarationSyntax>().Any(m => m.Identifier.ValueText == $"On{name}Changed"),
                 hasImplementation = member is not MethodDeclarationSyntax implementation || implementation.ExpressionBody is not null || implementation.Body?.Statements.Count > 0,
+                jsonIgnore = attributes.Any(a => a.Name.ToString().EndsWith("JsonIgnore")),
+                jsonName = (attributes.FirstOrDefault(a => a.Name.ToString().EndsWith("JsonPropertyName"))?.ArgumentList?.Arguments.FirstOrDefault()?.Expression as LiteralExpressionSyntax)?.Token.ValueText,
+                isStatic = member.Modifiers.Any(SyntaxKind.StaticKeyword),
+                writable = member is FieldDeclarationSyntax || member is PropertyDeclarationSyntax prop && prop.AccessorList?.Accessors.Any(accessor => accessor.IsKind(SyntaxKind.SetAccessorDeclaration) && !accessor.Modifiers.Any(SyntaxKind.PrivateKeyword)) == true,
+                parameters = member is MethodDeclarationSyntax commandMethod ? commandMethod.ParameterList.Parameters.Select(parameter => new { name = parameter.Identifier.ValueText, type = parameter.Type?.ToString() }).ToArray() : null,
+                needsDialogInput = member is MethodDeclarationSyntax dialogMethod && new[] { "PromptDialog.Prompt", "OpenFileDialog", "SaveFileDialog", "FolderBrowserDialog", "PromptDialog.User" }.Any(dialog => dialogMethod.ToString().Contains(dialog, StringComparison.Ordinal)),
+                usesSelection = member is MethodDeclarationSyntax selectedMethod && Regex.IsMatch(selectedMethod.ToString(), @"\bSelected\w+"),
+                asyncVoid = member is MethodDeclarationSyntax asyncMethod && asyncMethod.Modifiers.Any(SyntaxKind.AsyncKeyword) && asyncMethod.ReturnType.ToString() == "void",
             };
         }
     }

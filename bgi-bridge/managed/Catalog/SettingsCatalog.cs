@@ -152,7 +152,9 @@ public static class SettingsCatalog
             var customHook = documentation?.HasCustomChangeHook == true
                 || property.DeclaringType?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                     .Any(method => method.Name == $"On{property.Name}Changed") == true;
-            var writable = property.SetMethod?.IsPublic == true && schema is not null && readError is null && !customHook;
+            // 已核对的单字段边界钩子在 Schema 范围内不产生其他字段变化。
+            var boundedHook = SettingMutationAdapters.ReviewedHook(path);
+            var writable = property.SetMethod?.IsPublic == true && schema is not null && readError is null && (!customHook || boundedHook);
             result.Add(new SettingEntry(
                 path,
                 currentSection,

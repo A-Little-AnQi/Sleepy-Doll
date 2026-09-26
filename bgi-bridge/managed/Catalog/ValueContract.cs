@@ -76,6 +76,11 @@ public static class ValueContract
         else if (type == typeof(double) || type == typeof(float) || type == typeof(decimal)) schema = new() { ["type"] = "number" };
         else
         {
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>)
+                && type.GetGenericArguments()[0] == typeof(string)
+                && Schema(type.GetGenericArguments()[1]) is { } dictionaryValue)
+                schema = new() { ["type"] = "object", ["maxProperties"] = 1000,
+                    ["additionalProperties"] = JsonNode.Parse(dictionaryValue.GetRawText()) };
             var element = type.IsArray ? type.GetElementType() : type.IsGenericType
                 && type.GetGenericTypeDefinition() is var generic
                 && (generic == typeof(List<>) || generic == typeof(System.Collections.ObjectModel.ObservableCollection<>))
@@ -90,6 +95,12 @@ public static class ValueContract
             if (double.TryParse(range.Maximum.ToString(), out var max)) schema["maximum"] = max;
         }
         if (path == "triggerInterval") { schema["minimum"] = 1; schema["maximum"] = 10000; }
+        if (path == "autoBossConfig.runCount") schema["minimum"] = 1;
+        if (path == "autoBossConfig.reviveRetryCount") schema["minimum"] = 0;
+        if (path is not null && SettingMutationAdapters.Bounded.TryGetValue(path, out var boundary))
+        { schema["minimum"] = boundary.Min; schema["maximum"] = boundary.Max; }
+        if (path is not null && SettingMutationAdapters.Colors.Contains(path))
+        { schema["minLength"] = 7; schema["maxLength"] = 9; schema["pattern"] = "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"; }
         if (schema["type"]?.ToString() is "integer" or "number"
             && property is not null && new[] { "Interval", "Timeout", "Delay", "Duration" }.Any(word => property.Name.Contains(word, StringComparison.OrdinalIgnoreCase)))
             schema["minimum"] = Math.Max(path == "triggerInterval" ? 1 : 0, double.TryParse(schema["minimum"]?.ToString(), out var existingMin) ? existingMin : 0);

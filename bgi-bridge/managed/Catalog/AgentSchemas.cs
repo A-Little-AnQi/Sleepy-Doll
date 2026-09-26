@@ -23,7 +23,8 @@ public static class AgentSchemas
     private static JsonElement Value => ArgumentSchema.Parse("""{"description":"新值，必须符合 get_setting 返回的 valueSchema；不得将遮蔽值当作原值提交。"}""");
     public static JsonElement Input(string id) => id switch
     {
-        "bgi.ping" or "bgi.probe" or "bgi.get_status" or "bgi.start_game" or "bgi.list_setting_sections" or "bgi.list_setting_changes" => ArgumentSchema.Empty,
+        "bgi.ping" or "bgi.probe" or "bgi.get_status" or "bgi.start_game" or "bgi.stop_current_task" or "bgi.list_pages" or "bgi.list_setting_sections" or "bgi.list_setting_changes" => ArgumentSchema.Empty,
+        "bgi.open_page" => Object(("page", JsonSerializer.SerializeToElement(new { type = "string", @enum = Tools.NavigationTools.Pages.Select(page => page.Id).ToArray(), description = "来自 bgi.list_pages 的页面标识。" }), true)),
         "bgi.search_settings" => Object(
             ("terms", ArgumentSchema.Parse("""{"type":"array","maxItems":16,"items":{"type":"string","maxLength":100},"description":"搜索词数组，所有词均需匹配路径或用途说明；空数组表示不限定。"}"""), false),
             ("section", Text("分区名，来自 list_setting_sections。"), false),
@@ -41,8 +42,12 @@ public static class AgentSchemas
         "bgi.commit_settings" => Object(("planId", Text("preview_settings 返回且尚未过期的计划 ID。"), true)),
         "bgi.get_setting_change" or "bgi.rollback_settings" => Object(("changeId", Text("由 commit_settings、set_setting 或变更记录返回的事务 ID。"), true)),
         "bgi.run_script_group" => Object(("groupName", Text("从 User/ScriptGroup 配置文件读取到的精确 name。"), true)),
+        "bgi.delete_script_group" => Object(("groupName", Text("从 User/ScriptGroup 读取到的精确 name；只删除该配置组。"), true),
+            ("expectedSha256", ArgumentSchema.Parse("""{"type":"string","pattern":"^[0-9a-fA-F]{64}$","description":"bgi.user.read 返回的目标配置组 SHA-256，不允许猜测。"}"""), true)),
         "bgi.subscribe_script_resources" => Object(("paths", ArgumentSchema.Parse("""{"type":"array","minItems":1,"maxItems":8,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":1024},"description":"来自仓库结果的精确完整目录或脚本路径，如 pathing/地方特产/稻妻/血斛/作者包。"}"""), true)),
         "bgi.prepare_pathing_group" => Object(("path", Text("已安装的完整父目录，保留 pathing/ 前缀。", 1024), true), ("groupName", Text("可选稳定名称；留空由桥生成，不覆盖已有不同内容配置组。", 160), false)),
+        "bgi.prepare_js_group" => Object(("folderName", Text("已安装 JsScript 的单层目录名。"), true),
+            ("groupName", Text("可选稳定配置组名称。",160), false), ("settings", ArgumentSchema.Parse("""{"type":"object","maxProperties":100,"description":"来自脚本 settingsUi 定义的参数值；省略时沿用脚本默认值。"}"""), false)),
         "bgi.update_subscribed_scripts" => ArgumentSchema.Parse("""{"type":"object","properties":{"mode":{"type":"string","enum":["repositoryOnly","selected","all"],"description":"repositoryOnly 只刷新中央仓库；selected 只更新 paths；all 更新全部当前订阅。"},"paths":{"type":"array","minItems":1,"maxItems":100,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":512},"description":"mode=selected 时必填；值来自 User/Subscriptions，例如 js/AutoHoeingOneDragon。"}},"required":["mode"],"additionalProperties":false}"""),
         "bgi.search_script_repository" => Object(
             ("query", Text("脚本标题或一个功能词；可包含原始问题中的脚本名称。", 200), true),
@@ -98,6 +103,9 @@ public static class AgentSchemas
         {
             "bgi.ping" => ResultObject(description, ("ok", Flag("桥请求处理成功。"), true), ("hostLoaded", Flag("BetterGI 程序集可见。"), true), ("at", Text("观测时间，ISO 8601。"), true)),
             "bgi.get_status" => ResultObject(description, ("ready", Flag("当前状态检查是否就绪。"), true), ("runtime", Any("截图、窗口和独立任务状态；未能观测的项必须保留未知。"), true), ("observedAt", Text("ISO 8601 观测时间。"), true)),
+            "bgi.stop_current_task" => ResultObject(description, ("stopped", Flag("宿主任务锁是否已释放。"), true), ("outcome", Text("stopped、alreadyIdle 或 timeout。"), true)),
+            "bgi.list_pages" => ResultObject(description, ("pages", ArrayOf(Any("id、title、available。"), "主窗口页面。"), true)),
+            "bgi.open_page" => ResultObject(description, ("page", Text("目标页面标识。"), true), ("opened", Flag("窗口是否可见且导航已选择目标页面。"), true), ("verified", Flag("导航选择和窗口可见性已复查。"), true)),
             "bgi.wait_ready" => ResultObject(description, ("ready", Flag("游戏是否已在主界面就绪。"), true), ("outcome", Text("ready、resolution、notRunning 或 timeout。"), true), ("elapsedMs", ArgumentSchema.Parse("""{"type":"integer"}"""), true), ("observedAt", Text("ISO 8601 观测时间。"), true), ("runtime", Any("本次观测到的游戏与截图器状态。"), true)),
             "bgi.set_game_resolution" => ResultObject(description, ("written", Flag("目标游戏的显示记录是否写入。"), true), ("width", ArgumentSchema.Parse("""{"type":"integer"}"""), true), ("height", ArgumentSchema.Parse("""{"type":"integer"}"""), true), ("mode", Text("写入的窗口模式。"), true), ("game", Text("实际修改的国服或国际服记录。"), true)),
             "bgi.start_game" => ResultObject(description, ("started", Flag("本次是否发出了启动。"), true), ("alreadyRunning", Flag("BetterGI 已经在运行，未重复启动。"), true), ("ready", Flag("返回时是否已可截图并执行游戏动作。"), true), ("stillLoading", Flag("为 true 表示原神仍在加载，用 get_status 继续等，不是失败。"), true), ("elapsedMs", ArgumentSchema.Parse("""{"type":"integer","description":"本次等待的毫秒数。"}"""), true), ("note", Text("需要用户知道的一句话说明。"), true), ("runtime", Any("启动后的截图、窗口和独立任务状态。"), true)),
@@ -109,6 +117,7 @@ public static class AgentSchemas
             "bgi.list_setting_changes" => ResultObject(description, ("changes", ArrayOf(Any("changeId、state、createdAt、verified、backupFile、differences。"), "最近的配置变更和命令前检查点。"), true)),
             "bgi.subscribe_script_resources" => ResultObject(description, ("installed", Flag("目标资源已存在。"), true), ("paths", ArrayOf(Text("精确仓库路径。",1024),"所选资源。"),true)),
             "bgi.prepare_pathing_group" => ResultObject(description, ("prepared", Flag("配置组已保存。"),true), ("groupName",Text("运行入口参数。"),true), ("executionScope",Text("directoryRecursive。"),true), ("routeCount",Integer("完整目录实际路线数，不是模型挑选条数。"),true)),
+            "bgi.prepare_js_group" => ResultObject(description, ("prepared", Flag("宿主 JS 配置组已保存。"),true), ("groupName",Text("实际运行入口参数。"),true), ("reused",Flag("是否复用相同内容配置组。"),true)),
             "bgi.search_script_repository" => ResultObject(description,
                 ("source", Text("centralRepository；不是 User 中已订阅副本。"), true),
                 ("total", Integer("匹配数。"), true), ("items", ArrayOf(Any("path、name、version、description、namedInQuery。"), "候选脚本。"), true),
@@ -142,6 +151,9 @@ public static class AgentSchemas
                 ("note", Any("需要调用方知道的一句话说明，可为 null。"), false)),
             "bgi.list_commands" => ResultObject(description, ("count", ArgumentSchema.Parse("""{"type":"integer"}"""), true), ("commands", ArrayOf(Any("name、guide、parameterSchema、unavailableReason、requiresConfirmation、isDestructive。"), "界面命令契约。"), true)),
             "bgi.run_script_group" => ResultObject(description, ("groupName", Text("从磁盘配置解析并交给 BetterGI 的准确名称。"), true), ("resolved", Flag("是否唯一定位到目标配置组。"), true), ("executed", Flag("BetterGI 按名称执行方法是否已返回；不是整组任务完成标记。"), true)),
+            "bgi.delete_script_group" => ResultObject(description, ("groupName", Text("已删除配置组的精确名称。"), true), ("deleted", Flag("文件与宿主列表均已删除。"), true),
+                ("verified", Flag("删除结果已复查。"), true), ("path", Text("User 下的原配置组文件路径。", 1024), true), ("backup", Text("User 下的原始内容备份，脚本与路线保留。", 1024), true),
+                ("previousSha256", Text("删除前文件的 SHA-256。"), true), ("resourcesPreserved", Flag("脚本、路线、订阅资源未删除。"), true)),
             "bgi.update_subscribed_scripts" => ResultObject(description, ("mode", Text("实际执行的更新范围。"), true), ("repositoryChanged", Any("中央仓库是否拉到新内容；all 模式可能无法单独报告。"), false), ("updatedPaths", ArrayOf(Text("交给 BetterGI 更新的精确订阅路径。", 512), "selected/all 模式涉及的订阅路径。"), true), ("completed", Flag("BetterGI 更新函数已返回；仍需回读目标文件验证内容。"), true)),
             _ => ResultObject(description, ("command", Text("实际命令名。"), true), ("executed", Flag("命令处理器已返回；不是业务成功标记。"), true), ("configurationCheckpoint", Any("执行前的配置备份记录，可用于离线恢复。"), true)),
         };

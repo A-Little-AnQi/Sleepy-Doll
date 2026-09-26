@@ -66,7 +66,7 @@ public sealed class SettingsTransactionEngine(
             var entries = SettingsCatalog.Build(root).ToDictionary(item => item.Path, StringComparer.OrdinalIgnoreCase);
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var changes = new List<SettingChange>();
-            foreach (var change in requested)
+            foreach (var change in SettingMutationAdapters.Expand(requested, entries))
             {
                 if (!entries.TryGetValue(change.Path, out var entry)) throw BridgeException.NotFound($"配置目录中没有 {change.Path}。");
                 if (!entry.Writable) throw BridgeException.InvalidArgument(entry.WriteRestriction ?? "该配置只读。");
@@ -260,7 +260,8 @@ public sealed class SettingsTransactionEngine(
         catch (Exception failure)
         {
             var recovered = true;
-            foreach (var change in changed.AsEnumerable().Reverse())
+            foreach (var change in changed.AsEnumerable().Reverse().OrderBy(change =>
+                change.Owner.GetType().FullName == "BetterGenshinImpact.GameTask.AutoBoss.AutoBossConfig" && change.Property.Name == "SpecifyRunCount" ? 0 : 1))
                 try
                 {
                     change.Property.SetValue(change.Owner, change.Before);
