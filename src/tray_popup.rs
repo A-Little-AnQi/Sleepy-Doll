@@ -155,6 +155,14 @@ pub struct TrayPopup {
     state: Value,
 }
 
+impl Drop for TrayPopup {
+    fn drop(&mut self) {
+        self.hide();
+        self.window.set_visible(false);
+        POPUP_HWND.store(0, Ordering::Relaxed);
+    }
+}
+
 impl TrayPopup {
     pub fn new(
         target: &EventLoopWindowTarget<UserEvent>,

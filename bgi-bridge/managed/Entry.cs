@@ -71,7 +71,11 @@ public static class Entry
             HostLogTools.Register(registry);
             CatalogTools.Register(registry);
             // 两组自动发现：命令与设置项数量随宿主版本变化。
-            Ui.InvokeAsync(() => CatalogTools.RegisterDiscovered(registry, config)).GetAwaiter().GetResult();
+            Ui.InvokeAsync(() =>
+            {
+                StartupVisibility.Normalize();
+                CatalogTools.RegisterDiscovered(registry, config);
+            }).GetAwaiter().GetResult();
             Diagnostics.Write($"方法注册完成，共 {registry.Count} 个。");
 
             _host = new BridgeHost(config, registry, new JobStore(), Version);

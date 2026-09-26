@@ -124,8 +124,8 @@ fn launch_host(executable: &Path, directory: &Path, silently: bool) -> Result<()
         use windows_sys::Win32::{
             Foundation::CloseHandle,
             System::Threading::{
-                CREATE_NO_WINDOW, CREATE_SUSPENDED, CreateProcessW, PROCESS_INFORMATION,
-                ResumeThread, STARTF_USESHOWWINDOW, STARTUPINFOW,
+                CREATE_NO_WINDOW, CreateProcessW, PROCESS_INFORMATION, STARTF_USESHOWWINDOW,
+                STARTUPINFOW,
             },
             UI::WindowsAndMessaging::{GetForegroundWindow, SW_HIDE},
         };
@@ -145,7 +145,7 @@ fn launch_host(executable: &Path, directory: &Path, silently: bool) -> Result<()
                 std::ptr::null(),
                 std::ptr::null(),
                 0,
-                CREATE_SUSPENDED | CREATE_NO_WINDOW,
+                CREATE_NO_WINDOW,
                 std::ptr::null(),
                 directory.as_ptr(),
                 &startup,
@@ -158,15 +158,14 @@ fn launch_host(executable: &Path, directory: &Path, silently: bool) -> Result<()
                 std::io::Error::last_os_error()
             )));
         }
+        // WPF 可绕过启动显示标志。仅隐藏首次主窗口后立即结束，不再压制用户重开。
         let process_id = process.dwProcessId;
         let process_handle = process.hProcess as isize;
-        std::thread::spawn(move || {
-            hide_process_windows(process_id, process_handle, foreground);
-        });
         unsafe {
-            ResumeThread(process.hThread);
             CloseHandle(process.hThread);
         }
+        // 完成首次隐藏后才继续注入，保证桥同步 WPF 状态时看到的是最终隐藏状态。
+        hide_initial_host_window(process_id, process_handle, foreground);
         return Ok(());
     }
 
@@ -181,48 +180,84 @@ fn launch_host(executable: &Path, directory: &Path, silently: bool) -> Result<()
 }
 
 #[cfg(target_os = "windows")]
-fn hide_process_windows(process_id: u32, process_handle: isize, foreground: isize) {
+fn hide_initial_host_window(process_id: u32, process_handle: isize, foreground: isize) {
     use windows_sys::Win32::{
         Foundation::{CloseHandle, HWND, LPARAM, WAIT_OBJECT_0},
         System::Threading::WaitForSingleObject,
         UI::WindowsAndMessaging::{
-            EnumWindows, GetWindowThreadProcessId, IsWindowVisible, SW_HIDE, SetForegroundWindow,
-            ShowWindow,
+            EnumWindows, GW_OWNER, GetClassNameW, GetForegroundWindow, GetWindow,
+            GetWindowTextLengthW, GetWindowThreadProcessId, IsWindowVisible, SW_HIDE,
+            SetForegroundWindow, ShowWindow,
         },
     };
-
     struct Context {
         process_id: u32,
-        hidden: bool,
+        main: HWND,
     }
-
-    unsafe extern "system" fn hide(hwnd: HWND, lparam: LPARAM) -> i32 {
+    unsafe extern "system" fn find(hwnd: HWND, lparam: LPARAM) -> i32 {
         let context = unsafe { &mut *(lparam as *mut Context) };
         let mut owner = 0;
         unsafe { GetWindowThreadProcessId(hwnd, &mut owner) };
-        if owner == context.process_id && unsafe { IsWindowVisible(hwnd) } != 0 {
-            unsafe { ShowWindow(hwnd, SW_HIDE) };
-            context.hidden = true;
+        if owner != context.process_id
+            || unsafe { IsWindowVisible(hwnd) } == 0
+            || !unsafe { GetWindow(hwnd, GW_OWNER) }.is_null()
+            || unsafe { GetWindowTextLengthW(hwnd) } == 0
+        {
+            return 1;
+        }
+        let mut class = [0u16; 128];
+        let length = unsafe { GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32) };
+        if length > 0
+            && String::from_utf16_lossy(&class[..length as usize]).starts_with("HwndWrapper[")
+        {
+            context.main = hwnd;
+            return 0;
         }
         1
     }
-
     let process_handle = process_handle as *mut std::ffi::c_void;
-    for _ in 0..500 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         if unsafe { WaitForSingleObject(process_handle, 0) } == WAIT_OBJECT_0 {
             break;
         }
         let mut context = Context {
             process_id,
-            hidden: false,
+            main: std::ptr::null_mut(),
         };
-        unsafe { EnumWindows(Some(hide), (&mut context as *mut Context) as LPARAM) };
-        if context.hidden && foreground != 0 {
-            unsafe { SetForegroundWindow(foreground as HWND) };
+        unsafe { EnumWindows(Some(find), (&mut context as *mut Context) as LPARAM) };
+        if !context.main.is_null() {
+            let stole_focus = unsafe { GetForegroundWindow() } == context.main;
+            unsafe { ShowWindow(context.main, SW_HIDE) };
+            if stole_focus && foreground != 0 {
+                unsafe { SetForegroundWindow(foreground as HWND) };
+            }
+            break;
         }
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(Duration::from_millis(10));
     }
     unsafe { CloseHandle(process_handle) };
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod launch_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "需要隔离的 WPF 启动验证程序"]
+    fn silent_launch_allows_the_host_to_reopen_itself_immediately() {
+        let executable =
+            PathBuf::from(std::env::var_os("SLEEPY_DOLL_LAUNCH_FIXTURE").expect("缺少验证程序"));
+        let report =
+            PathBuf::from(std::env::var_os("SLEEPY_DOLL_LAUNCH_REPORT").expect("缺少验证报告路径"));
+        launch_host(&executable, executable.parent().unwrap(), true).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while !report.is_file() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let result: Value = serde_json::from_slice(&std::fs::read(report).unwrap()).unwrap();
+        assert_eq!(result["ok"], true, "{result}");
+    }
 }
 
 /// BetterGI 可执行文件的位置：上次连接记住的目录 → 卸载注册表 → 常见安装目录。

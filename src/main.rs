@@ -27,9 +27,58 @@ use tao::{
     window::{Window, WindowBuilder},
 };
 use wry::{
-    WebContext, WebViewBuilder,
+    WebContext, WebView, WebViewBuilder,
     http::{Request, Response, header::CONTENT_TYPE},
 };
+
+/// 让窗口与 WebView 共用明确的释放顺序；Drop 先隐藏父窗口，避免子视图关闭后露底。
+struct DesktopSurface {
+    webview: WebView,
+    window: Window,
+}
+
+impl Drop for DesktopSurface {
+    fn drop(&mut self) {
+        self.window.set_visible(false);
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod shutdown_tests {
+    use super::*;
+    use tao::platform::windows::{EventLoopBuilderExtWindows, WindowExtWindows};
+
+    #[test]
+    #[ignore = "需要隔离的 WebView2 用户数据目录"]
+    fn desktop_surface_hides_parent_before_webview_teardown() {
+        let data =
+            PathBuf::from(std::env::var_os("SLEEPY_DOLL_WINDOW_VALIDATION").expect("缺少验证目录"));
+        let event_loop = EventLoopBuilder::<UserEvent>::with_user_event()
+            .with_any_thread(true)
+            .build();
+        let window = WindowBuilder::new()
+            .with_title("Sleepy Doll shutdown validation")
+            .with_skip_taskbar(true)
+            .with_position(PhysicalPosition::new(-32000, -32000))
+            .build(&event_loop)
+            .unwrap();
+        let hwnd = window.hwnd();
+        let mut context = WebContext::new(Some(data));
+        let webview = WebViewBuilder::new_with_web_context(&mut context)
+            .with_html("<body style='background:#1b1b1b'>shutdown validation</body>")
+            .build(&window)
+            .unwrap();
+        assert_ne!(
+            unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd as _) },
+            0
+        );
+        drop(DesktopSurface { webview, window });
+        assert_eq!(
+            unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd as _) },
+            0
+        );
+    }
+}
 
 /// `assets/sleepy-doll.rc` 里的图标编号。
 #[cfg(target_os = "windows")]
@@ -339,6 +388,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| window.inner_size());
     let mut placement_deadline = None;
     #[cfg(target_os = "windows")]
+    let mut shutting_down = false;
+    #[cfg(target_os = "windows")]
     let mut tray_popup: Option<tray_popup::TrayPopup> = None;
     #[cfg(target_os = "windows")]
     // 上次会话的主题落在用户目录，托盘面板预热不依赖前端回传的时序。
@@ -353,7 +404,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "bridgeBusy": false,
     });
 
+    let surface = DesktopSurface { webview, window };
     event_loop.run(move |event, event_target, control_flow| {
+        let window = &surface.window;
+        let webview = &surface.webview;
         #[cfg(target_os = "windows")]
         let mut refresh_tray_menu = false;
         if placement_deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
@@ -366,7 +420,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             placement_deadline = None;
         }
         *control_flow = ControlFlow::Wait;
+        // 退出过程中忽略托盘/快捷键再次显示窗口，只等待清理完成。
+        #[cfg(target_os = "windows")]
+        if shutting_down
+            && !matches!(
+                event,
+                Event::UserEvent(UserEvent::ShutdownFinished) | Event::LoopDestroyed
+            )
+        {
+            return;
+        }
         match event {
+            Event::LoopDestroyed => {
+                window.set_visible(false);
+                #[cfg(target_os = "windows")]
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.hide();
+                }
+            }
             #[cfg(target_os = "windows")]
             Event::WindowEvent {
                 window_id,
@@ -413,7 +484,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 use tray_icon::menu::ContextMenu;
                                 unsafe {
                                     tray.menu.show_context_menu_for_hwnd(
-                                        window_chrome::hwnd_id(&window),
+                                        window_chrome::hwnd_id(window),
                                         Some(PhysicalPosition::new(x as i32, y as i32).into()),
                                     );
                                 }
@@ -486,10 +557,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         normal_size,
                         window.is_maximized(),
                     );
-                    close_window(tray.as_ref(), &window, &controller, &proxy);
+                    close_window(
+                        tray.as_ref(),
+                        window,
+                        &controller,
+                        &proxy,
+                        &mut shutting_down,
+                    );
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
+                    window.set_visible(false);
                     controller.shutdown();
                     *control_flow = ControlFlow::Exit;
                 }
@@ -532,12 +610,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         normal_size,
                         window.is_maximized(),
                     );
-                    close_window(tray.as_ref(), &window, &controller, &proxy);
+                    close_window(
+                        tray.as_ref(),
+                        window,
+                        &controller,
+                        &proxy,
+                        &mut shutting_down,
+                    );
                 } else {
-                    window_chrome::perform(&window, action);
+                    window_chrome::perform(window, action);
                 }
                 #[cfg(not(target_os = "windows"))]
-                window_chrome::perform(&window, action);
+                window_chrome::perform(window, action);
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::SyncChrome) => {
@@ -681,15 +765,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::Quit) => {
-                let controller = controller.clone();
-                let proxy = proxy.clone();
-                thread::spawn(move || {
-                    controller.shutdown();
-                    let _ = proxy.send_event(UserEvent::ShutdownFinished);
-                });
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.hide();
+                }
+                begin_shutdown(window, &controller, &proxy, &mut shutting_down);
             }
             #[cfg(target_os = "windows")]
-            Event::UserEvent(UserEvent::ShutdownFinished) => *control_flow = ControlFlow::Exit,
+            Event::UserEvent(UserEvent::ShutdownFinished) => {
+                window.set_visible(false);
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.hide();
+                }
+                *control_flow = ControlFlow::Exit;
+            }
             _ => {}
         }
         #[cfg(target_os = "windows")]
@@ -774,11 +862,28 @@ fn close_window(
     window: &Window,
     controller: &Arc<AppController>,
     proxy: &EventLoopProxy<UserEvent>,
+    shutting_down: &mut bool,
 ) {
     if tray.is_some() {
         fold_into_tray(window);
         return;
     }
+    begin_shutdown(window, controller, proxy, shutting_down);
+}
+
+/// 先从屏幕移除窗口，再停止后台任务，最后由事件循环释放 WebView 与窗口。
+#[cfg(target_os = "windows")]
+fn begin_shutdown(
+    window: &Window,
+    controller: &Arc<AppController>,
+    proxy: &EventLoopProxy<UserEvent>,
+    shutting_down: &mut bool,
+) {
+    if *shutting_down {
+        return;
+    }
+    *shutting_down = true;
+    window.set_visible(false);
     let controller = controller.clone();
     let proxy = proxy.clone();
     thread::spawn(move || {
