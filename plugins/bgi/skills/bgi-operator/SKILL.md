@@ -1,168 +1,22 @@
 ---
 name: bgi-operator
-description: BetterGI 用户资源、宿主设置与执行命令的统一操作手册。用于查询、修改、创建和运行 BGI 内容。
-tags: BetterGI, 原神, 配置组, 调度器, 路线, 脚本, 设置, 查询, 修改, 创建, 运行
-alwaysLoad: true
+description: 执行 BGI 操作时按任务读取资源、设置、运行、仓库或脚本排障流程；不常驻完整手册。
+tags: BGI操作
 ---
 
-# BGI 操作规范
+# BGI 操作说明
 
-## 先判断对象，再选工具
+按当前目标读取一份相关流程，已取得的路径、版本和接口 ID 可复用。bgi.feature.search/read 返回单项卡片，bgi.api.describe 返回当前调用契约；静态索引不授予执行权限，不证明运行中的版本有该接口。
 
-每个请求只能先走一条证据路径。不要同时搜索接口、插件和用户目录。
+| 当前目标 | skills.reference 的 path |
+|---|---|
+| 查询、创建、修改或删除配置组／用户资源 | [references/resources.md](references/resources.md) |
+| 修改全局设置与联动事务 | [references/settings.md](references/settings.md) |
+| 准备运行、检查游戏、停止或核对任务 | [references/execution.md](references/execution.md) |
+| 更新仓库与订阅 | [references/repository.md](references/repository.md) |
+| JS 参数、资料与脚本报错 | [references/script-analysis.md](references/script-analysis.md) |
+| 需要澄清或遇到阻塞 | [references/shared.md](references/shared.md) |
 
-| 用户目标 | 权威来源 | 首选工具 |
-|---|---|---|
-| “我有哪些”、梳理、查某个已安装内容 | `User\` 中的真实文件 | `bgi.user.list/read` |
-| 查询或修改 BetterGI 全局设置 | 宿主当前 `AllConfig` | `bgi.api.search/describe/read/invoke` |
-| 跑某个材料、脚本、路线或配置组 | 本机资源及当前中央仓库索引 | `bgi.user.resolve`，找到内容后再调用执行接口 |
-| 删除一个配置组，保留脚本／路线 | 配置组 name 与读取版本 | `bgi.user.read` → describe/invoke `bgi.delete_script_group` |
-| 打开或切换明确页面 | 主窗口页面目录 | `bgi.list_pages` → `bgi.open_page`，不搜索生命周期 |
-| 停止正在执行的任务 | 当前 Job 或宿主任务锁 | 有 Job 用 `bgi.job.cancel`，无 Job 用 `bgi.stop_current_task`，核对停止结果 |
-| 切换界面、调用明确的宿主动作 | 当前接口目录与运行状态 | `bgi.api.*`，提交前才用 `bgi.state.get` |
-| 插件声明的语义能力或资源 | 已安装插件目录 | `bgi.capability.*` / `resource.search` |
-| 理解 JS 脚本参数、机制或源码，含未订阅脚本 | 已安装版本或中央 Git 仓库 | `bgi.user.inspect_script/read` 或 `bgi.repo.search/read` |
-| 更新脚本仓库或已订阅脚本 | User 订阅清单 + 宿主仓库更新接口 | `bgi.user.list/read` + `bgi.update_subscribed_scripts` |
-| 脚本报错、任务中途失败 | 宿主按天写的运行日志 | `bgi.get_script_errors`，要过程时再 `bgi.read_host_log` |
+参数必须来自资源、脚本定义或当前接口 Schema。修改比较读取版本，保留未知字段；全局配置使用设置事务。游戏就绪仅用于游戏任务，资源查询、删除和页面导航不先启动游戏。
 
-`bgi.api.search` 列的是“BetterGI 能做什么”；`bgi.user.list` 列的是“这个用户实际装了什么、配了什么”。两者不能互相替代。没有安装插件时，不调用 `bgi.capability.search` 作为兜底。
-
-脚本名加字段、JS 自定义配置、README 或源码问题先走脚本资料，不先读功能全景或搜宿主 settings。无法确定某名称是否为脚本时先 `bgi.repo.search` 核对名称；未订阅不影响仓库阅读。接口连续无命中后必须换证据源，不以中英文同义词维持同一检索循环。
-
-## BetterGI 对象模型
-
-| 对象 | 用户目录中的位置 | 关键事实 |
-|---|---|---|
-| 调度器配置组 | `ScriptGroup\<组名>.json` | `projects[]` 才是实际任务清单 |
-| JS 脚本 | `JsScript\<目录>\` | 目录名由任务的 `folderName` 引用 |
-| 地图追踪路线 | `AutoPathing\...` | 层级和名称由已安装数据决定 |
-| 键鼠脚本 | `KeyMouseScript\` | 录制与回放文件 |
-| 一条龙 | `OneDragon\` | 与调度器配置组不是同一种对象；运行走 `bgi.run_one_dragon` |
-| 战斗/卡牌/音乐等资源 | 对应 `AutoFight\`、`AutoGeniusInvokation\`、`Music\` | 以磁盘实际内容为准 |
-| 全局设置 | `config.json` | 运行中以内存 `AllConfig` 为准，修改走设置事务 |
-
-配置组包含 `name`、`index`、`config`、`projects[]`。任务常用字段包括 `name`、`folderName`、`index`、`type`、`schedule`、`status`、`runNum`、`jsScriptSettingsObject`。字段形状以用户现有同类文件和脚本自己的参数定义为准。
-
-`schedule` 是 BetterGI 的调度周期。脚本内部还可能按星期、账号状态或运行记录自行跳过，因此组名和 `schedule` 都不能单独证明任务何时实际执行。
-
-## 查询现有配置
-
-1. 用一次 `bgi.user.list` 找到目标目录。只要名称时不传 `jsonKeys`；需要梳理 JSON 内容时，在同一次调用传 `jsonKeys`。配置组通常投影 `name,index,projects`，只有分析运行参数时才读取 `config`。
-2. 仅当某个文件没有返回 `data`、内容被截断或需要完整写回时，再对该文件调用 `bgi.user.read`。多个独立文件在同一轮并行读取。
-3. 汇总磁盘事实，不再调用 `bgi.api.search`、`plugins.list` 或重复列目录。
-4. 区分启用状态、调度周期、任务类型和脚本内部参数；不要把文件名或组名当作结论。
-
-## 理解和修改脚本任务
-
-1. 问本机任务时从配置组任务的 `folderName` 定位；只问脚本含义时直接用 `bgi.repo.search` 搜索脚本标题，使用返回的精确 path，不要求先订阅。
-2. 已知本机脚本用一次 `bgi.user.inspect_script` 读取资料；未安装脚本用 `bgi.repo.read` 直接读中央 Git 对象中的 manifest、README 和 settings。仓库候选携带 `readingGuide` 时按其中的 `bgi-javascript` 技能追踪源码。不要把 User 目录未命中当成仓库没有该脚本。
-3. `jsScriptSettingsObject` 的键必须来自 `settings.json.name`；值满足对应类型、选项和默认值。
-4. 参数定义只说明用途；涉及动作先后、切回、默认值、生效条件或报错时按 `bgi-javascript` 阅读 main 指定的入口、字段全部引用和必要模块。只问输入类型或选项列表时定义足够。需要账户文件或子资源时按定义路径读取。
-5. 修改配置组时读取完整目标文件，只改目标字段，保留未知字段；写入时传该次读取返回的 `sha256`，防止覆盖期间出现的新改动。
-
-## 创建用户资源
-
-1. 确认目标名称在对应目录中不存在；若用户没指定名称，使用能表达目标且不冲突的名称，不为普通命名再次提问。
-2. 读取一个最接近的现有对象作为结构样板。若用户明确要创建同类组，可保留样板的 `config`，只替换组身份和用户要求的 tasks；不要再读 User/config.json 或 AutoFight 重建同一份宿主配置。样板不能继承用户未要求的额外任务、账号、配队或通知权限。
-3. `folderName` 已被现有配置组引用时，仍须确认对应目录或文件还在；缺失则更新/订阅，不得视为已安装。
-4. JS 任务必须核对脚本参数定义；没有可靠默认值的必填参数才构成用户缺项。
-5. 计算顺序字段时复用目录投影里的 `index`；不要再逐文件读取文件头。
-6. 调用 `bgi.user.write` 提交完整文件。替换已有文件时传 `expectedSha256`；新建时省略。运行时按实际改动范围决定要不要确认一次：改几个字段、新建一个对象都直接执行；删除文件或大范围改配置（同一意图内累计 10 个以上配置叶字段、3 个以上对象，或整份替换）才弹一次范围确认。不在对话里重复索要许可。
-7. 写后重新读取目标文件，核对名称、任务数、引用和关键参数。保留返回的 `backup`；需要撤销时调用 `bgi.user.restore`，并传当前文件的 `sha256`，不要手工覆盖。
-
-## 修改全局设置
-
-`User\config.json` 和 BetterGI 安装目录里的宿主配置只能通过桥的设置事务修改，禁止用 `workspace.write`、`workspace.shell` 或任何本机文件命令改它们。运行中的 BetterGI 会用内存值覆盖磁盘，而且字段 setter 可能有联动行为。用户没有开发环境，不要为此安装中间件。
-
-固定流程：
-
-1. `bgi.api.search` 在 `settings` 组用一个核心业务词定位候选。
-2. 只对最可能的候选调用一次 `bgi.api.describe`。
-3. 用 `bgi.api.read` 读取当前值、`valueSchema`、`writable` 和 `valueVersion`。
-4. 单字段可用 `bgi.set_setting`；多字段用 `bgi.preview_settings` 后提交 `bgi.commit_settings`。
-5. 运行时按实际改动范围决定要不要确认一次写操作。提交后回读；保存 `changeId` 供回退。
-6. 候选不可写或语义不确定时停止修改并说明具体缺口，不靠字段名猜效果。
-
-## 执行任务
-
-1. “跑个 X”“运行下 X”默认把 X 当作资源目标，先调用一次 `bgi.user.resolve`，使用用户原话或目标名称。它在本机未命中时自动查当前全仓索引。不要先 `bgi.api.search`，也不要列 AutoPathing 或逐条读取路线 JSON。用户明确指定本体动作或一条龙时才走对应原生动作。
-2. `verdict=run` 时直接读取 `bgi.run_script_group` 契约并传入精确 `name`。路径缺失时运行时会拒绝执行；不要在 `repair` 状态下调用它。
-3. `verdict=repair` 时只处理 `missing` 列出的路径：更新仓库或订阅后再次 `resolve`。
-3a. `resourceFound` 表示已有中央仓库证据。直接用 `repository.items`，不用重复查或刷新；采集选择一个完整作者包并核对角色前提。describe/invoke `bgi.subscribe_script_resources` 安装该目录，再 `bgi.prepare_pathing_group`，使用返回的 groupName 运行。JS 候选按定义读取参数、订阅和配置。不能逐条读、重写或重命名叶子路线 JSON。
-3b. `notFound` 表示本机与当前全仓索引均未命中，核对名称后，确需更新才刷新一次再 resolve。`lookupFailed` 是仓库查询失败，处理返回的错误，不能报告资源不存在。单独使用 `bgi.repo.search` 时分类无结果也不能代表全仓不存在。
-3c. `create` 的 candidates 明确区分 `Pathing` 与 `Javascript`。JS 先 inspect_script，settings 来源是 manifest 的 settingsUi；读取参数、README 与必要源码后，用 `bgi.prepare_js_group` 的 folderName/settings 建组，随后运行返回的 groupName。本机自建 JS 可以执行，不要求中央仓库同名条目。地图追踪不能套 JS 设置流程。
-4. 只有准备提交执行时才调用一次 `bgi.state.get`，检查截图器、游戏句柄、任务锁和窗口状态。纯查询或文件编辑不需要状态快照。`ready` 以**进入游戏主界面**为准：截图器就绪但仍在登录或加载画面时调用会被拒绝，等 `bgi.get_status` 的 `ready=true` 再提交。`gameResolution.sixteenToNine=false` 时先把游戏或远程桌面会话调到 16:9（如 1920x1080），启动参数 `-screen-width` 对已初始化过的原神不生效。
-4b. 未就绪时直接 describe/invoke `bgi.start_game`，再 `bgi.get_status` / `bgi.wait_ready`；不要先搜索截图器 ViewModel 命令，更不能明知未就绪仍试跑。游戏已就绪直接 describe/invoke `bgi.run_script_group`，不用另找运行命令。
-4a. 目标是每日/清体力/周常一条龙时用 `bgi.run_one_dragon`（宿主原生任务链，`configName` 可选），不要为它建调度器配置组；它收尾可能自动退出游戏。用户要求退出原神或任务链收尾时用 `bgi.exit_game`（正常关闭，超时强结束），核验 `gameHandle` 回落后即完成。
-5. 其他动作若已知道精确 `methodId`，直接 `bgi.api.describe`；否则只在 `command` 组按一个动作词搜索一次。
-6. 契约必须同时满足：`callable=true`、参数可提供、接口确实作用于目标对象。其他低层命令仍依赖界面当前选择时，不得声称能按名称执行。
-7. 调用 `bgi.api.invoke` 后用返回的 Job ID 查询到终态。完成只证明处理器返回；按契约要求复查状态或结果。
-8. 接口不可调用时直接说明唯一阻塞项。不要继续换中英文、查插件、搜生命周期接口或让用户重复提供已经查到的信息。
-
-## 删除配置组
-
-用户明确要求删除某个配置组时，删除就是目标，不用“禁用任务”替代，也不要求先在 BetterGI 选中它。
-
-1. 用配置组目录列表或现有证据定位一个精确目标，读取 `name` 和该文件的 `sha256`；同名候选无法唯一定位时才询问。
-2. 直接 describe `bgi.delete_script_group`，invoke 传 groupName 和 expectedSha256。它不需要游戏或截图器，不查 lifecycle、导航或地图追踪页面。
-3. 运行时按当前权限模式审批，不另外在聊天里重复问一次。版本冲突时重新读取，不忽略校验；任务正运行时先报告冲突，不擅自停止。
-4. `deleted=true` 且 `verified=true` 才说明删除完成。保留 backup；路线、JS 和订阅仍在。原 `DeleteScriptGroupCommand` 不可调用只是缺少对象绑定，不能推导为无法删除配置组。
-5. 撤销时读取 backup，通过 user.write 在原 path 新建完整原始内容；目标路径已有其他文件时不能覆盖。
-
-## 动态命令的完整链路
-
-- `callable=true` 仅表示契约可提交，还必须确认参数、当前选择和验证证据。需要弹窗输入、async void 或无法绑定的宿主对象时，先找稳定入口或资源操作，不能把弹窗出现当完成。
-- 独立任务的目标参数先走 settings 读取与事务，例如首领名称、指定次数模式和次数。联动字段在 preview 的 differences 中一并核对，不能只写 runCount 却遗漏 specifyRunCount。
-- 设置的 writable=false 是具体写入限制，不代表整个功能不存在；不通过 workspace 或磁盘全局配置绕过。
-- 打开页面是明确 UI 目标；使用 bgi.list_pages/open_page。对采集、运行、删除请求，页面导航不能代替操作结果。
-- 普通停止优先取消已关联的 Job；没有 Job ID 时用 bgi.stop_current_task。结果为 timeout 就仍在停止，不能回答“已停止”；音乐播放、录制与外部绑定还要核对各自的停止命令。
-
-## 更新脚本仓库与订阅内容
-
-BGI 操作不使用 `workspace.*` 扫描桥缓存、DLL、EXE 或反射方法来发现能力。已知稳定入口直接 describe；目录返回不可调用就报告具体限制，不靠程序集文本、手工复制路线或别的接口绕过。
-
-1. `bgi.update_subscribed_scripts` 是固定的稳定接口，直接 `bgi.api.describe`，不先调用 `bgi.api.search`。用户只要求刷新中央脚本仓库时使用 `repositoryOnly`；不要用“打开脚本仓库”代替更新。
-2. 用户要求更新某个已安装脚本或路线时，读取 `User/Subscriptions` 中当前订阅文件，把目标解析为其中真实的订阅路径。名称对应不唯一时才询问。
-   “更新/升级/同步某脚本”默认指订阅内容；除非用户明确说配置组或一条龙流程，否则不并行查询 `OneDragon`、`ScriptGroup`。
-3. 调用 `bgi.update_subscribed_scripts`：传 `paths` 时只更新这些已订阅路径；省略时更新全部订阅。接口会先同步当前渠道的中央仓库。
-4. 仓库/脚本更新不依赖截图器、游戏句柄或前台窗口，不调用 `bgi.state.get`，也不读取自动更新周期、上次更新时间等设置来代替执行。
-5. 更新会覆盖订阅资源的程序文件，但沿用 BetterGI 自带的脚本配置保留逻辑。Job 完成后回读目标脚本的 manifest 或关键文件；不要只凭“处理器返回”声称版本已更新。
-6. `bgi.api.invoke` 已跟踪 Job 到终态。返回中已经有 completed、failed 或 cancelled 时直接处理 evidence，不再调用 `bgi.job.get`；只有恢复中断任务且手里只有 Job ID 时才查询。
-
-## 排查脚本报错
-
-宿主把脚本失败写进按天日志，报错原文、出错脚本名和涉及的文件都能直接取到。不要先让用户复制日志或截图。
-
-1. `bgi.get_script_errors` 是固定稳定接口，直接 `bgi.api.describe` 后 `bgi.api.read`，不先 `bgi.api.search`。默认读当天的日志；失败发生在更早的日期时传 `date`，可用日期在 `availableDates` 里。
-2. 每条 `failure` 已经归并过：`error` 是宿主给出的一手报错原文，`jsError` 非空表示错误由 JS 引擎抛出，`script` 是从同一次运行的日志里读到的脚本名，`context` 是这次运行前后的记录。
-3. 按 `locations` 逐项核对，不再搜索接口：
-   - `kind=userFile` 是相对 `User\` 的路径，直接交给 `bgi.user.read`。缺失的路线、数据或配置文件通常出现在这里，报错原文会说它找不到什么。
-   - `kind=hostSource` 是宿主源码位置（`BetterGenshinImpact/Service/ScriptService.cs:548`），与 `bgi.api.describe` 返回的 source 字段同一形式。它说明失败发生在宿主哪一步，不是用户能改的文件，别把它当成要修的对象。
-   - `kind=absolute` 是打包机路径，本机不一定存在。
-4. 报错指向脚本本身时读源码：`bgi.user.read` 读 `User\JsScript\<folderName>\main.js`，`folderName` 取配置组任务里的字段，不按显示名猜目录。参数与运行前提以 `README.md`、`manifest.json`、`settings.json` 为准。
-5. 需要这一次运行的完整过程时，用 `bgi.read_host_log` 传 `failure.thread` 读出同一线程的记录：脚本自己的 `log()` 输出、开始与结束行、宿主异常都在其中。
-6. `script` 为空表示日志里没有能对上号的脚本名，不要猜：按 `thread` 读原始日志，或回到配置组按用户说的任务名核对 `folderName`。
-7. 结论必须落在可核对的位置：报错原文、出错的脚本或文件、下一步动作（改哪个文件、补哪条订阅、改哪个参数）。日志里确实没有记录的失败，直说没有记录，不编造原因。
-
-## 何时询问用户
-
-先把本地文件、接口契约和状态中能取得的事实查完。只在以下情况询问，并一次问完：
-
-- 两个真实存在的目标都符合请求，选择会导致不同结果；
-- 缺少脚本定义为必填且没有默认值的参数；
-- 用户要求的目标不存在，且不能从已安装资源确定替代项；
-- 操作结果不可逆，而用户原话没有确定目标或范围。
-
-不要询问 BetterGI 是否运行、目录在哪里、有哪些配置组、接口是否可用、是否需要保存、是否允许执行已明确要求的写操作。程序会获取这些事实；普通写入直接执行，只有删除和大范围配置变更会让用户确认一次真实范围。
-
-用户要求运行游戏任务而宿主或游戏还没启动时，**自己把它启动起来**：用 `bgi.api.invoke` 调用 `bgi.start_game`（没有这个接口时，用 `bgi.api.search` 在 `command` 组找启动触发器的命令 `cmd.home_page.start_trigger`），再用 `bgi.get_status` 等到 `ready=true`（以进入主界面为准），然后继续原任务。运行类调用返回「游戏尚未就绪」不是终点，那是让你先启动再重试。不要把「请你先启动游戏」当成结论交回用户 —— `bgi.start_game` 失败时会带上缺的那一项（未配置安装路径、未开启联动启动、没有游戏窗口），照它说的做或如实转述。
-
-## 调用纪律
-
-- 独立只读调用放在同一轮并行执行；不要逐个等待后再决定读取下一个同类文件。
-- 已经得到的路径、接口 ID、配置值和状态在未发生变化时直接复用。
-- 已知对象类型时直接进入对应目录，不先列 User 根目录做“环境调查”。
-- 每个证据源最多做一次发现；零结果后检查是否选错证据源，而不是连续换同义词。
-- 参数以 Schema、现有文件和脚本定义为准，不凭经验补字段。
-- 只报告已读取或已验证的事实。未提交、Job 未完成、结果未知必须明确区分。
-- 完成后先说结果，再说必要的生效条件或一个真实阻塞项；不列“你可以 A/B/C”把下一步重新交给用户。
+提交后按卡片和契约验证。已验证的 deleted/prepared/opened 等状态只证明该项操作；用户要求运行时仍须继续执行。无可调用接口时说明具体限制和可核实的替代路径，不扫描桥二进制，不编造完成结果。

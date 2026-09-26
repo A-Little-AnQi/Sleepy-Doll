@@ -2,7 +2,7 @@
 name = "sleepy-doll"
 version = "0.1.0"
 edition = "2024"
-description = "Codex-inspired desktop agent runtime for BetterGI"
+description = "General desktop agent for game scripting tools, with a BetterGI plugin"
 license = "MIT"
 
 [features]
@@ -76,6 +76,11 @@ required-features = ["desktop"]
 [[bin]]
 name = "sleepy-doll-dev"
 path = "src/bin/sleepy-doll-dev.rs"
+required-features = ["dev-ipc"]
+
+[[bin]]
+name = "bgi-agent-check"
+path = "src/bin/bgi-agent-check.rs"
 required-features = ["dev-ipc"]
 
 # 只在显式 --features setup 时编译：它 include_bytes! 构建期生成的载荷，

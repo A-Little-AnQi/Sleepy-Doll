@@ -8,7 +8,7 @@
 
 完整链路必须同时具备：目标定位、输入来源与校验、当前版本可调用契约、符合权限的提交、真实宿主执行、结果核验、取消／失败处理。存在类、存在方法、HTTP 成功、命令处理器返回或 Job 完成，均不能单独证明用户目标已完成。
 
-本次读取两套安装配置的桥地址时均连接被拒绝。当前报告中的“运行桥尚未核验”是缺少现场快照，不代表接口不存在；源码索引和隔离测试与真实游戏验证分别记录，不将它们混为一个通过状态。
+最新复查已取得真实运行桥的只读快照，共 931 个接口。源码清单中的 319 个命令有 181 个已登记可调用、59 个当前不可调用、79 个当前目录未登记；622 个设置索引项有 615 个匹配当前目录、7 个需核对复杂对象展开或版本差异。未登记命令主要来自编辑器、弹窗、遮罩和未实例化的子 ViewModel，不等于对应业务完全不存在。所有源码清单中的稳定入口均已登记。源码索引、现场只读契约、隔离测试与真实游戏验证分别记录，不混为一个通过状态。
 
 已完成源码静态全量盘点与链路分类：319 个命令、622 个全局设置叶节点、68 个页面／窗口、140 个脚本 API 方法、35 个脚本资源模型字段。319 个命令中，217 项可按动态命令机制继续核验，33 项需要宿主对象绑定，24 项需要当前选择证据，21 项依赖弹窗输入，22 项是内部事件／空实现，2 项使用不可跟踪的 async void。这是源码分类，不是 217 项实机通过。
 
@@ -22,7 +22,7 @@
 | 停止运行 | 桥 Job CTS 没有接到宿主 CancellationContext | 请求取消后游戏任务仍可继续 | 已加入当前任务取消联动与 `bgi.stop_current_task`；验证启动前取消、传递、旧作用域不取消新任务 |
 | 首领次数与模式 | 所有 OnXChanged 被统一视为不可写；次数是边界校验，模式会清除树脂补充字段 | “执行两次”无法正确配置 | 开放受限次数 Schema，模式联动字段纳入预览、提交与回退；已验证 |
 | 字典设置 | ValueContract 没有字符串键字典契约 | 遮罩指标开关等复合叶子只能读 | 已补字典值与属性数校验；类型错误和超限拒绝已验证 |
-| 本机 JS 独立目标 | user.resolve 主要定位配置组和 AutoPathing；自建 JS 不一定在中央仓库 | 已安装 JS 无组时可能被报为不存在 | 本机 manifest 标题定位、settingsUi 读取、prepare_js_group 原生准备；默认值、选项、未知键及复用已验证 |
+| 本机 JS 独立目标 | user.resolve 主要定位配置组和 AutoPathing；自建 JS 不一定在中央仓库 | 已安装 JS 无组时可能被报为不存在 | 本机 manifest 标题定位、settings_ui 读取、prepare_js_group 原生准备；默认值、选项、未知键及复用已验证 |
 | 当前界面选择 | 部分命令依赖 SelectedConfig、SelectedScriptProject 或 SelectedTrack | 可调用不等于能作用于用户点名目标 | 全量记录选择依赖，需逐类核对稳定替代入口与 skill 指引 |
 | 联动设置 | 所有钩子一律拒绝，包含仅边界限制的 19 项和首领模式 1 项 | 日常次数、缩放、颜色等无法配置 | 已核对源实现；19 项按数值／颜色边界开放，模式纳入关联字段事务；范围与格式已验证 |
 | 页面导航 | 源码导航服务存在，桥没有按目标页面入口 | 搜索“导航”未命中后无可执行入口 | 新增 list_pages/open_page，明确 14 个主页面；导航选择与窗口可见性已验证 |
@@ -57,6 +57,7 @@
 ```powershell
 dotnet run --project bgi-bridge/dev/MetadataBuilder.csproj -- E:/BetterGIProject/better-genshin-impact bgi-bridge/managed/generated/host-documentation.json
 python bgi-bridge/dev/coverage-audit.py E:/BetterGIProject/better-genshin-impact --live-config dist/Sleepy-Doll/user/config.json
+python bgi-bridge/dev/feature-guide-builder.py
 ```
 
 运行桥快照只读接口目录，不读取模型密钥或当前敏感设置，不提交游戏任务；缓存位于 `target/bgi-coverage/`。
@@ -67,7 +68,9 @@ python bgi-bridge/dev/coverage-audit.py E:/BetterGIProject/better-genshin-impact
 
 仍不具备无交互完整入口的项目，在全量表中明确标记：编辑器的鼠标／布局操作、录制过程中的人工操作、部分对象选择、外部平台验证码绑定和宿主文件选择对话框。部分目标可以改走资源读写、设置事务或新稳定入口；没有替代入口的项目仍需专门适配。不得把这些项目描述成已完整自动化，也不得因为其中一个界面命令不可调用就否定整个业务功能。
 
-在真实桥未连接时，无法核验当前安装版本是否登记全部源码命令，也不能确认本机所有独立任务可执行。复查需要保持 BGI 连接，然后重新获取只读目录；不自动启动游戏、不试运行全部任务、不修改用户通知渠道或跨会话配置。
+现场只读目录可以核对登记、参数和可调用限制，但不能确认所有独立任务在游戏中完成。后续版本复查需保持 BGI 连接并重新获取目录；不自动试运行全部任务、不修改通知渠道或跨会话配置。
+
+真实仓库只读回归已找到 `pathing/地方特产/稻妻/血斛`（1 个完整目标目录），以及历练点相关 JS（4 个候选），并成功从中央仓库读取 `js/使用历练点完成每日委托/manifest.json` 的 20 行文本。这验证了实际仓库查询与源码读取链路，没有订阅、修改配置或运行游戏；“本机未装”不能再被当作全仓没有。
 
 运行隔离检查：
 
@@ -78,3 +81,35 @@ dotnet "$env:TEMP/sleepy-doll-bgi-coverage-validation/bin/BetterGI.dll"
 ```
 
 测试程序集名称用于宿主类型定位，使用 dotnet 运行而不启动名为 BetterGI.exe 的假进程，以免触发实际桌面程序的宿主重连。结束后清理登记的临时目录。
+
+## Agent 理解与渐进式披露
+
+功能覆盖清单同时生成插件资源 `plugins/bgi/resources/feature-index.json`：1,232 个条目，其中包含 16 条用户目标流程，以及每个命令、设置、页面、脚本 API、资源字段和稳定入口的单项卡片。卡片保留输入来源、依赖、执行步骤、限制分支、核验方法、参考资料和源码版本。脚本 API 是脚本运行环境能力，不能当作同名 Agent 工具；界面选择、弹窗、内部事件和 async void 的限制仍明确标记。
+
+运行时只常驻简短的 `bgi-assistant` 目标入口。`bgi-operator` 已拆成资源、设置、执行、仓库、源码排障和缺项说明六份参考资料，不再常驻完整操作手册。流程为：
+
+```mermaid
+flowchart LR
+  A[简短目标入口] --> B[feature.search 摘要]
+  B --> C[feature.read 单项卡片]
+  C --> D[当前任务的 skill 参考资料]
+  D --> E[api.describe 当前契约]
+  E --> F[提交并按证据核验]
+```
+
+明确的资源运行请求仍直接 `user.resolve`，脚本问题直接读取脚本；不强制每次经过全部层级。功能总览只分页读取流程摘要。搜索最多返回 12 条摘要，单项卡片完整落在默认工具结果预算内；不会把整份索引、全量接口 Schema 或无关手册装入模型上下文。源码知识和检索实现属于 BGI 提供方；通用 Agent 只增加现有 BGI 只读分发中的两个工具名，没有修改通用规划、技能匹配或其他插件行为。
+
+全量检查逐项核对源码清单与卡片、所有参考资料的实际 SkillRegistry 读取、16 类目标检索、摘要分页和单项结果大小。CI 执行生成器 `--check`，防止覆盖清单更新后插件索引未同步。
+
+实际 Supervisor 配合当前配置的 `deepseek-flash` 做隔离行为回归：普通知识没有 BGI 调用；功能总览只读流程摘要；删除组按文件版本调用 `delete_script_group`；JS 参数解释读到本机定义及入口源码；“帮我跑下血斛”先 resolve 再调用正确运行入口，并使用终态证据。实际系统上下文约 2,438 字符，JS 任务约 4,964 字符，均未常驻完整索引或操作手册。隔离桥只操作系统临时目录，模型密钥仅在代理进程内存中；不连接真实 BGI、不运行游戏。这证明实际加载与所测目标路由，不证明所有模型、所有措辞或真实游戏结果都正确。
+
+回归过程中修复了实际命名不一致：原生 BGI 的 Manifest 使用 SnakeCaseLower，JSON 字段为 `settings_ui`。本机检查器现在优先读取该字段，并兼容旧 `settingsUi`；C# 原生构造器测试也改用正确的原生序列化规则，65 项断言重新通过。
+
+复现实际 Agent 验收（使用配置中的当前模型，会发出模型请求）：
+
+```powershell
+cargo build --no-default-features --features dev-ipc --bin bgi-agent-check
+python bgi-bridge/dev/disclosure-check.py --config dist/Sleepy-Doll/user/config.json
+```
+
+测试工具只支持当前验收的 Anthropic Messages 协议。它登记并创建系统临时目录 `sleepy-doll-bgi-disclosure-validation`，监听本机随机端口，运行真实 AppController/Supervisor；退出时关闭本次进程、服务器并清理配置和数据库，不保留模型密钥或真实宿主数据。

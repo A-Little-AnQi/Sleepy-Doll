@@ -23,7 +23,7 @@
 | 用户资源 | `bgi.user.resolve` / `bgi.user.list` / `bgi.user.read` / `bgi.user.inspect_script` / `bgi.user.write` / `bgi.user.restore` | 采集和运行先 `resolve`；其余读写见 `bgi-operator` |
 | 中央仓库资料 | `bgi.repo.search` / `bgi.repo.read` | 按脚本标题定位，再直接读取 Git 对象中的文档、参数和 JS；未订阅也可读，支持行号与关键词上下文 |
 | 订阅与准备地图追踪 | `bgi.subscribe_script_resources` / `bgi.prepare_pathing_group` | 稳定宿主入口直接 api.describe/invoke；选择父目录，由宿主导入文件并构造完整配置组 |
-| 准备本机 JS | `bgi.prepare_js_group` | 读取 manifest 指定的 settingsUi 后用已定义参数准备配置组，再运行返回的 groupName |
+| 准备本机 JS | `bgi.prepare_js_group` | 读取 manifest 指定的 settings_ui 后用已定义参数准备配置组，再运行返回的 groupName |
 | 插件语义能力 | `bgi.capability.search` / `bgi.capability.describe` / `bgi.capability.invoke` | 仅在任务明确涉及已安装插件时使用 |
 
 同样的对应关系也适用于其他文档：凡是提到“能力目录”，在 Sleepy Doll 里就是 `bgi.api.*`。

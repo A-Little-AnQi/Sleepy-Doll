@@ -1,6 +1,7 @@
 //! 与 BetterGI 的接触面：桥的客户端、工具，以及桥进程的生命周期。
 
 pub mod control;
+pub(crate) mod features;
 pub(crate) mod resolve;
 pub(crate) mod retrieval;
 
@@ -347,6 +348,7 @@ impl BgiClient {
 }
 
 pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Result<()> {
+    let features = features::FeatureIndex::bundled()?;
     let mut definitions: Vec<BridgeToolDefinition<'_>> = vec![
         (
             "bgi.state.get",
@@ -412,6 +414,14 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
     ];
     definitions.extend([
+        ("bgi.feature.search", "查找 BGI 功能链路", "离线检索 BGI 插件的全量功能与流程索引；只返回少量摘要。用户目标或设置/命令不明确时用它，明确运行资源仍先 user.resolve。静态命中不代表现场可调用；用 feature.read 读取单项链路，再 describe 当前接口。", json!({"type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":200},"kind":{"type":"string","enum":["workflow","command","setting","page","scriptApi","resourceModel","stable"]},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":12,"default":5}},"required":["query"],"additionalProperties":false}), {
+            let features = features.clone();
+            Arc::new(move |a: &Value| features.search(a["query"].as_str().unwrap_or(""),a["kind"].as_str(),a["offset"].as_u64().unwrap_or(0) as usize,a["limit"].as_u64().unwrap_or(5) as usize)) as BridgeToolFn
+        }),
+        ("bgi.feature.read", "读取单项 BGI 链路", "读取 feature.search 返回的一个精确 ID，取得输入来源、步骤、分支、验证方法与相关参考资料。不读取全量手册，不证明当前接口可调用；只按当前目标继续读取引用和 describe。", json!({"type":"object","properties":{"id":{"type":"string","minLength":1}},"required":["id"],"additionalProperties":false}), {
+            let features = features.clone();
+            Arc::new(move |a: &Value| features.read(a["id"].as_str().unwrap_or(""))) as BridgeToolFn
+        }),
         ("bgi.repo.search", "检索脚本仓库", "搜索中央仓库全部资源，默认 all；JS 参数用 js，采集/地图追踪必须用 pathing。地图追踪返回完整目标目录和作者包、requirements，不返回散落叶子供拼接。分类无命中不等于全仓库没有。用精确路径阅读、订阅并准备运行，不要扫描桥程序集。", json!({"type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":200},"category":{"type":"string","enum":["all","js","pathing","combat","tcg"],"default":"all"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":20,"default":8}},"required":["query"],"additionalProperties":false}), {
             let client = client.clone();
             Arc::new(move |a: &Value| client.repository_read("bgi.search_script_repository", a)) as BridgeToolFn
@@ -570,7 +580,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
                         profiles.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
                     }
                     let manifest = read_small_json(&path.join("manifest.json"), 64 * 1024);
-                    let settings_name = manifest.as_ref().and_then(|value| value["settingsUi"].as_str()).filter(|name| !name.is_empty());
+                    let settings_name = manifest.as_ref().and_then(|value| value["settings_ui"].as_str().or_else(|| value["settingsUi"].as_str())).filter(|name| !name.is_empty());
                     let settings_path = settings_name.map(|name| user_path(&path, name)).transpose()?;
                     Ok(json!({
                         "folderName":folder,

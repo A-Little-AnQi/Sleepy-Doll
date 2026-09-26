@@ -28,3 +28,7 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo check
       - run: cargo check --no-default-features
+      - name: Validate BGI progressive disclosure
+        run: |
+          python bgi-bridge/dev/feature-guide-builder.py --check
+          cargo test --no-default-features --lib

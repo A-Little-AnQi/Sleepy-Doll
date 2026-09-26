@@ -12,6 +12,7 @@ description: 阅读 BetterGI JavaScript 脚本的参数、源码、模块和执�
 - 只是问某脚本或字段的含义，直接 `bgi.repo.search` 搜索脚本标题，使用返回的 `path`；未订阅也能用 `bgi.repo.read` 读取。中央仓库只检出索引，文件在 Git 对象中，不能以磁盘上没有 JS 文件判断脚本不存在。
 - 先读 `manifest.json`，按 `settings_ui` 和 `main` 定位配置定义与入口。独立的 manifest、settings、README 可并行读。标明使用本机版本还是中央仓库版本，两者版本不同时不混用实现。
 - 仓库搜索未命中时用一个核心功能词核对一次；参数字段可能不在目录索引中。确实不知道脚本名时只补问名称，不转去扫描 `OneDragon`、宿主设置、无关脚本或 Sleepy Doll 安装目录。
+- 仓库读取接口失败时，立即检查本机 `JsScript` 的 manifest 标题并读取已安装版本；不存在扩展能力并不能证明脚本不存在，不为脚本参数问题转查 `bgi.capability.search` 或本体命令。
 
 ## 从字段跟到行为
 

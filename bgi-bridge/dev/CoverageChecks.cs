@@ -178,7 +178,7 @@ class CoverageChecks
     {
         var folder = Path.Combine(Root, "JsScript", "本机JS"); Directory.CreateDirectory(folder);
         File.WriteAllText(Path.Combine(folder, "main.js"), "log('fixture');");
-        File.WriteAllText(Path.Combine(folder, "manifest.json"), "{\"name\":\"只在本机的脚本\",\"main\":\"main.js\",\"settingsUi\":\"options.json\"}");
+        File.WriteAllText(Path.Combine(folder, "manifest.json"), "{\"name\":\"只在本机的脚本\",\"main\":\"main.js\",\"settings_ui\":\"options.json\"}");
         File.WriteAllText(Path.Combine(folder, "options.json"), "[{\"name\":\"team\",\"type\":\"input-text\",\"default\":\"默认队伍\"},{\"name\":\"mode\",\"type\":\"select\",\"options\":[\"A\",\"B\"],\"default\":\"A\"}]");
         var result = await Call(registry, "bgi.prepare_js_group", new { folderName = "本机JS", settings = new { team = "采集" } });
         var file = Path.Combine(Root, "ScriptGroup", result.GetProperty("groupName").GetString() + ".json");
@@ -254,7 +254,7 @@ namespace BetterGenshinImpact.Core.Script.Project
     public class ScriptProject
     {
         public string FolderName { get; } public Manifest Manifest { get; }
-        public ScriptProject(string folder) { FolderName=folder; Manifest=JsonSerializer.Deserialize<Manifest>(File.ReadAllText(Path.Combine(CoverageChecks.Root,"JsScript",folder,"manifest.json")),new JsonSerializerOptions { PropertyNameCaseInsensitive=true })!; }
+        public ScriptProject(string folder) { FolderName=folder; Manifest=JsonSerializer.Deserialize<Manifest>(File.ReadAllText(Path.Combine(CoverageChecks.Root,"JsScript",folder,"manifest.json")),new JsonSerializerOptions { PropertyNamingPolicy=JsonNamingPolicy.SnakeCaseLower })!; }
     }
     public class Manifest
     {

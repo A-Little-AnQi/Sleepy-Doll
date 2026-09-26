@@ -2637,6 +2637,8 @@ impl Supervisor {
             | "bgi.user.read"
             | "bgi.user.inspect_script"
             | "bgi.user.resolve"
+            | "bgi.feature.search"
+            | "bgi.feature.read"
             | "workspace.list"
             | "workspace.read" => {
                 let registry = self.tools().clone();

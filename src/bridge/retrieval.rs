@@ -146,9 +146,9 @@ fn reading_guide(value: &mut Value, guide: Option<&str>) {
     if value["items"]
         .as_array()
         .is_some_and(|items| !items.is_empty())
-        && let Some(instructions) = guide
+        && guide.is_some()
     {
-        value["readingGuide"] = json!({"skill":"bgi-javascript","instructions":instructions});
+        value["readingGuide"] = json!({"skill":"bgi-javascript","next":"skills.read 加载 JS 阅读规则，再按 manifest 的 settings_ui/main 和字段引用读取必要源码；不自动装入整份手册。"});
     }
 }
 
