@@ -69,8 +69,7 @@ public static class AgentSchemas
         "bgi.get_script_errors" => Object(("date", Date, false), ("limit", Limit, false)),
         "bgi.list_commands" => Object(("filter", Text("命令名或用途关键词。"), false), ("includeDangerous", Flag("是否同时列出有破坏性副作用的命令；不影响调用权限。"), false)),
         "bgi.invoke_command" => Object(("command", Text("来自命令目录的精确 name。"), true), ("argument", ArgumentSchema.Parse("""{"description":"必须符合该命令的 parameterSchema；无参命令省略此字段。"}"""), false),
-            ("contextId",Text("真实上下文引用。",64),false), ("selection",ArgumentSchema.Parse("""{"type":"object","maxProperties":32}"""),false), ("dialogInput", Bgi.NativeDialogScope.Schema,false),
-            ("implementationInput",ArgumentSchema.Parse("""{"type":"object","maxProperties":32,"description":"补充实现的业务输入，必须满足对应 cmd 的当前 implementationInput 契约。"}"""),false)),
+            ("contextId",Text("真实上下文引用。",64),false), ("selection",ArgumentSchema.Parse("""{"type":"object","maxProperties":32}"""),false), ("dialogInput", Bgi.NativeDialogScope.Schema,false)),
         _ => throw new InvalidOperationException($"接口 {id} 缺少参数契约。"),
     };
 

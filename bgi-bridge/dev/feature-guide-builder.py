@@ -81,9 +81,10 @@ WORKFLOWS = [
 def build(data):
     result = list(WORKFLOWS)
     revision = data["sourceRevision"]
+    published_names = {item["name"] for item in data["commands"] if item.get("publicExposure", True)}
     for item in data["commands"]:
-        if item["methodId"] in {"cmd.task_settings_page.switch_auto_track", "cmd.task_settings_page.go_to_auto_track_url"}:
-            continue  # 用户明确要求暂不对 Agent 披露遗留剧情跟踪。
+        if not item.get("publicExposure", True):
+            continue
         assessment = item["chainAssessment"]
         alternative = item.get("stableAlternative", "")
         result.append({"id": item["methodId"], "kind": "command", "title": item.get("label") or item.get("summary") or item["name"],
@@ -96,6 +97,8 @@ def build(data):
                        "references": [ref("execution.md"), ref("viewmodel-usage.md", "bgi-assistant")],
                        "source": {"path": item["source"], "line": item["line"]}, "sourceRevision": revision})
     for item in data["settings"]:
+        if not item.get("publicExposure", True):
+            continue
         result.append({"id": item["methodId"], "kind": "setting", "title": item["summary"] or item["path"], "summary": item["summary"],
                        "keywords": [item["path"], item["name"], item["owner"].split(".")[-1]], "availability": "当前 writable、valueSchema 和联动事务决定",
                        "methodIds": [item["methodId"], "bgi.set_setting", "bgi.preview_settings", "bgi.commit_settings"],
@@ -109,10 +112,12 @@ def build(data):
         result.append({"id": "view." + owner, "kind": "page", "title": owner.split(".")[-1] if item["class"] else Path(owner).stem,
                        "summary": "页面／窗口及绑定入口", "keywords": [item["source"]], "availability": "主页面走 open_page，编辑窗口核对具体命令",
                        "steps": ["list_pages 返回主页面标识；主页面用 open_page", "不是主页面时搜索具体打开命令；不调用 Loaded/Closing 等内部事件"],
-                       "inputSources": [], "bindings": {"commands": item["commands"], "events": item["events"]}, "branches": [], "verification": "导航选择与窗口可见性；打开页面不代替业务操作",
+                       "inputSources": [], "bindings": {"commands": [binding for binding in item["commands"] if any(name in binding["binding"] for name in published_names)]}, "branches": [], "verification": "导航选择与窗口可见性；打开页面不代替业务操作",
                        "references": [ref("viewmodel-usage.md", "bgi-assistant")], "source": {"path": item["source"]}, "sourceRevision": revision})
     for kind, records in [("scriptApi", data["scriptApis"]), ("resourceModel", data["resourceModels"])]:
         for item in records:
+            if item.get("exposureReason"):
+                continue
             result.append({"id": item["symbol"], "kind": kind, "title": item["summary"] or item["name"],
                            "summary": item["summary"], "keywords": [item["name"], item["owner"]], "availability": "脚本 API／资源模型，不是直接桥操作",
                            "inputSources": item.get("parameters") or [{"type": item["valueType"]}],

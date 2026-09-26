@@ -127,9 +127,12 @@ def make_inventory(source, metadata, live):
                     "OneKeyExecuteCommand": "bgi.run_one_dragon", "StopSoloTaskCommand": "bgi.stop_current_task"}
     supported = {"string", "bool", "int", "double", "float", "long", "decimal"} | set(metadata["enums"])
     for item in commands:
+        item["publicExposure"] = not bool(item.get("exposureReason"))
         parameter = (item.get("valueType") or "").removesuffix("?")
         name = item["name"].removesuffix("Command")
-        if name in internal or item.get("hasImplementation") is False:
+        if item.get("exposureReason"):
+            chain = "已移除：" + item["exposureReason"]
+        elif name in internal or item.get("hasImplementation") is False:
             chain = "内部事件／空实现，不作为业务入口"
         elif item.get("asyncVoid") and item.get("hasAwait", True):
             chain = "异步不可跟踪，需稳定替代"
@@ -144,6 +147,11 @@ def make_inventory(source, metadata, live):
         item["chainAssessment"] = chain
         item["stableAlternative"] = alternatives.get(item["name"], "")
     for item in commands + settings:
+        item["publicExposure"] = not bool(item.get("exposureReason"))
+        if not item["publicExposure"]:
+            item["bridgeState"] = "新版公共目录已移除"
+            item["reason"] = item["exposureReason"]
+            continue
         actual = runtime.get(item["methodId"])
         if actual:
             item["bridgeState"] = "可调用" if actual["callable"] else "当前不可调用"

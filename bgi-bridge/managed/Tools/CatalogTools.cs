@@ -16,16 +16,14 @@ public static class CatalogTools
             var context = ("contextId", ArgumentSchema.Parse("""{"type":"string","minLength":1,"maxLength":64,"description":"list_command_targets 返回的当前上下文引用；多实例或泛型命令必须指定。"}"""), false);
             var selection = ("selection", item.SelectionSchema, false);
             var dialog = ("dialogInput", NativeDialogScope.Schema, item.NeedsDialogInput);
-            var implementation = ("implementationInput",item.ImplementationInput ?? ArgumentSchema.Empty,item.RequiresImplementationInput);
-            var schema = item.ParameterType is null ? AgentSchemas.Object(context, selection, dialog, implementation)
-                : AgentSchemas.Object(context, selection, dialog, implementation, ("argument", item.ParameterSchema!.Value, item.ImplementationInput is null));
+            var schema = item.ParameterType is null ? AgentSchemas.Object(context, selection, dialog)
+                : AgentSchemas.Object(context, selection, dialog, ("argument", item.ParameterSchema!.Value, true));
             registry.Register($"cmd.{item.Name}", "command", item.Guide.Purpose,
                 (arguments, cancellation) => CommandCatalog.Invoke(item.Name,
                     arguments.TryGetProperty("argument", out var value) ? value : null, cancellation,
                     arguments.TryGetProperty("contextId", out var contextId) ? contextId.GetString() : null,
                     arguments.TryGetProperty("selection", out var selected) ? selected : null,
-                    arguments.TryGetProperty("dialogInput", out var input) ? input : null,
-                    arguments.TryGetProperty("implementationInput",out var implemented) ? implemented : null),
+                    arguments.TryGetProperty("dialogInput", out var input) ? input : null),
                 readOnly: false, destructive: true, inputSchema: schema, guide: item.Guide,
                 unavailableReason: item.UnavailableReason, requiresGameReady: item.RequiresGameReady);
         }
@@ -130,8 +128,7 @@ public static class CatalogTools
                 arguments.TryGetProperty("argument", out var argument) ? argument : null, cancellation,
                 arguments.TryGetProperty("contextId", out var context) ? context.GetString() : null,
                 arguments.TryGetProperty("selection", out var selection) ? selection : null,
-                arguments.TryGetProperty("dialogInput", out var dialog) ? dialog : null,
-                arguments.TryGetProperty("implementationInput",out var implementation) ? implementation : null),
+                arguments.TryGetProperty("dialogInput", out var dialog) ? dialog : null),
             readOnly: false, destructive: true);
     }
 

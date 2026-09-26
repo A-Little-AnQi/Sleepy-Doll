@@ -48,7 +48,6 @@ public static class CommandDocumentation
         ["AutoRedeemCode"]="兑换码", ["AutoMusicGame"]="音游", ["AutoAlbum"]="千音雅集",
         ["AutoFishing"]="自动钓鱼", ["AutoDomain"]="自动秘境", ["AutoFight"]="自动战斗",
         ["AutoBoss"]="首领讨伐", ["AutoCook"]="自动烹饪", ["AutoWood"]="自动伐木",
-        ["AutoTrackPath"]="地图追踪", ["AutoTrack"]="旧版自动寻路",
         ["GetGridIcons"]="背包图标采集", ["GridIconsModelAccuracyTest"]="背包图标模型准确率测试",
         ["AutoEat"]="自动吃药", ["OneDragonFlow"]="一条龙流程", ["ScriptControl"]="脚本调度",
         ["JsList"]="JavaScript 脚本", ["KeyMouseRecordPage"]="键鼠脚本",

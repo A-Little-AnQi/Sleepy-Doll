@@ -11,6 +11,7 @@ var entries = new SortedDictionary<string, object>(StringComparer.Ordinal);
 var enumValues = new SortedDictionary<string, string[]>(StringComparer.Ordinal);
 var labels = new Dictionary<string, string?>(StringComparer.Ordinal);
 var propertyGuides = new Dictionary<string, string?>(StringComparer.Ordinal);
+var uiBindings = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
 void AddPropertyGuide(string key, string caption)
 {
     if (string.IsNullOrWhiteSpace(caption)) return;
@@ -27,6 +28,14 @@ foreach (var path in Directory.EnumerateFiles(root, "*.xaml", SearchOption.AllDi
         var contextNamespace = contextMatch.Success ? xml.Root!.GetNamespaceOfPrefix(contextMatch.Groups[1].Value)?.NamespaceName : null;
         var ownerHint = contextNamespace?.StartsWith("clr-namespace:") == true
             ? contextNamespace["clr-namespace:".Length..].Split(';')[0] + "." + contextMatch.Groups[2].Value : null;
+        // 包含样式 Setter、EnableCommand/CloseCommand 等自定义属性；不读取 XML 注释中的旧控件。
+        foreach (var attribute in xml.Descendants().Attributes().Where(a => a.Value.Contains("{Binding", StringComparison.Ordinal)))
+        foreach (Match binding in Regex.Matches(attribute.Value, @"\b(\w+Command)\b"))
+        {
+            var commandKey = binding.Groups[1].Value;
+            if (!uiBindings.TryGetValue(commandKey, out var locations)) uiBindings[commandKey] = locations = [];
+            locations.Add(Path.GetRelativePath(root, path).Replace('\\', '/'));
+        }
         foreach (var element in xml.Descendants())
         foreach (var attribute in element.Attributes().Where(a => a.Name.LocalName is "IsChecked" or "Text" or "Value" or "SelectedItem" or "SelectedValue" or "SelectedIndex" or "Password"))
         {
@@ -49,9 +58,15 @@ foreach (var path in Directory.EnumerateFiles(root, "*.xaml", SearchOption.AllDi
         }
         foreach (var element in xml.Descendants())
         {
-            var command = element.Attribute("Command")?.Value;
+            var command = element.Attributes().FirstOrDefault(a => a.Name.LocalName.EndsWith("Command", StringComparison.Ordinal))?.Value;
             if (command is null) continue;
             var match = Regex.Match(command, @"(?:Path=)?(?:\w+\.)?(\w+Command)");
+            if (match.Success)
+            {
+                var commandKey = match.Groups[1].Value;
+                if (!uiBindings.TryGetValue(commandKey, out var locations)) uiBindings[commandKey] = locations = [];
+                locations.Add(Path.GetRelativePath(root, path).Replace('\\', '/'));
+            }
             var label = Caption(element.Attribute("Content")?.Value ?? element.Attribute("Header")?.Value ?? element.Attribute("ToolTip")?.Value);
             var card = element.Ancestors().FirstOrDefault(a => a.Name.LocalName is "CardControl" or "CardExpander" or "GroupBox");
             var context = card?.Descendants().Where(e => e.Name.LocalName.EndsWith("TextBlock")).Select(e => Caption(e.Attribute("Text")?.Value)).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s));
@@ -71,6 +86,15 @@ foreach (var path in Directory.EnumerateFiles(root, "*.xaml", SearchOption.AllDi
 }
 var trees = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories).Where(Usable)
     .Select(path => (Path: path, Tree: CSharpSyntaxTree.ParseText(File.ReadAllText(path)))).ToArray();
+var callerText = trees.ToDictionary(pair => Path.GetRelativePath(root, pair.Path).Replace('\\', '/'), pair => pair.Tree.GetRoot().ToString());
+var callers = trees.SelectMany(pair => pair.Tree.GetRoot().DescendantNodes().OfType<IdentifierNameSyntax>()
+    .Select(node => (Name: node.Identifier.ValueText, Path: Path.GetRelativePath(root, pair.Path).Replace('\\', '/'))))
+    .GroupBy(item => item.Name).ToDictionary(group => group.Key, group => group.Select(item => item.Path).Distinct().ToArray());
+var internalEvents = new HashSet<string>(StringComparer.Ordinal)
+{
+    "Activated", "Closing", "Loaded", "WindowSizeChanged", "OverlayLayoutCommitted", "PointClick", "PointHover", "PointRightClick",
+    "DropDownChanged", "ConfigDropDownChanged", "CaptureModeDropDownChanged", "StrategyDropDownOpened", "BeginSeek", "UpdateTrackSelection",
+};
 foreach (var (_, tree) in trees)
 {
     foreach (var call in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
@@ -160,6 +184,30 @@ foreach (var (path, tree) in trees)
             }
             var range = attributes.FirstOrDefault(a => a.Name.ToString().EndsWith("Range"))?.ArgumentList?.Arguments.Select(a => a.Expression.ToString()).ToArray();
             var key = (kind == "command" ? "C:" : kind == "scriptApi" ? "M:" : "P:") + owner + "." + name;
+            var obsolete = attributes.Concat(type.AttributeLists.SelectMany(list => list.Attributes))
+                .Any(a => a.Name.ToString() is "Obsolete" or "ObsoleteAttribute" or "System.Obsolete" or "System.ObsoleteAttribute");
+            var implemented = member is not MethodDeclarationSyntax implementation || implementation.ExpressionBody is not null || implementation.Body?.Statements.Count > 0;
+            var bindings = uiBindings.GetValueOrDefault(name)?.Order().ToArray() ?? [];
+            var sourceCallers = member is MethodDeclarationSyntax calledMethod
+                ? callers.GetValueOrDefault(calledMethod.Identifier.ValueText, []).Concat(callers.GetValueOrDefault(name, [])).Distinct()
+                    .Where(caller => caller == Path.GetRelativePath(root, path).Replace('\\', '/') || callerText[caller].Contains(type.Identifier.ValueText, StringComparison.Ordinal)).Order().ToArray() : [];
+            var hasAwait = member is MethodDeclarationSyntax awaitMethod && awaitMethod.DescendantNodes().OfType<AwaitExpressionSyntax>().Any();
+            var asyncVoid = member is MethodDeclarationSyntax asyncMethod && asyncMethod.Modifiers.Any(SyntaxKind.AsyncKeyword) && asyncMethod.ReturnType.ToString() == "void";
+            var needsDialogInput = member is MethodDeclarationSyntax dialogMethod && (new[] { "PromptDialog.Prompt", "OpenFileDialog", "SaveFileDialog", "FolderBrowserDialog", "PromptDialog.User", "new PromptDialog" }.Any(dialog => dialogMethod.ToString().Contains(dialog, StringComparison.Ordinal)));
+            var dialogCalls = member is MethodDeclarationSyntax modalMethod ? modalMethod.DescendantNodes().OfType<InvocationExpressionSyntax>()
+                .Select(call => call.Expression.ToString()).Where(call => call.EndsWith("ShowDialog", StringComparison.Ordinal) || call.EndsWith("ShowDialogAsync", StringComparison.Ordinal)).ToArray() : [];
+            var unsupportedDialog = kind == "command" && (dialogCalls.Any(call => call.EndsWith("ShowDialogAsync", StringComparison.Ordinal))
+                || dialogCalls.Length > 0 && !needsDialogInput && !(type.Identifier.ValueText == "MapPathingViewModel" && name == "OpenSettingsCommand"));
+            var retiredOwner = type.Identifier.ValueText is "FormViewModel" or "AutoPickBlackListViewModel" or "AutoPickWhiteListViewModel";
+            var exposureReason = obsolete ? "源码标记 Obsolete，已移除公共入口"
+                : kind != "command" ? null
+                : retiredOwner ? "旧表单类型已无原生界面／业务调用，使用当前黑白名单窗口或资源接口"
+                : !implemented ? "空实现或仅注释占位，已移除而不补造业务"
+                : internalEvents.Contains(name[..^7]) ? "WPF 生命周期／控件输入事件，不是独立业务接口"
+                : asyncVoid && hasAwait ? "async void 含 await，桥不能等待真实终态"
+                : unsupportedDialog ? "模态窗口／ContentDialog 尚无完整输入与收尾适配，不作为可调用接口"
+                : bindings.Length == 0 && sourceCallers.Length == 0 ? "没有有效界面绑定或源码调用，未作为当前产品功能发布"
+                : null;
             entries[key] = new
             {
                 summary,
@@ -172,16 +220,22 @@ foreach (var (path, tree) in trees)
                 source = Path.GetRelativePath(root, path).Replace('\\','/'),
                 line = tree.GetLineSpan(member.Span).StartLinePosition.Line + 1,
                 hasCustomChangeHook = type.Members.OfType<MethodDeclarationSyntax>().Any(m => m.Identifier.ValueText == $"On{name}Changed"),
-                hasImplementation = member is not MethodDeclarationSyntax implementation || implementation.ExpressionBody is not null || implementation.Body?.Statements.Count > 0,
+                hasImplementation = implemented,
+                isObsolete = obsolete,
+                exposureReason,
+                uiBindings = bindings,
+                sourceCallers,
+                calls = member is MethodDeclarationSyntax bodyMethod ? bodyMethod.DescendantNodes().OfType<InvocationExpressionSyntax>().Select(i => i.Expression.ToString()).Distinct().ToArray() : null,
                 jsonIgnore = attributes.Any(a => a.Name.ToString().EndsWith("JsonIgnore")),
                 jsonName = (attributes.FirstOrDefault(a => a.Name.ToString().EndsWith("JsonPropertyName"))?.ArgumentList?.Arguments.FirstOrDefault()?.Expression as LiteralExpressionSyntax)?.Token.ValueText,
                 isStatic = member.Modifiers.Any(SyntaxKind.StaticKeyword),
                 writable = member is FieldDeclarationSyntax || member is PropertyDeclarationSyntax prop && prop.AccessorList?.Accessors.Any(accessor => accessor.IsKind(SyntaxKind.SetAccessorDeclaration) && !accessor.Modifiers.Any(SyntaxKind.PrivateKeyword)) == true,
                 parameters = member is MethodDeclarationSyntax commandMethod ? commandMethod.ParameterList.Parameters.Select(parameter => new { name = parameter.Identifier.ValueText, type = parameter.Type?.ToString() }).ToArray() : null,
-                needsDialogInput = member is MethodDeclarationSyntax dialogMethod && new[] { "PromptDialog.Prompt", "OpenFileDialog", "SaveFileDialog", "FolderBrowserDialog", "PromptDialog.User" }.Any(dialog => dialogMethod.ToString().Contains(dialog, StringComparison.Ordinal)),
+                needsDialogInput,
+                dialogCalls,
                 usesSelection = member is MethodDeclarationSyntax selectedMethod && Regex.IsMatch(selectedMethod.ToString(), @"\bSelected\w+"),
-                asyncVoid = member is MethodDeclarationSyntax asyncMethod && asyncMethod.Modifiers.Any(SyntaxKind.AsyncKeyword) && asyncMethod.ReturnType.ToString() == "void",
-                hasAwait = member is MethodDeclarationSyntax awaitMethod && awaitMethod.DescendantNodes().OfType<AwaitExpressionSyntax>().Any(),
+                asyncVoid,
+                hasAwait,
                 dialogTitles = member is MethodDeclarationSyntax titleMethod ? titleMethod.DescendantNodes().OfType<AssignmentExpressionSyntax>()
                     .Where(a => a.Left.ToString() == "Title").Select(a => a.Right).OfType<LiteralExpressionSyntax>().Select(a => a.Token.ValueText)
                     .Concat(titleMethod.DescendantNodes().OfType<InvocationExpressionSyntax>().Where(i => i.Expression.ToString().Contains("PromptDialog", StringComparison.Ordinal)

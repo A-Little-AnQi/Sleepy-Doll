@@ -25,8 +25,6 @@ public sealed record CommandDescriptor(
     public required JsonElement SelectionSchema { get; init; }
     public bool NeedsDialogInput { get; init; }
     public bool InternalUiEvent { get; init; }
-    public JsonElement? ImplementationInput { get; init; }
-    public bool RequiresImplementationInput { get; init; }
 }
 
 /// <summary>命令目录：扫描宿主 ICommand 属性，按真实上下文暴露成 cmd.&lt;owner&gt;.&lt;command&gt;。</summary>
@@ -72,21 +70,22 @@ public static partial class CommandCatalog
             foreach (var type in types)
             {
                 if (type.IsInterface || type.FullName?.StartsWith("BetterGenshinImpact.", StringComparison.Ordinal) != true
-                    || type.Assembly.GetName().Name != Reflect.HostAssembly) continue;
+                    || type.Assembly.GetName().Name != Reflect.HostAssembly || type.IsDefined(typeof(ObsoleteAttribute), true)) continue;
 
                 foreach (var property in type.GetProperties(BindingFlags.Instance | BindingFlags.Public))
                 {
                     if (!property.Name.EndsWith("Command", StringComparison.Ordinal)) continue;
+                    if (property.IsDefined(typeof(ObsoleteAttribute), true)) continue;
                     if (!typeof(ICommand).IsAssignableFrom(property.PropertyType)) continue;
 
                     var viewModelName = TrimSuffix(type.Name.Split('`')[0], "ViewModel");
                     var commandName = TrimSuffix(property.Name, "Command");
                     var name = $"{ToSnakeCase(viewModelName)}.{ToSnakeCase(commandName)}";
-                    // 用户明确要求：遗留剧情跟踪暂不开放，目录与通用调用入口一起隐藏。
-                    if (name is "task_settings_page.switch_auto_track" or "task_settings_page.go_to_auto_track_url") continue;
-                    if (!seen.Add(name)) continue;  // 重名保留第一个
                     var parameterType = FindParameterType(property.PropertyType);
                     var source = SourceDocumentation.Find("C", type, property.Name);
+                    // 只发布审核过的当前业务入口；弃用、占位、内部事件和未审查成员不反射复活。
+                    if (source is null || source.ExposureReason is not null || source.IsObsolete || !source.HasImplementation) continue;
+                    if (!seen.Add(name)) continue;
                     var purpose = CommandDocumentation.Purpose(type.Name, property.Name, source);
                     if (purpose.Contains("不安排自动调用", StringComparison.Ordinal))
                         purpose = $"宿主反射命令 {type.FullName}.{property.Name}；需当前上下文、原生参数与操作后的业务证据，不从处理器返回推断用户目标完成。";
@@ -94,9 +93,7 @@ public static partial class CommandCatalog
                     var parameterSchema = parameterType is null
                         ? (JsonElement?)null
                         : DescribeParameter(CommandTargets.Schema(parameterType), title, parameterType);
-                    var implemented = ImplementedCommands.Handles(name);
-                    var unavailable = source?.HasImplementation == false && !implemented ? "当前 BetterGI 版本该命令为空实现。"
-                        : source?.AsyncVoid == true && source.HasAwait ? "宿主使用包含 await 的 async void，需稳定可等待的替代入口。"
+                    var unavailable = source.AsyncVoid && source.HasAwait ? "宿主使用包含 await 的 async void，需稳定可等待的替代入口。"
                         : null;
                     var internalUi = CommandDocumentation.UnavailableReason(type.Name, property.Name) is not null;
                     var guide = new AgentGuide(
@@ -116,8 +113,8 @@ public static partial class CommandCatalog
                         unavailable is not null ? []
                             : parameterType is not null && parameterSchema is null ? []
                             : [parameterType is null ? ArgumentSchema.Parse("{}") : JsonSerializer.SerializeToElement(new { argument = Example(parameterSchema) })],
-                        source?.Summary.Length > 0 ? "host-source-and-ui" : "bridge-domain-guide",
-                        source is null ? null : $"{source.Source}:{source.Line}");
+                        source.Summary.Length > 0 ? "host-source-and-ui" : "bridge-domain-guide",
+                        $"{source.Source}:{source.Line}");
 
                     result.Add((
                         new CommandDescriptor(
@@ -128,9 +125,8 @@ public static partial class CommandCatalog
                             IsAsyncCommand(property.PropertyType),
                             true) { Guide = guide, ParameterSchema = parameterSchema, UnavailableReason = unavailable,
                                 IsDestructive = DangerousWords.Any(word => commandName.Contains(word, StringComparison.OrdinalIgnoreCase)),
-                                RequiresGameReady = CommandDocumentation.RequiresGameReady(type.Name, property.Name) || name == "task_settings_page.switch_auto_track_path",
-                                SelectionSchema = CommandTargets.SelectionSchema(type), NeedsDialogInput = source?.NeedsDialogInput == true, InternalUiEvent = internalUi,
-                                ImplementationInput = implemented ? ImplementedCommands.Input(name) : null, RequiresImplementationInput = ImplementedCommands.NeedsInput(name) },
+                                RequiresGameReady = CommandDocumentation.RequiresGameReady(type.Name, property.Name),
+                                SelectionSchema = CommandTargets.SelectionSchema(type), NeedsDialogInput = source.NeedsDialogInput, InternalUiEvent = internalUi },
                         type,
                         property,
                         FindParameterType(property.PropertyType)));
@@ -143,7 +139,7 @@ public static partial class CommandCatalog
     }
 
     /// <summary>在 UI 线程执行；这些命令操作绑定到界面的对象。</summary>
-    public static async Task<object?> Invoke(string name, JsonElement? argument, CancellationToken cancellation, string? contextId = null, JsonElement? selection = null, JsonElement? dialogInput = null, JsonElement? implementationInput = null)
+    public static async Task<object?> Invoke(string name, JsonElement? argument, CancellationToken cancellation, string? contextId = null, JsonElement? selection = null, JsonElement? dialogInput = null)
     {
         if (_config is null || !_config.IsMethodEnabled($"cmd.{name}", "command"))
             throw BridgeException.Disabled("命令分组或该命令已禁用；通用入口不能绕过此限制。");
@@ -154,8 +150,6 @@ public static partial class CommandCatalog
             throw new BridgeException("NOT_CALLABLE", unavailable, 409);
         if (entry.Descriptor.NeedsDialogInput && !dialogInput.HasValue)
             throw BridgeException.InvalidArgument("命令需要明确 dialogInput；不能用通用入口省略弹窗输入。");
-        if (entry.Descriptor.RequiresImplementationInput && !implementationInput.HasValue)
-            throw BridgeException.InvalidArgument("补充实现需要 implementationInput；按当前接口 Schema 提供业务输入。");
         if (entry.Descriptor.RequiresGameReady && !Host.CaptureReady)
             throw BridgeException.GameNotReady("该命令要求截图器和游戏环境已就绪。");
 
@@ -165,11 +159,6 @@ public static partial class CommandCatalog
             // 解析 ViewModel 可能在其构造函数里执行配置迁移。
             var checkpoint = SettingsTransactions.Engine.Checkpoint($"cmd.{name}");
             var viewModel = CommandTargets.Owner(entry.ViewModel, contextId);
-            if (ImplementedCommands.Handles(name))
-            {
-                var result = await ImplementedCommands.Run(name,viewModel,implementationInput ?? ArgumentSchema.Parse("{}"),cancellation);
-                return (object?)new { command = name, executed = true, configurationCheckpoint = checkpoint, implementation = "bgiPlugin", result };
-            }
             if (name == "map_pathing.open_settings")
             {
                 var vmType = Reflect.RequireType("BetterGenshinImpact.ViewModel.Pages.View.PathingConfigViewModel");

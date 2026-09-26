@@ -114,6 +114,7 @@ public static class SettingsCatalog
             if (property.GetMethod is null) continue;                       // 只写的跳过
             if (property.GetIndexParameters().Length != 0) continue;        // 索引器跳过
             if (property.GetCustomAttribute<JsonIgnoreAttribute>() is not null) continue;
+            if (property.GetCustomAttribute<ObsoleteAttribute>() is not null || SourceDocumentation.Find("P", type, property.Name)?.IsObsolete == true) continue;
             if (typeof(Delegate).IsAssignableFrom(property.PropertyType)) continue;
 
             var jsonName = property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name

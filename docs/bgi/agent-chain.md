@@ -88,7 +88,9 @@ flowchart TD
 ```mermaid
 flowchart TD
   C[源码功能卡或当前接口目录] --> ALL[扫描 BetterGI 程序集中的 ICommand 属性]
-  ALL --> CAT[命令说明、参数类型、选择 Schema、弹窗输入]
+  ALL --> FILTER{源码审阅与当前有效入口}
+  FILTER -->|已弃用、占位、内部事件或无适配弹窗| DROP[不登记，不可经通用入口恢复]
+  FILTER -->|已审查业务入口| CAT[命令说明、参数类型、选择 Schema、弹窗输入]
   CAT --> TARGET[list_command_targets：真实窗口、DataContext、对象集合]
   TARGET -->|已有实例| ID[contextId 与原生 objectId]
   TARGET -->|未创建的非泛型实例| CREATE[create_command_target：匹配唯一构造器与原服务依赖]
@@ -110,7 +112,7 @@ flowchart TD
 
 窗口与未注册子对象不会因为没有 `IViewModel` 标记而从目录消失。查询目录不构造窗口；构造是独立写操作。复杂对象以真实引用绑定，不能从用户 JSON 随意重建宿主对象。弹窗输入缺项、旧引用、同名多实例、错误参数和禁用命令均返回明确错误，不能把通用调用入口当绕过方式。
 
-遗留空入口由 BGI 提供方的 ImplementedCommands 补充，而非假定反射本身能创造业务逻辑：遮罩显示／隐藏、截图开关持久化、图像测试、路线跟踪、表单编辑／具体保存、录制地图选择。路线跟踪通过可等待的宿主 TaskRunner 执行，桥与宿主停止都链接到同一动作 token，结果核对 PathExecutor.SuccessEnd。WPF 生命周期回调只用于真实 UI 上下文，不代替业务入口。`async void` 是否能跟踪要核对方法是否真的包含 `await`。用户暂不开放的遗留功能从运行接口和 Agent 功能索引排除。
+反射只负责定位真实对象和调用已审查的业务入口，不创造宿主未实现的业务。旧补接实现及其 implementationInput 已删除；弃用、占位、生命周期和缺少收尾适配的模态窗口从公共目录与功能卡移除。正常路线执行走资源定位、prepare_pathing_group 和 run_script_group；截图测试使用当前原生 start_capture_test。完整逐项保留／删除结果见 [全部接口审阅表](interface-review.md)。
 
 对应实现：[命令发现与执行](../../bgi-bridge/managed/Catalog/CommandCatalog.cs)、[目标与原生对象绑定](../../bgi-bridge/managed/Bgi/CommandTargets.cs)、[上下文接口](../../bgi-bridge/managed/Tools/CommandTargetTools.cs)、[本次弹窗输入](../../bgi-bridge/managed/Bgi/NativeDialogScope.cs)。
 

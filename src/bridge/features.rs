@@ -178,14 +178,9 @@ mod tests {
             .iter()
             .chain(audit["settings"].as_array().unwrap())
         {
-            if matches!(
-                item["methodId"].as_str(),
-                Some(
-                    "cmd.task_settings_page.switch_auto_track"
-                        | "cmd.task_settings_page.go_to_auto_track_url"
-                )
-            ) {
-                continue; // 用户要求从 BGI Agent 功能目录隐藏。
+            if item["publicExposure"] == false {
+                assert!(index.read(item["methodId"].as_str().unwrap()).is_err());
+                continue;
             }
             let card = index.read(item["methodId"].as_str().unwrap()).unwrap();
             assert!(!card["item"]["steps"].as_array().unwrap().is_empty());
@@ -197,6 +192,10 @@ mod tests {
             .iter()
             .chain(audit["resourceModels"].as_array().unwrap())
         {
+            if item["exposureReason"].is_string() {
+                assert!(index.read(item["symbol"].as_str().unwrap()).is_err());
+                continue;
+            }
             assert!(index.read(item["symbol"].as_str().unwrap()).is_ok());
         }
         for item in audit["views"].as_array().unwrap() {
