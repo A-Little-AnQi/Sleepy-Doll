@@ -12,6 +12,7 @@ var enumValues = new SortedDictionary<string, string[]>(StringComparer.Ordinal);
 var labels = new Dictionary<string, string?>(StringComparer.Ordinal);
 var propertyGuides = new Dictionary<string, string?>(StringComparer.Ordinal);
 var uiBindings = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+var uiDeclarations = new List<object>();
 void AddPropertyGuide(string key, string caption)
 {
     if (string.IsNullOrWhiteSpace(caption)) return;
@@ -28,6 +29,16 @@ foreach (var path in Directory.EnumerateFiles(root, "*.xaml", SearchOption.AllDi
         var contextNamespace = contextMatch.Success ? xml.Root!.GetNamespaceOfPrefix(contextMatch.Groups[1].Value)?.NamespaceName : null;
         var ownerHint = contextNamespace?.StartsWith("clr-namespace:") == true
             ? contextNamespace["clr-namespace:".Length..].Split(';')[0] + "." + contextMatch.Groups[2].Value : null;
+        var declarationIndex=0;
+        foreach(var element in xml.Descendants())
+        {
+            var bindings=element.Attributes().Where(a=>a.Value.Contains("{Binding",StringComparison.Ordinal)).Select(a=>new{property=a.Name.LocalName,binding=a.Value}).ToArray();
+            var events=element.Attributes().Where(a=>a.Name.LocalName is "Click" or "Checked" or "Unchecked" or "SelectionChanged" or "Drop" or "PreviewKeyDown" or "MouseDoubleClick").Select(a=>new{name=a.Name.LocalName,handler=a.Value}).ToArray();
+            if(bindings.Length==0&&events.Length==0)continue;
+            var label=Caption(element.Attribute("Header")?.Value??element.Attribute("Content")?.Value??element.Attribute("ToolTip")?.Value??element.Attribute("Text")?.Value);
+            uiDeclarations.Add(new{id="ui."+Path.GetRelativePath(root,path).Replace('\\','/')+"#"+declarationIndex++,view=xml.Root?.Attribute(XName.Get("Class","http://schemas.microsoft.com/winfx/2006/xaml"))?.Value,owner=ownerHint,
+                control=element.Name.LocalName,name=element.Attribute(XName.Get("Name","http://schemas.microsoft.com/winfx/2006/xaml"))?.Value,label,bindings,events,source=Path.GetRelativePath(root,path).Replace('\\','/')});
+        }
         // 包含样式 Setter、EnableCommand/CloseCommand 等自定义属性；不读取 XML 注释中的旧控件。
         foreach (var attribute in xml.Descendants().Attributes().Where(a => a.Value.Contains("{Binding", StringComparison.Ordinal)))
         foreach (Match binding in Regex.Matches(attribute.Value, @"\b(\w+Command)\b"))
@@ -205,7 +216,6 @@ foreach (var (path, tree) in trees)
                 : !implemented ? "空实现或仅注释占位，已移除而不补造业务"
                 : internalEvents.Contains(name[..^7]) ? "WPF 生命周期／控件输入事件，不是独立业务接口"
                 : asyncVoid && hasAwait ? "async void 含 await，桥不能等待真实终态"
-                : unsupportedDialog ? "模态窗口／ContentDialog 尚无完整输入与收尾适配，不作为可调用接口"
                 : bindings.Length == 0 && sourceCallers.Length == 0 ? "没有有效界面绑定或源码调用，未作为当前产品功能发布"
                 : null;
             entries[key] = new
@@ -223,6 +233,7 @@ foreach (var (path, tree) in trees)
                 hasImplementation = implemented,
                 isObsolete = obsolete,
                 exposureReason,
+                interaction = unsupportedDialog ? "nativeUiContinuation" : needsDialogInput ? "dialogInput" : "direct",
                 uiBindings = bindings,
                 sourceCallers,
                 calls = member is MethodDeclarationSyntax bodyMethod ? bodyMethod.DescendantNodes().OfType<InvocationExpressionSyntax>().Select(i => i.Expression.ToString()).Distinct().ToArray() : null,
@@ -245,7 +256,77 @@ foreach (var (path, tree) in trees)
         }
     }
 }
-var output = JsonSerializer.Serialize(new { format = 1, entries, enums = enumValues }, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+var scriptTypes = new SortedDictionary<string, object>(StringComparer.Ordinal);
+var typeMap = trees.SelectMany(pair => pair.Tree.GetRoot().DescendantNodes().OfType<BaseTypeDeclarationSyntax>().Select(type =>
+    (Type: type, pair.Path, pair.Tree, Name: string.Join('.', type.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().Reverse().Select(n => n.Name.ToString())) + "." + type.Identifier.ValueText)))
+    .GroupBy(item => item.Name).ToDictionary(group => group.Key, group => group.First());
+string ResolveType(string raw, SyntaxNode context)
+{
+    raw = raw.TrimEnd('?');
+    var external = new Dictionary<string, string> { ["Mat"]="OpenCvSharp.Mat",["Point2f"]="OpenCvSharp.Point2f",["Pen"]="System.Drawing.Pen",["Color"]="System.Drawing.Color",["CancellationToken"]="System.Threading.CancellationToken",["CancellationTokenSource"]="System.Threading.CancellationTokenSource",["Task"]="System.Threading.Tasks.Task" };
+    foreach (var directive in context.SyntaxTree.GetRoot().DescendantNodes().OfType<UsingDirectiveSyntax>())
+        if (directive.Alias?.Name.Identifier.ValueText == raw) return directive.Name!.ToString();
+    if (external.TryGetValue(raw, out var known)) return known;
+    if (typeMap.ContainsKey(raw)) return raw;
+    foreach (var directive in context.SyntaxTree.GetRoot().DescendantNodes().OfType<UsingDirectiveSyntax>().Where(d => d.Alias is null))
+        if (typeMap.ContainsKey(directive.Name + "." + raw)) return directive.Name + "." + raw;
+    var names = typeMap.Keys.Where(name => name.EndsWith("." + raw, StringComparison.Ordinal)).ToArray();
+    return names.Length == 1 ? names[0] : raw;
+}
+object Parameters(ParameterListSyntax list) => list.Parameters.Select(parameter => new
+{
+    name = parameter.Identifier.ValueText, type = parameter.Type?.ToString(), optional = parameter.Default is not null,
+    defaultValue = parameter.Default?.Value.ToString(), modifier = parameter.Modifiers.ToString()
+}).ToArray();
+var scriptBindings = new List<object>();
+var jsRoots = new Queue<string>();
+foreach (var (path, tree) in trees.Where(pair => Path.GetFileName(pair.Path) == "EngineExtend.cs"))
+foreach (var call in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>().Where(call => call.Expression.ToString() is "engine.AddHostObject" or "engine.AddHostType"))
+{
+    var argsList = call.ArgumentList.Arguments.Select(arg => arg.Expression).ToArray();
+    var alias = argsList[0] is LiteralExpressionSyntax text ? text.Token.ValueText : ((TypeOfExpressionSyntax)argsList[0]).Type.ToString();
+    var value = argsList[^1];
+    var kind = call.Expression.ToString().EndsWith("AddHostType", StringComparison.Ordinal) ? "type" : value is MemberAccessExpressionSyntax ? "function" : "object";
+    var clr = value switch { TypeOfExpressionSyntax t => ResolveType(t.Type.ToString(),call), ObjectCreationExpressionSyntax c => ResolveType(c.Type.ToString(),call), MemberAccessExpressionSyntax m => ResolveType(m.Expression.ToString(),call), _ => "dynamic" };
+    if (value is ObjectCreationExpressionSyntax collection && collection.Type.ToString() == "HostTypeCollection")
+    { kind = "namespace"; clr = ((LiteralExpressionSyntax)collection.ArgumentList!.Arguments[0].Expression).Token.ValueText; }
+    scriptBindings.Add(new { alias, kind, clrType = clr, member = value is MemberAccessExpressionSyntax function ? function.Name.ToString() : null,
+        source = Path.GetRelativePath(root,path).Replace('\\','/'), line = tree.GetLineSpan(call.Span).StartLinePosition.Line+1 });
+    jsRoots.Enqueue(clr);
+}
+scriptBindings.Add(new { alias="settings",kind="dynamic",clrType="System.Dynamic.ExpandoObject",member=(string?)null,source="BetterGenshinImpact/Core/Script/Project/ScriptProject.cs",line=114 });
+while (jsRoots.TryDequeue(out var name))
+{
+    if (scriptTypes.ContainsKey(name) || !typeMap.TryGetValue(name, out var definition)) continue;
+    var declaration = definition.Type;
+    var members = new List<object>();
+    if (declaration is TypeDeclarationSyntax type)
+    {
+        foreach (var member in type.Members.Where(m => m.Modifiers.Any(SyntaxKind.PublicKeyword)))
+        {
+            var memberName = member switch { MethodDeclarationSyntax m => m.Identifier.ValueText, ConstructorDeclarationSyntax => ".ctor", PropertyDeclarationSyntax p => p.Identifier.ValueText, FieldDeclarationSyntax f => f.Declaration.Variables[0].Identifier.ValueText, _ => null };
+            if (memberName is null) continue;
+            var returns = member switch { MethodDeclarationSyntax m => m.ReturnType.ToString(), PropertyDeclarationSyntax p => p.Type.ToString(), FieldDeclarationSyntax f => f.Declaration.Type.ToString(), _ => name };
+            var parameters = member switch { MethodDeclarationSyntax m => Parameters(m.ParameterList), ConstructorDeclarationSyntax c => Parameters(c.ParameterList), _ => null };
+            var memberKind = member is ConstructorDeclarationSyntax ? "constructor" : member is MethodDeclarationSyntax ? "method" : member is FieldDeclarationSyntax ? "field" : "property";
+            members.Add(new { name=memberName,kind=memberKind,returnType=returns,parameters,isStatic=member.Modifiers.Any(SyntaxKind.StaticKeyword),summary=Summary(member),
+                deprecated=member.AttributeLists.SelectMany(list=>list.Attributes).Any(a=>a.Name.ToString().EndsWith("Obsolete")),
+                source=Path.GetRelativePath(root,definition.Path).Replace('\\','/'),line=definition.Tree.GetLineSpan(member.Span).StartLinePosition.Line+1 });
+            foreach (var token in Regex.Matches(returns + " " + member.ToString().Split('{')[0], @"\b[A-Z]\w+\b").Cast<Match>().Select(m=>m.Value))
+                jsRoots.Enqueue(ResolveType(token,member));
+        }
+        foreach (var field in type.Members.OfType<FieldDeclarationSyntax>().Where(f=>f.AttributeLists.SelectMany(l=>l.Attributes).Any(a=>a.Name.ToString().EndsWith("ObservableProperty"))))
+        {
+            var variable=field.Declaration.Variables[0]; var raw=variable.Identifier.ValueText.TrimStart('_');
+            members.Add(new { name=char.ToUpperInvariant(raw[0])+raw[1..],kind="property",returnType=field.Declaration.Type.ToString(),parameters=(object?)null,isStatic=false,summary=Summary(field),deprecated=field.AttributeLists.SelectMany(l=>l.Attributes).Any(a=>a.Name.ToString().EndsWith("Obsolete")),source=Path.GetRelativePath(root,definition.Path).Replace('\\','/'),line=definition.Tree.GetLineSpan(field.Span).StartLinePosition.Line+1 });
+        }
+        foreach (var baseType in type.BaseList?.Types.Select(b=>ResolveType(b.Type.ToString(),type)) ?? []) jsRoots.Enqueue(baseType);
+    }
+    scriptTypes[name] = new { name,kind=declaration is EnumDeclarationSyntax ? "enum":"type",members,
+        enumValues=declaration is EnumDeclarationSyntax e ? e.Members.Select(m=>m.Identifier.ValueText).ToArray():null,
+        bases=declaration is TypeDeclarationSyntax t ? t.BaseList?.Types.Select(b=>ResolveType(b.Type.ToString(),t)).ToArray():null };
+}
+var output = JsonSerializer.Serialize(new { format = 1, entries, enums = enumValues, scriptBindings, scriptTypes, uiDeclarations }, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
 File.WriteAllText(args[1], output);
 Console.WriteLine($"Indexed {entries.Count} members and {enumValues.Count} enums.");
 

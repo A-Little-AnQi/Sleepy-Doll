@@ -89,7 +89,7 @@ flowchart TD
 flowchart TD
   C[源码功能卡或当前接口目录] --> ALL[扫描 BetterGI 程序集中的 ICommand 属性]
   ALL --> FILTER{源码审阅与当前有效入口}
-  FILTER -->|已弃用、占位、内部事件或无适配弹窗| DROP[不登记，不可经通用入口恢复]
+  FILTER -->|已弃用、占位或脱离控件的生命周期| DROP[不登记旧命令，保留可见目标的真实链路]
   FILTER -->|已审查业务入口| CAT[命令说明、参数类型、选择 Schema、弹窗输入]
   CAT --> TARGET[list_command_targets：真实窗口、DataContext、对象集合]
   TARGET -->|已有实例| ID[contextId 与原生 objectId]
@@ -105,6 +105,11 @@ flowchart TD
   CAN --> SCOPE[本次调用的 NativeDialogScope]
   SCOPE --> DIALOG[只处理新建输入窗口；排除已有窗口]
   DIALOG --> INPUT[text / filePath / selectedValues / confirm / values]
+  SCOPE --> OP[模态操作 operationId 续接]
+  OP --> UIR[ui.read：真实字段、按钮、列表与窗口]
+  UIR --> UIW[ui.write / options / reorder / invoke]
+  UIW --> UIEND[ui.respond / operation / close：保存与终态]
+  UIEND --> EVIDENCE
   INPUT --> CMD[ICommand 或 ExecuteAsync 原生处理器]
   CMD --> EVIDENCE[返回不等于业务完成：读取目标结果]
   EVIDENCE --> RELEASE[释放桥创建的上下文，用户已有实例保留]
@@ -112,9 +117,29 @@ flowchart TD
 
 窗口与未注册子对象不会因为没有 `IViewModel` 标记而从目录消失。查询目录不构造窗口；构造是独立写操作。复杂对象以真实引用绑定，不能从用户 JSON 随意重建宿主对象。弹窗输入缺项、旧引用、同名多实例、错误参数和禁用命令均返回明确错误，不能把通用调用入口当绕过方式。
 
-反射只负责定位真实对象和调用已审查的业务入口，不创造宿主未实现的业务。旧补接实现及其 implementationInput 已删除；弃用、占位、生命周期和缺少收尾适配的模态窗口从公共目录与功能卡移除。正常路线执行走资源定位、prepare_pathing_group 和 run_script_group；截图测试使用当前原生 start_capture_test。完整逐项保留／删除结果见 [全部接口审阅表](interface-review.md)。
+反射只负责定位真实对象和调用已审查的业务入口，不创造宿主未实现的业务。旧补接实现及其 implementationInput 已删除；弃用、占位和脱离真实控件的生命周期命令不发布；当前可见编辑器与模态窗口通过原生 UI 续接，不能因为需要交互就删除功能。正常路线执行走资源定位、prepare_pathing_group 和 run_script_group；截图测试使用当前原生 start_capture_test。完整逐项保留／删除结果见 [全部接口审阅表](interface-review.md)。
 
 对应实现：[命令发现与执行](../../bgi-bridge/managed/Catalog/CommandCatalog.cs)、[目标与原生对象绑定](../../bgi-bridge/managed/Bgi/CommandTargets.cs)、[上下文接口](../../bgi-bridge/managed/Tools/CommandTargetTools.cs)、[本次弹窗输入](../../bgi-bridge/managed/Bgi/NativeDialogScope.cs)。
+
+## JS 编写、OCR 与真实引擎契约
+
+```mermaid
+flowchart TD
+  GOAL[用户要求编写／修改 JS] --> SKILL[bgi-javascript：按需 writing.md]
+  SKILL --> SEARCH[js_api.search：实际 EngineExtend 注入别名]
+  SEARCH --> READ[js_api.read：真实类型、重载与继承成员]
+  READ --> OCR[captureGameRegion / ImageRegion / Region / RecognitionObject]
+  READ --> VISION[BvPage / BvLocator / BvImage / OpenCvSharp]
+  READ --> OTHER[输入、任务、文件、通知、模块与 settings]
+  OCR --> CODE[按参数、ROI、坐标、Task/Promise、Dispose 编写]
+  VISION --> CODE
+  OTHER --> CODE
+  CODE --> SAVE[user.write：manifest / main / settings_ui]
+  SAVE --> CHECK[源码／语法／非游戏检查]
+  CHECK --> RUN[按授权准备、运行与读取日志／产物]
+```
+
+契约只描述真实注入、可达类型与返回对象，不创建脚本引擎、不执行 OCR 或键鼠动作。OpenCV 类型集合按具体类型分页读取，避免把全部程序集装进模型上下文。源码回退与真实类型检查明确区分。
 
 ## 输出、折叠与停止
 

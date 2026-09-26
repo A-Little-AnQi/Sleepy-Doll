@@ -64,6 +64,8 @@ public static class CatalogTools
     public static void Register(MethodRegistry registry)
     {
         CommandTargetTools.Register(registry);
+        ScriptApiTools.Register(registry);
+        NativeUiTools.Register(registry);
         ScriptGroupTools.Register(registry);
         ScriptGroupDeletionTools.Register(registry);
         TaskStopTools.Register(registry);

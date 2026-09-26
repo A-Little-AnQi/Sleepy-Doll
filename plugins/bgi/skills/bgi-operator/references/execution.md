@@ -24,7 +24,8 @@
 - `selection` 按当前 Schema 绑定 Selected 字段；多实例必须显式给 contextId。旧引用、类型不符、未匹配的构造器和缺少弹窗输入应根据错误重新取得必要证据，不能扫描 DLL 或换无关接口绕过。
 - 需要输入的命令提供 `dialogInput`：名称用 text，文件／目录用 filePath，资源选择用真实 Tag 的 selectedValues，确认用明确 confirm。作用域只接管本次新建窗口，不能操作用户已有窗口。`dialogsHandled` 不是业务成功标记，修改后仍回读目标。
 - 使用结束后释放桥创建的无用上下文；用户已有实例保留。空实现、弃用功能和内部 UI 事件已从公共目录移除，不能反射恢复或寻找旧教程绕过。
+- 当前可见编辑器、列表行或模态窗口保留原生链路，按需读取 native-ui.md：ui.read/write/options/reorder/invoke/respond/operation 完成输入、排序、保存与终态，不因需要弹窗而删掉功能。
 - 独立任务的目标参数先走 settings 读取与事务，例如首领名称、指定次数模式和次数。联动字段在 preview 的 differences 中一并核对，不能只写 runCount 却遗漏 specifyRunCount。
-- 设置的 writable=false 是具体写入限制，不代表整个功能不存在；不通过 workspace 或磁盘全局配置绕过。
+- 设置的 writable=false 是直接事务限制；当前可见字段可走 ui.read/write 的真实控件绑定、原生校验和保存。不通过 workspace 或磁盘全局配置绕过。
 - 打开页面是明确 UI 目标；使用 bgi.list_pages/open_page。对采集、运行、删除请求，页面导航不能代替操作结果。
 - 普通停止优先取消已关联的 Job；没有 Job ID 时用 bgi.stop_current_task。结果为 timeout 就仍在停止，不能回答“已停止”；音乐播放、录制与外部绑定还要核对各自的停止命令。

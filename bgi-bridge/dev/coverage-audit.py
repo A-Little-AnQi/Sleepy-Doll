@@ -167,7 +167,7 @@ def make_inventory(source, metadata, live):
             item["reason"] = "需核对版本、父对象初始化与安全读写契约。"
     stable = []
     for file in sorted((ROOT / "bgi-bridge/managed/Tools").glob("*.cs")):
-        for method in sorted(set(re.findall(r'"(bgi\.[a-z_]+)"', file.read_text(encoding="utf-8")))):
+        for method in sorted(set(re.findall(r'"(bgi\.[a-z_]+(?:\.[a-z_]+)*)"', file.read_text(encoding="utf-8")))):
             if method.startswith("bgi."):
                 stable.append({"methodId": method, "source": file.relative_to(ROOT).as_posix(),
                                "live": method in runtime})
@@ -184,6 +184,7 @@ def make_inventory(source, metadata, live):
         "commands": sorted(commands, key=lambda item: item["symbol"]),
         "settings": sorted(settings, key=lambda item: item["path"]),
         "views": pages, "stableEntries": stable, "liveInfo": live.get("info", {}),
+        "scriptBindings": metadata.get("scriptBindings", []), "scriptTypes": metadata.get("scriptTypes", {}), "uiDeclarations": metadata.get("uiDeclarations", []),
         "scriptApis": script_apis, "resourceModels": resource_models,
         "chainAssessments": assessments,
         "skillReferences": skill_refs,

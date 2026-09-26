@@ -15,6 +15,8 @@ alwaysLoad: true
 
 - “执行／运行／采集某个材料、路线或脚本”：直接 `bgi.user.resolve`，按返回的资源类型和 verdict 准备、运行；本机未安装不等于仓库不存在。
 - 脚本参数、README 或源码含义：本机用 `bgi.user.inspect_script/read`，仓库用 `bgi.repo.search/read`；按 manifest 的 settings_ui/main 继续读取。用 `skills.read` 加载 `bgi-javascript`。
+- 编写／修改 JS，或 OCR、图像、宿主 API：加载 `bgi-javascript` 的 writing.md，通过 api.read 的 bgi.js_api.search/read 查询实际引擎契约。
+- 当前可见编辑器、窗口或列表设置：稳定入口优先；需要原生交互时读取 bgi-operator 的 native-ui.md，使用 bgi.ui.read/write/invoke/respond/operation 完成输入、保存与核验，不因弹窗而删掉功能。
 - 删除配置组：定位精确 name/sha256，describe/invoke `bgi.delete_script_group`；不要求界面选中、不改成禁用。
 - 停止任务：关联原 Job；无 Job 时 `bgi.stop_current_task`。取消请求或 timeout 都不表示已经停止。
 - 其他功能或对象不明确：用 `bgi.feature.search` 搜索用户目标，再 `bgi.feature.read` 读取最相关条目。索引覆盖源码功能，但当前能否调用仍以 `bgi.api.describe` 为准。

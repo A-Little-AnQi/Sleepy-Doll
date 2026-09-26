@@ -14,7 +14,7 @@ namespace BgiBridge.Bgi;
 public sealed class NativeDialogScope : IDisposable
 {
     public static JsonElement Schema => ArgumentSchema.Parse("""{"type":"object","minProperties":1,"properties":{"text":{"type":"string","maxLength":8192},"filePath":{"type":"string","minLength":1,"maxLength":1024},"selectedValues":{"type":"array","minItems":1,"maxItems":512,"items":{"type":"string","maxLength":1024}},"confirm":{"type":"boolean"},"values":{"type":"object","maxProperties":64}},"additionalProperties":false,"description":"本次命令的明确输入。text 用于名称／文本，filePath 用于文件或目录选择，selectedValues 必须是资源返回的原生 Tag 路径或 folderName；confirm 仅确认本次已授权操作；values 是新窗口数据上下文中的已定义字段。"}""");
-    private readonly JsonElement? input;
+    private JsonElement? input;
     private readonly string[] titles;
     private readonly HashSet<Window> beforeWindows;
     private readonly HashSet<nint> beforeHandles;
@@ -22,7 +22,7 @@ public sealed class NativeDialogScope : IDisposable
     private readonly HashSet<nint> touchedNative = [];
     private readonly DispatcherTimer timer;
     private readonly CancellationToken cancellation;
-    private readonly DateTimeOffset started = DateTimeOffset.UtcNow;
+    private DateTimeOffset started = DateTimeOffset.UtcNow;
     private Exception? failure;
     public int Handled { get; private set; }
 
@@ -39,7 +39,14 @@ public sealed class NativeDialogScope : IDisposable
     private bool Has(string name) => input?.TryGetProperty(name, out _) == true;
     private string? Text(string name) => input.HasValue && input.Value.TryGetProperty(name, out var value) ? value.GetString() : null;
     private bool Accept => !input.HasValue || !input.Value.TryGetProperty("confirm", out var confirm) || confirm.GetBoolean();
+    private void Consume(){input=null;timer.Stop();}
     public void Verify() { if (failure is not null) throw failure; }
+    public void SupplyInput(JsonElement value)
+    {
+        ArgumentSchema.Validate(value, Schema); input=value.Clone(); started=DateTimeOffset.UtcNow; timer.Start();
+    }
+    public object Pending() => new { windows=Application.Current.Windows.Cast<Window>().Where(w=>!beforeWindows.Contains(w)&&w.IsVisible).Select(w=>new{type=w.GetType().FullName,title=w.Title}),
+        nativeDialogs=Handles().Where(h=>!beforeHandles.Contains(h)).Select(h=>new{title=Caption(h)}),handled=Handled };
 
     private void Tick(object? sender, EventArgs args)
     {
@@ -54,6 +61,7 @@ public sealed class NativeDialogScope : IDisposable
                 if (cancellation.IsCancellationRequested || DateTimeOffset.UtcNow - started > TimeSpan.FromSeconds(30))
                 { window.Close(); failure = BridgeException.Failed("弹窗输入已取消或超时，未确认操作完成。"); continue; }
                 Fill(window);
+                if(!input.HasValue)return;
             }
             catch (Exception error) { failure = Reflect.Root(error); window.Close(); }
         }
@@ -72,7 +80,7 @@ public sealed class NativeDialogScope : IDisposable
                 {
                     var choice = root.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, Accept ? "6" : "7"))
                         ?? root.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, Accept ? "1" : "2"));
-                    if (choice?.TryGetCurrentPattern(InvokePattern.Pattern, out var choicePattern) == true) { ((InvokePattern)choicePattern!).Invoke(); Handled++; }
+                    if (choice?.TryGetCurrentPattern(InvokePattern.Pattern, out var choicePattern) == true) { Consume(); ((InvokePattern)choicePattern!).Invoke(); Handled++; return; }
                     continue;
                 }
                 var editors = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit)).Cast<AutomationElement>().ToArray();
@@ -84,7 +92,7 @@ public sealed class NativeDialogScope : IDisposable
                 ((ValuePattern)value).SetValue(Text("filePath")!);
                 var button = root.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, Accept ? "1" : "2"));
                 if (button?.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke) != true) continue;
-                ((InvokePattern)invoke!).Invoke(); Handled++;
+                Consume(); ((InvokePattern)invoke!).Invoke(); Handled++;return;
             }
             catch (ElementNotAvailableException) { }
             catch (InvalidOperationException) { }
@@ -137,7 +145,7 @@ public sealed class NativeDialogScope : IDisposable
         var buttons = elements.OfType<Button>().Where(button => button.IsEnabled).ToArray();
         var button = words.Select(word => buttons.FirstOrDefault(b => (b.Content?.ToString() ?? "").Replace("_", "").StartsWith(word, StringComparison.OrdinalIgnoreCase))).FirstOrDefault(b => b is not null);
         if (button is null) return;
-        button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Handled++;
+        Consume();button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); Handled++;
     }
 
     private static IEnumerable<DependencyObject> Elements(DependencyObject root)
@@ -148,6 +156,8 @@ public sealed class NativeDialogScope : IDisposable
         {
             var item = queue.Dequeue(); if (!visited.Add(item)) continue; yield return item;
             foreach (var child in LogicalTreeHelper.GetChildren(item).OfType<DependencyObject>()) queue.Enqueue(child);
+            if(item is System.Windows.Media.Visual||item is System.Windows.Media.Media3D.Visual3D)
+                for(var i=0;i<System.Windows.Media.VisualTreeHelper.GetChildrenCount(item);i++) queue.Enqueue(System.Windows.Media.VisualTreeHelper.GetChild(item,i));
         }
     }
 

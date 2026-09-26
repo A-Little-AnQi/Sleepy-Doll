@@ -70,12 +70,15 @@ WORKFLOWS = [
              ["通过设置事务读取与修改用户授权渠道，敏感值保持遮蔽", "describe 当前测试或绑定命令，区分配置写入与外部验证码交互"],
              "渠道测试结果或绑定状态；外部验证码／邀请需要真实用户交互时说明唯一缺项", [ref("settings.md"), ref("action-policy.md", "bgi-assistant")]),
     workflow("editor", "录制、编辑器、点位与开发功能", ["录制", "模板", "编辑器", "点位", "拖拽", "开发", "遮罩布局"], ["编辑", "录制", "制作", "修改", "打开", "导出"],
-             ["先读具体功能卡，区分业务目标与内部 WPF 输入事件", "参数／文件可提供时走受支持入口；不能编造点位或重放内部事件"],
+             ["先读功能卡并 describe 当前打开命令，稳定资源入口优先", "编辑器或弹窗用 ui.read → ui.write/ui.invoke → ui.operation 续接原生字段与保存", "Prompt／文件选择用本次 operationId 的 ui.respond；不虚构字段或点位"],
              "保存文件、模板或编辑结果；仅窗口出现不能证明制作完成", [ref("capability-boundaries.md", "bgi-assistant"), ref("viewmodel-usage.md", "bgi-assistant")]),
     workflow("child-session", "桌面分身与子会话", ["分身", "子会话", "多开", "远程桌面"], ["启动", "停止", "创建", "设置", "连接"],
              ["检索当前子会话入口，核对 Windows 会话、权限和实际状态", "只提交明确目标的动作，不改其他账号或会话"],
              "子会话状态与实际窗口；缺环境证据时不宣称后台运行已验收", [ref("viewmodel-usage.md", "bgi-assistant")]),
 ]
+WORKFLOWS.append(workflow("javascript.write", "编写 JS：查询真实宿主 API、OCR 与图像接口", ["JS", "脚本", "OCR", "识别", "截图", "模板", "图像", "OpenCV", "BvPage"], ["写", "编写", "创建", "开发", "修改", "实现"],
+    ["js_api.search 从 EngineExtend 实际注入别名定位 API，js_api.read 读重载、默认值、返回类型与继承成员", "OCR 读 captureGameRegion、ImageRegion、RecognitionObject、Region；BvPage/BvLocator 和 OpenCvSharp 逐个类型按需读", "按实际 manifest/main/settings_ui 创建脚本；Task 返回需要 await，图像对象按生命周期 Dispose", "按授权保存与准备运行，先核对前置，运行后根据日志／产物验证"],
+    "使用的每个宿主符号有真实契约；源码／语法／隔离检查与实际游戏验证分别报告", [{"skill":"bgi-javascript","path":"references/writing.md"}], ["bgi.js_api.search","bgi.js_api.read","bgi.user.write","bgi.prepare_js_group","bgi.run_script_group"]))
 
 
 def build(data):
@@ -104,16 +107,22 @@ def build(data):
                        "methodIds": [item["methodId"], "bgi.set_setting", "bgi.preview_settings", "bgi.commit_settings"],
                        "inputSources": [{"path": item["path"], "type": item["valueType"], "hasChangeHook": item["hasCustomChangeHook"], "sourceDefault": item.get("initial"), "sourceRange": item.get("range")}],
                        "steps": ["describe/read 当前设置取得值、可写性、Schema 与 valueVersion", "用户要求修改时按 Schema 设置；联动差异纳入 preview，比较版本提交", "回读并保存 changeId；不改磁盘全局配置绕过"],
-                       "branches": ["writable=false 说明具体限制，不代表整个功能不存在", "敏感值不回显，不提交遮蔽占位值"],
+                       "branches": ["writable=false 是直接事务限制；当前可见字段可用 ui.read/ui.write 走真实控件绑定、校验与保存，不改全局 JSON 绕过", "敏感值不回显，不提交遮蔽占位值"],
                        "verification": "verified 及回读值；回退比较当前版本", "references": [ref("settings.md")],
                        "source": {"path": item["source"], "line": item["line"]}, "sourceRevision": revision})
     for item in data["views"]:
         owner = item["class"] or item["source"]
         result.append({"id": "view." + owner, "kind": "page", "title": owner.split(".")[-1] if item["class"] else Path(owner).stem,
                        "summary": "页面／窗口及绑定入口", "keywords": [item["source"]], "availability": "主页面走 open_page，编辑窗口核对具体命令",
-                       "steps": ["list_pages 返回主页面标识；主页面用 open_page", "不是主页面时搜索具体打开命令；不调用 Loaded/Closing 等内部事件"],
+                       "steps": ["list_pages 返回主页面标识；主页面用 open_page", "其他窗口走具体打开命令；返回 operationId 时用 ui.read/write/invoke/respond 续接并核验 ui.operation", "生命周期由真实控件维护；关闭窗口用 ui.close，不伪造 Loaded/Closing"],
                        "inputSources": [], "bindings": {"commands": [binding for binding in item["commands"] if any(name in binding["binding"] for name in published_names)]}, "branches": [], "verification": "导航选择与窗口可见性；打开页面不代替业务操作",
                        "references": [ref("viewmodel-usage.md", "bgi-assistant")], "source": {"path": item["source"]}, "sourceRevision": revision})
+    for binding in data.get("scriptBindings", []):
+        result.append({"id":"js.binding."+binding["alias"],"kind":"scriptApi","title":binding["alias"],"summary":"JS 实际注入："+binding["clrType"],"keywords":[binding["alias"],binding["clrType"],"OCR" if binding["alias"] in {"RecognitionObject","ImageRegion","BvPage","BvLocator","captureGameRegion"} else binding["kind"]],
+            "availability":"实际引擎注入声明；成员以 js_api.read 当前契约为准","methodIds":["bgi.js_api.search","bgi.js_api.read"],"inputSources":[],"steps":["api.describe/read js_api.read，id="+binding["alias"],"读取实际成员／重载与继承、参数默认值、返回对象；namespace 按具体类型继续查询"],"branches":["不是可直接 invoke 的 JS 动作；执行应在脚本环境按授权运行"],"verification":"脚本引用的别名与每个成员有实际契约依据","references":[{"skill":"bgi-javascript","path":"references/writing.md"}],"source":{"path":binding["source"],"line":binding["line"]},"declaration":binding})
+    for item in data.get("uiDeclarations", []):
+        result.append({"id":item["id"],"kind":"page","title":item.get("label") or item.get("name") or item["control"],"summary":"用户界面绑定／事件："+item["source"],"keywords":[item.get("label") or "",item.get("name") or "",item["control"]]+[field["binding"] for field in item["bindings"]],
+            "availability":"静态可见界面声明；以 ui.read 的实际控件、绑定、启用状态与版本为准","methodIds":["bgi.ui.read","bgi.ui.write","bgi.ui.invoke","bgi.ui.operation","bgi.ui.respond"],"inputSources":item["bindings"],"steps":["打开所属页面／窗口，ui.read 从真实字段与控件定位，不把静态声明当当前可见对象", "按返回 fieldId/version、options/valueSchema 填写；ui.invoke 点击真实保存／确认，或展开菜单／分组", "operationId 读取终态；原生校验、资源／设置回读或日志核验目标结果"],"branches":["没有 ICommand 的 Click、选择变更或窗口事件也通过真实控件链路处理","仅当前可见、已启用、仍存活的绑定可编辑；不伪造生命周期"],"verification":"原生界面、业务文件／配置与最终操作状态","references":[ref("native-ui.md")],"source":{"path":item["source"]},"declaration":item})
     for kind, records in [("scriptApi", data["scriptApis"]), ("resourceModel", data["resourceModels"])]:
         for item in records:
             if item.get("exposureReason"):

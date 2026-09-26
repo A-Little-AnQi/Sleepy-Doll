@@ -207,6 +207,27 @@ mod tests {
         for item in audit["stableEntries"].as_array().unwrap() {
             assert!(index.read(item["methodId"].as_str().unwrap()).is_ok());
         }
+        for item in audit["uiDeclarations"].as_array().unwrap() {
+            let card = index.read(item["id"].as_str().unwrap()).unwrap();
+            assert!(
+                card["item"]["methodIds"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|id| id == "bgi.ui.read")
+            );
+            assert_eq!(card["item"]["declaration"]["bindings"], item["bindings"]);
+        }
+        for binding in audit["scriptBindings"].as_array().unwrap() {
+            assert!(
+                index
+                    .read(&format!(
+                        "js.binding.{}",
+                        binding["alias"].as_str().unwrap()
+                    ))
+                    .is_ok()
+            );
+        }
         assert_eq!(index.revision, audit["sourceRevision"].as_str().unwrap());
     }
     #[test]
@@ -215,6 +236,7 @@ mod tests {
         for (query, expected) in [
             ("帮我把植绒草那个配置组删一下", "workflow.group.delete"),
             ("帮我跑下血斛", "workflow.resource.run"),
+            ("帮我编写 OCR 识别脚本", "workflow.javascript.write"),
             ("打开调度器页面", "workflow.navigation"),
             ("停一下刚才的任务", "workflow.task.stop"),
             ("run_script_group", "bgi.run_script_group"),
@@ -252,9 +274,9 @@ mod tests {
         assert!(index.read("untrusted-guessed-id").is_err());
         let first = index.search("功能目录", None, 0, 12).unwrap();
         let second = index.search("功能目录", None, 12, 12).unwrap();
-        assert_eq!(first["total"], 16);
+        assert_eq!(first["total"], 17);
         assert_eq!(first["nextOffset"], 12);
-        assert_eq!(second["items"].as_array().unwrap().len(), 4);
+        assert_eq!(second["items"].as_array().unwrap().len(), 5);
         assert!(second["nextOffset"].is_null());
     }
 

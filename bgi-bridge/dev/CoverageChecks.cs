@@ -53,7 +53,7 @@ class CoverageChecks
             finally { app.Shutdown(); }
         };
         app.Run();
-        if (failure is not null) throw failure;
+        if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
         Console.WriteLine(JsonSerializer.Serialize(new { passed, realUserDataTouched = false }));
     }
 
@@ -106,6 +106,7 @@ class CoverageChecks
         await SettingsChecks();
         await JavaScriptChecks(registry);
         await ReflectionChecks();
+        await NativeSurfaceChecks();
 
         foreach (var (path, boundary) in SettingMutationAdapters.Bounded)
         {
@@ -243,6 +244,45 @@ class CoverageChecks
         Check(BetterGenshinImpact.ViewModel.ReflectionFixtureViewModel.Disposed, "桥创建的上下文未释放");
     }
 
+    static async Task NativeSurfaceChecks()
+    {
+        var registry=new MethodRegistry();NativeUiTools.Register(registry);ScriptApiTools.Register(registry);
+        var model=new SurfaceFixture();var panel=new System.Windows.Controls.StackPanel();
+        var name=new System.Windows.Controls.TextBox{Name="队伍名称"};name.SetBinding(System.Windows.Controls.TextBox.TextProperty,new System.Windows.Data.Binding(nameof(SurfaceFixture.Name)){Mode=System.Windows.Data.BindingMode.TwoWay});panel.Children.Add(name);
+        var secret=new System.Windows.Controls.TextBox{Name="访问凭据"};secret.SetBinding(System.Windows.Controls.TextBox.TextProperty,new System.Windows.Data.Binding(nameof(SurfaceFixture.Api_Secret)){Mode=System.Windows.Data.BindingMode.TwoWay});panel.Children.Add(secret);
+        var readOnly=new System.Windows.Controls.TextBlock{Name="只读说明"};readOnly.SetBinding(System.Windows.Controls.TextBlock.TextProperty,new System.Windows.Data.Binding(nameof(SurfaceFixture.Name)));panel.Children.Add(readOnly);
+        var saved=false;var save=new System.Windows.Controls.Button{Content="保存到原生目标"};save.Click+=(_,_)=>saved=true;panel.Children.Add(save);
+        var checkedValue=false;var check=new System.Windows.Controls.CheckBox{Content="原生勾选事件"};check.Click+=(_,_)=>checkedValue=check.IsChecked==true;panel.Children.Add(check);
+        var order=new ObservableCollection<string>{"甲","乙","丙"};var reordered=false;order.CollectionChanged+=(_,args)=>reordered=args.Action==NotifyCollectionChangedAction.Move;
+        var list=new System.Windows.Controls.ListBox{Name="排序列表",Height=60};list.SetBinding(System.Windows.Controls.ItemsControl.ItemsSourceProperty,new System.Windows.Data.Binding{Source=order});panel.Children.Add(list);
+        var window=new Window{DataContext=model,Content=panel,Left=-32000,Top=-32000,Width=240,Height=240,Opacity=0,ShowInTaskbar=false,ShowActivated=false};window.Show();window.UpdateLayout();await Task.Delay(50);
+        var state=await Call(registry,"bgi.ui.read",new{query="队伍名称"});var field=state.GetProperty("items").EnumerateArray().Single(item=>item.TryGetProperty("fieldId",out _));
+        Check(field.GetProperty("writable").GetBoolean(),"可见双向字段不可编辑");
+        await Call(registry,"bgi.ui.write",new{fieldId=field.GetProperty("fieldId").GetString(),expectedVersion=field.GetProperty("version").GetString(),value="新队伍"});
+        Check(model.Name=="新队伍","未走原生绑定更新实际模型");
+        await Reject(()=>Call(registry,"bgi.ui.write",new{fieldId=field.GetProperty("fieldId").GetString(),expectedVersion=field.GetProperty("version").GetString(),value="不能覆盖"}),"VERSION_CONFLICT");
+        var privateFields=await Call(registry,"bgi.ui.read",new{query="Api_Secret"});Check(!privateFields.GetRawText().Contains(model.Api_Secret,StringComparison.Ordinal),"凭据从界面契约泄露");
+        var readonlyState=await Call(registry,"bgi.ui.read",new{query="只读说明"});Check(!readonlyState.GetProperty("items")[0].GetProperty("writable").GetBoolean(),"默认单向显示被当作可写字段");
+        var buttons=await Call(registry,"bgi.ui.read",new{query="保存到原生目标"});var button=buttons.GetProperty("items").EnumerateArray().Single(item=>item.TryGetProperty("kind",out var kind)&&kind.GetString()=="action");
+        await Call(registry,"bgi.ui.invoke",new{controlId=button.GetProperty("controlId").GetString()});Check(saved,"没有调用真实原生 Click 处理器");
+        var checkState=await Call(registry,"bgi.ui.read",new{query="原生勾选事件"});var checkAction=checkState.GetProperty("items").EnumerateArray().Single(item=>item.TryGetProperty("kind",out var kind)&&kind.GetString()=="action");
+        await Call(registry,"bgi.ui.invoke",new{controlId=checkAction.GetProperty("controlId").GetString()});Check(checkedValue,"控件动作绕过了原生 Toggle 行为");
+        var listState=await Call(registry,"bgi.ui.read",new{query="排序列表"});var listField=listState.GetProperty("items").EnumerateArray().Single(item=>item.TryGetProperty("fieldId",out _));
+        var optionState=await Call(registry,"bgi.ui.options",new{fieldId=listField.GetProperty("fieldId").GetString(),offset=1,limit=1});Check(optionState.GetProperty("options")[0].GetProperty("label").GetString()=="乙","分页选项顺序不正确");
+        await Call(registry,"bgi.ui.reorder",new{fieldId=listField.GetProperty("fieldId").GetString(),expectedVersion=listField.GetProperty("version").GetString(),from=0,to=2});Check(reordered&&order[2]=="甲","排序没有进入原生集合通知");
+        var continuation=JsonSerializer.SerializeToElement(await NativeUiSurface.Begin(_=>
+        {
+            var dialog=new BetterGenshinImpact.ViewModel.PromptDialog();dialog.ShowDialog();return Task.FromResult<object?>(new{received=dialog.Box.Text});
+        },null,null,CancellationToken.None));
+        Check(continuation.GetProperty("state").GetString()=="runningOrAwaitingInput","模态窗口仍卡住初始调用");
+        var operationId=continuation.GetProperty("operationId").GetString()!;
+        await Call(registry,"bgi.ui.respond",new{operationId,dialogInput=new{text="续接输入",confirm=true}});
+        await Task.Delay(120);
+        var completed=await Call(registry,"bgi.ui.operation",new{operationId});Check(completed.GetProperty("state").GetString()=="completed"&&completed.GetProperty("result").GetProperty("received").GetString()=="续接输入","已打开的弹窗没有完成续接");
+        var ocr=await Call(registry,"bgi.js_api.read",new{id="RecognitionObject",member="Ocr"});Check(ocr.GetProperty("total").GetInt32()>1,"OCR 契约／重载缺失");
+        var inherited=await Call(registry,"bgi.js_api.read",new{id="ImageRegion",member="Click"});Check(inherited.GetProperty("total").GetInt32()>0,"图像区域的继承 API 缺失");
+        window.Close();await Reject(()=>Call(registry,"bgi.ui.write",new{fieldId=field.GetProperty("fieldId").GetString(),expectedVersion=field.GetProperty("version").GetString(),value="已关闭"}),"STALE_TARGET");
+    }
 }
 
 public class OneDragonFixture
@@ -262,6 +302,13 @@ namespace BetterGenshinImpact
         public Vm Groups { get; } = new(); public Wpf.Ui.NavigationService Navigation { get; } = new();
         public object? GetService(Type type) => type == typeof(Vm) ? Groups : type == typeof(Wpf.Ui.INavigationService) ? Navigation : type==typeof(BetterGenshinImpact.Service.Interface.IConfigService) ? new BetterGenshinImpact.Service.ConfigService() : null;
     }
+
+
+}
+public class SurfaceFixture:INotifyPropertyChanged
+{
+    private string name="原队伍";public string Name{get=>name;set{name=value;PropertyChanged?.Invoke(this,new(nameof(Name)));}}
+    public string Api_Secret{get;set;}="fixture-private-value";public event PropertyChangedEventHandler? PropertyChanged;
 }
 namespace BetterGenshinImpact.GameTask.Common { public static class TaskControl { public static SemaphoreSlim TaskSemaphore { get; } = new(1,1); } }
 namespace BetterGenshinImpact.Core.Script

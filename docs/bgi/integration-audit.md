@@ -10,7 +10,7 @@
 
 上一阶段取得旧驻留桥的只读快照，共 931 个接口；以下分类仅描述该快照，新版检查见文末。源码清单中的 319 个命令有 181 个已登记可调用、59 个当前不可调用、79 个当前目录未登记；622 个设置索引项有 615 个匹配当前目录、7 个需核对复杂对象展开或版本差异。未登记命令主要来自编辑器、弹窗、遮罩和未实例化的子 ViewModel，不等于对应业务完全不存在。所有源码清单中的稳定入口均已登记。源码索引、现场只读契约、隔离测试与真实游戏验证分别记录，不混为一个通过状态。
 
-已完成源码静态全量盘点：319 个命令、622 个全局设置叶节点、68 个页面／窗口、140 个脚本 API 方法、35 个脚本资源模型字段。本次逐项清理移除 58 个源码命令与 2 个弃用设置；完整处理原因见 [全部接口审阅表](interface-review.md)。这是源码与契约审阅，不是实机全功能通过。
+已完成源码静态全量盘点：319 个命令、622 个全局设置叶节点、68 个页面／窗口、140 个脚本 API 方法、35 个脚本资源模型字段。当前保留全部可见界面的原生链路；仅移除 41 个弃用／空置／内部旧命令与 2 个弃用设置；完整处理原因见 [全部接口审阅表](interface-review.md)。这是源码与契约审阅，不是实机全功能通过。
 
 ## 已发现的缺口
 
@@ -84,7 +84,7 @@ dotnet "$env:TEMP/sleepy-doll-bgi-coverage-validation/bin/BetterGI.dll"
 
 ## Agent 理解与渐进式披露
 
-功能覆盖清单同时生成插件资源 `plugins/bgi/resources/feature-index.json`：1,176 个有效条目（已清理弃用、占位、内部事件与未适配的模态入口），其中包含 16 条用户目标流程，以及每个命令、设置、页面、脚本 API、资源字段和稳定入口的单项卡片。卡片保留输入来源、依赖、执行步骤、限制分支、核验方法、参考资料和源码版本。脚本 API 是脚本运行环境能力，不能当作同名 Agent 工具；界面选择、弹窗、内部事件和 async void 的限制仍明确标记。
+功能覆盖清单同时生成插件资源 `plugins/bgi/resources/feature-index.json`：2,638 个条目（覆盖可见界面声明、实际 JS 别名和目标流程；目录数量以生成器输出为准），其中包含 16 条用户目标流程，以及每个命令、设置、页面、脚本 API、资源字段和稳定入口的单项卡片。卡片保留输入来源、依赖、执行步骤、限制分支、核验方法、参考资料和源码版本。脚本 API 是脚本运行环境能力，不能当作同名 Agent 工具；界面选择、弹窗、内部事件和 async void 的限制仍明确标记。
 
 运行时只常驻简短的 `bgi-assistant` 目标入口。`bgi-operator` 已拆成资源、设置、执行、仓库、源码排障和缺项说明六份参考资料，不再常驻完整操作手册。流程为：
 
@@ -114,17 +114,19 @@ python bgi-bridge/dev/disclosure-check.py --config dist/Sleepy-Doll/user/config.
 
 测试工具只支持当前验收的 Anthropic Messages 协议。它登记并创建系统临时目录 `sleepy-doll-bgi-disclosure-validation`，监听本机随机端口，运行真实 AppController/Supervisor；退出时关闭本次进程、服务器并清理配置和数据库，不保留模型密钥或真实宿主数据。
 
-## 公共接口清理
+## 当前可见功能与 JS API 补齐
 
-此前把反射发现当作能力发布依据，错误地补接了弃用跟踪、空测试按钮和旧表单等入口。本次删除整个补接实现文件及 implementationInput 参数；这不是开关隐藏，公开目录、通用调用、上下文构造与 Agent 功能索引都无法恢复已删除入口。BGI 本体仓库和用户现存配置文件保持原样，源码盘点仅保留移除证据。
+先前把 17 个需要模态交互的现有功能摘出公共目录，不符合“所有当前可见功能都有链路”的要求。本次恢复这些真实命令，并增加原生 UI 的 read/write/options/reorder/invoke/respond/operation/close/cancel。字段来自实际 WPF 绑定，列表顺序使用原生 Move，按钮触发真实 OnClick 与异步执行任务。未展开的分组、菜单或页签可先展开／定位；字段、选项、绑定目标和版本变化均重新取证。
 
-本次逐项审阅 20 个 Agent 工具、36 个稳定桥接口、319 个源码命令和 622 个设置节点，并核对 140 个脚本 API、35 个资源字段和 68 个页面。源码命令删除 58 项（弃用／空实现、生命周期与输入事件、无有效界面或调用的旧入口、没有完整适配的模态窗口），设置删除 2 项明确 Obsolete 字段。当前真实 x64 编译程序集中的动态目录由上阶段 343 项减为 263 项；差额含继承别名与未审查的新成员，源码清单的计数口径不同。
+模态命令先返回 operationId，随后读取当前窗口、填写字段、点击保存／确认或补充本次弹窗输入，再读取操作终态与业务结果。一份弹窗输入只确认一个阶段，不把旧输入自动用到后续窗口。双向绑定、原生校验、单向显示不可写、敏感值遮蔽、失效对象和集合通知都有隔离回归。Lifecycle 由真实窗口和控件触发，不直接伪造 Loaded/Closing。
 
-反射仍覆盖当前有效的窗口、子对象与泛型上下文，但只登记源码已审查的入口。新增宿主成员未审查时不自动发布。对象、选择、PromptDialog 与文件输入链路保留；无法自动收尾的其他模态窗口与 ContentDialog 已摘出，不能把它们伪装成可执行接口。正常地图追踪继续走 prepare_pathing_group/run_script_group；原生截图测试 start_capture_test 保留。
+源码界面索引保留全部 1,365 个绑定／事件声明，每项都有原生 UI 流程卡，包含非 AllConfig 编辑器、列表行和动态字段。有效 AllConfig 字段仍可查询；直接事务受限的可见字段可走实际控件与保存链路。弃用旧跟踪、空测试、无产品调用的旧入口保持删除，不复活旧业务。
 
-真实程序集检查的 missing、missingFromHostVersion、blocked、malformed、excludedLeaks 均为空。86 项隔离断言覆盖空入口移除、通用调用与构造入口不能绕回、弃用设置不公开，以及已有资源、设置、取消、对象和弹窗适配。此处只读类型检查不构造 BGI Host、不启动游戏；隔离执行不触碰用户数据。新版现场注入及游戏内全功能效果仍未验收。
+JS API 不再只列 Core.Script.Dependence 包装方法：从 EngineExtend 与 ScriptProject 的实际 AST 提取 68 个注入入口／别名，展开 140 个相关源码类型，并提供运行时 js_api.search/read。真实程序集检查覆盖全部 68 个入口，包括 ImageRegion/Region 的继承方法、RecognitionObject OCR 重载、BvPage/BvLocator/BvImage、OpenCV 导出集合、Task/Promise、默认参数、ref/out、params 与返回对象。只读检查不初始化 Host、不运行游戏或 JS；检查器使用兼容宿主依赖的 .NET 10，产品运行时与通用 Agent 未改。
 
-[全部接口审阅表](interface-review.md)逐项列出当前公开命令、稳定接口、全部设置及删除原因；[结构化表](interface-review.json)保留完整 Schema 与核验规则。[完整输入到输出链路图](agent-chain.md)已同步清理旧实现。
+当前真实程序集目录有 280 个动态命令与 47 个稳定入口，已删除入口没有复活，保留项无遗漏。117 项隔离断言通过；Rust 12 项通过、2 项现有环境检查跳过。生成器与功能卡逐项测试核对每个 UI 声明和 JS 别名，按需披露，不常驻全目录。
+
+[全部接口审阅表](interface-review.md)、[结构化表](interface-review.json)及[完整调用链路图](agent-chain.md)均同步更新。真实已运行 BGI 的新版注入及游戏内全部业务分支尚未现场验收，不能用类型契约或隔离检查冒充实机全通过。
 
 ```powershell
 dotnet run --project bgi-bridge/dev/SourceCommandChecks.csproj -- E:/BetterGIProject/better-genshin-impact/BetterGenshinImpact/bin/x64/Debug/net8.0-windows10.0.22621.0/BetterGI.dll docs/bgi/feature-coverage.json

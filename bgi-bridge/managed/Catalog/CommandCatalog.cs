@@ -126,7 +126,7 @@ public static partial class CommandCatalog
                             true) { Guide = guide, ParameterSchema = parameterSchema, UnavailableReason = unavailable,
                                 IsDestructive = DangerousWords.Any(word => commandName.Contains(word, StringComparison.OrdinalIgnoreCase)),
                                 RequiresGameReady = CommandDocumentation.RequiresGameReady(type.Name, property.Name),
-                                SelectionSchema = CommandTargets.SelectionSchema(type), NeedsDialogInput = source.NeedsDialogInput, InternalUiEvent = internalUi },
+                                SelectionSchema = CommandTargets.SelectionSchema(type), NeedsDialogInput = source.NeedsDialogInput && source.Interaction != "nativeUiContinuation", InternalUiEvent = internalUi },
                         type,
                         property,
                         FindParameterType(property.PropertyType)));
@@ -182,6 +182,13 @@ public static partial class CommandCatalog
                     $"命令「{name}」当前不可执行——检查页面状态和必填参数。", 409);
             cancellation.ThrowIfCancellationRequested();
             var source = SourceDocumentation.Find("C", entry.ViewModel, entry.Property.Name);
+            if (source?.Interaction == "nativeUiContinuation")
+                return await NativeUiSurface.Begin(async token=>
+                {
+                    token.ThrowIfCancellationRequested();using var hostCancellation=entry.Descriptor.RequiresGameReady?new HostTaskCancellation(token):null;
+                    await Commands.RunAsync(command,parameter);if(hostCancellation is not null)await hostCancellation.CompleteAsync();
+                    return (object?)new{command=name,executed=true,configurationCheckpoint=checkpoint,verificationRequired=entry.Descriptor.Guide.Verification};
+                },dialogInput,source.DialogTitles,cancellation);
             using var dialog = new NativeDialogScope(dialogInput, source?.DialogTitles, cancellation);
             await Commands.RunAsync(command, parameter);
             dialog.Verify();

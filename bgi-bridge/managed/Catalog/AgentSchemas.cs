@@ -99,6 +99,8 @@ public static class AgentSchemas
         ("sensitive", Flag("当前值是否已遮蔽。"), true));
     public static JsonElement Output(string id, string description)
     {
+        if (id.StartsWith("bgi.js_api.", StringComparison.Ordinal) || id.StartsWith("bgi.ui.", StringComparison.Ordinal))
+            return ResultObject(description);
         if (id.StartsWith("setting.") || id == "bgi.get_setting") return Setting;
         return id switch
         {

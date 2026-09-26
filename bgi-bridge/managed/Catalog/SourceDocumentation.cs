@@ -5,10 +5,12 @@ namespace BgiBridge.Catalog;
 public sealed record SourceEntry(string Summary, string? Label, string Kind, string? ValueType,
     string? Initial, string[]? Range, string Source, int Line, bool HasCustomChangeHook, bool HasImplementation = true,
     string DocumentationSource = "host-source", bool NeedsDialogInput = false, bool UsesSelection = false, bool AsyncVoid = false,
-    bool HasAwait = true, string[]? DialogTitles = null, bool IsObsolete = false, string? ExposureReason = null);
+    bool HasAwait = true, string[]? DialogTitles = null, bool IsObsolete = false, string? ExposureReason = null, string Interaction = "direct");
 
 public static class SourceDocumentation
 {
+    public static JsonElement ScriptBindings => Data.TryGetProperty("scriptBindings", out var bindings) ? bindings : ArgumentSchema.Parse("[]");
+    public static JsonElement ScriptTypes => Data.TryGetProperty("scriptTypes", out var types) ? types : ArgumentSchema.Parse("{}");
     private static readonly JsonElement Data = Load();
     private static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true };
     private static readonly Dictionary<string, SourceEntry> Entries = Data.TryGetProperty("entries", out var entries)

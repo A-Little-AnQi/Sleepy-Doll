@@ -1,9 +1,11 @@
 ---
 name: bgi-javascript
-description: 阅读 BetterGI JavaScript 脚本的参数、源码、模块和执行流程，解释默认值、切队、条件分支、异步调用、跳过与报错。用于脚本名加参数字段的提问、脚本机制和源码排障，包括尚未订阅的脚本；宿主全局设置和页面操作使用 bgi-operator。
+description: 编写、修改和解释 BetterGI JavaScript，查询实际注入的 OCR、图像、BvPage、OpenCV、输入和任务 API；阅读脚本参数、模块与执行流程，排查源码与报错，包括未订阅脚本。
 ---
 
 # BetterGI JavaScript 阅读
+
+用户要求新建／编写／修改功能脚本，或询问 OCR／图像／宿主 API 时，先读取 [writing.md](references/writing.md)，通过 bgi.js_api.search/read 取得当前真实契约。解释已有脚本则按下面流程读取实际版本，不先加载全部 API。
 
 ## 定位资料
 
