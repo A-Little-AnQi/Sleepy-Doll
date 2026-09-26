@@ -131,3 +131,13 @@ JS API 不再只列 Core.Script.Dependence 包装方法：从 EngineExtend 与 S
 ```powershell
 dotnet run --project bgi-bridge/dev/SourceCommandChecks.csproj -- E:/BetterGIProject/better-genshin-impact/BetterGenshinImpact/bin/x64/Debug/net8.0-windows10.0.22621.0/BetterGI.dll docs/bgi/feature-coverage.json
 ```
+
+## 按路径删除资源的目标回归
+
+最新实际对话的用户原话为“血斛的配置组还有路线也删一下”。模型早已从配置组读到完整作者包与 5 条路线，却因缺少稳定资源删除入口，继续查命令、建立上下文、导航、展开懒加载树和枚举选项。之前把全量界面反射视为完整业务链路，判断不成立。
+
+新增 inspect_local_resource/delete_local_resource/restore_local_resource。按 User 相对路径检查完整范围、SHA 版本、组引用和订阅覆盖，将精确目标移入 User 的恢复区，原位置移除后核验。其他资源、配置组和订阅不动；引用未处理时拒绝删除，内容或依赖版本变化时拒绝；恢复先核对原始字节与目录范围，目标已有内容时不覆盖。与已初始化仓库写锁互斥，不需要游戏、页面或树节点。
+
+user.read 同时返回配置组真实引用目录 referencedResources，user.list/read 给出资源生命周期入口与相对路径，使目标定位证据可直接进入删除阶段。资源删除的 skill 和流程卡禁止重新从根目录遍历、建立 UI 上下文或查选中项；缺接口报告桥版本缺口，不能无限试错。
+
+137 项隔离断言通过，涵盖五路线作者包、空目录、其他路线和订阅字节不变、版本冲突、其他组引用阻断、删除与恢复及根路径拒绝。实际配置模型 deepseek-flash 与真实 Supervisor 的隔离目标回归成功删除血斛配置组和 5 条路线，17 次工具调用、0 次 UI／页面／上下文调用；只操作系统临时目录，未改真实 BGI 用户数据。该结果证明所测目标已完成，不代表所有措辞或所有功能都已经可靠。

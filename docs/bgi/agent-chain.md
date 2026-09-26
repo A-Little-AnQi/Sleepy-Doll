@@ -57,6 +57,10 @@ flowchart TD
   READ --> PREP[核对前提与参数，必要时订阅、准备配置组]
   RES -->|已可运行| DES[api.describe：现场接口契约]
   PREP --> DES
+  ROUTE -->|删除本机路线或脚本| DELPATH[user.read 的 referencedResources 或已定位 User 路径]
+  DELPATH --> INSPECT[inspect_local_resource：范围、引用、订阅与版本]
+  INSPECT --> DELETE[delete_local_resource：精确移动到恢复区并核验]
+  DELETE --> RESULT
   ROUTE -->|脚本机制或报错| JS[inspect_script / user.read / repo.read]
   JS --> JSSK[按需 bgi-javascript：定义、分支、模块、调用顺序]
   JSSK --> RESULT[有源码依据的解释或修改]

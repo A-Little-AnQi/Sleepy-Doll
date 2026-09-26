@@ -1244,6 +1244,9 @@
 | bgi.get_script_errors | bgi-bridge/managed/Tools/HostLogTools.cs | 否／需核对更新版本 |
 | bgi.read_host_log | bgi-bridge/managed/Tools/HostLogTools.cs | 否／需核对更新版本 |
 | bgi.prepare_js_group | bgi-bridge/managed/Tools/JavaScriptPreparationTools.cs | 否／需核对更新版本 |
+| bgi.delete_local_resource | bgi-bridge/managed/Tools/LocalResourceDeletionTools.cs | 否／需核对更新版本 |
+| bgi.inspect_local_resource | bgi-bridge/managed/Tools/LocalResourceDeletionTools.cs | 否／需核对更新版本 |
+| bgi.restore_local_resource | bgi-bridge/managed/Tools/LocalResourceDeletionTools.cs | 否／需核对更新版本 |
 | bgi.ui.cancel | bgi-bridge/managed/Tools/NativeUiTools.cs | 否／需核对更新版本 |
 | bgi.ui.close | bgi-bridge/managed/Tools/NativeUiTools.cs | 否／需核对更新版本 |
 | bgi.ui.invoke | bgi-bridge/managed/Tools/NativeUiTools.cs | 否／需核对更新版本 |

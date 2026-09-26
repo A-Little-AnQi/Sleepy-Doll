@@ -4,7 +4,7 @@
 
 源码版本：`7e02dc8cee57f264aa8d5f3efe4f18a956c39611`。真实类型检查：`E:\BetterGIProject\better-genshin-impact\BetterGenshinImpact\bin\x64\Debug\net8.0-windows10.0.22621.0\BetterGI.dll`。
 
-公开 Agent 工具 20 个、稳定桥接口 47 个、动态命令 280 个。保留 1365 个界面绑定／事件声明，逐项提供原生 UI 链路；JS 实际注册 68 个入口与别名，并反射其类型、继承、重载与返回对象。源码命令删除 41 项，仅限弃用／空置／内部事件和无产品调用的旧入口；设置删除 2 个弃用字段。
+公开 Agent 工具 20 个、稳定桥接口 50 个、动态命令 280 个。保留 1365 个界面绑定／事件声明，逐项提供原生 UI 链路；JS 实际注册 68 个入口与别名，并反射其类型、继承、重载与返回对象。源码命令删除 41 项，仅限弃用／空置／内部事件和无产品调用的旧入口；设置删除 2 个弃用字段。
 
 完整 Schema、参数、前置条件、副作用与核验规则见 [结构化接口审阅表](interface-review.json)。每一项命令和设置均在下面列出；运行时仍以当前实例的 api.describe 为准。没有执行全部游戏任务、通知测试、升级、账号操作或资源删除，不能把源码审查称为实机全通过。
 
@@ -22,26 +22,26 @@
 
 | 工具 | 用途 | 定义 |
 |---|---|---|
-| `bgi.state.get` | 读取一次 BetterGI、截图器、游戏窗口和任务锁状态。仅在准备执行、执行后核验或排障时使用；查询和编辑 User 文件不需要先调它。 | src/bridge/mod.rs:353 |
-| `bgi.capability.search` | 搜索已安装扩展登记的语义能力和资源。它不包含 BetterGI 自身接口，也不用于查用户配置；没有扩展时调用一次空结果即结束。 | src/bridge/mod.rs:363 |
-| `bgi.capability.describe` | 读取已由 capability.search 找到的扩展能力契约。BetterGI 原生接口使用 bgi.api.describe。 | src/bridge/mod.rs:373 |
-| `bgi.capability.invoke` | 执行已读取契约的扩展能力。只使用 capability.search 返回的精确 ID，并继续核验 Job 结果。 | src/bridge/mod.rs:383 |
-| `bgi.job.get` | 仅在已有 Job ID、但原调用没有返回终态证据时查询 Job。bgi.api.invoke 已返回 completed/failed/cancelled 时不要重复查询。verification 才表示业务是否已核验。 | src/bridge/mod.rs:395 |
-| `bgi.job.cancel` | 请求取消指定 Job。cancellationRequested 不等于宿主任务已经停止，继续查询同一 Job。 | src/bridge/mod.rs:405 |
-| `bgi.feature.search` | 离线检索 BGI 插件的全量功能与流程索引；只返回少量摘要。用户目标或设置/命令不明确时用它，明确运行资源仍先 user.resolve。静态命中不代表现场可调用；用 feature.read 读取单项链路，再 describe 当前接口。 | src/bridge/mod.rs:417 |
-| `bgi.feature.read` | 读取 feature.search 返回的一个精确 ID，取得输入来源、步骤、分支、验证方法与相关参考资料。不读取全量手册，不证明当前接口可调用；只按当前目标继续读取引用和 describe。 | src/bridge/mod.rs:421 |
-| `bgi.repo.search` | 搜索中央仓库全部资源，默认 all；JS 参数用 js，采集/地图追踪必须用 pathing。地图追踪返回完整目标目录和作者包、requirements，不返回散落叶子供拼接。分类无命中不等于全仓库没有。用精确路径阅读、订阅并准备运行，不要扫描桥程序集。 | src/bridge/mod.rs:425 |
-| `bgi.repo.read` | 直接从中央 Git 仓库读取未订阅的 settings.json、README、manifest、入口 JS 与引用模块。path 使用搜索返回的 js/... 路径再拼文件名，不加 repo/，不猜已安装目录。contains 定位字段或函数及上下文；返回行号、SHA-256、truncated 和 nextLine，截断时继续分页。阅读不会运行脚本或修改订阅。 | src/bridge/mod.rs:429 |
-| `bgi.api.search` | 在当前 BetterGI 宿主中发现设置或动作。它不搜索配置组、路线、脚本等用户资源。group 必须来自目录实际返回的分组；用一个业务词查询，一次零结果后检查证据源。 | src/bridge/mod.rs:433 |
-| `bgi.api.describe` | 读取一个精确 methodId 的用途、参数、前置条件、副作用、结果判定和回退边界。每个候选读一次；callable=false 时以 unavailableReason 为最终结论。 | src/bridge/mod.rs:437 |
-| `bgi.api.read` | 调用刚通过 api.describe 确认的只读接口。用于读取宿主当前设置或诊断；不用于读取 User 文件。arguments 必须满足该接口 inputSchema。 | src/bridge/mod.rs:441 |
-| `bgi.api.invoke` | 调用刚通过 api.describe 确认的写接口。运行时显示审批并跟踪 Job 到终态；返回 outcome/evidence 后直接按契约核验，不重复调用 job.get。不能把 completed 或处理器返回自动当成业务成功。 | src/bridge/mod.rs:444 |
-| `bgi.user.list` | 列出 BetterGI User 目录下指定位置的一层真实文件和目录。jsonKeys 可在同一次调用中投影每个 JSON 文件的顶层字段，避免逐文件读取；不用于发现宿主接口。 | src/bridge/mod.rs:447 |
-| `bgi.user.read` | 读取 BetterGI User 目录中的一个文本文件。JSON 可用 keys 投影所需顶层字段；查询配置组通常读取 name、index、projects，只有修改整个文件时才读取全文。多个独立文件应在同一轮并行读取。 | src/bridge/mod.rs:498 |
-| `bgi.user.inspect_script` | 一次读取一个已知 JS 脚本包的 manifest、README、settings 参数定义、目录条目和 settings 下的账户配置。folderName 必须来自配置组任务或 User/JsScript 目录；不要再分别 list/read 同一脚本。 | src/bridge/mod.rs:542 |
-| `bgi.user.resolve` | 查找用户要求运行的实际资源：先匹配本机配置组、核验引用和地图追踪父目录；未命中自动搜索当前中央仓库全部分类。不要扫描路线 JSON 或先刷新仓库。run 直接运行；repair 补 missing；create 准备本地父目录；resourceFound 按 repository 候选订阅、配置并继续运行；lookupFailed 是查询失败，不能称资源不存在；notFound 才是本机和当前全仓索引均未命中。 | src/bridge/mod.rs:597 |
-| `bgi.user.write` | 原子创建或替换 BetterGI User 资源文件。已有文件必须提交 user.read 返回的 sha256，写入前校验 JSON、比较版本并保留独立备份；写后自动核验。不得修改 User/config.json。 | src/bridge/mod.rs:613 |
-| `bgi.user.restore` | 把 bgi.user.write 返回的独立备份恢复到原资源。恢复前比较当前 sha256，避免覆盖写入后的其他修改；恢复本身也为当前版本创建新备份并核验。 | src/bridge/mod.rs:676 |
+| `bgi.state.get` | 读取一次 BetterGI、截图器、游戏窗口和任务锁状态。仅在准备执行、执行后核验或排障时使用；查询和编辑 User 文件不需要先调它。 | src/bridge/mod.rs:396 |
+| `bgi.capability.search` | 搜索已安装扩展登记的语义能力和资源。它不包含 BetterGI 自身接口，也不用于查用户配置；没有扩展时调用一次空结果即结束。 | src/bridge/mod.rs:406 |
+| `bgi.capability.describe` | 读取已由 capability.search 找到的扩展能力契约。BetterGI 原生接口使用 bgi.api.describe。 | src/bridge/mod.rs:416 |
+| `bgi.capability.invoke` | 执行已读取契约的扩展能力。只使用 capability.search 返回的精确 ID，并继续核验 Job 结果。 | src/bridge/mod.rs:426 |
+| `bgi.job.get` | 仅在已有 Job ID、但原调用没有返回终态证据时查询 Job。bgi.api.invoke 已返回 completed/failed/cancelled 时不要重复查询。verification 才表示业务是否已核验。 | src/bridge/mod.rs:438 |
+| `bgi.job.cancel` | 请求取消指定 Job。cancellationRequested 不等于宿主任务已经停止，继续查询同一 Job。 | src/bridge/mod.rs:448 |
+| `bgi.feature.search` | 离线检索 BGI 插件的全量功能与流程索引；只返回少量摘要。用户目标或设置/命令不明确时用它，明确运行资源仍先 user.resolve。静态命中不代表现场可调用；用 feature.read 读取单项链路，再 describe 当前接口。 | src/bridge/mod.rs:460 |
+| `bgi.feature.read` | 读取 feature.search 返回的一个精确 ID，取得输入来源、步骤、分支、验证方法与相关参考资料。不读取全量手册，不证明当前接口可调用；只按当前目标继续读取引用和 describe。 | src/bridge/mod.rs:464 |
+| `bgi.repo.search` | 搜索中央仓库全部资源，默认 all；JS 参数用 js，采集/地图追踪必须用 pathing。地图追踪返回完整目标目录和作者包、requirements，不返回散落叶子供拼接。分类无命中不等于全仓库没有。用精确路径阅读、订阅并准备运行，不要扫描桥程序集。 | src/bridge/mod.rs:468 |
+| `bgi.repo.read` | 直接从中央 Git 仓库读取未订阅的 settings.json、README、manifest、入口 JS 与引用模块。path 使用搜索返回的 js/... 路径再拼文件名，不加 repo/，不猜已安装目录。contains 定位字段或函数及上下文；返回行号、SHA-256、truncated 和 nextLine，截断时继续分页。阅读不会运行脚本或修改订阅。 | src/bridge/mod.rs:472 |
+| `bgi.api.search` | 在当前 BetterGI 宿主中发现设置或动作。它不搜索配置组、路线、脚本等用户资源。group 必须来自目录实际返回的分组；用一个业务词查询，一次零结果后检查证据源。 | src/bridge/mod.rs:476 |
+| `bgi.api.describe` | 读取一个精确 methodId 的用途、参数、前置条件、副作用、结果判定和回退边界。每个候选读一次；callable=false 时以 unavailableReason 为最终结论。 | src/bridge/mod.rs:480 |
+| `bgi.api.read` | 调用刚通过 api.describe 确认的只读接口。用于读取宿主当前设置或诊断；不用于读取 User 文件。arguments 必须满足该接口 inputSchema。 | src/bridge/mod.rs:484 |
+| `bgi.api.invoke` | 调用刚通过 api.describe 确认的写接口。运行时显示审批并跟踪 Job 到终态；返回 outcome/evidence 后直接按契约核验，不重复调用 job.get。不能把 completed 或处理器返回自动当成业务成功。 | src/bridge/mod.rs:487 |
+| `bgi.user.list` | 列出 BetterGI User 目录下指定位置的一层真实文件和目录。jsonKeys 可在同一次调用中投影每个 JSON 文件的顶层字段，避免逐文件读取；不用于发现宿主接口。 | src/bridge/mod.rs:490 |
+| `bgi.user.read` | 读取 BetterGI User 目录中的一个文本文件。JSON 可用 keys 投影所需顶层字段；查询配置组通常读取 name、index、projects，只有修改整个文件时才读取全文。多个独立文件应在同一轮并行读取。 | src/bridge/mod.rs:542 |
+| `bgi.user.inspect_script` | 一次读取一个已知 JS 脚本包的 manifest、README、settings 参数定义、目录条目和 settings 下的账户配置。folderName 必须来自配置组任务或 User/JsScript 目录；不要再分别 list/read 同一脚本。 | src/bridge/mod.rs:590 |
+| `bgi.user.resolve` | 查找用户要求运行的实际资源：先匹配本机配置组、核验引用和地图追踪父目录；未命中自动搜索当前中央仓库全部分类。不要扫描路线 JSON 或先刷新仓库。run 直接运行；repair 补 missing；create 准备本地父目录；resourceFound 按 repository 候选订阅、配置并继续运行；lookupFailed 是查询失败，不能称资源不存在；notFound 才是本机和当前全仓索引均未命中。 | src/bridge/mod.rs:645 |
+| `bgi.user.write` | 原子创建或替换 BetterGI User 资源文件。已有文件必须提交 user.read 返回的 sha256，写入前校验 JSON、比较版本并保留独立备份；写后自动核验。不得修改 User/config.json。 | src/bridge/mod.rs:661 |
+| `bgi.user.restore` | 把 bgi.user.write 返回的独立备份恢复到原资源。恢复前比较当前 sha256，避免覆盖写入后的其他修改；恢复本身也为当前版本创建新备份并核验。 | src/bridge/mod.rs:724 |
 
 ## 稳定桥接口：全部保留
 
@@ -50,12 +50,14 @@
 | bgi.commit_settings | 提交 preview_settings 生成的计划，创建恢复记录并原子写入。 | configurationWrite | planId | 回读目标 path，并保留 changeId。 |
 | bgi.create_command_argument | 仅构造当前命令声明的参数类型；不能指定任意 CLR 类型。泛型从真实 contextId 取得具体类型，已有资源仍使用引用。 | hostCommand | command, arguments | 继续绑定精确 contextId/objectId，执行后核对业务证据。 |
 | bgi.create_command_target | 显式构造未注册的宿主对象；服务依赖从原容器取得，未知／歧义参数拒绝。目录查询不偷偷实例化。 | hostCommand | command, arguments | 继续绑定精确 contextId/objectId，执行后核对业务证据。 |
+| bgi.delete_local_resource | 按已经找到的真实路径直接删除完整作者包／材料目录或单文件；保留同卷恢复备份、版本核对和范围证据，不要求界面选中。 | hostCommand | path, expectedVersion | 已验证结果返回后停止；不再搜索删除命令、构造上下文、导航、展开树或枚举选项。 |
 | bgi.delete_script_group | 按精确名称删除一个调度器配置组，不依赖界面当前选择；保留脚本、地图追踪路线和订阅。 | hostCommand | groupName, expectedSha256 | 返回已验证结果即完成，不再查生命周期、导航或游戏状态。 |
 | bgi.exit_game | 结束原神游戏进程。等价于 BetterGI 一条龙收尾的退出方式：先请求正常关闭，5 秒未退再结束进程。任务收尾、切换账号前使用。 | hostCommand | — | 调用后读一次 bgi.get_status：gameHandle 变 0 或 captureReady 回落即已退出；不要反复调用。 |
 | bgi.get_script_errors | 从宿主日志里提取脚本执行失败：报错原文、JS 层错误、出错的脚本名、涉及的用户文件路径和宿主源位置。 | readOnly | — | 按 script 读取 User/JsScript 下的源码核对 error 指出的位置；需要完整过程时用 bgi.read_host_log 按同一 thread 读取那次运行。 |
 | bgi.get_setting | 读取一个精确 path 的当前值、Schema、写入限制和并发版本。 | readOnly | path | 保存 valueVersion；按 valueSchema 生成新值。 |
 | bgi.get_setting_change | 读取一个 changeId 的脱敏差异、状态和恢复记录。 | readOnly | changeId | 核对 changeId、状态和目标 path。 |
 | bgi.get_status | 读取截图器、游戏句柄、窗口前台状态和独立任务锁。 | readOnly | — | 检查 observedAt；执行结果按目标接口另行核验。 |
+| bgi.inspect_local_resource | 按 User 相对路径直接核对完整目录／单文件、文件 SHA、配置组引用及订阅覆盖；不操作懒加载界面树。 | readOnly | path | 已验证结果返回后停止；不再搜索删除命令、构造上下文、导航、展开树或枚举选项。 |
 | bgi.invoke_command | 执行已确定且当前可调用的界面命令；异步命令等待处理器返回。 | hostCommand | command | 按具体命令契约读取状态或资源；超时后不盲目重发。 |
 | bgi.js_api.read | 读取当前类型的构造器、静态／实例方法、继承成员、属性、枚举、默认参数与 Task→Promise 约定。 | readOnly | id | 从已注册别名开始读；按 nextOffset 补齐需要的成员与返回对象。写 JS 时用真实名称、参数与 await。 |
 | bgi.js_api.search | 从当前脚本引擎实际注入的别名和可达类型发现 OCR、图像区域、BvPage/BvLocator、OpenCV、输入和任务 API。 | readOnly | query | 从已注册别名开始读；按 nextOffset 补齐需要的成员与返回对象。写 JS 时用真实名称、参数与 await。 |
@@ -73,6 +75,7 @@
 | bgi.read_host_log | 读取 BetterGI 自己写的按天日志。脚本的 log() 输出、宿主异常和脚本异常都在里面，不需要用户复制粘贴。 | readOnly | — | 改变 date、level、logger、contains 或 thread 重新读取；重复同一条查询不算新证据。 |
 | bgi.read_script_repository_file | 直接读取中央 Git 仓库中的 README、settings、manifest、JS 与模块源码；未订阅文件同样可读，不检出、不订阅、不执行。支持行号分页和关键词上下文。 | readOnly | path | 脚本参数以 settings 与 JS 的实际读取、分支和调用为准；已安装版本可能与中央仓库版本不同。 |
 | bgi.release_command_target | 结束使用后释放由桥创建的对象，用户已有窗口和对象不能通过此入口释放。 | hostCommand | objectId | 继续绑定精确 contextId/objectId，执行后核对业务证据。 |
+| bgi.restore_local_resource | 按返回的 backupId 恢复原始资源字节与相对位置；目标已存在时拒绝覆盖。 | hostCommand | backupId | 已验证结果返回后停止；不再搜索删除命令、构造上下文、导航、展开树或枚举选项。 |
 | bgi.rollback_settings | 仅在目标字段仍等于该事务提交值时恢复旧值；保留其他后续修改。 | configurationWrite | changeId | 回读目标 path。CONFIG_CONFLICT 表示未覆盖后续修改。 |
 | bgi.run_one_dragon | 运行 BetterGI 的「一条龙」日常流程（领邮件、合成树脂、自动秘境、首领讨伐、幽境危战、地脉花、每日奖励、尘歌壶等，按该配置启用的任务执行）。执行完按配置可能自动退出游戏。 | gameWrite | — | Job 到终态后读一次 bgi.read_host_log（过滤「一条龙」或 ERR）确认各任务结果与是否已退出游戏；不要反复轮询。 |
 | bgi.run_script_group | 调用 BetterGI 自带的按名称执行入口，运行指定配置组中的已启用任务。无需用户预先在脚本调度页选中目标。 | gameWrite | groupName | Job 到终态后读一次 bgi.read_host_log（过滤「执行结束」或 ERR）即可收尾：无错误即报告完成，有错误列出到场的问题；不要反复轮询或多方取证。 |

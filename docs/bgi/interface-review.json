@@ -8,140 +8,140 @@
       "title": "读取游戏状态",
       "summary": "读取一次 BetterGI、截图器、游戏窗口和任务锁状态。仅在准备执行、执行后核验或排障时使用；查询和编辑 User 文件不需要先调它。",
       "source": "src/bridge/mod.rs",
-      "line": 353
+      "line": 396
     },
     {
       "id": "bgi.capability.search",
       "title": "检索插件能力",
       "summary": "搜索已安装扩展登记的语义能力和资源。它不包含 BetterGI 自身接口，也不用于查用户配置；没有扩展时调用一次空结果即结束。",
       "source": "src/bridge/mod.rs",
-      "line": 363
+      "line": 406
     },
     {
       "id": "bgi.capability.describe",
       "title": "读取能力定义",
       "summary": "读取已由 capability.search 找到的扩展能力契约。BetterGI 原生接口使用 bgi.api.describe。",
       "source": "src/bridge/mod.rs",
-      "line": 373
+      "line": 416
     },
     {
       "id": "bgi.capability.invoke",
       "title": "执行游戏操作",
       "summary": "执行已读取契约的扩展能力。只使用 capability.search 返回的精确 ID，并继续核验 Job 结果。",
       "source": "src/bridge/mod.rs",
-      "line": 383
+      "line": 426
     },
     {
       "id": "bgi.job.get",
       "title": "查询执行结果",
       "summary": "仅在已有 Job ID、但原调用没有返回终态证据时查询 Job。bgi.api.invoke 已返回 completed/failed/cancelled 时不要重复查询。verification 才表示业务是否已核验。",
       "source": "src/bridge/mod.rs",
-      "line": 395
+      "line": 438
     },
     {
       "id": "bgi.job.cancel",
       "title": "取消正在执行的任务",
       "summary": "请求取消指定 Job。cancellationRequested 不等于宿主任务已经停止，继续查询同一 Job。",
       "source": "src/bridge/mod.rs",
-      "line": 405
+      "line": 448
     },
     {
       "id": "bgi.feature.search",
       "title": "查找 BGI 功能链路",
       "summary": "离线检索 BGI 插件的全量功能与流程索引；只返回少量摘要。用户目标或设置/命令不明确时用它，明确运行资源仍先 user.resolve。静态命中不代表现场可调用；用 feature.read 读取单项链路，再 describe 当前接口。",
       "source": "src/bridge/mod.rs",
-      "line": 417
+      "line": 460
     },
     {
       "id": "bgi.feature.read",
       "title": "读取单项 BGI 链路",
       "summary": "读取 feature.search 返回的一个精确 ID，取得输入来源、步骤、分支、验证方法与相关参考资料。不读取全量手册，不证明当前接口可调用；只按当前目标继续读取引用和 describe。",
       "source": "src/bridge/mod.rs",
-      "line": 421
+      "line": 464
     },
     {
       "id": "bgi.repo.search",
       "title": "检索脚本仓库",
       "summary": "搜索中央仓库全部资源，默认 all；JS 参数用 js，采集/地图追踪必须用 pathing。地图追踪返回完整目标目录和作者包、requirements，不返回散落叶子供拼接。分类无命中不等于全仓库没有。用精确路径阅读、订阅并准备运行，不要扫描桥程序集。",
       "source": "src/bridge/mod.rs",
-      "line": 425
+      "line": 468
     },
     {
       "id": "bgi.repo.read",
       "title": "读取仓库源码",
       "summary": "直接从中央 Git 仓库读取未订阅的 settings.json、README、manifest、入口 JS 与引用模块。path 使用搜索返回的 js/... 路径再拼文件名，不加 repo/，不猜已安装目录。contains 定位字段或函数及上下文；返回行号、SHA-256、truncated 和 nextLine，截断时继续分页。阅读不会运行脚本或修改订阅。",
       "source": "src/bridge/mod.rs",
-      "line": 429
+      "line": 472
     },
     {
       "id": "bgi.api.search",
       "title": "检索 BetterGI 接口",
       "summary": "在当前 BetterGI 宿主中发现设置或动作。它不搜索配置组、路线、脚本等用户资源。group 必须来自目录实际返回的分组；用一个业务词查询，一次零结果后检查证据源。",
       "source": "src/bridge/mod.rs",
-      "line": 433
+      "line": 476
     },
     {
       "id": "bgi.api.describe",
       "title": "读取接口说明",
       "summary": "读取一个精确 methodId 的用途、参数、前置条件、副作用、结果判定和回退边界。每个候选读一次；callable=false 时以 unavailableReason 为最终结论。",
       "source": "src/bridge/mod.rs",
-      "line": 437
+      "line": 480
     },
     {
       "id": "bgi.api.read",
       "title": "读取 BetterGI 状态",
       "summary": "调用刚通过 api.describe 确认的只读接口。用于读取宿主当前设置或诊断；不用于读取 User 文件。arguments 必须满足该接口 inputSchema。",
       "source": "src/bridge/mod.rs",
-      "line": 441
+      "line": 484
     },
     {
       "id": "bgi.api.invoke",
       "title": "执行 BetterGI 操作",
       "summary": "调用刚通过 api.describe 确认的写接口。运行时显示审批并跟踪 Job 到终态；返回 outcome/evidence 后直接按契约核验，不重复调用 job.get。不能把 completed 或处理器返回自动当成业务成功。",
       "source": "src/bridge/mod.rs",
-      "line": 444
+      "line": 487
     },
     {
       "id": "bgi.user.list",
       "title": "查看用户资源",
       "summary": "列出 BetterGI User 目录下指定位置的一层真实文件和目录。jsonKeys 可在同一次调用中投影每个 JSON 文件的顶层字段，避免逐文件读取；不用于发现宿主接口。",
       "source": "src/bridge/mod.rs",
-      "line": 447
+      "line": 490
     },
     {
       "id": "bgi.user.read",
       "title": "读取配置文件",
       "summary": "读取 BetterGI User 目录中的一个文本文件。JSON 可用 keys 投影所需顶层字段；查询配置组通常读取 name、index、projects，只有修改整个文件时才读取全文。多个独立文件应在同一轮并行读取。",
       "source": "src/bridge/mod.rs",
-      "line": 498
+      "line": 542
     },
     {
       "id": "bgi.user.inspect_script",
       "title": "读取脚本说明",
       "summary": "一次读取一个已知 JS 脚本包的 manifest、README、settings 参数定义、目录条目和 settings 下的账户配置。folderName 必须来自配置组任务或 User/JsScript 目录；不要再分别 list/read 同一脚本。",
       "source": "src/bridge/mod.rs",
-      "line": 542
+      "line": 590
     },
     {
       "id": "bgi.user.resolve",
       "title": "查找可运行任务",
       "summary": "查找用户要求运行的实际资源：先匹配本机配置组、核验引用和地图追踪父目录；未命中自动搜索当前中央仓库全部分类。不要扫描路线 JSON 或先刷新仓库。run 直接运行；repair 补 missing；create 准备本地父目录；resourceFound 按 repository 候选订阅、配置并继续运行；lookupFailed 是查询失败，不能称资源不存在；notFound 才是本机和当前全仓索引均未命中。",
       "source": "src/bridge/mod.rs",
-      "line": 597
+      "line": 645
     },
     {
       "id": "bgi.user.write",
       "title": "写入配置文件",
       "summary": "原子创建或替换 BetterGI User 资源文件。已有文件必须提交 user.read 返回的 sha256，写入前校验 JSON、比较版本并保留独立备份；写后自动核验。不得修改 User/config.json。",
       "source": "src/bridge/mod.rs",
-      "line": 613
+      "line": 661
     },
     {
       "id": "bgi.user.restore",
       "title": "恢复备份",
       "summary": "把 bgi.user.write 返回的独立备份恢复到原资源。恢复前比较当前 sha256，避免覆盖写入后的其他修改；恢复本身也为当前版本创建新备份并核验。",
       "source": "src/bridge/mod.rs",
-      "line": 676
+      "line": 724
     }
   ],
   "stableInterfaces": [
@@ -381,6 +381,67 @@
           "target",
           "verified"
         ],
+        "additionalProperties": true
+      }
+    },
+    {
+      "Id": "bgi.delete_local_resource",
+      "Group": "resources",
+      "Summary": "按已经找到的真实路径直接删除完整作者包／材料目录或单文件；保留同卷恢复备份、版本核对和范围证据，不要求界面选中。",
+      "ReadOnly": false,
+      "Destructive": true,
+      "InputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "已定位的 User 相对资源路径，例如 AutoPathing/地方特产/稻妻/血斛 或 JsScript/脚本目录；不能删除分类根目录。"
+          },
+          "expectedVersion": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{64}$"
+          },
+          "allowBrokenReferences": {
+            "type": "boolean",
+            "description": "默认 false；只有用户明确允许保留指向缺失资源的其他配置组时才为 true。"
+          }
+        },
+        "required": [
+          "path",
+          "expectedVersion"
+        ],
+        "additionalProperties": false
+      },
+      "Guide": {
+        "Title": "删除路线或脚本资源",
+        "Purpose": "按已经找到的真实路径直接删除完整作者包／材料目录或单文件；保留同卷恢复备份、版本核对和范围证据，不要求界面选中。",
+        "WhenToUse": [
+          "用户要求删除或恢复已定位的路线、JS、键鼠、战斗或七圣资源；只删配置组仍使用 delete_script_group。"
+        ],
+        "Preconditions": [
+          "路径来自 user.list/read/resolve；删除前 inspect_local_resource 获取实际文件、引用与版本。",
+          "资源删除不需要游戏、页面、选中项或 UI 树；任务运行时不删除。"
+        ],
+        "SideEffects": [
+          "将精确资源移入 User 的恢复区或移回；其他资源、配置组及订阅保留。"
+        ],
+        "ResultMeaning": "deleted/restored=true 且 verified=true 才完成；backupId 可恢复。订阅保留，未来更新可能重新导入，结果明确列出覆盖订阅。",
+        "Verification": "已验证结果返回后停止；不再搜索删除命令、构造上下文、导航、展开树或枚举选项。",
+        "Rollback": "用 restore_local_resource 恢复同一备份；原路径已存在则拒绝覆盖。",
+        "Examples": [],
+        "DocumentationSource": "bridge-stable-resource-lifecycle",
+        "SourceReference": null
+      },
+      "UnavailableReason": null,
+      "RequiresGameReady": false,
+      "Effect": "hostCommand",
+      "OutputSchema": {
+        "type": "object",
+        "description": "deleted/restored=true 且 verified=true 才完成；backupId 可恢复。订阅保留，未来更新可能重新导入，结果明确列出覆盖订阅。",
+        "properties": {},
+        "required": [],
         "additionalProperties": true
       }
     },
@@ -929,6 +990,67 @@
           "runtime",
           "observedAt"
         ],
+        "additionalProperties": true
+      }
+    },
+    {
+      "Id": "bgi.inspect_local_resource",
+      "Group": "resources",
+      "Summary": "按 User 相对路径直接核对完整目录／单文件、文件 SHA、配置组引用及订阅覆盖；不操作懒加载界面树。",
+      "ReadOnly": true,
+      "Destructive": false,
+      "InputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "已定位的 User 相对资源路径，例如 AutoPathing/地方特产/稻妻/血斛 或 JsScript/脚本目录；不能删除分类根目录。"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "Guide": {
+        "Title": "检查资源删除范围",
+        "Purpose": "按 User 相对路径直接核对完整目录／单文件、文件 SHA、配置组引用及订阅覆盖；不操作懒加载界面树。",
+        "WhenToUse": [
+          "用户要求删除或恢复已定位的路线、JS、键鼠、战斗或七圣资源；只删配置组仍使用 delete_script_group。"
+        ],
+        "Preconditions": [
+          "路径来自 user.list/read/resolve；删除前 inspect_local_resource 获取实际文件、引用与版本。",
+          "资源删除不需要游戏、页面、选中项或 UI 树；任务运行时不删除。"
+        ],
+        "SideEffects": [
+          "只读文件清单、引用、订阅覆盖与版本。"
+        ],
+        "ResultMeaning": "deleted/restored=true 且 verified=true 才完成；backupId 可恢复。订阅保留，未来更新可能重新导入，结果明确列出覆盖订阅。",
+        "Verification": "已验证结果返回后停止；不再搜索删除命令、构造上下文、导航、展开树或枚举选项。",
+        "Rollback": "用 restore_local_resource 恢复同一备份；原路径已存在则拒绝覆盖。",
+        "Examples": [],
+        "DocumentationSource": "bridge-stable-resource-lifecycle",
+        "SourceReference": null
+      },
+      "UnavailableReason": null,
+      "RequiresGameReady": false,
+      "Effect": "readOnly",
+      "OutputSchema": {
+        "type": "object",
+        "description": "deleted/restored=true 且 verified=true 才完成；backupId 可恢复。订阅保留，未来更新可能重新导入，结果明确列出覆盖订阅。",
+        "properties": {},
+        "required": [],
         "additionalProperties": true
       }
     },
@@ -2314,6 +2436,56 @@
           "released",
           "verified"
         ],
+        "additionalProperties": true
+      }
+    },
+    {
+      "Id": "bgi.restore_local_resource",
+      "Group": "resources",
+      "Summary": "按返回的 backupId 恢复原始资源字节与相对位置；目标已存在时拒绝覆盖。",
+      "ReadOnly": false,
+      "Destructive": false,
+      "InputSchema": {
+        "type": "object",
+        "properties": {
+          "backupId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          }
+        },
+        "required": [
+          "backupId"
+        ],
+        "additionalProperties": false
+      },
+      "Guide": {
+        "Title": "恢复被删除资源",
+        "Purpose": "按返回的 backupId 恢复原始资源字节与相对位置；目标已存在时拒绝覆盖。",
+        "WhenToUse": [
+          "用户要求删除或恢复已定位的路线、JS、键鼠、战斗或七圣资源；只删配置组仍使用 delete_script_group。"
+        ],
+        "Preconditions": [
+          "路径来自 user.list/read/resolve；删除前 inspect_local_resource 获取实际文件、引用与版本。",
+          "资源删除不需要游戏、页面、选中项或 UI 树；任务运行时不删除。"
+        ],
+        "SideEffects": [
+          "将精确资源移入 User 的恢复区或移回；其他资源、配置组及订阅保留。"
+        ],
+        "ResultMeaning": "deleted/restored=true 且 verified=true 才完成；backupId 可恢复。订阅保留，未来更新可能重新导入，结果明确列出覆盖订阅。",
+        "Verification": "已验证结果返回后停止；不再搜索删除命令、构造上下文、导航、展开树或枚举选项。",
+        "Rollback": "用 restore_local_resource 恢复同一备份；原路径已存在则拒绝覆盖。",
+        "Examples": [],
+        "DocumentationSource": "bridge-stable-resource-lifecycle",
+        "SourceReference": null
+      },
+      "UnavailableReason": null,
+      "RequiresGameReady": false,
+      "Effect": "hostCommand",
+      "OutputSchema": {
+        "type": "object",
+        "description": "deleted/restored=true 且 verified=true 才完成；backupId 可恢复。订阅保留，未来更新可能重新导入，结果明确列出覆盖订阅。",
+        "properties": {},
+        "required": [],
         "additionalProperties": true
       }
     },

@@ -2,6 +2,8 @@
 
 稳定的资源、设置事务和任务入口优先。当前编辑器、列表行或弹窗没有稳定入口时，使用原生 UI 链路，不能把“自动适配缺失”说成 BGI 功能不存在。
 
+已定位资源路径的删除不走本流程：inspect_local_resource → delete_local_resource。不可因为“界面能反射”重新展开懒加载树、查上下文、选择字段或枚举选项；明确的路径是更直接的目标证据。
+
 1. 主页面先 list_pages/open_page，窗口用当前命令打开。含模态窗口的命令返回 operationId，初始阶段不等于结束。
 2. describe/read `bgi.ui.read`，按 query、offset、limit 查看实际可见字段、按钮、容器和窗口。未展开的分组、菜单、页签用 ui.invoke 的 expand/contextMenu/focus，再读具体内容。字段来自真实 WPF 绑定，覆盖全局配置、窗口设置、列表行和 JS 自定义配置。
 3. `bgi.ui.write` 使用真实 fieldId、expectedVersion 和 valueSchema。下拉／列表使用返回的 optionId；后续选项用 ui.options 分页。排序使用当前列表字段及版本的 ui.reorder，触发原生 Move 和集合保存回调。不能从 JSON 伪造宿主对象；旧绑定、虚拟列表换行和选项变化重新读取。敏感字段只提供明确的新值，不提交遮蔽占位。

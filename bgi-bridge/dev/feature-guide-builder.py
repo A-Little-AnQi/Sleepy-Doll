@@ -22,6 +22,10 @@ def workflow(key, title, nouns, actions, steps, proof, refs, methods=(), branche
 
 
 WORKFLOWS = [
+    workflow("resource.delete", "按已定位路径删除路线或脚本资源", ["路线", "地图追踪", "脚本", "资源", "作者包", "目录"], ["删除", "删", "移除", "清理", "卸载"],
+             ["user.list/read/resolve 得到真实 User 路径；用户同时删组和资源时先删除已定位组", "describe/read inspect_local_resource 一次核对文件数、引用、订阅覆盖与 version", "describe/invoke delete_local_resource，path/expectedVersion 来自检查；不导航、不创建上下文、不展开树或枚举选项"],
+             "result.deleted=true、verified=true；文件移出本机资源目录，其他资源／配置组不改；保留 backupId，订阅覆盖如实说明", [ref("resources.md")], ["bgi.inspect_local_resource","bgi.delete_local_resource","bgi.restore_local_resource"],
+             ["其他组仍引用时只处理用户明确范围，不自动允许失效引用", "接口缺失报告桥版本缺口，不无限 UI 试错"]),
     workflow("resource.run", "查找并运行材料、路线或脚本", ["材料", "路线", "采集", "脚本", "特产"], ["执行", "运行", "跑", "采集", "收集", "刷"],
              ["bgi.user.resolve 传目标原话，查本机，未命中继续当前仓库", "run 直接运行；repair 只修 missing；create/resourceFound 按资源类型准备", "地图追踪选择完整父目录或作者包，JS 按 manifest.settings_ui 读取参数", "必要时订阅并 prepare_pathing_group/prepare_js_group，游戏就绪后 run_script_group"],
              "invoke 跟踪终态并读取契约要求的日志／状态；准备或启动成功不等于采集完成", [ref("execution.md"), ref("collection-workflow.md", "bgi-assistant")],

@@ -44,4 +44,14 @@
 2. 直接 describe `bgi.delete_script_group`，invoke 传 groupName 和 expectedSha256。它不需要游戏或截图器，不查 lifecycle、导航或地图追踪页面。
 3. 运行时按当前权限模式审批，不另外在聊天里重复问一次。版本冲突时重新读取，不忽略校验；任务正运行时先报告冲突，不擅自停止。
 4. `deleted=true` 且 `verified=true` 才说明删除完成。保留 backup；路线、JS 和订阅仍在。原 `DeleteScriptGroupCommand` 不可调用只是缺少对象绑定，不能推导为无法删除配置组。
+
+## 删除路线或脚本资源
+
+明确要求删除资源时，读取到真实 User 路径就直接进入资源删除，不再从 UI 重新发现相同目标。user.list/read 的 resourceLifecycle 给出稳定入口。
+
+1. describe/read `bgi.inspect_local_resource`，path 使用已定位的完整材料目录／作者包／单文件。一次取得全目录文件数、内容版本、其他组引用及订阅覆盖；不逐条读取 5 条路线来寻找删除接口。
+2. 用户同时要求删配置组和路线，先按名称与 SHA 删除目标配置组，再 inspect 路线目录，避免自己刚删的组被当作仍存在的引用。
+3. describe/invoke `bgi.delete_local_resource`，path 与 expectedVersion 使用本次检查结果。若其他组仍引用，按用户授权范围处理这些组；不能默认 allowBrokenReferences=true。
+4. result.deleted=true、result.verified=true 即文件删除核验完成；保留 backupId。其他资源、组和订阅保留。coveringSubscriptions 非空时明确说明后续订阅更新可能重新导入，不擅自扩大为取消父目录订阅。
+5. 恢复用 `bgi.restore_local_resource` 的 backupId，原位置有新内容时拒绝覆盖。当前桥缺少稳定入口时说明需要更新桥，不连续试页面、绑定、树节点或选项。只有用户目标本身要求界面操作时才走原生 UI。
 5. 撤销时读取 backup，通过 user.write 在原 path 新建完整原始内容；目标路径已有其他文件时不能覆盖。

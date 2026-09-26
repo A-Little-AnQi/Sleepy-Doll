@@ -76,6 +76,49 @@ fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+fn local_resource_lifecycle(path: &str) -> Value {
+    let normalized = path.replace('\\', "/");
+    if ![
+        "AutoPathing/",
+        "JsScript/",
+        "KeyMouseScript/",
+        "AutoFight/",
+        "AutoGeniusInvokation/",
+    ]
+    .iter()
+    .any(|root| normalized.starts_with(root))
+    {
+        return Value::Null;
+    }
+    json!({"path":normalized,"inspectMethodId":"bgi.inspect_local_resource","deleteMethodId":"bgi.delete_local_resource","restoreMethodId":"bgi.restore_local_resource","selectionRequired":false,
+        "next":"若用户要求删除此资源，直接 describe/read inspect_local_resource，再按返回 path/version describe/invoke delete_local_resource。已经有真实路径，不再构造页面、遍历懒加载树或枚举选中项。"})
+}
+
+fn referenced_resource_targets(content: &[u8]) -> Value {
+    let Ok(value) = serde_json::from_slice::<Value>(content) else {
+        return Value::Null;
+    };
+    let mut targets = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for project in value["projects"].as_array().into_iter().flatten() {
+        let root = match project["type"].as_str() {
+            Some("Pathing") => "AutoPathing",
+            Some("Javascript") => "JsScript",
+            Some("KeyMouse") => "KeyMouseScript",
+            _ => continue,
+        };
+        let Some(folder) = project["folderName"].as_str() else {
+            continue;
+        };
+        let path = format!("{root}/{}", folder.replace('\\', "/").trim_matches('/'));
+        targets
+            .entry(path)
+            .or_default()
+            .push(project["name"].as_str().unwrap_or("").into());
+    }
+    json!({"targets":targets.into_iter().map(|(path,projects)|json!({"path":path,"projects":projects,"resourceLifecycle":local_resource_lifecycle(&path)})).collect::<Vec<_>>(),
+        "next":"用户同时要求删除组及引用资源时，先删除已定位组，再按上述真实引用目录 inspect_local_resource；不从 AutoPathing 根目录重新遍历。检查范围后按用户目标删除完整目录或精确文件。"})
+}
+
 fn validate_resource(path: &Path, content: &[u8]) -> Result<()> {
     if path
         .extension()
@@ -480,6 +523,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
                         let meta = entry.metadata().ok();
                         let mut item = json!({
                             "name": file_name,
+                            "relativePath": entry.path().strip_prefix(&root).unwrap_or(&entry.path()).to_string_lossy().replace('\\', "/"),
                             "directory": meta.as_ref().is_some_and(|m| m.is_dir()),
                             "bytes": meta.as_ref().filter(|m| m.is_file()).map(|m| m.len()),
                         });
@@ -491,7 +535,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
                         entries.push(item);
                     }
                     entries.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-                    Ok(json!({"path":path.to_string_lossy(),"count":entries.len(),"entries":entries}))
+                    Ok(json!({"path":path.to_string_lossy(),"count":entries.len(),"entries":entries,"resourceLifecycle":local_resource_lifecycle(a["path"].as_str().unwrap_or(""))}))
                 }) as BridgeToolFn
             },
         ),
@@ -522,6 +566,8 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
                             "path": path.to_string_lossy(),
                             "bytes": bytes.len(),
                             "sha256": sha256(&bytes),
+                            "resourceLifecycle": local_resource_lifecycle(a["path"].as_str().unwrap_or("")),
+                            "referencedResources": referenced_resource_targets(&bytes),
                             "droppedKeys": dropped,
                             "chars": out.chars().count(),
                             "truncated": out.chars().count() > USER_READ_LIMIT,
@@ -532,6 +578,8 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
                         "path": path.to_string_lossy(),
                         "bytes": bytes.len(),
                         "sha256": sha256(&bytes),
+                        "resourceLifecycle": local_resource_lifecycle(a["path"].as_str().unwrap_or("")),
+                        "referencedResources": referenced_resource_targets(&bytes),
                         "chars": text.chars().count(),
                         "truncated": text.chars().count() > USER_READ_LIMIT,
                         "text": text.chars().take(USER_READ_LIMIT).collect::<String>(),

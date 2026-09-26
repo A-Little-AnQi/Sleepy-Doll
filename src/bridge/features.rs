@@ -236,6 +236,7 @@ mod tests {
         for (query, expected) in [
             ("帮我把植绒草那个配置组删一下", "workflow.group.delete"),
             ("帮我跑下血斛", "workflow.resource.run"),
+            ("血斛的配置组还有路线也删一下", "workflow.resource.delete"),
             ("帮我编写 OCR 识别脚本", "workflow.javascript.write"),
             ("打开调度器页面", "workflow.navigation"),
             ("停一下刚才的任务", "workflow.task.stop"),
@@ -274,9 +275,9 @@ mod tests {
         assert!(index.read("untrusted-guessed-id").is_err());
         let first = index.search("功能目录", None, 0, 12).unwrap();
         let second = index.search("功能目录", None, 12, 12).unwrap();
-        assert_eq!(first["total"], 17);
+        assert_eq!(first["total"], 18);
         assert_eq!(first["nextOffset"], 12);
-        assert_eq!(second["items"].as_array().unwrap().len(), 5);
+        assert_eq!(second["items"].as_array().unwrap().len(), 6);
         assert!(second["nextOffset"].is_null());
     }
 

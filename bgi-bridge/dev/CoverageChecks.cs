@@ -107,6 +107,7 @@ class CoverageChecks
         await JavaScriptChecks(registry);
         await ReflectionChecks();
         await NativeSurfaceChecks();
+        await LocalDeletionChecks();
 
         foreach (var (path, boundary) in SettingMutationAdapters.Bounded)
         {
@@ -192,6 +193,31 @@ class CoverageChecks
         Check((await Call(registry, "bgi.prepare_js_group", new { folderName = "本机JS", settings = new { team = "采集" } })).GetProperty("reused").GetBoolean(), "重复准备不复用");
         await Reject(() => Call(registry, "bgi.prepare_js_group", new { folderName = "本机JS", settings = new { bad = true } }), "INVALID_ARGUMENT");
         await Reject(() => Call(registry, "bgi.prepare_js_group", new { folderName = "本机JS", settings = new { mode = "C" } }), "INVALID_ARGUMENT");
+    }
+
+    static async Task LocalDeletionChecks()
+    {
+        var registry=new MethodRegistry();LocalResourceDeletionTools.Register(registry);
+        var oldReference=Path.Combine(Root,"ScriptGroup/其他组引用血斛.json");if(File.Exists(oldReference))File.Delete(oldReference);
+        var path="AutoPathing/地方特产/稻妻/血斛/血斛@固定作者包";var target=Path.Combine(Root,path.Replace('/',Path.DirectorySeparatorChar));Directory.CreateDirectory(target);
+        for(var i=1;i<=5;i++)File.WriteAllText(Path.Combine(target,$"路线{i}.json"),"{\"positions\":[{\"id\":"+i+"}]}");
+        Directory.CreateDirectory(Path.Combine(target,"空目录"));
+        var other=Path.Combine(Root,"AutoPathing/其他材料.json");File.WriteAllText(other,"keep-other-route");var otherBytes=File.ReadAllBytes(other);
+        var subscription=Path.Combine(Root,"Subscriptions/bettergi-scripts-list.json");Directory.CreateDirectory(Path.GetDirectoryName(subscription)!);File.WriteAllText(subscription,"[\"pathing/地方特产/稻妻/血斛\",\"pathing/其他材料\"]");var subscriptionBytes=File.ReadAllBytes(subscription);
+        var inspected=await Call(registry,"bgi.inspect_local_resource",new{path});Check(inspected.GetProperty("totalFiles").GetInt32()==5,"完整作者包范围未定位");
+        var version=inspected.GetProperty("version").GetString()!;
+        await Reject(()=>Call(registry,"bgi.delete_local_resource",new{path,expectedVersion=new string('0',64)}),"VERSION_CONFLICT");Check(Directory.Exists(target),"冲突仍移动了资源");
+        var deleted=await Call(registry,"bgi.delete_local_resource",new{path,expectedVersion=version});var result=deleted.GetProperty("result");
+        Check(result.GetProperty("verified").GetBoolean()&&!Directory.Exists(target)&&result.GetProperty("deletedFiles").GetInt32()==5,"路径删除没有完成");
+        Check(File.ReadAllBytes(other).SequenceEqual(otherBytes)&&File.ReadAllBytes(subscription).SequenceEqual(subscriptionBytes),"删除影响其他路线或订阅");
+        var backupId=result.GetProperty("backupId").GetString()!;var restored=await Call(registry,"bgi.restore_local_resource",new{backupId});Check(restored.GetProperty("result").GetProperty("verified").GetBoolean()&&Directory.Exists(Path.Combine(target,"空目录")),"未完整恢复目录与文件");
+        await Reject(()=>Call(registry,"bgi.restore_local_resource",new{backupId}),"RESOURCE_CONFLICT");
+        var reference=Path.Combine(Root,"ScriptGroup/其他组引用血斛.json");File.WriteAllText(reference,JsonSerializer.Serialize(new{name="其他组引用血斛",projects=new[]{new{name="路线1.json",type="Pathing",folderName="地方特产/稻妻/血斛/血斛@固定作者包"}}}));
+        inspected=await Call(registry,"bgi.inspect_local_resource",new{path});Check(inspected.GetProperty("references").GetArrayLength()==1,"引用范围未被检查");
+        await Reject(()=>Call(registry,"bgi.delete_local_resource",new{path,expectedVersion=inspected.GetProperty("version").GetString()}),"RESOURCE_IN_USE");
+        await Reject(()=>Call(registry,"bgi.inspect_local_resource",new{path="AutoPathing/../ScriptGroup"}),"INVALID_ARGUMENT");
+        await Reject(()=>Call(registry,"bgi.inspect_local_resource",new{path="AutoPathing"}),"INVALID_ARGUMENT");
+        File.Delete(reference);
     }
 
     static async Task ReflectionChecks()

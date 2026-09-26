@@ -40707,6 +40707,21 @@
       "live": false
     },
     {
+      "methodId": "bgi.delete_local_resource",
+      "source": "bgi-bridge/managed/Tools/LocalResourceDeletionTools.cs",
+      "live": false
+    },
+    {
+      "methodId": "bgi.inspect_local_resource",
+      "source": "bgi-bridge/managed/Tools/LocalResourceDeletionTools.cs",
+      "live": false
+    },
+    {
+      "methodId": "bgi.restore_local_resource",
+      "source": "bgi-bridge/managed/Tools/LocalResourceDeletionTools.cs",
+      "live": false
+    },
+    {
       "methodId": "bgi.ui.cancel",
       "source": "bgi-bridge/managed/Tools/NativeUiTools.cs",
       "live": false
@@ -98154,6 +98169,32 @@
     "已移除：旧表单类型已无原生界面／业务调用，使用当前黑白名单窗口或资源接口": 4
   },
   "skillReferences": {
+    "bgi.delete_script_group": [
+      "plugins/bgi/skills/bgi-assistant/SKILL.md",
+      "plugins/bgi/skills/bgi-assistant/references/evaluation-cases.md",
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
+      "plugins/bgi/skills/bgi-assistant/references/viewmodel-usage.md",
+      "plugins/bgi/skills/bgi-operator/references/resources.md"
+    ],
+    "bgi.feature.read": [
+      "plugins/bgi/skills/bgi-assistant/SKILL.md"
+    ],
+    "bgi.feature.search": [
+      "plugins/bgi/skills/bgi-assistant/SKILL.md",
+      "plugins/bgi/skills/bgi-operator/SKILL.md"
+    ],
+    "bgi.ui.read": [
+      "plugins/bgi/skills/bgi-assistant/SKILL.md",
+      "plugins/bgi/skills/bgi-operator/references/native-ui.md"
+    ],
+    "bgi.user.resolve": [
+      "plugins/bgi/skills/bgi-assistant/SKILL.md",
+      "plugins/bgi/skills/bgi-assistant/references/collection-workflow.md",
+      "plugins/bgi/skills/bgi-assistant/references/evaluation-cases.md",
+      "plugins/bgi/skills/bgi-assistant/references/source-routing.md",
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
+      "plugins/bgi/skills/bgi-operator/references/execution.md"
+    ],
     "bgi.api.describe": [
       "plugins/bgi/skills/bgi-assistant/SKILL.md",
       "plugins/bgi/skills/bgi-assistant/references/bgi-domain.md",
@@ -98165,31 +98206,16 @@
       "plugins/bgi/skills/bgi-operator/references/script-analysis.md",
       "plugins/bgi/skills/bgi-operator/references/settings.md"
     ],
-    "bgi.user.resolve": [
-      "plugins/bgi/skills/bgi-assistant/SKILL.md",
-      "plugins/bgi/skills/bgi-assistant/references/collection-workflow.md",
-      "plugins/bgi/skills/bgi-assistant/references/evaluation-cases.md",
-      "plugins/bgi/skills/bgi-assistant/references/source-routing.md",
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
-      "plugins/bgi/skills/bgi-operator/references/execution.md"
-    ],
-    "bgi.user.inspect_script": [
-      "plugins/bgi/skills/bgi-assistant/SKILL.md",
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
-      "plugins/bgi/skills/bgi-javascript/SKILL.md",
-      "plugins/bgi/skills/bgi-operator/references/script-analysis.md"
-    ],
-    "bgi.delete_script_group": [
-      "plugins/bgi/skills/bgi-assistant/SKILL.md",
-      "plugins/bgi/skills/bgi-assistant/references/evaluation-cases.md",
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
-      "plugins/bgi/skills/bgi-assistant/references/viewmodel-usage.md",
-      "plugins/bgi/skills/bgi-operator/references/resources.md"
-    ],
     "bgi.js_api.search": [
       "plugins/bgi/skills/bgi-assistant/SKILL.md",
       "plugins/bgi/skills/bgi-javascript/SKILL.md",
       "plugins/bgi/skills/bgi-javascript/references/writing.md"
+    ],
+    "bgi.stop_current_task": [
+      "plugins/bgi/skills/bgi-assistant/SKILL.md",
+      "plugins/bgi/skills/bgi-assistant/references/action-policy.md",
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
+      "plugins/bgi/skills/bgi-operator/references/execution.md"
     ],
     "bgi.repo.search": [
       "plugins/bgi/skills/bgi-assistant/SKILL.md",
@@ -98200,33 +98226,17 @@
       "plugins/bgi/skills/bgi-operator/references/execution.md",
       "plugins/bgi/skills/bgi-operator/references/script-analysis.md"
     ],
-    "bgi.stop_current_task": [
+    "bgi.user.inspect_script": [
       "plugins/bgi/skills/bgi-assistant/SKILL.md",
-      "plugins/bgi/skills/bgi-assistant/references/action-policy.md",
       "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
-      "plugins/bgi/skills/bgi-operator/references/execution.md"
+      "plugins/bgi/skills/bgi-javascript/SKILL.md",
+      "plugins/bgi/skills/bgi-operator/references/script-analysis.md"
     ],
-    "bgi.ui.read": [
-      "plugins/bgi/skills/bgi-assistant/SKILL.md",
-      "plugins/bgi/skills/bgi-operator/references/native-ui.md"
-    ],
-    "bgi.feature.read": [
-      "plugins/bgi/skills/bgi-assistant/SKILL.md"
-    ],
-    "bgi.feature.search": [
-      "plugins/bgi/skills/bgi-assistant/SKILL.md",
-      "plugins/bgi/skills/bgi-operator/SKILL.md"
-    ],
-    "bgi.wait_ready": [
+    "bgi.start_game": [
       "plugins/bgi/skills/bgi-assistant/references/action-policy.md",
       "plugins/bgi/skills/bgi-assistant/references/collection-workflow.md",
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
-      "plugins/bgi/skills/bgi-operator/references/execution.md"
-    ],
-    "bgi.exit_game": [
-      "plugins/bgi/skills/bgi-assistant/references/action-policy.md",
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
-      "plugins/bgi/skills/bgi-operator/references/execution.md"
+      "plugins/bgi/skills/bgi-operator/references/execution.md",
+      "plugins/bgi/skills/bgi-operator/references/shared.md"
     ],
     "bgi.api.search": [
       "plugins/bgi/skills/bgi-assistant/references/action-policy.md",
@@ -98239,11 +98249,20 @@
       "plugins/bgi/skills/bgi-operator/references/settings.md",
       "plugins/bgi/skills/bgi-operator/references/shared.md"
     ],
-    "bgi.start_game": [
+    "bgi.job.cancel": [
+      "plugins/bgi/skills/bgi-assistant/references/action-policy.md",
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md"
+    ],
+    "bgi.wait_ready": [
       "plugins/bgi/skills/bgi-assistant/references/action-policy.md",
       "plugins/bgi/skills/bgi-assistant/references/collection-workflow.md",
-      "plugins/bgi/skills/bgi-operator/references/execution.md",
-      "plugins/bgi/skills/bgi-operator/references/shared.md"
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
+      "plugins/bgi/skills/bgi-operator/references/execution.md"
+    ],
+    "bgi.exit_game": [
+      "plugins/bgi/skills/bgi-assistant/references/action-policy.md",
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
+      "plugins/bgi/skills/bgi-operator/references/execution.md"
     ],
     "bgi.set_game_resolution": [
       "plugins/bgi/skills/bgi-assistant/references/action-policy.md",
@@ -98254,18 +98273,20 @@
       "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
       "plugins/bgi/skills/bgi-operator/references/repository.md"
     ],
-    "bgi.job.cancel": [
-      "plugins/bgi/skills/bgi-assistant/references/action-policy.md",
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md"
-    ],
     "bgi.run_one_dragon": [
       "plugins/bgi/skills/bgi-assistant/references/bgi-domain.md",
       "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
       "plugins/bgi/skills/bgi-operator/references/execution.md",
       "plugins/bgi/skills/bgi-operator/references/resources.md"
     ],
-    "bgi.run_script_group": [
+    "bgi.get_status": [
       "plugins/bgi/skills/bgi-assistant/references/collection-workflow.md",
+      "plugins/bgi/skills/bgi-operator/references/execution.md",
+      "plugins/bgi/skills/bgi-operator/references/shared.md"
+    ],
+    "bgi.subscribe_script_resources": [
+      "plugins/bgi/skills/bgi-assistant/references/collection-workflow.md",
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
       "plugins/bgi/skills/bgi-operator/references/execution.md"
     ],
     "bgi.prepare_pathing_group": [
@@ -98273,15 +98294,9 @@
       "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
       "plugins/bgi/skills/bgi-operator/references/execution.md"
     ],
-    "bgi.subscribe_script_resources": [
+    "bgi.run_script_group": [
       "plugins/bgi/skills/bgi-assistant/references/collection-workflow.md",
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
       "plugins/bgi/skills/bgi-operator/references/execution.md"
-    ],
-    "bgi.get_status": [
-      "plugins/bgi/skills/bgi-assistant/references/collection-workflow.md",
-      "plugins/bgi/skills/bgi-operator/references/execution.md",
-      "plugins/bgi/skills/bgi-operator/references/shared.md"
     ],
     "bgi.get_script_errors": [
       "plugins/bgi/skills/bgi-assistant/references/evaluation-cases.md",
@@ -98294,63 +98309,63 @@
       "plugins/bgi/skills/bgi-javascript/SKILL.md",
       "plugins/bgi/skills/bgi-operator/references/script-analysis.md"
     ],
-    "bgi.api.invoke": [
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
-      "plugins/bgi/skills/bgi-operator/references/execution.md",
-      "plugins/bgi/skills/bgi-operator/references/repository.md",
-      "plugins/bgi/skills/bgi-operator/references/shared.md"
-    ],
-    "bgi.capability.invoke": [
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md"
-    ],
-    "bgi.open_page": [
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md"
-    ],
-    "bgi.state.get": [
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
-      "plugins/bgi/skills/bgi-operator/references/execution.md",
-      "plugins/bgi/skills/bgi-operator/references/repository.md"
-    ],
-    "bgi.user.restore": [
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
-      "plugins/bgi/skills/bgi-operator/references/resources.md"
-    ],
-    "bgi.list_pages": [
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
-      "plugins/bgi/skills/bgi-assistant/references/viewmodel-usage.md",
-      "plugins/bgi/skills/bgi-operator/references/execution.md"
-    ],
     "bgi.prepare_js_group": [
       "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
       "plugins/bgi/skills/bgi-assistant/references/viewmodel-usage.md",
       "plugins/bgi/skills/bgi-operator/references/execution.md"
-    ],
-    "bgi.user.write": [
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
-      "plugins/bgi/skills/bgi-javascript/references/writing.md",
-      "plugins/bgi/skills/bgi-operator/references/resources.md"
-    ],
-    "bgi.capability.describe": [
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md"
-    ],
-    "bgi.api.read": [
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
-      "plugins/bgi/skills/bgi-operator/references/script-analysis.md",
-      "plugins/bgi/skills/bgi-operator/references/settings.md"
-    ],
-    "bgi.capability.search": [
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
-      "plugins/bgi/skills/bgi-javascript/SKILL.md"
-    ],
-    "bgi.user.list": [
-      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
-      "plugins/bgi/skills/bgi-operator/references/resources.md"
     ],
     "bgi.user.read": [
       "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
       "plugins/bgi/skills/bgi-javascript/SKILL.md",
       "plugins/bgi/skills/bgi-operator/references/resources.md",
       "plugins/bgi/skills/bgi-operator/references/script-analysis.md"
+    ],
+    "bgi.capability.search": [
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
+      "plugins/bgi/skills/bgi-javascript/SKILL.md"
+    ],
+    "bgi.list_pages": [
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
+      "plugins/bgi/skills/bgi-assistant/references/viewmodel-usage.md",
+      "plugins/bgi/skills/bgi-operator/references/execution.md"
+    ],
+    "bgi.user.list": [
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
+      "plugins/bgi/skills/bgi-operator/references/resources.md"
+    ],
+    "bgi.capability.invoke": [
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md"
+    ],
+    "bgi.capability.describe": [
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md"
+    ],
+    "bgi.user.restore": [
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
+      "plugins/bgi/skills/bgi-operator/references/resources.md"
+    ],
+    "bgi.state.get": [
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
+      "plugins/bgi/skills/bgi-operator/references/execution.md",
+      "plugins/bgi/skills/bgi-operator/references/repository.md"
+    ],
+    "bgi.api.read": [
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
+      "plugins/bgi/skills/bgi-operator/references/script-analysis.md",
+      "plugins/bgi/skills/bgi-operator/references/settings.md"
+    ],
+    "bgi.api.invoke": [
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
+      "plugins/bgi/skills/bgi-operator/references/execution.md",
+      "plugins/bgi/skills/bgi-operator/references/repository.md",
+      "plugins/bgi/skills/bgi-operator/references/shared.md"
+    ],
+    "bgi.user.write": [
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md",
+      "plugins/bgi/skills/bgi-javascript/references/writing.md",
+      "plugins/bgi/skills/bgi-operator/references/resources.md"
+    ],
+    "bgi.open_page": [
+      "plugins/bgi/skills/bgi-assistant/references/tool-workflow.md"
     ],
     "bgi.list_command_targets": [
       "plugins/bgi/skills/bgi-assistant/references/viewmodel-usage.md",
@@ -98359,10 +98374,10 @@
     "bgi.js_api.read": [
       "plugins/bgi/skills/bgi-javascript/references/writing.md"
     ],
-    "bgi.create_command_target": [
+    "bgi.create_command_argument": [
       "plugins/bgi/skills/bgi-operator/references/execution.md"
     ],
-    "bgi.create_command_argument": [
+    "bgi.create_command_target": [
       "plugins/bgi/skills/bgi-operator/references/execution.md"
     ],
     "bgi.ui.write": [
@@ -98371,16 +98386,25 @@
     "bgi.update_subscribed_scripts": [
       "plugins/bgi/skills/bgi-operator/references/repository.md"
     ],
+    "bgi.restore_local_resource": [
+      "plugins/bgi/skills/bgi-operator/references/resources.md"
+    ],
+    "bgi.inspect_local_resource": [
+      "plugins/bgi/skills/bgi-operator/references/resources.md"
+    ],
+    "bgi.delete_local_resource": [
+      "plugins/bgi/skills/bgi-operator/references/resources.md"
+    ],
     "bgi.read_host_log": [
       "plugins/bgi/skills/bgi-operator/references/script-analysis.md"
-    ],
-    "bgi.set_setting": [
-      "plugins/bgi/skills/bgi-operator/references/settings.md"
     ],
     "bgi.commit_settings": [
       "plugins/bgi/skills/bgi-operator/references/settings.md"
     ],
     "bgi.preview_settings": [
+      "plugins/bgi/skills/bgi-operator/references/settings.md"
+    ],
+    "bgi.set_setting": [
       "plugins/bgi/skills/bgi-operator/references/settings.md"
     ]
   },
