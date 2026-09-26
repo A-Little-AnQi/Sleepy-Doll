@@ -296,8 +296,8 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
         var items = all.Skip(offset).Take(limit)
             .Select(method => method.Discovery(Unavailable(method) is null, Unavailable(method), _catalogVersion)).ToArray();
         // 空结果时提示调用方先确认证据源。
-        var hint = all.Length == 0 && !string.IsNullOrWhiteSpace(query) && string.IsNullOrEmpty(group)
-            ? "没有接口命中。先判断目标是否其实是 User 目录中的配置组、路线或脚本；若确定属于 BetterGI 接口，只用一个核心词重试一次。"
+        var hint = all.Length == 0 && !string.IsNullOrWhiteSpace(query)
+            ? "没有接口命中。脚本名、脚本参数与脚本行为改用 bgi.repo.search/read 查询中央仓库；未订阅也能读取。只有宿主设置或动作才在此用一个核心词重试一次，不要反复换中英文。"
             : null;
         return new
         {

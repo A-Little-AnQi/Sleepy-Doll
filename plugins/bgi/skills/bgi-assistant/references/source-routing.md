@@ -37,6 +37,8 @@
 
 ## 脚本仓库 `bettergi-scripts-list`
 
+`bgi.repo.search` 搜索当前渠道的 repo.json，`bgi.repo.read` 通过宿主读取器从 Git Blob 或文件式仓库读文本。path 从 `js/`、`pathing/`、`combat/`、`tcg/` 开始，不带 `repo/`。未订阅内容通常不在磁盘工作目录中，不扫描 `.git` 或 Sleepy Doll 安装目录，也不为阅读资料更新订阅。
+
 | 内容 | 优先路径 |
 | --- | --- |
 | 仓库树、节点、描述和更新时间 | `repo.json` |

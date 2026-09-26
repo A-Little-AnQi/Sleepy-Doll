@@ -112,6 +112,7 @@ class Session {
   private cursor = 0;
   private running = false;
   private runs = new Map<string, TaskInfo>();
+  private pendingRuns = new Map<string, TaskInfo>();
   private streams = new Map<
     string,
     Array<{ sequence: number; text: string }>
@@ -196,7 +197,7 @@ class Session {
             if (["run.created", "run.changed"].includes(event.kind)) {
               const run = event.data as unknown as TaskInfo;
               this.runs.set(run.id, run);
-              emitRun(run);
+              this.pendingRuns.set(run.id, run);
               refresh = true;
               if (!isRunning(run)) {
                 this.approvals.delete(run.id);
@@ -288,6 +289,8 @@ class Session {
               loading: false,
             });
           failures = 0;
+          for (const run of this.pendingRuns.values()) emitRun(run);
+          this.pendingRuns.clear();
           if (!batch.events.length && !window.ipc) {
             await new Promise((resolve) => setTimeout(resolve, 1000));
           }

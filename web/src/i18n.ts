@@ -118,6 +118,9 @@ const zh = {
   },
 
   transcript: {
+    stopped: "已停止",
+    needsReview: "结果待核对",
+    process: "执行过程",
     callFailed: "调用失败",
     code: "代码",
     params: "参数",
@@ -565,6 +568,9 @@ const en: Dict = {
   },
 
   transcript: {
+    stopped: "Stopped",
+    needsReview: "Needs review",
+    process: "Activity",
     callFailed: "Call failed",
     code: "Code",
     params: "Arguments",

@@ -11,12 +11,12 @@
 
 ## 知识查询顺序
 
-先用 [feature-map.md](feature-map.md) 确定功能域，并按 [source-routing.md](source-routing.md) 定位仓库路径。feature-map 只供你定位，不要复述给用户。与现场无关的讲解不要走第 1 步。再按以下来源取证：
+具体脚本或 JS 字段的问题优先搜索脚本标题，读该脚本的 settings、README 和必要源码，不先查本体设置与用户的一条龙配置。其他问题类别不清楚时用 [feature-map.md](feature-map.md) 确定功能域，并按 [source-routing.md](source-routing.md) 定位路径。feature-map 只供定位，不复述给用户。与现场无关的讲解不要走第 1 步。按问题所属对象选择以下来源：
 
 1. 当前 BGI 状态、配置和 `bgi.api.describe`：判断当前版本真实可用的操作、当前值和参数；仅当答案取决于现场值时使用；
 2. `bettergi-docs/src` 官方用户文档：回答界面路径、使用前提、选项含义和常见问题；
 3. 当前 BGI 源码中的页面 XAML、ViewModel、配置类和 GameTask：文档缺失或版本落后时核对真实选项与行为；
-4. 脚本仓库的 `repo.json`、README、manifest、settings 与源码：只用于特定路线、脚本和策略；
+4. 脚本仓库的 `repo.json`、README、manifest、settings 与源码：用于特定路线、脚本和策略；直接 `bgi.repo.search/read`，未订阅文件也可从中央 Git 仓库读取。问题涉及本机运行时优先读已安装版本；
 5. 动态日志与诊断信息：只在排障时按需读取。
 
 不要把源码类名直接当成用户答案。源码确认 `AutoUpdateSubscribedScripts` 后，用户答案应是“可以在脚本仓库设置里开启启动时自动更新已订阅脚本”。问怎么开就说到这儿；用户要你改时再改。

@@ -8,7 +8,7 @@ import {
   type ReactNode,
   type CSSProperties,
 } from "react";
-import { createPortal, flushSync } from "react-dom";
+import { createPortal } from "react-dom";
 import type { Page } from "../../App";
 import { api, framelessWindow } from "../../ipc/api";
 import {
@@ -133,14 +133,6 @@ function idsKey(items: Array<{ id: string }>) {
   return items.map((item) => item.id).join("\0");
 }
 
-function runLayout(apply: () => void) {
-  if (typeof document.startViewTransition !== "function") {
-    apply();
-    return;
-  }
-  document.startViewTransition(apply);
-}
-
 interface Props {
   bootstrap: Bootstrap;
   page: Page;
@@ -187,6 +179,7 @@ export function AppShell({
   const [detailsPresent, setDetailsPresent] = useState(detailsOpen);
   const widthRef = useRef(preferredWidth);
   const resizingRef = useRef(false);
+  const resizeCleanup = useRef<(() => void) | null>(null);
   const peekTimer = useRef(0);
   const [query, setQuery] = useState("");
   const [layout, setLayout] = useState<GroupLayout>(() => {
@@ -238,6 +231,7 @@ export function AppShell({
     return () => window.removeEventListener("resize", onResize);
   }, []);
   useEffect(() => () => window.clearTimeout(peekTimer.current), []);
+  useEffect(() => () => resizeCleanup.current?.(), []);
   useEffect(() => {
     // 断点按 CSS 像素判定，窗口缩放改变的是 CSS 宽度。
     const sidebar = window.matchMedia("(min-width: 960px)");
@@ -335,9 +329,7 @@ export function AppShell({
       setShownConversations(orderedConversations);
       return;
     }
-    runLayout(() => {
-      flushSync(() => setShownConversations(orderedConversations));
-    });
+    setShownConversations(orderedConversations);
   }, [ghost, orderedConversations, shownConversations]);
   const conversations = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -505,8 +497,10 @@ export function AppShell({
   const onResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
+    resizeCleanup.current?.();
     const origin = event.clientX;
-    const start = widthRef.current;
+    const start = sidebarWidth;
+    const pointerId = event.pointerId;
     const handle = event.currentTarget;
     try {
       handle.setPointerCapture(event.pointerId);
@@ -517,11 +511,21 @@ export function AppShell({
     setResizing(true);
     document.documentElement.dataset.sidebarResizing = "true";
     const move = (next: globalThis.PointerEvent) => {
-      const width = clampPreferredSidebarWidth(start + next.clientX - origin);
+      if (next.pointerId !== pointerId) return;
+      const width = clampSidebarWidth(
+        start + next.clientX - origin,
+        window.innerWidth,
+      );
       widthRef.current = width;
       setPreferredWidth(width);
     };
-    const stop = () => {
+    const stop = (next?: Event) => {
+      if (
+        next instanceof globalThis.PointerEvent &&
+        next.pointerId !== pointerId
+      )
+        return;
+      resizeCleanup.current = null;
       resizingRef.current = false;
       setResizing(false);
       delete document.documentElement.dataset.sidebarResizing;
@@ -529,10 +533,21 @@ export function AppShell({
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
       window.removeEventListener("pointercancel", stop);
+      window.removeEventListener("blur", stop);
+      handle.removeEventListener("lostpointercapture", stop);
+      try {
+        if (handle.hasPointerCapture(pointerId))
+          handle.releasePointerCapture(pointerId);
+      } catch {
+        /* 部分嵌入预览没有 capture。 */
+      }
     };
+    resizeCleanup.current = stop;
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop);
     window.addEventListener("pointercancel", stop);
+    window.addEventListener("blur", stop);
+    handle.addEventListener("lostpointercapture", stop);
   };
   const showHeader = page === "chat" || collapsed;
   const conversationAct = async (action: () => Promise<unknown>) => {
@@ -588,12 +603,11 @@ export function AppShell({
           >
             <Icon className="app-nav-icon" />
             <span>{t.nav[labelKey]}</span>
-            {target === "tasks" &&
-              bootstrap.tasks.some(isTaskRunActive) && (
-                <span className="app-nav-badge" title={t.nav.runningBadge}>
-                  {bootstrap.tasks.filter(isTaskRunActive).length}
-                </span>
-              )}
+            {target === "tasks" && bootstrap.tasks.some(isTaskRunActive) && (
+              <span className="app-nav-badge" title={t.nav.runningBadge}>
+                {bootstrap.tasks.filter(isTaskRunActive).length}
+              </span>
+            )}
           </button>
         ))}
       </nav>
@@ -711,6 +725,7 @@ export function AppShell({
         role="separator"
         aria-orientation="vertical"
         aria-label={t.nav.resizeSidebar}
+        title={t.nav.resizeSidebar}
         aria-valuenow={sidebarWidth}
         aria-valuemin={SIDEBAR_MIN_WIDTH}
         aria-valuemax={SIDEBAR_MAX_WIDTH}

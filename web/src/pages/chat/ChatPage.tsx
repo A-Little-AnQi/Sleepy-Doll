@@ -170,6 +170,7 @@ export function ChatPage({
   current.current = conversationId;
   const alive = useRef(true);
   const scroll = useRef<HTMLDivElement>(null);
+  const flow = useRef<HTMLDivElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const follow = useRef(true);
   useEffect(() => {
@@ -203,13 +204,18 @@ export function ChatPage({
     return () => clearInterval(timer);
   }, [busy, approval]);
   useLayoutEffect(() => {
-    if (follow.current) {
-      scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
-      setUnread(false);
-    } else {
-      setUnread(true);
-    }
-  }, [draftKey, messages, stream, plan]);
+    if (!flow.current) return;
+    const observer = new ResizeObserver(() => {
+      if (follow.current) {
+        scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
+        setUnread(false);
+      } else {
+        setUnread(true);
+      }
+    });
+    observer.observe(flow.current);
+    return () => observer.disconnect();
+  }, [draftKey, loading]);
   const setDraft = (value: string) => {
     setPrompt(value);
     localStorage.setItem(draftKey, value);
@@ -362,7 +368,7 @@ export function ChatPage({
               {loading && !messages.length && (
                 <p className="muted">{t.common.loading}</p>
               )}
-              <div className="conversation-flow">
+              <div ref={flow} className="conversation-flow">
                 <Transcript
                   messages={messages}
                   stream={stream}
@@ -454,7 +460,7 @@ export function ChatPage({
                     )}
                   </section>
                 )}
-                {/* 已停止与待核对不再单开一栏，标注行由对话记录给出。 */}
+                {/* 取消与待核对分别由对话记录标注。 */}
                 {task &&
                   !busy &&
                   ["failed", "partial", "blocked"].includes(task.state) && (

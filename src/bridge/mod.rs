@@ -2,6 +2,7 @@
 
 pub mod control;
 pub(crate) mod resolve;
+pub(crate) mod retrieval;
 
 use std::{
     fs,
@@ -300,6 +301,20 @@ impl BgiClient {
         self.request("POST", "/bridge/v1/invoke", Some(&json!({"requestId":key,"instanceId":info["instanceId"],"catalogVersion":info["catalogVersion"],"methodId":method_id,"arguments":arguments,"execution":{"onDisconnect":"continue"}})), Some(&key))
     }
 
+    fn repository_read(&self, method_id: &str, arguments: &Value) -> Result<Value> {
+        let contract = self.describe(method_id)?;
+        if contract["effect"] != "readOnly" || contract["callable"] != true {
+            return Err(Error::Tool(
+                "当前桥不支持只读仓库查询，请重新连接更新后的桥".into(),
+            ));
+        }
+        let response = self.invoke(method_id, arguments)?;
+        response
+            .get("result")
+            .cloned()
+            .ok_or_else(|| Error::Tool("仓库读取没有返回结果".into()))
+    }
+
     fn request(
         &self,
         method: &str,
@@ -397,6 +412,14 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
     ];
     definitions.extend([
+        ("bgi.repo.search", "检索脚本仓库", "搜索中央仓库全部资源，默认 all；JS 参数用 js，采集/地图追踪必须用 pathing。地图追踪返回完整目标目录和作者包、requirements，不返回散落叶子供拼接。分类无命中不等于全仓库没有。用精确路径阅读、订阅并准备运行，不要扫描桥程序集。", json!({"type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":200},"category":{"type":"string","enum":["all","js","pathing","combat","tcg"],"default":"all"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":20,"default":8}},"required":["query"],"additionalProperties":false}), {
+            let client = client.clone();
+            Arc::new(move |a: &Value| client.repository_read("bgi.search_script_repository", a)) as BridgeToolFn
+        }),
+        ("bgi.repo.read", "读取仓库源码", "直接从中央 Git 仓库读取未订阅的 settings.json、README、manifest、入口 JS 与引用模块。path 使用搜索返回的 js/... 路径再拼文件名，不加 repo/，不猜已安装目录。contains 定位字段或函数及上下文；返回行号、SHA-256、truncated 和 nextLine，截断时继续分页。阅读不会运行脚本或修改订阅。", json!({"type":"object","properties":{"path":{"type":"string","minLength":1,"maxLength":1024},"startLine":{"type":"integer","minimum":1},"maxLines":{"type":"integer","minimum":1,"maximum":240,"default":160},"contains":{"type":"string","minLength":1,"maxLength":200}},"required":["path"],"additionalProperties":false}), {
+            let client = client.clone();
+            Arc::new(move |a: &Value| client.repository_read("bgi.read_script_repository_file", a)) as BridgeToolFn
+        }),
         ("bgi.api.search", "检索 BetterGI 接口", "在当前 BetterGI 宿主中发现设置或动作。它不搜索配置组、路线、脚本等用户资源。group 必须来自目录实际返回的分组；用一个业务词查询，一次零结果后检查证据源。", json!({"type":"object","properties":{"query":{"type":"string","description":"一个核心业务词、动作词或精确 methodId；空字符串用于浏览分组"},"group":{"type":"string","description":"可选；使用目录实际返回的分组，例如 settings、command、scheduler、repository"},"offset":{"type":"integer","minimum":0,"description":"仅在响应给出 nextOffset 时继续"},"limit":{"type":"integer","minimum":1,"maximum":50,"default":8,"description":"候选数量；默认 8，只有响应给出 nextOffset 且确有必要时增加"}},"required":["query"],"additionalProperties":false}), {
             let client = client.clone();
             Arc::new(move |a: &Value| client.catalog_page_with_limit(a["query"].as_str().unwrap_or(""),a["group"].as_str(),a["offset"].as_u64().unwrap_or(0),a["limit"].as_u64().unwrap_or(8))) as BridgeToolFn
@@ -560,16 +583,16 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         (
             "bgi.user.resolve",
             "查找可运行任务",
-            "一次判定采集或运行目标：查配置组、核验引用路径是否还在、只按目录名找 AutoPathing 父节点。不要用 list/read 扫路线 JSON。按 verdict 行动：run 直接运行该配置组；repair 只补 missing；create 用 candidates 父节点建组；ambiguous 才提问；notFound 再考虑更新仓库。",
-            json!({"type":"object","properties":{"query":{"type":"string","minLength":1,"description":"用户原话或材料/配置组名称"}},"required":["query"],"additionalProperties":false}),
+            "查找用户要求运行的实际资源：先匹配本机配置组、核验引用和地图追踪父目录；未命中自动搜索当前中央仓库全部分类。不要扫描路线 JSON 或先刷新仓库。run 直接运行；repair 补 missing；create 准备本地父目录；resourceFound 按 repository 候选订阅、配置并继续运行；lookupFailed 是查询失败，不能称资源不存在；notFound 才是本机和当前全仓索引均未命中。",
+            json!({"type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":200,"description":"用户原话或材料/脚本/配置组名称，例如帮我跑下血斛"}},"required":["query"],"additionalProperties":false}),
             {
                 let client = client.clone();
                 Arc::new(move |a: &Value| {
                     let root = client.user_root()?;
-                    Ok(resolve::resolve_local(
+                    resolve::resolve_target(resolve::resolve_local(
                         &root,
                         a["query"].as_str().unwrap_or(""),
-                    ))
+                    ), |arguments| client.repository_read("bgi.search_script_repository", arguments))
                 }) as BridgeToolFn
             },
         ),
@@ -714,7 +737,12 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             }
         } else if matches!(
             name,
-            "bgi.user.list" | "bgi.user.read" | "bgi.user.inspect_script" | "bgi.user.resolve"
+            "bgi.user.list"
+                | "bgi.user.read"
+                | "bgi.user.inspect_script"
+                | "bgi.user.resolve"
+                | "bgi.repo.search"
+                | "bgi.repo.read"
         ) {
             ToolExecution {
                 max_result_chars: 96_000,

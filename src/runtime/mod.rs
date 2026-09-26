@@ -2032,6 +2032,17 @@ impl Supervisor {
         let a = &call.arguments;
         let current = self.config.read().unwrap().clone();
         let definitions = self.definitions(exposed);
+        if current.host_plugin_enabled()
+            && call.name.starts_with("workspace.")
+            && let Some(reason) = crate::bridge::retrieval::workspace_restriction(
+                &run.prompt,
+                &self.journal.history(run)?,
+                &call.name,
+                a,
+            )
+        {
+            return Err(Error::Tool(reason.into()));
+        }
         let definition = definitions
             .iter()
             .find(|t| t.name == call.name)
@@ -2199,20 +2210,21 @@ impl Supervisor {
             }
             "bgi.state.get" => bridge.get("/bridge/v1/state", cancel).await,
             "bgi.api.search" => {
-                let query = {
-                    let mut query = url::form_urlencoded::Serializer::new(String::new());
-                    query
-                        .append_pair("q", a["query"].as_str().unwrap_or(""))
-                        .append_pair("limit", &a["limit"].as_u64().unwrap_or(8).to_string())
-                        .append_pair("offset", &a["offset"].as_u64().unwrap_or(0).to_string());
-                    if let Some(group) = a["group"].as_str() {
-                        query.append_pair("group", group);
-                    }
-                    query.finish()
-                };
-                bridge
-                    .get(&format!("/bridge/v1/catalog?{query}"), cancel)
-                    .await
+                let history = self.journal.history(run)?;
+                let skills = self.skills();
+                let guide = skills
+                    .get("bgi-javascript")
+                    .filter(|skill| !current.agent.disabled_skills.contains(&skill.name));
+                crate::bridge::retrieval::search_interface(
+                    &run.prompt,
+                    &history,
+                    a,
+                    self.tools(),
+                    bridge,
+                    cancel,
+                    guide.map(|skill| skill.body.as_str()),
+                )
+                .await
             }
             "bgi.api.describe" => {
                 let id = a["methodId"].as_str().unwrap_or("");
@@ -2605,7 +2617,23 @@ impl Supervisor {
                 }
                 Ok(json!({"plan":plan,"attempts":self.journal.attempts(&run.id)?}))
             }
+            "bgi.repo.search" => {
+                let history = self.journal.history(run)?;
+                let skills = self.skills();
+                let guide = skills
+                    .get("bgi-javascript")
+                    .filter(|skill| !current.agent.disabled_skills.contains(&skill.name));
+                crate::bridge::retrieval::search_repository(
+                    &history,
+                    a,
+                    self.tools(),
+                    cancel,
+                    guide.map(|skill| skill.body.as_str()),
+                )
+                .await
+            }
             "bgi.user.list"
+            | "bgi.repo.read"
             | "bgi.user.read"
             | "bgi.user.inspect_script"
             | "bgi.user.resolve"

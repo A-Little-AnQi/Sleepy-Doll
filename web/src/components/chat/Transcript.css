@@ -22,7 +22,8 @@
 }
 
 /* 段内与段间用同一个间隙，折叠行到上下文字的间距一致。 */
-.turn-segment {
+.turn-segment,
+.turn-process-content {
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -47,6 +48,15 @@
 
 .message-actions.is-user {
   justify-content: flex-end;
+}
+
+.message-actions[data-hidden="true"] {
+  visibility: hidden;
+}
+
+.process-disclosure[hidden],
+.assistant-message[hidden] {
+  display: none;
 }
 
 .message-turn:hover .message-actions,
@@ -101,7 +111,7 @@
   color: var(--muted);
 }
 
-.turn-stopped-note {
+.turn-outcome-note {
   height: var(--chat-message-meta-height);
   display: flex;
   align-items: center;
@@ -181,10 +191,11 @@
 }
 
 .process-disclosure-summary {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 7px;
-  width: 100%;
+  width: fit-content;
+  max-width: 100%;
   min-height: 0;
   padding: 4px 0;
   border: 0;
@@ -200,7 +211,13 @@
 }
 
 .process-disclosure-summary time {
+  flex-shrink: 0;
   font-variant-numeric: tabular-nums;
+}
+
+/* 状态在整个运行期间复用同一节点，不随阶段/计时重播全局 status-enter。 */
+.process-disclosure-summary [role="status"] {
+  animation: none;
 }
 
 .process-disclosure-label {
@@ -228,8 +245,9 @@
 }
 
 .activity-summary {
-  width: 100%;
-  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
   min-height: 32px;
@@ -379,20 +397,6 @@
   border-top-color: var(--secondary);
   border-radius: 50%;
   animation: activity-spin 0.9s linear infinite;
-}
-
-.response-phase {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 30px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.response-phase time {
-  font-variant-numeric: tabular-nums;
-  font-size: 11px;
 }
 
 @keyframes activity-spin {

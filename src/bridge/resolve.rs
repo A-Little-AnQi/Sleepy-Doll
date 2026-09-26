@@ -4,7 +4,50 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::error::{Error, Result};
 use serde_json::{Value, json};
+
+/// 本地未命中后继续查当前全仓索引；查询失败不能被解释成资源不存在。
+pub fn resolve_target(
+    mut local: Value,
+    repository_search: impl FnOnce(&Value) -> Result<Value>,
+) -> Result<Value> {
+    local["lookupScope"] = json!("local");
+    if local["verdict"] != "notFound" {
+        return Ok(local);
+    }
+    let arguments = json!({"query":local["query"],"category":"all","limit":8});
+    let repository = repository_search(&arguments).and_then(|value| {
+        if value["total"].as_u64().is_none() || !value["items"].is_array() {
+            return Err(Error::Tool("中央仓库返回的检索证据不完整".into()));
+        }
+        Ok(value)
+    });
+    match repository {
+        Ok(repository) => {
+            let found = repository["total"].as_u64().unwrap_or(0) > 0;
+            local["lookupScope"] = json!("localAndCentralRepository");
+            local["verdict"] = json!(if found { "resourceFound" } else { "notFound" });
+            local["next"] = if found {
+                repository["next"].clone()
+            } else {
+                json!(
+                    "本机与当前全仓索引均未命中。核对目标名称；索引需要更新时只刷新一次再查询，不扫描程序集，不把查询失败当成不存在。"
+                )
+            };
+            local["repository"] = repository;
+        }
+        Err(Error::Cancelled) => return Err(Error::Cancelled),
+        Err(error) => {
+            local["verdict"] = json!("lookupFailed");
+            local["repositoryError"] = json!(error.to_string());
+            local["next"] = json!(
+                "仅本机未命中，中央仓库查询失败，目标是否存在尚未确定。处理 repositoryError 后重试，不声称仓库没有资源。"
+            );
+        }
+    }
+    Ok(local)
+}
 
 /// 判定采集或运行目标的入口：一次扫描配置组与 AutoPathing 目录名，不打开路线 JSON。
 pub fn resolve_local(root: &Path, query: &str) -> Value {
@@ -108,7 +151,9 @@ fn next_action(verdict: &str) -> &'static str {
         "repair" => "只补 missing 里的路径（更新/订阅），不要重写无关配置，补完后再 resolve",
         "create" => "用 candidates 的父节点建配置组，不要读取叶子 JSON",
         "ambiguous" => "只问真正不同的配置组，不要并列所有路线文件",
-        _ => "目标在本地不存在，再考虑更新仓库或向用户确认名称",
+        _ => {
+            "仅本机未安装，不代表仓库不存在。采集/地图追踪用 bgi.repo.search category=pathing（或 all）查询完整父节点；已有索引先查询，不先反复刷新。选择作者包后直接 describe/invoke bgi.subscribe_script_resources、bgi.prepare_pathing_group；游戏就绪再 bgi.run_script_group。不要扫描软件目录或桥程序集。"
+        }
     }
 }
 
@@ -191,7 +236,11 @@ fn parse_project(root: &Path, value: &Value) -> Option<Project> {
         .filter(|name| !name.is_empty())?
         .replace('\\', "/");
     let kind = value["type"].as_str().unwrap_or("Pathing").to_owned();
-    let relative = resource_path(&kind, &folder_name);
+    let mut relative = resource_path(&kind, &folder_name);
+    if kind.eq_ignore_ascii_case("Pathing") {
+        let file_name = value["name"].as_str().filter(|name| !name.is_empty())?;
+        relative = relative.join(file_name);
+    }
     let exists = root.join(&relative).exists();
     Some(Project {
         name: value["name"].as_str().unwrap_or(&folder_name).to_owned(),
@@ -286,4 +335,54 @@ fn normalize(value: &str) -> String {
 
 fn path_display(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_local_target_searches_all_categories_and_continues_with_evidence() {
+        for query in ["帮我跑下血斛", "运行下清心", "跑个AAA狗粮批发"] {
+            let resolved = resolve_target(json!({"query":query,"verdict":"notFound"}), |args| {
+                assert_eq!(args["query"], query);
+                assert_eq!(args["category"], "all");
+                Ok(json!({"total":1,"items":[{"path":"pathing/地方特产/稻妻/血斛"}],"next":"订阅并运行"}))
+            }).unwrap();
+            assert_eq!(resolved["verdict"], "resourceFound");
+            assert_eq!(resolved["lookupScope"], "localAndCentralRepository");
+            assert_eq!(
+                resolved["repository"]["items"][0]["path"],
+                "pathing/地方特产/稻妻/血斛"
+            );
+        }
+    }
+
+    #[test]
+    fn existing_local_target_does_not_refresh_or_repeat_repository_lookup() {
+        for verdict in ["run", "repair", "create", "ambiguous"] {
+            let resolved = resolve_target(json!({"query":"血斛","verdict":verdict}), |_| {
+                panic!("本地已找到资源，不应查仓库")
+            })
+            .unwrap();
+            assert_eq!(resolved["verdict"], verdict);
+        }
+    }
+
+    #[test]
+    fn not_found_requires_a_successful_repository_query() {
+        let local = json!({"query":"血斛","verdict":"notFound"});
+        let empty = resolve_target(local.clone(), |_| Ok(json!({"total":0,"items":[]}))).unwrap();
+        assert_eq!(empty["verdict"], "notFound");
+        assert_eq!(empty["lookupScope"], "localAndCentralRepository");
+        let failed = resolve_target(local.clone(), |_| Err(Error::Http("断线".into()))).unwrap();
+        assert_eq!(failed["verdict"], "lookupFailed");
+        assert_eq!(failed["lookupScope"], "local");
+        let invalid = resolve_target(local.clone(), |_| Ok(json!({}))).unwrap();
+        assert_eq!(invalid["verdict"], "lookupFailed");
+        assert!(matches!(
+            resolve_target(local, |_| Err(Error::Cancelled)),
+            Err(Error::Cancelled)
+        ));
+    }
 }

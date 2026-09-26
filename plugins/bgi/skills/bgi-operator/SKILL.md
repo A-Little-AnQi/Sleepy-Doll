@@ -15,13 +15,16 @@ alwaysLoad: true
 |---|---|---|
 | “我有哪些”、梳理、查某个已安装内容 | `User\` 中的真实文件 | `bgi.user.list/read` |
 | 查询或修改 BetterGI 全局设置 | 宿主当前 `AllConfig` | `bgi.api.search/describe/read/invoke` |
-| 运行任务、切换界面、调用宿主动作 | 当前接口目录与运行状态 | `bgi.api.*`，提交前才用 `bgi.state.get` |
+| 跑某个材料、脚本、路线或配置组 | 本机资源及当前中央仓库索引 | `bgi.user.resolve`，找到内容后再调用执行接口 |
+| 切换界面、调用明确的宿主动作 | 当前接口目录与运行状态 | `bgi.api.*`，提交前才用 `bgi.state.get` |
 | 插件声明的语义能力或资源 | 已安装插件目录 | `bgi.capability.*` / `resource.search` |
-| 理解某个 JS 脚本的参数 | 该脚本自己的清单和说明 | `manifest.json`、`README.md`、`settings.json` |
+| 理解 JS 脚本参数、机制或源码，含未订阅脚本 | 已安装版本或中央 Git 仓库 | `bgi.user.inspect_script/read` 或 `bgi.repo.search/read` |
 | 更新脚本仓库或已订阅脚本 | User 订阅清单 + 宿主仓库更新接口 | `bgi.user.list/read` + `bgi.update_subscribed_scripts` |
 | 脚本报错、任务中途失败 | 宿主按天写的运行日志 | `bgi.get_script_errors`，要过程时再 `bgi.read_host_log` |
 
 `bgi.api.search` 列的是“BetterGI 能做什么”；`bgi.user.list` 列的是“这个用户实际装了什么、配了什么”。两者不能互相替代。没有安装插件时，不调用 `bgi.capability.search` 作为兜底。
+
+脚本名加字段、JS 自定义配置、README 或源码问题先走脚本资料，不先读功能全景或搜宿主 settings。无法确定某名称是否为脚本时先 `bgi.repo.search` 核对名称；未订阅不影响仓库阅读。接口连续无命中后必须换证据源，不以中英文同义词维持同一检索循环。
 
 ## BetterGI 对象模型
 
@@ -48,10 +51,10 @@ alwaysLoad: true
 
 ## 理解和修改脚本任务
 
-1. 从配置组任务的 `folderName` 定位脚本目录，不按显示名称猜目录。
-2. 调用一次 `bgi.user.inspect_script` 取得 manifest、README、settings 参数定义、目录条目和账户配置；不要再对这些文件逐个 list/read。
+1. 问本机任务时从配置组任务的 `folderName` 定位；只问脚本含义时直接用 `bgi.repo.search` 搜索脚本标题，使用返回的精确 path，不要求先订阅。
+2. 已知本机脚本用一次 `bgi.user.inspect_script` 读取资料；未安装脚本用 `bgi.repo.read` 直接读中央 Git 对象中的 manifest、README 和 settings。仓库候选携带 `readingGuide` 时按其中的 `bgi-javascript` 技能追踪源码。不要把 User 目录未命中当成仓库没有该脚本。
 3. `jsScriptSettingsObject` 的键必须来自 `settings.json.name`；值满足对应类型、选项和默认值。
-4. 需要账户文件或脚本子资源时，按 README/manifest 给出的路径读取。不要为了“了解脚本”读取 `main.js`。
+4. 参数定义只说明用途；涉及动作先后、切回、默认值、生效条件或报错时按 `bgi-javascript` 阅读 main 指定的入口、字段全部引用和必要模块。只问输入类型或选项列表时定义足够。需要账户文件或子资源时按定义路径读取。
 5. 修改配置组时读取完整目标文件，只改目标字段，保留未知字段；写入时传该次读取返回的 `sha256`，防止覆盖期间出现的新改动。
 
 ## 创建用户资源
@@ -79,10 +82,13 @@ alwaysLoad: true
 
 ## 执行任务
 
-1. 运行现有配置组或采集材料时，先调用一次 `bgi.user.resolve`。不要先 `bgi.api.search`，也不要列 AutoPathing 或逐条读取路线 JSON。
+1. “跑个 X”“运行下 X”默认把 X 当作资源目标，先调用一次 `bgi.user.resolve`，使用用户原话或目标名称。它在本机未命中时自动查当前全仓索引。不要先 `bgi.api.search`，也不要列 AutoPathing 或逐条读取路线 JSON。用户明确指定本体动作或一条龙时才走对应原生动作。
 2. `verdict=run` 时直接读取 `bgi.run_script_group` 契约并传入精确 `name`。路径缺失时运行时会拒绝执行；不要在 `repair` 状态下调用它。
 3. `verdict=repair` 时只处理 `missing` 列出的路径：更新仓库或订阅后再次 `resolve`。
+3a. `resourceFound` 表示已有中央仓库证据。直接用 `repository.items`，不用重复查或刷新；采集选择一个完整作者包并核对角色前提。describe/invoke `bgi.subscribe_script_resources` 安装该目录，再 `bgi.prepare_pathing_group`，使用返回的 groupName 运行。JS 候选按定义读取参数、订阅和配置。不能逐条读、重写或重命名叶子路线 JSON。
+3b. `notFound` 表示本机与当前全仓索引均未命中，核对名称后，确需更新才刷新一次再 resolve。`lookupFailed` 是仓库查询失败，处理返回的错误，不能报告资源不存在。单独使用 `bgi.repo.search` 时分类无结果也不能代表全仓不存在。
 4. 只有准备提交执行时才调用一次 `bgi.state.get`，检查截图器、游戏句柄、任务锁和窗口状态。纯查询或文件编辑不需要状态快照。`ready` 以**进入游戏主界面**为准：截图器就绪但仍在登录或加载画面时调用会被拒绝，等 `bgi.get_status` 的 `ready=true` 再提交。`gameResolution.sixteenToNine=false` 时先把游戏或远程桌面会话调到 16:9（如 1920x1080），启动参数 `-screen-width` 对已初始化过的原神不生效。
+4b. 未就绪时直接 describe/invoke `bgi.start_game`，再 `bgi.get_status` / `bgi.wait_ready`；不要先搜索截图器 ViewModel 命令，更不能明知未就绪仍试跑。游戏已就绪直接 describe/invoke `bgi.run_script_group`，不用另找运行命令。
 4a. 目标是每日/清体力/周常一条龙时用 `bgi.run_one_dragon`（宿主原生任务链，`configName` 可选），不要为它建调度器配置组；它收尾可能自动退出游戏。用户要求退出原神或任务链收尾时用 `bgi.exit_game`（正常关闭，超时强结束），核验 `gameHandle` 回落后即完成。
 5. 其他动作若已知道精确 `methodId`，直接 `bgi.api.describe`；否则只在 `command` 组按一个动作词搜索一次。
 6. 契约必须同时满足：`callable=true`、参数可提供、接口确实作用于目标对象。其他低层命令仍依赖界面当前选择时，不得声称能按名称执行。
@@ -90,6 +96,8 @@ alwaysLoad: true
 8. 接口不可调用时直接说明唯一阻塞项。不要继续换中英文、查插件、搜生命周期接口或让用户重复提供已经查到的信息。
 
 ## 更新脚本仓库与订阅内容
+
+BGI 操作不使用 `workspace.*` 扫描桥缓存、DLL、EXE 或反射方法来发现能力。已知稳定入口直接 describe；目录返回不可调用就报告具体限制，不靠程序集文本、手工复制路线或别的接口绕过。
 
 1. `bgi.update_subscribed_scripts` 是固定的稳定接口，直接 `bgi.api.describe`，不先调用 `bgi.api.search`。用户只要求刷新中央脚本仓库时使用 `repositoryOnly`；不要用“打开脚本仓库”代替更新。
 2. 用户要求更新某个已安装脚本或路线时，读取 `User/Subscriptions` 中当前订阅文件，把目标解析为其中真实的订阅路径。名称对应不唯一时才询问。

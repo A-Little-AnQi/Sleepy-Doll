@@ -61,6 +61,7 @@ public static class CatalogTools
         OneDragonTools.Register(registry);
         GameResolutionTools.Register(registry);
         ScriptRepositoryTools.Register(registry);
+        PathingPreparationTools.Register(registry);
         registry.Register("bgi.list_setting_sections", "settings", "",
             (_, _) => Ui.InvokeAsync<object?>(() => new { sections = SettingsCatalog.BuildSections() }));
         registry.Register("bgi.search_settings", "settings", "", (arguments, _) => Ui.InvokeAsync<object?>(() =>

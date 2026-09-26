@@ -15,17 +15,26 @@ import { DisclosureChevron } from "../controls/DisclosureChevron";
 import type { MessageInfo, TaskInfo } from "../../ipc/types";
 import "./Transcript.css";
 import { useT } from "../../i18n";
+import { usePresentedText } from "./usePresentedText";
+import { prepareCjkStrong, remarkCjkStrong } from "./remarkCjkStrong";
 
 type Call = NonNullable<MessageInfo["toolCalls"]>[number];
 interface Activity extends Call {
   result?: string;
 }
 type Part =
-  | { kind: "text"; text: string }
+  | {
+      kind: "text";
+      text: string;
+      visibleText: string;
+      hasTools?: boolean;
+      revealing?: boolean;
+    }
   | { kind: "reasoning"; text: string }
-  | { kind: "stream"; text: string }
+  | { kind: "stream"; text: string; visibleText: string }
   | { kind: "activities"; activities: Activity[] };
 export interface Turn {
+  key: string;
   role: "user" | "assistant";
   parts: Part[];
   runId?: string;
@@ -67,14 +76,29 @@ function pushReasoning(turn: Turn, text: string) {
 }
 
 /** 把消息组装成对话轮次。 */
-export function buildTurns(messages: MessageInfo[], stream: string): Turn[] {
+export function buildTurns(
+  messages: MessageInfo[],
+  stream: string,
+  presentation?: Pick<
+    ReturnType<typeof usePresentedText>,
+    "messages" | "stream" | "revealingMessages"
+  >,
+  streamRunId?: string,
+): Turn[] {
   const results = new Map(
     messages
       .filter((message) => message.role === "tool")
       .map((message) => [message.toolCallId, message.content]),
   );
   const turns: Turn[] = [];
-  for (const message of messages) {
+  const counts = new Map<string, number>();
+  const keyFor = (role: string, owner: string) => {
+    const prefix = `${role}:${owner}`;
+    const ordinal = counts.get(prefix) ?? 0;
+    counts.set(prefix, ordinal + 1);
+    return `${prefix}:${ordinal}`;
+  };
+  for (const [messageIndex, message] of messages.entries()) {
     if (message.role !== "user" && message.role !== "assistant") continue;
     const calls = (message.toolCalls ?? []).filter(
       (call) => !["plan.update", "user.ask"].includes(call.name),
@@ -83,9 +107,15 @@ export function buildTurns(messages: MessageInfo[], stream: string): Turn[] {
     const reasoning = message.reasoning?.text ?? "";
     if (!message.content && !calls.length && !reasoning) continue;
     let turn = turns.at(-1);
-    if (!turn || turn.role !== message.role || message.role === "user") {
+    if (
+      !turn ||
+      turn.role !== message.role ||
+      message.role === "user" ||
+      (message.runId && turn.runId && turn.runId !== message.runId)
+    ) {
       const nextTurn: Turn = {
         role: message.role,
+        key: keyFor(message.role, message.runId ?? "history"),
         parts: [],
         ...(message.runId ? { runId: message.runId } : {}),
         ...(message.createdAt ? { createdAt: message.createdAt } : {}),
@@ -97,7 +127,14 @@ export function buildTurns(messages: MessageInfo[], stream: string): Turn[] {
     if (message.createdAt) turn.lastAt = message.createdAt;
     if (reasoning) pushReasoning(turn, reasoning);
     if (message.content)
-      turn.parts.push({ kind: "text", text: message.content });
+      turn.parts.push({
+        kind: "text",
+        text: message.content,
+        visibleText:
+          presentation?.messages[messageIndex]?.content ?? message.content,
+        hasTools: Boolean(message.toolCalls?.length),
+        revealing: presentation?.revealingMessages.has(messageIndex) ?? false,
+      });
     if (calls.length) {
       let part = turn.parts.at(-1);
       if (part?.kind !== "activities") {
@@ -114,11 +151,24 @@ export function buildTurns(messages: MessageInfo[], stream: string): Turn[] {
   }
   if (stream) {
     let turn = turns.at(-1);
-    if (turn?.role !== "assistant") {
-      turn = { role: "assistant", parts: [] };
+    const owner = streamRunId ?? turn?.runId ?? "history";
+    if (
+      turn?.role !== "assistant" ||
+      (streamRunId && turn.runId !== streamRunId)
+    ) {
+      turn = {
+        key: keyFor("assistant", owner),
+        role: "assistant",
+        parts: [],
+        ...(streamRunId ? { runId: streamRunId } : {}),
+      };
       turns.push(turn);
     }
-    turn.parts.push({ kind: "stream", text: stream });
+    turn.parts.push({
+      kind: "stream",
+      text: stream,
+      visibleText: presentation?.stream ?? stream,
+    });
   }
   return turns;
 }
@@ -283,26 +333,51 @@ function elapsedLabel(
       : t.transcript.turnElapsedM(minutes, seconds);
 }
 
-/** 轮次结束后把思考与工具调用收进一行；说明文字与回复正文留在时间线上。 */
+/** 总结开始后把过程说明与工具调用收进一行。 */
 function ProcessDisclosure({
   label,
   elapsed,
   children,
+  visible = true,
+  collapseKey,
 }: {
   label: string;
   elapsed?: string | undefined;
   children: ReactNode;
+  visible?: boolean;
+  collapseKey?: number | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [present, setPresent] = useState(false);
+  const [version, setVersion] = useState(collapseKey);
+  if (version !== collapseKey) {
+    setVersion(collapseKey);
+    setExpanded(false);
+    setPresent(false);
+  }
+  useEffect(() => {
+    if (expanded || !present) return;
+    const timer = window.setTimeout(() => setPresent(false), 220);
+    return () => window.clearTimeout(timer);
+  }, [expanded, present]);
   return (
-    <section className="process-disclosure" data-expanded={expanded}>
+    <section
+      className="process-disclosure"
+      hidden={!visible}
+      data-expanded={expanded && version === collapseKey}
+    >
       <button
         type="button"
         className="process-disclosure-summary"
         aria-expanded={expanded}
-        onClick={() => setExpanded((open) => !open)}
+        onClick={() => {
+          if (!expanded) setPresent(true);
+          setExpanded((open) => !open);
+        }}
       >
-        <span className="process-disclosure-label">{label}</span>
+        <span className="process-disclosure-label" role="status">
+          {label}
+        </span>
         {elapsed && <time>{elapsed}</time>}
         <DisclosureChevron expanded={expanded} className="process-caret" />
       </button>
@@ -311,33 +386,11 @@ function ProcessDisclosure({
         aria-hidden={!expanded}
         inert={!expanded}
       >
-        <div className="activity-disclosure-inner">{children}</div>
+        <div className="activity-disclosure-inner">
+          {present ? children : null}
+        </div>
       </div>
     </section>
-  );
-}
-
-/** 思考状态行：只报进度，思考原文不进界面。 */
-function ProcessGroup({
-  steps,
-  running,
-  stopping,
-}: {
-  steps: number;
-  running: boolean;
-  stopping: boolean;
-}) {
-  const t = useT();
-  return (
-    <div className="process-status" role="status">
-      {stopping
-        ? "正在停止"
-        : running
-          ? t.transcript.thinkingRunning
-          : steps > 0
-            ? t.transcript.thinkingSteps(steps)
-            : t.transcript.thinking}
-    </div>
   );
 }
 
@@ -391,9 +444,13 @@ const MarkdownText = memo(function MarkdownText({
   text: string;
   streaming?: boolean;
 }) {
+  const prepared = prepareCjkStrong(streaming ? stabilizeMarkdown(text) : text);
   return (
-    <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-      {streaming ? stabilizeMarkdown(text) : text}
+    <Markdown
+      remarkPlugins={[remarkGfm, [remarkCjkStrong, prepared.starts]]}
+      components={markdownComponents}
+    >
+      {prepared.text}
     </Markdown>
   );
 });
@@ -459,7 +516,26 @@ export const Transcript = memo(function Transcript({
   running?: boolean;
 }) {
   const t = useT();
-  const turns = buildTurns(messages, stream);
+  const presented = usePresentedText(messages, stream, currentTask?.id);
+  // 先用完整消息决定折叠结构，吐字只改变正文的可见内容。
+  const turns = buildTurns(messages, stream, presented, currentTask?.id);
+  // 首个 delta 到来前就占据同一助手轮次，等待状态不另建一个临时节点。
+  const latest = turns.at(-1);
+  if (
+    running &&
+    (latest?.role !== "assistant" ||
+      (currentTask && latest.runId !== currentTask.id))
+  ) {
+    const owner = currentTask?.id ?? latest?.runId ?? "history";
+    const prefix = `assistant:${owner}:`;
+    const ordinal = turns.filter((turn) => turn.key.startsWith(prefix)).length;
+    turns.push({
+      key: `${prefix}${ordinal}`,
+      role: "assistant",
+      parts: [],
+      ...(currentTask ? { runId: currentTask.id } : {}),
+    });
+  }
   // 每个运行只在它的最后一轮收尾处显示一次总用时。
   const isRunLast = turns.map(() => false);
   const seenRuns = new Set<string>();
@@ -469,213 +545,128 @@ export const Transcript = memo(function Transcript({
     seenRuns.add(runId);
     isRunLast[i] = true;
   }
-  const last = turns.at(-1);
   return (
     <>
       {turns.map((turn, index) => {
-        const copy = turnCopyText(turn);
-        const time = formatMessageTime(turn.createdAt);
-        const turnActive =
-          turn.role === "assistant" && index === turns.length - 1 && running;
-        // 说明文字常驻时间线；思考与工具默认收进「过程」一行，运行中的那几条留在行外。
-        type TextPart = Extract<Part, { kind: "text" | "stream" }>;
-        const terminalPart = turn.parts.at(-1);
-        const finalTextIndex =
-          !turnActive &&
-          (terminalPart?.kind === "text" || terminalPart?.kind === "stream")
+        const task =
+          currentTask?.id === turn.runId
+            ? currentTask
+            : tasks.find((item) => item.id === turn.runId);
+        const active =
+          turn.role === "assistant" &&
+          index === turns.length - 1 &&
+          running &&
+          (!currentTask || !turn.runId || currentTask.id === turn.runId);
+        const terminal = turn.parts.at(-1);
+        const finalIndex =
+          terminal?.kind === "text" && !terminal.hasTools
             ? turn.parts.length - 1
             : -1;
-        type Block =
-          | { kind: "reasoning"; text: string }
-          | { kind: "tool"; activity: Activity }
-          | { kind: "commentary"; parts: TextPart[] };
-        const blocks: Block[] = [];
-        for (let i = 0; i < turn.parts.length; i += 1) {
-          const part = turn.parts[i];
-          if (!part) continue;
-          if (i === finalTextIndex) continue;
-          const tail = blocks.at(-1);
-          if (part.kind === "reasoning") {
-            blocks.push({ kind: "reasoning", text: part.text });
-          } else if (part.kind === "activities") {
-            for (const activity of part.activities)
-              blocks.push({ kind: "tool", activity });
-          } else if (tail?.kind === "commentary") {
-            tail.parts.push(part);
-          } else {
-            blocks.push({ kind: "commentary", parts: [part] });
-          }
-        }
-        const hasProcess = blocks.length > 0;
-        const finalText =
-          finalTextIndex >= 0 ? turn.parts[finalTextIndex] : undefined;
-        const task =
-          tasks.find((task) => task.id === turn.runId) ??
-          (currentTask?.id === turn.runId ? currentTask : undefined);
-        type ProcessBlock = Exclude<Block, { kind: "commentary" }>;
-        const blockDone = (block: ProcessBlock) =>
-          block.kind !== "tool" || outcome(block.activity) !== "running";
-        // 折叠行只列这段实际调用的工具；思考原文不进界面。
-        const segmentLabel = (process: ProcessBlock[]) => {
-          const names: string[] = [];
-          for (const block of process) {
-            if (block.kind !== "tool") continue;
-            const name = toolLabels[block.activity.name] ?? block.activity.name;
-            if (!names.includes(name)) names.push(name);
-          }
-          const label = names.slice(0, 3).join(" · ");
-          return process.filter((block) => block.kind === "tool").length > 3
-            ? `${label} …`
-            : label;
-        };
-        // 说明文字常驻时间线，并把过程按它分段：两次说明之间的思考与工具
-        // 收成一行，运行中正在进行的那几条留在行外。
-        type Segment = { commentary?: Block; process: ProcessBlock[] };
-        const segments: Segment[] = [];
-        let current: Segment = { process: [] };
-        for (const block of blocks) {
-          if (block.kind === "commentary") {
-            segments.push(current);
-            current = { commentary: block, process: [] };
-          } else {
-            current.process.push(block);
-          }
-        }
-        segments.push(current);
-        const lastSegment = segments.at(-1);
-        const renderBlock = (block: ProcessBlock) =>
-          block.kind === "reasoning" ? (
-            <ProcessGroup
-              key="thinking"
-              steps={1}
-              running={turnActive}
-              stopping={turnActive && phase === "正在停止"}
-            />
-          ) : (
-            <ActivityGroup
-              key={block.activity.id}
-              activities={[block.activity]}
-              labels={toolLabels}
-              active={turnActive}
-            />
-          );
+        const answer = finalIndex >= 0 ? turn.parts[finalIndex] : undefined;
+        const process = turn.parts.filter(
+          (part, at) => at !== finalIndex && part.kind !== "reasoning",
+        );
+        const hasProcess = process.length > 0;
+        const copy =
+          turn.role === "assistant" && answer?.kind === "text"
+            ? answer.text
+            : turnCopyText(turn);
+        const time = formatMessageTime(turn.createdAt);
         return (
-          <article key={index} className={`message-turn ${turn.role}`}>
+          <article
+            key={turn.key}
+            className={`message-turn ${turn.role}`}
+            data-turn-key={turn.key}
+          >
             <div className="message-content">
-              {segments.map((segment, segmentIndex) => {
-                const isLast = segment === lastSegment;
-                // 运行中：最后一段里未完成的块（以及正在思考）保持平铺。
-                const live =
-                  turnActive &&
-                  isLast &&
-                  segment.process.some((block) => !blockDone(block));
-                const visibleBlocks = live
-                  ? segment.process.filter((block) => !blockDone(block))
-                  : [];
-                // 折叠行只收工具调用；思考不占界面。
-                const archivedBlocks = (live
-                  ? segment.process.filter((block) => blockDone(block))
-                  : segment.process
-                ).filter((block) => block.kind === "tool");
-                const elapsed =
-                  !turnActive &&
-                  isLast &&
-                  isRunLast[index] &&
-                  archivedBlocks.length > 0
-                    ? elapsedLabel(turn, task, t)
-                    : undefined;
-                return (
-                  <div key={segmentIndex} className="turn-segment">
-                    {segment.commentary?.kind === "commentary" && (
-                      <div
-                        className={`assistant-message${segment.commentary.parts.some((part) => part.kind === "stream") ? " is-streaming" : ""}`}
-                      >
-                        <MarkdownText
-                          text={segment.commentary.parts
-                            .map((part) => part.text)
-                            .join("\n\n")}
-                          streaming={segment.commentary.parts.some(
-                            (part) => part.kind === "stream",
-                          )}
-                        />
-                      </div>
-                    )}
-                    {visibleBlocks.map(renderBlock)}
-                    {archivedBlocks.length > 0 && (
-                      <ProcessDisclosure
-                        label={segmentLabel(archivedBlocks)}
-                        elapsed={elapsed}
-                      >
-                        {archivedBlocks.map((block) => (
+              {turn.role === "user" ? (
+                <div className="user-message">
+                  <MarkdownText text={copy} />
+                </div>
+              ) : (
+                <>
+                  <ProcessDisclosure
+                    visible={hasProcess || active}
+                    collapseKey={finalIndex >= 0 ? finalIndex : undefined}
+                    label={
+                      active && !answer && phase ? phase : t.transcript.process
+                    }
+                    elapsed={
+                      active && !answer
+                        ? `${seconds}s`
+                        : !active && isRunLast[index]
+                          ? elapsedLabel(turn, task, t)
+                          : undefined
+                    }
+                  >
+                    <div className="turn-process-content">
+                      {process.map((part, at) =>
+                        part.kind === "activities" ? (
                           <ActivityGroup
-                            key={block.activity.id}
-                            activities={[block.activity]}
+                            key={`tools:${at}`}
+                            activities={part.activities}
                             labels={toolLabels}
-                            active={false}
+                            active={active}
                           />
-                        ))}
-                      </ProcessDisclosure>
+                        ) : part.kind === "text" || part.kind === "stream" ? (
+                          <div
+                            key={`text:${at}`}
+                            className={`assistant-message${part.kind === "stream" || part.revealing ? " is-streaming" : ""}`}
+                          >
+                            <MarkdownText
+                              text={part.visibleText}
+                              streaming={
+                                part.kind === "stream" ||
+                                Boolean(part.revealing)
+                              }
+                            />
+                          </div>
+                        ) : null,
+                      )}
+                    </div>
+                  </ProcessDisclosure>
+                  <div
+                    data-answer
+                    data-final={Boolean(answer) && hasProcess}
+                    hidden={!answer}
+                    className={`assistant-message${answer?.kind === "text" && answer.revealing ? " is-streaming" : ""}`}
+                  >
+                    {answer?.kind === "text" && (
+                      <MarkdownText
+                        text={answer.visibleText}
+                        streaming={Boolean(answer.revealing)}
+                      />
                     )}
                   </div>
-                );
-              })}
-              {finalText?.kind === "text" ? (
-                <div
-                  className={
-                    turn.role === "user" ? "user-message" : "assistant-message"
-                  }
-                  data-final={turn.role === "assistant" && hasProcess}
-                >
-                  <MarkdownText text={finalText.text} />
-                </div>
-              ) : finalText?.kind === "stream" ? (
-                <div
-                  className={`assistant-message${running ? " is-streaming" : ""}`}
-                >
-                  <MarkdownText text={finalText.text} streaming />
-                </div>
-              ) : null}
-              {turn.role === "assistant" &&
-                index === turns.length - 1 &&
-                phase &&
-                !stream &&
-                !hasProcess && (
-                  <div className="response-phase" role="status">
-                    {phase}
-                    <time>{seconds}s</time>
-                  </div>
-                )}
+                </>
+              )}
             </div>
             {turn.role === "assistant" &&
-              !running &&
+              !active &&
               isRunLast[index] &&
               ["cancelled", "needsReview"].includes(task?.state ?? "") && (
-                <div className="turn-stopped-note">已停止</div>
+                <div className="turn-outcome-note">
+                  {task?.state === "cancelled"
+                    ? t.transcript.stopped
+                    : t.transcript.needsReview}
+                </div>
               )}
-            {/* 运行结束前不出时间和复制；结束后悬停整行都能唤出。 */}
-            {!running && (copy || time) ? (
-              <div
-                className={`message-actions${turn.role === "user" ? " is-user" : ""}`}
-              >
-                {time && (
-                  <time className="message-time" dateTime={turn.createdAt}>
-                    {time}
-                  </time>
-                )}
-                {copy && <CopyButton text={copy} />}
-              </div>
-            ) : null}
+            <div
+              className={`message-actions${turn.role === "user" ? " is-user" : ""}`}
+              data-hidden={
+                active || (answer?.kind === "text" && answer.revealing)
+              }
+            >
+              {time && (
+                <time className="message-time" dateTime={turn.createdAt}>
+                  {time}
+                </time>
+              )}
+              {copy && <CopyButton text={copy} />}
+            </div>
           </article>
         );
       })}
-      {phase && last?.role !== "assistant" && (
-        <article className="message-turn assistant">
-          <div className="response-phase" role="status">
-            {phase}
-            <time>{seconds}s</time>
-          </div>
-        </article>
-      )}
     </>
   );
 });
