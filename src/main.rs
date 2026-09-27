@@ -1,6 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod desktop_startup;
+#[cfg(target_os = "windows")]
+mod tray_popup;
+#[cfg(target_os = "windows")]
+mod tray_request;
 mod window_chrome;
 
 use std::{
@@ -21,7 +25,7 @@ use sleepy_doll::{app::AppController, logging, runtime::types::Event as AgentEve
 use tao::platform::windows::{IconExtWindows, WindowBuilderExtWindows};
 use tao::{
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize, Position, Size},
-    event::{Event, WindowEvent},
+    event::{Event, StartCause, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
     window::{Window, WindowBuilder},
 };
@@ -119,6 +123,10 @@ enum UserEvent {
     #[cfg(target_os = "windows")]
     OpenHelp,
     FrontendReady(bool),
+    #[cfg(target_os = "windows")]
+    ShowTrayMenu(f64, f64),
+    #[cfg(target_os = "windows")]
+    TrayAction(Value),
     #[cfg(target_os = "windows")]
     WindowTheme(bool),
     #[cfg(target_os = "windows")]
@@ -396,7 +404,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut pending_messages = Vec::new();
     #[cfg(target_os = "windows")]
     let mut bridge_busy = false;
-    event_loop.run(move |event, _, control_flow| {
+    #[cfg(target_os = "windows")]
+    let mut tray_popup: Option<tray_popup::TrayPopup> = None;
+    #[cfg(target_os = "windows")]
+    let mut tray_state = json!({"dark":startup_dark,"bridge":bridge_enabled.load(Ordering::Relaxed),"bridgeBusy":false,"active":run_active.load(Ordering::Relaxed)});
+    event_loop.run(move |event, event_target, control_flow| {
         let window = &surface.window;
         let webview = &surface.webview;
         if placement_deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
@@ -422,6 +434,105 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         match event {
             Event::LoopDestroyed => {
                 window.set_visible(false);
+                #[cfg(target_os = "windows")]
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.hide();
+                }
+                #[cfg(target_os = "windows")]
+                tray_popup::uninstall_outside_click_hook();
+            }
+            #[cfg(target_os = "windows")]
+            Event::NewEvents(StartCause::Init) => {
+                if tray.is_some() {
+                    match tray_popup::TrayPopup::new(
+                        event_target,
+                        proxy.clone(),
+                        &user_directory,
+                        tray_state.clone(),
+                    ) {
+                        Ok(popup) => tray_popup = Some(popup),
+                        Err(error) => log::warn!("托盘菜单预热失败：{error}"),
+                    }
+                    tray_popup::install_outside_click_hook(proxy.clone());
+                }
+            }
+            #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::ShowTrayMenu(x, y)) => {
+                tray_popup::install_outside_click_hook(proxy.clone());
+                if tray_popup.is_none() {
+                    match tray_popup::TrayPopup::new(
+                        event_target,
+                        proxy.clone(),
+                        &user_directory,
+                        tray_state.clone(),
+                    ) {
+                        Ok(popup) => tray_popup = Some(popup),
+                        Err(error) => log::warn!("托盘菜单不可用：{error}"),
+                    }
+                }
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.show(x, y, tray_state.clone());
+                } else if let Some(tray) = tray.as_ref() {
+                    use tray_icon::menu::ContextMenu;
+                    unsafe {
+                        tray.menu
+                            .show_context_menu_for_hwnd(window_chrome::hwnd_id(window), None);
+                    }
+                }
+            }
+            #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::TrayAction(payload)) => {
+                let action = payload["action"].as_str().unwrap_or("");
+                if let Some(popup) = tray_popup.as_mut() {
+                    match action {
+                        "ready" => popup.ready(payload["height"].as_f64().unwrap_or(420.0)),
+                        "shown" => popup.present(
+                            payload["generation"].as_u64().unwrap_or(0),
+                            payload["height"].as_f64().unwrap_or(420.0),
+                        ),
+                        "bridge" => {}
+                        _ => popup.hide(),
+                    }
+                }
+                let action = match action {
+                    "open" => Some(UserEvent::ShowWindow),
+                    "settings" => Some(UserEvent::OpenSettings),
+                    "help" => Some(UserEvent::OpenHelp),
+                    "folder" => Some(UserEvent::OpenUserDirectory),
+                    "bridge" => Some(UserEvent::ToggleBridge),
+                    "stop" => Some(UserEvent::PanicStop),
+                    "quit" => Some(UserEvent::Quit),
+                    _ => None,
+                };
+                if let Some(action) = action {
+                    let _ = proxy.send_event(action);
+                }
+            }
+            #[cfg(target_os = "windows")]
+            Event::WindowEvent {
+                window_id,
+                event: WindowEvent::Focused(false),
+                ..
+            } if tray_popup
+                .as_ref()
+                .is_some_and(|popup| popup.window.id() == window_id && popup.is_presented()) =>
+            {
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.hide();
+                }
+            }
+            #[cfg(target_os = "windows")]
+            Event::WindowEvent {
+                window_id,
+                event: WindowEvent::CloseRequested,
+                ..
+            } if tray_popup
+                .as_ref()
+                .is_some_and(|popup| popup.window.id() == window_id) =>
+            {
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.hide();
+                }
             }
             Event::UserEvent(UserEvent::FrontendReady(dark)) => {
                 if startup.is_ready() {
@@ -436,6 +547,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::WindowTheme(dark)) => {
+                tray_state["dark"] = json!(dark);
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.update(tray_state.clone());
+                }
                 window.set_background_color(Some(desktop_startup::background(dark)));
                 window.set_theme(Some(if dark {
                     tao::window::Theme::Dark
@@ -578,6 +693,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     return;
                 }
                 bridge_busy = true;
+                tray_state["bridgeBusy"] = json!(true);
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.update(tray_state.clone());
+                }
                 if let Some(tray) = tray.as_ref() {
                     tray.bridge.set_enabled(false);
                 }
@@ -627,11 +746,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     // 还是退出。丢弃 TrayIcon 时图标也从通知区移除。
                     (_, false) => {
                         tray = None;
+                        if let Some(popup) = tray_popup.as_mut() {
+                            popup.hide();
+                        }
                     }
                 }
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::BridgeState(enabled)) => {
+                tray_state["bridge"] = json!(enabled);
+                tray_state["bridgeBusy"] = json!(false);
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.update(tray_state.clone());
+                }
                 bridge_enabled.store(enabled, Ordering::Relaxed);
                 if let Some(tray) = tray.as_ref() {
                     tray.bridge.set_checked(enabled);
@@ -641,6 +768,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::BridgeFailed(message)) => {
+                tray_state["bridgeBusy"] = json!(false);
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.update(tray_state.clone());
+                    popup.hide();
+                }
                 let enabled = bridge_enabled.load(Ordering::Relaxed);
                 if let Some(tray) = tray.as_ref() {
                     tray.bridge.set_checked(enabled);
@@ -654,6 +786,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::RunActivity(active)) => {
+                tray_state["active"] = json!(active);
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.update(tray_state.clone());
+                }
                 run_active.store(active, Ordering::Relaxed);
                 if let Some(tray) = tray.as_ref() {
                     tray.set_active(active);
@@ -679,10 +815,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::Quit) => {
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.hide();
+                }
                 begin_shutdown(window, &controller, &proxy, &mut shutting_down);
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::ShutdownFinished) => {
+                if let Some(popup) = tray_popup.as_mut() {
+                    popup.hide();
+                }
                 window.set_visible(false);
                 *control_flow = ControlFlow::Exit;
             }
@@ -956,24 +1098,33 @@ fn create_tray(
 
     TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
         if let TrayIconEvent::Click {
-            button: MouseButton::Left,
+            button,
             button_state: MouseButtonState::Up,
+            position,
             ..
         } = event
         {
-            let _ = proxy.send_event(UserEvent::ShowWindow);
+            match button {
+                MouseButton::Left => {
+                    let _ = proxy.send_event(UserEvent::ShowWindow);
+                }
+                MouseButton::Right => {
+                    let _ = proxy.send_event(UserEvent::ShowTrayMenu(position.x, position.y));
+                }
+                _ => {}
+            }
         }
     }));
     let mut builder = TrayIconBuilder::new()
         .with_tooltip("Sleepy Doll · 关闭窗口后继续运行")
-        .with_menu_on_left_click(false)
-        .with_menu(Box::new(menu));
+        .with_menu_on_left_click(false);
     // 图标编在 exe 的资源里，界面、窗口和托盘共用同一份。
     match Icon::from_resource(APP_ICON, Some((32, 32))) {
         Ok(icon) => builder = builder.with_icon(icon),
         Err(error) => log::warn!("托盘图标不可用: {error}"),
     }
     let handles = TrayHandles {
+        menu,
         icon: builder.build()?,
         bridge,
         status: status_item,
@@ -1059,6 +1210,7 @@ fn menu_glyph(glyph: MenuGlyph, color: [u8; 4]) -> Option<tray_icon::menu::Icon>
 /// 事件循环持有的托盘句柄。
 #[cfg(target_os = "windows")]
 struct TrayHandles {
+    menu: tray_icon::menu::Menu,
     icon: tray_icon::TrayIcon,
     bridge: tray_icon::menu::CheckMenuItem,
     /// 只读状态行：有运行进行中时提示急停热键。

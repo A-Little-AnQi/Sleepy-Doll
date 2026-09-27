@@ -95,3 +95,7 @@ required-features = ["setup"]
 name = "desktop-startup"
 path = "bgi-bridge/dev/desktop-startup.rs"
 required-features = ["desktop"]
+
+[[test]]
+name = "tray-request"
+path = "bgi-bridge/dev/tray-request.rs"

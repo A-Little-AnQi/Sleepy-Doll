@@ -115,10 +115,11 @@ export default defineConfig({
     outDir: "../target/ui",
     emptyOutDir: true,
     rollupOptions: {
-      // 主窗口和安装程序分别加载各自入口；托盘菜单由原生控件绘制。
+      // 主窗口、安装程序和主题一致的托盘菜单使用各自入口。
       input: {
         index: fileURLToPath(new URL("./web/index.html", import.meta.url)),
         setup: fileURLToPath(new URL("./web/setup.html", import.meta.url)),
+        tray: fileURLToPath(new URL("./web/tray.html", import.meta.url)),
       },
     },
   },

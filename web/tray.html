@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sleepy Doll · 托盘</title>
+    <script>
+      // 首帧前定主题：wry 的初始化脚本先于页面脚本执行，__TRAY_STATE__ 已就位。
+      // 不先定主题的话，:root 浅色默认把 HTML 背景刷成白色，深色用户看到白闪。
+      document.documentElement.dataset.theme =
+        ((window.__TRAY_STATE__ ?? {}).dark ??
+        matchMedia("(prefers-color-scheme: dark)").matches)
+          ? "dark"
+          : "light";
+    </script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #fff;
+      }
+      html[data-theme="dark"],
+      html[data-theme="dark"] body {
+        background: #1b1b1b;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/tray/main.tsx"></script>
+  </body>
+</html>
