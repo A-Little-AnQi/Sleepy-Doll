@@ -1,11 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../ipc/api";
-import {
-  isRunning,
-  needsConfirmation,
-  readError,
-  taskLabels,
-} from "../../session";
+import { isRunning, readError, taskLabels } from "../../session";
 import { Toast } from "../overlay/Toast";
 import { ConfirmDialog } from "../overlay/ConfirmDialog";
 import type {
@@ -174,10 +169,6 @@ export function DetailsPanel({
       void act(task.id, () => api.pinWorkflow(task.id, pinned)),
     copy: (task) => void act(task.id, () => api.copyWorkflow(task.id)),
     remove: (task) => {
-      if (!needsConfirmation(bootstrap.permission.mode)) {
-        void act(task.id, () => api.deleteWorkflow(task.id));
-        return;
-      }
       setPendingRemove(task);
     },
   };

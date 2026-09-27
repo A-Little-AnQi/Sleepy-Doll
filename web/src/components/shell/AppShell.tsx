@@ -14,7 +14,6 @@ import { api, framelessWindow } from "../../ipc/api";
 import {
   isRunning,
   isTaskRunActive,
-  needsConfirmation,
   readError,
   taskLabels,
 } from "../../session";
@@ -682,7 +681,6 @@ export function AppShell({
               )}
               onOpen={() => openExisting(entry.id)}
               onAct={conversationAct}
-              permissionMode={bootstrap.permission.mode}
               draggingId={ghost?.id}
               onDragArm={armDrag}
             />
@@ -1085,7 +1083,6 @@ function GroupRow({
                 )}
                 onOpen={() => onConversation(entry.id)}
                 onAct={onAct}
-                permissionMode={bootstrap.permission.mode}
                 nested
                 groupId={group.id}
                 draggingId={draggingId}
@@ -1115,7 +1112,6 @@ function ConversationRow({
   entry,
   current,
   running,
-  permissionMode,
   onOpen,
   onAct,
   nested = false,
@@ -1126,7 +1122,6 @@ function ConversationRow({
   entry: ConversationInfo;
   current: boolean;
   running?: { state: string } | undefined;
-  permissionMode: string;
   onOpen(): void;
   onAct(action: () => Promise<unknown>): void;
   nested?: boolean;
@@ -1137,6 +1132,7 @@ function ConversationRow({
   const t = useT();
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(entry.title);
+  const [previewingDelete, setPreviewingDelete] = useState(false);
   const [asking, setAsking] = useState<{
     title: string;
     tasks: number;
@@ -1207,22 +1203,22 @@ function ConversationRow({
             className="icon-button"
             aria-label={t.app.deleteConversation}
             title={t.app.deleteConversation}
+            disabled={previewingDelete}
             onClick={() => {
-              void (async () => {
-                const first = await api.deleteConversation(entry.id, false);
-                if (!first.requiresConfirmation) return;
-                const preview = {
-                  title: first.affects?.title ?? entry.title,
-                  tasks: first.affects?.taskCount ?? 0,
-                  keeps: first.keeps ?? "",
-                };
-                if (!needsConfirmation(permissionMode)) {
-                  await api.deleteConversation(entry.id, true);
-                  await onAct(async () => {});
-                  return;
+              setPreviewingDelete(true);
+              void onAct(async () => {
+                try {
+                  const first = await api.deleteConversation(entry.id, false);
+                  if (!first.requiresConfirmation) return;
+                  setAsking({
+                    title: first.affects?.title ?? entry.title,
+                    tasks: first.affects?.taskCount ?? 0,
+                    keeps: first.keeps ?? "",
+                  });
+                } finally {
+                  setPreviewingDelete(false);
                 }
-                setAsking(preview);
-              })().catch(() => undefined);
+              });
             }}
           >
             <TrashIcon className="button-icon" />

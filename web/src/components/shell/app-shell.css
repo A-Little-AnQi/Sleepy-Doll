@@ -668,6 +668,17 @@
   min-width: 0;
   --row-bg: transparent;
 }
+.app-conversations li[data-sd-slot="conversation"] {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius);
+  background: var(--row-bg);
+}
+.app-conversations li[data-sd-slot="conversation"] > button {
+  flex: 1;
+  width: auto;
+  background: transparent;
+}
 .app-conversations li:hover {
   --row-bg: var(--hover);
 }
@@ -681,25 +692,18 @@
 .app-conversations li.app-group.is-current:hover {
   --row-bg: transparent;
 }
-/* 操作按钮绝对定位，不占布局宽度。 */
+/* 留出操作区的宽度，隐藏时也不改变标题的截断位置。 */
 .app-conversation-actions {
-  position: absolute;
-  inset-inline-end: 2px;
-  top: 50%;
-  translate: 0 -50%;
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 1px;
-  padding-inline-start: 14px;
-  border-radius: 0 var(--radius) var(--radius) 0;
-  background: linear-gradient(90deg, transparent, var(--row-bg) 14px);
+  margin-inline-end: 4px;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translateX(6px);
   transition:
     opacity var(--motion-fast) var(--ease-standard),
-    transform var(--motion-fast) var(--ease-enter),
     visibility var(--motion-fast) var(--ease-standard);
 }
 .app-conversations li:hover > .app-conversation-actions,
@@ -708,7 +712,6 @@
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transform: none;
 }
 .app-conversation-actions .icon-button {
   width: 24px;

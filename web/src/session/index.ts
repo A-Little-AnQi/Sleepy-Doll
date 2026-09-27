@@ -8,11 +8,6 @@ export function readError(reason: unknown): string {
   return String(reason);
 }
 
-/** 删除这类动作要不要先问一句。 */
-export function needsConfirmation(mode?: string): boolean {
-  return mode !== "fullAccess";
-}
-
 /** 运行状态文案，与运行时 `RunState::label` 一一对应。 */
 export const taskLabels: Record<string, string> = {
   queued: "排队中",

@@ -2,12 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../../ipc/api";
 import { HistoryIcon, SearchIcon } from "../../components/icons";
 import { TaskCard, type TaskActions } from "../../components/tasks/TaskCard";
-import {
-  isRunning,
-  needsConfirmation,
-  readError,
-  taskLabels,
-} from "../../session";
+import { isRunning, readError, taskLabels } from "../../session";
 import { Toast } from "../../components/overlay/Toast";
 import { ConfirmDialog } from "../../components/overlay/ConfirmDialog";
 import type { Bootstrap, TaskInfo, TaskSummary } from "../../ipc/types";
@@ -112,10 +107,6 @@ export function TasksPage({
       void act(task.id, () => api.archiveWorkflow(task.id, archived)),
     copy: (task) => void act(task.id, () => api.copyWorkflow(task.id)),
     remove: (task) => {
-      if (!needsConfirmation(bootstrap.permission.mode)) {
-        void act(task.id, () => api.deleteWorkflow(task.id));
-        return;
-      }
       setPendingRemove(task);
     },
     askAi: (task) => {
