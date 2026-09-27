@@ -21,8 +21,8 @@ public static class ScriptGroupTools
             ["用户要求运行一个已从 User/ScriptGroup 确认存在的配置组时。"],
             ["截图器就绪且已进入游戏主界面。", "窗口分辨率为 16:9。", "没有其他独立任务持锁。", "groupName 来自 User/ScriptGroup 的真实 name。"],
             ["启动配置组中的游戏自动化、脚本、路线或 Shell 任务；具体影响由组内已启用任务决定。"],
-            "返回 resolved=true 和 executed=true 表示目标组已解析且执行方法已返回；Job 终态即执行结束。",
-            "Job 到终态后读一次 bgi.read_host_log（过滤「执行结束」或 ERR）即可收尾：无错误即报告完成，有错误列出到场的问题；不要反复轮询或多方取证。",
+            "resolved=true 和 executed=true 仅表示目标组已解析且宿主执行方法已返回，不能据此保证每项业务成功；Job 等待由运行时处理。",
+            "普通运行请求用返回证据总结本次已提交或执行方法已返回，并结束本轮。不继续 job.get、查任务状态、日志或截图，不重跑。只有用户明确要求等待结果、后续步骤、查看进度或排错时才继续。",
             "已经发送的游戏输入和脚本副作用不能自动撤销；需要停止时使用对应停止操作并核验终态。",
             [JsonSerializer.SerializeToElement(new { groupName = "用户目录中读取到的精确配置组名称" })],
             "bridge-stable-operation");
