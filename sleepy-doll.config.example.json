@@ -19,7 +19,7 @@
     "instanceId": "",
     "timeoutMs": 30000,
     "hostInstallPath": null,
-    "launchSilently": true
+    "launchSilently": false
   },
   "plugins": {
     "directories": ["../plugins", "./plugins"],

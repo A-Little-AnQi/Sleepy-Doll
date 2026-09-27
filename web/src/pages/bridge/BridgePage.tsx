@@ -25,14 +25,14 @@ export function BridgePage({
   const [showRecovery, setShowRecovery] = useState(false);
   const bridge = bootstrap.bridge;
   const [launchSilently, setLaunchSilently] = useState(
-    bridge.launchSilently ?? true,
+    bridge.launchSilently ?? false,
   );
   const [savingLaunch, setSavingLaunch] = useState(false);
   useEffect(() => {
     void reload();
   }, [reload]);
   useEffect(() => {
-    setLaunchSilently(bridge.launchSilently ?? true);
+    setLaunchSilently(bridge.launchSilently ?? false);
   }, [bridge.launchSilently]);
   const toggle = async (enabled: boolean) => {
     setBusy(true);

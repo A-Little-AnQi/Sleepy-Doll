@@ -185,8 +185,8 @@ pub struct BridgeConfig {
     /// 上次连接成功时宿主的安装目录，连接前用它自动启动 BetterGI。
     #[serde(default)]
     pub host_install_path: Option<PathBuf>,
-    /// 自动启动宿主时不显示主窗口，也不抢占当前前台。
-    #[serde(default = "default_true")]
+    /// 是否隐藏自动启动的宿主窗口；默认显示窗口。
+    #[serde(default)]
     pub launch_silently: bool,
 }
 
