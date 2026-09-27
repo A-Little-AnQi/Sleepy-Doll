@@ -448,7 +448,12 @@ fn collect_tool_names(nodes: &[TaskNode], names: &mut Vec<String>) {
             }
             TaskNode::ForEach(node) => collect_tool_names(&node.nodes, names),
             TaskNode::Repeat(node) => collect_tool_names(&node.nodes, names),
-            TaskNode::Wait(_) | TaskNode::Result(_) => {}
+            TaskNode::Wait(wait) => {
+                if let Some(name) = wait.probe.as_ref().and_then(|probe| probe.tool.as_ref()) {
+                    names.push(name.clone());
+                }
+            }
+            TaskNode::Result(_) => {}
         }
     }
 }

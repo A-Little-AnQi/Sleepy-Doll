@@ -5,6 +5,7 @@ pub mod kernel;
 pub mod operations;
 pub mod permissions;
 pub mod task;
+pub mod task_schema;
 pub mod task_store;
 pub mod verifier;
 pub mod workflow;

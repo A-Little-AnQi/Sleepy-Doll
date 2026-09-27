@@ -265,6 +265,10 @@ impl Scope {
     pub fn output(&self, node: &str) -> Option<&Value> {
         self.outputs.get(node)
     }
+    /// 循环只恢复 item/iteration；本次执行的节点结果仍是后续步骤的数据。
+    pub fn retain_outputs_from(&mut self, nested: &Self) {
+        self.outputs.extend(nested.outputs.clone());
+    }
 }
 
 impl ValueRef {
@@ -853,13 +857,13 @@ fn walk(nodes: &[TaskNode], state: &mut Walk<'_>) {
                         message: "重复次数必须为正且不超过上限".into(),
                     });
                 }
-                if let Some(until) = &repeat.until {
-                    check_condition(until, state, &id);
-                }
                 *state.expansions = state.expansions.saturating_add(repeat.max_iterations);
                 let outer = state.iteration_scoped;
                 state.iteration_scoped = true;
                 walk(&repeat.nodes, state);
+                if let Some(until) = &repeat.until {
+                    check_condition(until, state, &id);
+                }
                 state.iteration_scoped = outer;
                 state.available.insert(id);
             }
@@ -890,20 +894,15 @@ fn walk(nodes: &[TaskNode], state: &mut Walk<'_>) {
                         message: "条件等待必须有绝对期限".into(),
                     });
                 }
-                if let Some(until) = &wait.until {
-                    check_condition(until, state, &id);
-                }
                 if let Some(probe) = &wait.probe {
-                    let probe_id = format!("{}·检查", probe.id);
-                    let mut probe = probe.clone();
-                    probe.id = probe_id.clone();
+                    let probe_id = probe.id.clone();
                     if !state.seen.insert(probe_id.clone()) {
                         state.validation.issues.push(TaskIssue {
                             node_id: id.clone(),
                             message: "检查步骤的 ID 与已有节点重复".into(),
                         });
                     }
-                    walk_tool(&probe, state);
+                    walk_tool(probe, state);
                     // 检查步骤必须是只读的。
                     if let Some(name) = probe.tool.as_deref()
                         && let Some(contract) = state.catalog.get(name)
@@ -915,6 +914,9 @@ fn walk(nodes: &[TaskNode], state: &mut Walk<'_>) {
                         });
                     }
                     state.available.insert(probe_id);
+                }
+                if let Some(until) = &wait.until {
+                    check_condition(until, state, &id);
                 }
                 state.available.insert(id);
             }
@@ -961,7 +963,13 @@ fn walk_tool(tool: &ToolNode, state: &mut Walk<'_>) {
         *state.model_usage = ModelUsage::Unknown;
         return;
     };
-    if !crate::extension::validate(&tool.arguments, &contract.input_schema, "$").is_empty() {
+    let schema = symbolic_argument_schema(
+        &contract.input_schema,
+        &tool.arguments,
+        &contract.input_schema,
+        0,
+    );
+    if !crate::extension::validate(&tool.arguments, &schema, "$").is_empty() {
         state.validation.issues.push(TaskIssue {
             node_id: id.clone(),
             message: "参数不符合工具契约".into(),
@@ -1051,10 +1059,14 @@ fn check_ref(reference: &ValueRef, state: &mut Walk<'_>, id: &str) {
 fn check_refs_in_value(value: &Value, state: &mut Walk<'_>, id: &str) {
     match value {
         Value::Object(map) => {
-            if let Some(reference) = map.get("$ref")
-                && let Ok(parsed) = serde_json::from_value::<ValueRef>(reference.clone())
-            {
-                check_ref(&parsed, state, id);
+            if let Some(reference) = map.get("$ref") {
+                match serde_json::from_value::<ValueRef>(reference.clone()) {
+                    Ok(parsed) if map.len() == 1 => check_ref(&parsed, state, id),
+                    _ => state.validation.issues.push(TaskIssue {
+                        node_id: id.to_owned(),
+                        message: "参数引用必须是唯一的 $ref 字段，并使用合法的取值引用".into(),
+                    }),
+                }
                 return;
             }
             for nested in map.values() {
@@ -1171,4 +1183,58 @@ fn describe_ref(reference: &ValueRef) -> String {
         ValueRef::Item { .. } => "循环项".into(),
         ValueRef::Iteration => "迭代序号".into(),
     }
+}
+
+/// 动态参数的值在运行时才能取得；只放宽有效引用所在的值，其余结构继续校验。
+/// 调用工具前仍由运行时按真实参数执行完整契约校验。
+fn symbolic_argument_schema(schema: &Value, value: &Value, root: &Value, depth: usize) -> Value {
+    if depth > 64 {
+        return schema.clone();
+    }
+    if value.as_object().is_some_and(|map| {
+        map.len() == 1
+            && map.get("$ref").is_some_and(|reference| {
+                serde_json::from_value::<ValueRef>(reference.clone()).is_ok()
+            })
+    }) {
+        return Value::Bool(true);
+    }
+    let mut selected = schema.clone();
+    if let Some(reference) = schema["$ref"]
+        .as_str()
+        .and_then(|reference| reference.strip_prefix('#'))
+        && let Some(target) = root.pointer(reference)
+    {
+        selected = symbolic_argument_schema(target, value, root, depth + 1);
+    }
+    if !selected.is_object() {
+        return selected;
+    }
+    for keyword in ["allOf", "anyOf", "oneOf"] {
+        if let Some(branches) = selected.get_mut(keyword).and_then(Value::as_array_mut) {
+            for branch in branches {
+                *branch = symbolic_argument_schema(branch, value, root, depth + 1);
+            }
+        }
+    }
+    if let Some(fields) = value.as_object() {
+        for (name, argument) in fields {
+            if let Some(property) = selected["properties"].get(name).cloned() {
+                selected["properties"][name] =
+                    symbolic_argument_schema(&property, argument, root, depth + 1);
+            }
+        }
+    }
+    if let Some(items) = value.as_array()
+        && (selected["items"].is_object() || selected["items"].is_boolean())
+    {
+        let item_schema = selected["items"].clone();
+        selected["prefixItems"] = Value::Array(
+            items
+                .iter()
+                .map(|item| symbolic_argument_schema(&item_schema, item, root, depth + 1))
+                .collect(),
+        );
+    }
+    selected
 }

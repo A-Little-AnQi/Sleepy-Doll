@@ -142,8 +142,13 @@ impl<'a> TaskExecutor<'a> {
         let definitions = self.supervisor.tool_definitions();
         let mut missing: Vec<String> = Vec::new();
         for node in flatten(&self.revision.nodes) {
-            let TaskNode::Tool(tool) = node else {
-                continue;
+            let tool = match node {
+                TaskNode::Tool(tool) => tool,
+                TaskNode::Wait(wait) => match &wait.probe {
+                    Some(probe) => probe,
+                    None => continue,
+                },
+                _ => continue,
             };
             let Some(name) = tool.tool.as_deref() else {
                 return Err(Error::Conflict(format!(
@@ -415,7 +420,8 @@ impl<'a> TaskExecutor<'a> {
             let mut stopped = None;
             let result = Box::pin(self.walk(&node.nodes, &mut stopped)).await;
             // 循环变量是局部作用域，退出体后必须还原。
-            self.scope = previous;
+            let nested = std::mem::replace(&mut self.scope, previous);
+            self.scope.retain_outputs_from(&nested);
             if let Err(error) = result {
                 self.loop_key = outer;
                 return Err(error);
@@ -449,7 +455,12 @@ impl<'a> TaskExecutor<'a> {
             let scoped = self.scope.with_item(Value::Null, iteration);
             let previous = std::mem::replace(&mut self.scope, scoped);
             let result = Box::pin(self.walk(&node.nodes, &mut stopped)).await;
-            self.scope = previous;
+            let reached = node
+                .until
+                .as_ref()
+                .is_some_and(|until| until.evaluate(&self.scope) == Truth::True);
+            let nested = std::mem::replace(&mut self.scope, previous);
+            self.scope.retain_outputs_from(&nested);
             if let Err(error) = result {
                 self.loop_key = outer;
                 return Err(error);
@@ -457,9 +468,7 @@ impl<'a> TaskExecutor<'a> {
             if stopped.is_some() {
                 break;
             }
-            if let Some(until) = &node.until
-                && until.evaluate(&self.scope) == Truth::True
-            {
+            if reached {
                 break;
             }
         }

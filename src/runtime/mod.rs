@@ -1844,9 +1844,9 @@ impl Supervisor {
             (
                 "task.save",
                 "保存快捷任务",
-                "把用户想反复做的一件事保存成快捷任务。只做静态校验和保存，绝不执行、也绝不产生任何外部写入；用户说「不要现在运行」时照此办理。\
+                "把用户想反复做的一件事保存成通用快捷任务，不绑定 BGI。先按需 task.schema 阅读真实节点格式；所有节点用 kind，wait.probe 不带 kind。tool 必须是已登记工具名，插件内部 methodId 放在对应工具 arguments 中。只做静态校验和保存，绝不执行、也绝不产生任何外部写入；用户说「不要现在运行」时照此办理。\
                  步骤类型：tool（固定工具与参数）、sequence（顺序子步骤，nodes）、condition（condition 三值判断，另有 then/otherwise/unknown 三个分支，unknown 必填）、\
-                 foreach（items 取值引用、itemKey、nodes、maxItems）、repeat（count 或 until、nodes、maxIterations）、wait（seconds 或 until+timeoutSeconds，可选只读 probe）、\
+                 forEach（items 取值引用、itemKey、nodes、maxItems）、repeat（count 或 until、nodes、maxIterations）、wait（seconds 或 until+timeoutSeconds，可选只读 probe）、\
                  result（受限模板 template，只允许 {{ nodes.<步骤ID>.字段 }}、{{ item }}、{{ iteration }}）。\
                  取值引用写成 {\"kind\":\"nodeOutput\",\"node\":\"<步骤ID>\",\"path\":[\"字段\"]} 或用 {\"kind\":\"literal\",\"value\":…} 写常量。\
                  每个 tool 步骤必须带 id、title、tool、arguments；参数里引用别的步骤输出时写成 {\"$ref\":<取值引用>}。\
@@ -1867,11 +1867,25 @@ impl Supervisor {
                     ..ToolExecution::default()
                 },
             ),
+            (
+                "task.schema",
+                "读取快捷任务定义",
+                "按需读取通用快捷任务的准确节点协议。kind 指定 tool、sequence、condition、forEach、repeat、wait 或 result；省略时返回完整保存协议。只读，不查询或运行 BGI 等领域目标。",
+                json!({"kind":{"type":"string","enum":["tool","sequence","condition","forEach","repeat","wait","result"]}}),
+                json!([]),
+                ToolExecution::read_only(),
+            ),
         ] {
             definitions.push(ToolDefinition{name:name.into(),label:label.into(),description:description.into(),input_schema:json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}),output_schema:None,source:"core:runtime".into(),provider_version:Some(env!("CARGO_PKG_VERSION").into()),execution});
         }
         // 工具注册表来自多个插件与 HashMap，发现顺序不可作为请求字节顺序。
         // 按来源和名称固定排列，避免仅因进程重启或插件扫描顺序变化打断缓存。
+        if let Some(definition) = definitions
+            .iter_mut()
+            .find(|definition| definition.name == "task.save")
+        {
+            definition.input_schema = operation::task_schema::save_schema();
+        }
         definitions.sort_by(|left, right| {
             left.source
                 .cmp(&right.source)
@@ -2199,6 +2213,7 @@ impl Supervisor {
                 self.operations.store.get(a["id"].as_str().unwrap_or(""))?
             )),
             "task.save" => self.save_task(run, call, a),
+            "task.schema" => Ok(operation::task_schema::describe(a["kind"].as_str())),
             "skills.reference" => {
                 let name = a["name"].as_str().unwrap_or("");
                 if current.agent.disabled_skills.iter().any(|n| n == name) {
