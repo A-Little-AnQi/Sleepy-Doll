@@ -376,6 +376,7 @@ export const api = {
     clientKey: string = crypto.randomUUID(),
     modelId?: string,
     shortcutId?: string,
+    referenceConversationId?: string,
   ) =>
     invoke<TaskInfo>("shortcut.configure", {
       prompt,
@@ -383,7 +384,10 @@ export const api = {
       ...(conversationId ? { conversationId } : {}),
       ...(modelId ? { modelId } : {}),
       ...(shortcutId ? { shortcutId } : {}),
+      ...(referenceConversationId ? { referenceConversationId } : {}),
     }),
+  acceptShortcut: (runId: string, name: string, description: string) =>
+    invoke<{ taskId: string }>("shortcut.accept", { runId, name, description }),
   renameWorkflow: (id: string, name: string) =>
     invoke("workflow.rename", { id, name }),
   pinWorkflow: (id: string, pinned: boolean) =>

@@ -159,6 +159,13 @@ export interface TaskSummary {
   issue?: string | null;
 }
 
+export interface ShortcutProposal {
+  id?: string | null;
+  name: string;
+  description: string;
+  binding: ShortcutBinding;
+}
+
 export interface ShortcutBinding {
   action: { tool: string; arguments: Record<string, unknown> };
   prepare?: Array<{ tool: string; arguments: Record<string, unknown> }>;

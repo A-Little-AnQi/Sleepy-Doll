@@ -268,6 +268,7 @@ export default function App() {
         ) : visiblePage === "tasks" ? (
           <TasksPage
             bootstrap={bootstrap}
+            referenceConversationId={conversation}
             reload={reload}
             onOpenConversation={openConversation}
             onOpenTask={(task: TaskSummary) => {

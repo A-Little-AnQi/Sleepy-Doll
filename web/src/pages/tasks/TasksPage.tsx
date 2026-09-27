@@ -16,12 +16,14 @@ export function TasksPage({
   reload,
   onOpenTask,
   onConnectTools,
+  referenceConversationId,
 }: {
   bootstrap: Bootstrap;
   reload(): Promise<void>;
   onOpenConversation(id: string): void;
   onOpenTask?: (task: TaskSummary) => void;
   onConnectTools?: () => void;
+  referenceConversationId?: string | undefined;
 }) {
   const [tab, setTab] = useState<"tasks" | "runs">("tasks");
   const [query, setQuery] = useState("");
@@ -190,7 +192,7 @@ export function TasksPage({
                   ? "换个名称或清除筛选。"
                   : archived
                     ? "暂时不用的入口可以归档，随时恢复。"
-                    : "在对话中告诉 AI：把刚才配置好的某一项任务加入快捷任务。也可以在这里让 AI 配置。"}
+                    : "在原对话中指定一个已有项加入快捷任务。也可以在这里让 AI 识别并封装已有项。"}
               </p>
               {needle ? (
                 <button
@@ -208,7 +210,7 @@ export function TasksPage({
                     className="secondary-action"
                     onClick={() => configure()}
                   >
-                    让 AI 配置任务
+                    封装已有项
                   </button>
                 )
               )}
@@ -227,7 +229,7 @@ export function TasksPage({
                     className="subtle-action"
                     onClick={() => configure(task)}
                   >
-                    让 AI 调整
+                    封装其中一项
                   </button>
                   <button
                     className="subtle-action"
@@ -299,6 +301,7 @@ export function TasksPage({
         bootstrap={bootstrap}
         open={configuring}
         target={target}
+        referenceConversationId={referenceConversationId}
         onClose={() => setConfiguring(false)}
         reload={reload}
       />

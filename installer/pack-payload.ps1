@@ -22,11 +22,16 @@
 
 .PARAMETER Output
     Folder for payload.bin and payload.json. Defaults to ..\target\setup.
+
+.PARAMETER Executable
+    Optional built application to embed without replacing a running product.
+    Plugin files always come from the formal source directory.
 #>
 [CmdletBinding()]
 param(
     [string]$Source,
-    [string]$Output
+    [string]$Output,
+    [string]$Executable
 )
 
 Set-StrictMode -Version Latest
@@ -83,6 +88,27 @@ $files = @(
         Where-Object { Test-Included $_.Path } |
         Sort-Object -Property Path
 )
+
+$files = @(
+    @($files | Where-Object { $_.Path -notlike 'plugins/bgi/*' }) +
+    @(Get-ChildItem -LiteralPath $pluginRoot -Recurse -File | ForEach-Object {
+        [pscustomobject]@{
+            Path = 'plugins/bgi/' + $_.FullName.Substring($pluginPrefix.Length).Replace('\', '/')
+            Full = $_.FullName
+            Size = $_.Length
+        }
+    }) | Sort-Object -Property Path
+)
+if ($Executable) {
+    $built = Get-Item -LiteralPath (Resolve-Path -LiteralPath $Executable).Path
+    if ($built.PSIsContainer) { throw 'Executable must be a file' }
+    foreach ($file in $files) {
+        if ($file.Path -eq 'sleepy-doll.exe') {
+            $file.Full = $built.FullName
+            $file.Size = $built.Length
+        }
+    }
+}
 
 if ($files.Count -eq 0) {
     throw "nothing to pack: $source is empty"

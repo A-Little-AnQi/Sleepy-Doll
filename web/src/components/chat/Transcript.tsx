@@ -244,12 +244,10 @@ function ActivityGroup({
   activities,
   labels,
   active,
-  hideInternals = false,
 }: {
   activities: Activity[];
   labels: ToolLabels;
   active: boolean;
-  hideInternals?: boolean;
 }) {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
@@ -267,41 +265,6 @@ function ActivityGroup({
     .join(" · ");
   const subject =
     activities.length === 1 ? subjectOf(activities[0]!.arguments) : "";
-  if (hideInternals) {
-    const publicLabel = [
-      ...new Set(
-        activities.map((activity) => {
-          const label = labels[activity.name];
-          return !label || /桥|接口|工具|PowerShell|命令/i.test(label)
-            ? "处理任务设置"
-            : label;
-        }),
-      ),
-    ]
-      .slice(0, 3)
-      .join(" · ");
-    return (
-      <div className="activity-summary" role="status">
-        {running ? (
-          <span className="activity-spinner" />
-        ) : failed || pending ? (
-          <AlertIcon className="activity-icon" />
-        ) : (
-          <CheckIcon className="activity-icon" />
-        )}
-        <span className="activity-label">{publicLabel}</span>
-        {(pending || failed) && (
-          <span className="activity-outcome">
-            {running
-              ? t.chat.statusRunning
-              : pending
-                ? "未收到结果"
-                : t.transcript.callFailed}
-          </span>
-        )}
-      </div>
-    );
-  }
   return (
     <section className="activity-group" data-expanded={expanded}>
       <button
@@ -590,7 +553,6 @@ export const Transcript = memo(function Transcript({
   currentTask,
   running = Boolean(phase),
   contextActivities = [],
-  hideInternals = false,
 }: {
   messages: MessageInfo[];
   stream: string;
@@ -601,7 +563,6 @@ export const Transcript = memo(function Transcript({
   currentTask?: TaskInfo | undefined;
   running?: boolean;
   contextActivities?: ContextActivity[];
-  hideInternals?: boolean;
 }) {
   const t = useT();
   const presented = usePresentedText(messages, stream, currentTask?.id);
@@ -726,7 +687,6 @@ export const Transcript = memo(function Transcript({
                             activities={part.activities}
                             labels={toolLabels}
                             active={active}
-                            hideInternals={hideInternals}
                           />
                         ) : part.kind === "context" ? (
                           <div

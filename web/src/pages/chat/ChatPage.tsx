@@ -32,11 +32,6 @@ import type { Plan } from "../../session";
 import { DEFAULT_CONTEXT_WINDOW } from "../../models/presets";
 
 interface Props {
-  configuration?: boolean;
-  configurationTarget?: string | undefined;
-  draftScope?: string;
-  onSubmitted?(conversationId: string): void;
-  onSending?(sending: boolean): void;
   bootstrap: Bootstrap;
   conversationId?: string | undefined;
   onConversation(id: string): void;
@@ -98,11 +93,6 @@ export function ChatPage({
   reload,
   onComposerDraft,
   onOpenModels,
-  configuration = false,
-  configurationTarget,
-  draftScope,
-  onSubmitted,
-  onSending,
 }: Props) {
   const t = useT();
   const data = useSession(conversationId);
@@ -117,7 +107,7 @@ export function ChatPage({
     loading,
   } = data;
   const busy = isRunning(task);
-  const draftKey = `sleepy-doll-draft:${conversationId ?? draftScope ?? "new"}`;
+  const draftKey = `sleepy-doll-draft:${conversationId ?? "new"}`;
   const [prompt, setPrompt] = useState(
     () => localStorage.getItem(draftKey) ?? "",
   );
@@ -129,9 +119,6 @@ export function ChatPage({
   const [notice, setNotice] = useState("");
   const [unread, setUnread] = useState(false);
   const [sending, setSending] = useState(false);
-  useEffect(() => {
-    onSending?.(sending);
-  }, [sending, onSending]);
   const [stopping, setStopping] = useState(false);
   const interrupting = stopping || task?.state === "cancelling";
   // 工具名取自工具定义里的 label，没有 label 的不进表。
@@ -155,12 +142,7 @@ export function ChatPage({
   );
   const selectedModel = resolveConversationModel(
     bootstrap.models,
-    configuration
-      ? {
-          modelId:
-            pendingModel ?? conversation?.modelId ?? task?.modelId ?? null,
-        }
-      : conversation,
+    conversation,
     pendingModel,
   );
   const contextWindow =
@@ -267,20 +249,13 @@ export function ChatPage({
         if (alive.current && current.current === origin)
           setNotice(t.chat.queuedStep);
       } else {
-        const run = await (
-          configuration
-            ? (prompt: string, id?: string, key?: string, model?: string) =>
-                api.configureShortcut(
-                  prompt,
-                  id,
-                  key,
-                  model,
-                  configurationTarget,
-                )
-            : api.submitTask
-        )(value, origin, clientKey, origin ? undefined : selectedModel);
+        const run = await api.submitTask(
+          value,
+          origin,
+          clientKey,
+          origin ? undefined : selectedModel,
+        );
         session(run.conversationId).start();
-        onSubmitted?.(run.conversationId);
         if (alive.current && current.current === origin)
           onConversation(run.conversationId);
         if (queue && alive.current && current.current === origin)
@@ -322,9 +297,7 @@ export function ChatPage({
       ? undefined
       : phaseLabel(task);
   return (
-    <section
-      className={`chat-workspace${welcome ? " is-welcome" : ""}${configuration ? " is-configuration" : ""}`}
-    >
+    <section className={`chat-workspace${welcome ? " is-welcome" : ""}`}>
       <MotionSwitch
         viewKey={conversationId ?? "new"}
         className="chat-scene-switch"
@@ -347,12 +320,7 @@ export function ChatPage({
                 src={mascot}
                 alt={t.chat.mascotAlt}
               />
-              <h2>{configuration ? "配置快捷任务" : t.chat.startNew}</h2>
-              {configuration && (
-                <p className="muted">
-                  告诉 AI 要添加哪一项任务。配置好后保存，以后点击即可运行。
-                </p>
-              )}
+              <h2>{t.chat.startNew}</h2>
               {!bootstrap.models.length &&
                 (onOpenModels ? (
                   <button
@@ -397,9 +365,8 @@ export function ChatPage({
                   tasks={bootstrap.tasks}
                   currentTask={task}
                   contextActivities={contextActivities}
-                  hideInternals={configuration}
                 />
-                {plan && !configuration && <RunPlanCard plan={plan} />}
+                {plan && <RunPlanCard plan={plan} />}
                 {question && (
                   <section className="run-question">
                     <h3>{t.chat.needInfo}</h3>
@@ -623,7 +590,6 @@ export function ChatPage({
                     }
                     void act(async () => {
                       await api.setConversationModel(conversationId, id);
-                      if (configuration) setPendingModel(id);
                     });
                   }}
                 />

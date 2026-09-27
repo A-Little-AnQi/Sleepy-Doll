@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { api } from "../ipc/api";
 import type {
   ContextActivity,
+  ShortcutProposal,
   MessageInfo,
   RunApproval,
   TaskInfo,
@@ -85,6 +86,7 @@ export interface Plan {
   steps: Array<{ id: string; title: string; tool?: string; outcome?: string }>;
 }
 export interface Snapshot {
+  shortcutProposal: ShortcutProposal | undefined;
   messages: MessageInfo[];
   task: TaskInfo | undefined;
   queued: TaskInfo[];
@@ -97,6 +99,7 @@ export interface Snapshot {
   error: string;
 }
 const empty: Snapshot = {
+  shortcutProposal: undefined,
   messages: [],
   task: undefined,
   queued: [],
@@ -124,6 +127,7 @@ class Session {
   private questions = new Map<string, string>();
   private approvals = new Map<string, RunApproval>();
   private plans = new Map<string, Plan>();
+  private shortcutProposals = new Map<string, ShortcutProposal>();
   private contextActivities = new Map<number, ContextActivity>();
   private contextActivityBoundary = 0;
   constructor(readonly id: string) {}
@@ -301,6 +305,11 @@ class Session {
               this.streams.delete(event.runId);
               refresh = true;
             }
+            if (event.kind === "shortcut.proposed")
+              this.shortcutProposals.set(
+                event.runId,
+                event.data as unknown as ShortcutProposal,
+              );
             if (event.kind === "shortcut.saved") {
               window.dispatchEvent(
                 new CustomEvent("sleepy-doll:shortcut-saved"),
@@ -377,6 +386,9 @@ class Session {
                   ? this.approvals.get(task.id)
                   : undefined,
               plan: task ? this.plans.get(task.id) : undefined,
+              shortcutProposal: task
+                ? this.shortcutProposals.get(task.id)
+                : undefined,
               error: "",
               loading: false,
             });

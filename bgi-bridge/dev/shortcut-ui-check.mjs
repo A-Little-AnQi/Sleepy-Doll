@@ -60,6 +60,7 @@ try {
   let runs = [],
     events = [];
   const requests = [];
+  let configurationCount = 0;
   const conversations = [
     { id: "chat-a", title: "原配置对话" },
     { id: "chat-b", title: "另一条对话" },
@@ -157,7 +158,7 @@ try {
     }
     if (q.method === "shortcut.configure") {
       result = {
-        id: "configuration-run",
+        id: `configuration-run-${++configurationCount}`,
         conversationId: q.params.conversationId ?? "shortcut-config-fixture",
         prompt: q.params.prompt,
         state: "deciding",
@@ -171,6 +172,25 @@ try {
         conversationId: result.conversationId,
         kind: "run.created",
         data: result,
+      });
+    }
+    if (q.method === "shortcut.accept") {
+      workflows = workflows.map((task) =>
+        task.id === "chosen"
+          ? { ...task, name: q.params.name, description: q.params.description }
+          : task,
+      );
+      result = { taskId: "chosen" };
+    }
+    if (q.method === "run.input") {
+      const run = runs.find((run) => run.id === q.params.id);
+      run.state = "deciding";
+      events.push({
+        sequence: events.length + 1,
+        runId: run.id,
+        conversationId: run.conversationId,
+        kind: "run.changed",
+        data: { ...run },
       });
     }
     if (q.method === "workflow.rename") {
@@ -233,36 +253,122 @@ try {
   await shelf
     .getByRole("button", { name: "每日血斛 的更多操作", exact: true })
     .click();
-  await page.getByRole("menuitem", { name: "让 AI 修改", exact: true }).click();
-  dialog = page.getByRole("dialog", { name: "修改「每日血斛」" });
-  await dialog.getByRole("textbox").fill("改成晚上运行这项任务");
-  await dialog.getByRole("textbox").press("Enter");
-  await page.waitForFunction(() =>
-    document
-      .querySelector(".shortcut-config-state")
-      ?.textContent.includes("正在配置"),
+  await page.getByRole("menuitem", { name: "调整入口", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "调整「每日血斛」的入口" });
+  assert.equal(
+    await dialog
+      .locator(
+        ".chat-workspace,.conversation-scene,.composer-dock,.context-meter",
+      )
+      .count(),
+    0,
+    "Wrapping must use a form, never a chat",
   );
+  await dialog
+    .getByRole("textbox", { name: "要加入哪一项", exact: true })
+    .fill("封装已有的血斛采集配置组");
+  await dialog.getByRole("button", { name: "识别已有项", exact: true }).click();
+  await dialog.getByText("正在定位已有项", { exact: true }).waitFor();
   const config = requests.find((q) => q.method === "shortcut.configure");
   assert.equal(config.params.shortcutId, "chosen");
-  assert.equal(config.params.prompt, "改成晚上运行这项任务");
+  assert.equal(config.params.referenceConversationId, "chat-b");
+  assert.equal(config.params.prompt, "封装已有的血斛采集配置组");
   assert.equal(requests.filter((q) => q.method === "task.submit").length, 0);
+  const current = runs.find((run) => run.id === "configuration-run-1");
+  current.state = "awaitingUser";
+  events.push({
+    sequence: events.length + 1,
+    runId: current.id,
+    conversationId: current.conversationId,
+    kind: "question",
+    data: { question: "要封装哪一个已有组？" },
+  });
+  events.push({
+    sequence: events.length + 1,
+    runId: current.id,
+    conversationId: current.conversationId,
+    kind: "run.changed",
+    data: { ...current },
+  });
   await dialog
-    .getByRole("button", { name: "停止配置并关闭", exact: true })
-    .click();
+    .getByRole("textbox", { name: "补充信息", exact: true })
+    .fill("血斛路线组");
+  await dialog.getByRole("button", { name: "补充并继续", exact: true }).click();
+  assert(
+    requests.some(
+      (q) => q.method === "run.input" && q.params.id === current.id,
+    ),
+  );
+  const proposal = {
+    id: "chosen",
+    name: "已有血斛入口",
+    description: "运行现有的血斛路线组",
+    binding: workflows[0].shortcut,
+  };
+  events.push({
+    sequence: events.length + 1,
+    runId: current.id,
+    conversationId: current.conversationId,
+    kind: "shortcut.proposed",
+    data: proposal,
+  });
+  current.state = "answered";
+  events.push({
+    sequence: events.length + 1,
+    runId: current.id,
+    conversationId: current.conversationId,
+    kind: "run.changed",
+    data: { ...current },
+  });
+  await dialog
+    .getByRole("textbox", { name: "入口名称", exact: true })
+    .waitFor();
+  assert.equal(workflows[0].name, "每日血斛", "Preview must not silently save");
+  assert.equal(
+    requests.filter((q) => q.method === "shortcut.accept").length,
+    0,
+  );
+  assert.equal(
+    await dialog.getByText("fixture.run", { exact: false }).count(),
+    0,
+  );
+  await dialog
+    .getByRole("textbox", { name: "用途说明", exact: true })
+    .fill("一键运行已有配置");
+  await page.waitForTimeout(300);
+  await page.screenshot({
+    path: path.join(os.tmpdir(), "sleepy-doll-shortcut-ui.png"),
+  });
+  await dialog.getByRole("button", { name: "保存入口", exact: true }).click();
+  await dialog.waitFor({ state: "hidden" });
+  await shelf
+    .getByRole("button", { name: "已有血斛入口", exact: true })
+    .waitFor();
+  const accepted = requests.find((q) => q.method === "shortcut.accept");
+  assert.equal(accepted.params.runId, current.id);
+  assert.equal(accepted.params.description, "一键运行已有配置");
+  await shelf.getByRole("button", { name: "添加", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "添加快捷任务", exact: true });
+  assert.equal(await dialog.locator(".chat-workspace").count(), 0);
+  assert.equal(
+    await dialog
+      .getByRole("textbox", { name: "要加入哪一项", exact: true })
+      .inputValue(),
+    "",
+  );
+  await dialog
+    .getByRole("textbox", { name: "要加入哪一项", exact: true })
+    .fill("定位另一个已有项");
+  await dialog.getByRole("button", { name: "识别已有项", exact: true }).click();
+  await dialog.getByText("正在定位已有项", { exact: true }).waitFor();
+  await dialog.getByRole("button", { name: "取消", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
   assert(
     requests.some(
-      (q) => q.method === "task.cancel" && q.params.id === "configuration-run",
+      (q) =>
+        q.method === "task.cancel" && q.params.id === "configuration-run-2",
     ),
   );
-  await shelf.getByRole("button", { name: "添加", exact: true }).click();
-  dialog = page.getByRole("dialog", { name: "添加快捷任务", exact: true });
-  assert.equal(
-    await dialog.getByText("改成晚上运行这项任务", { exact: true }).count(),
-    0,
-  );
-  await dialog.getByRole("button", { name: "完成", exact: true }).click();
-  await dialog.waitFor({ state: "hidden" });
   workflows = [
     ...workflows,
     {
@@ -287,10 +393,12 @@ try {
     .click();
   await page
     .locator(".tasks-page")
-    .getByRole("button", { name: "每日血斛", exact: true })
+    .getByRole("button", { name: "已有血斛入口", exact: true })
     .waitFor();
   assert.equal(
-    await shelf.getByRole("button", { name: "每日血斛", exact: true }).count(),
+    await shelf
+      .getByRole("button", { name: "已有血斛入口", exact: true })
+      .count(),
     1,
   );
   await page
@@ -317,7 +425,7 @@ try {
   assert.equal(
     await page
       .locator(".tasks-page")
-      .getByRole("button", { name: "每日血斛", exact: true })
+      .getByRole("button", { name: "已有血斛入口", exact: true })
       .count(),
     0,
   );
@@ -343,13 +451,11 @@ try {
       bounds.y + bounds.height <= 700,
     "Configuration must fit the window",
   );
-  await dialog.getByRole("button", { name: "完成", exact: true }).click();
+  await dialog.getByRole("button", { name: "取消", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.waitForTimeout(1200);
-  await page.screenshot({
-    path: path.join(os.tmpdir(), "sleepy-doll-shortcut-ui.png"),
-  });
+
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
@@ -361,6 +467,9 @@ try {
       stopExactRun: true,
       inlineRename: true,
       editSelectedTarget: true,
+      noChatUiForWrapping: true,
+      questionAsFormField: true,
+      previewBeforeSave: true,
       closeCancelsConfiguration: true,
       addAndEditDraftsSeparated: true,
       onlyTaskRunsInHistory: true,

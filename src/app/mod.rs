@@ -157,6 +157,7 @@ impl AppController {
                 | "strategy.run"
                 | "workflow.run"
                 | "shortcut.save"
+                | "shortcut.accept"
                 | "conversation.delete"
                 | "task.submit"
                 | "run.input"
@@ -413,6 +414,11 @@ impl AppController {
             "shortcut.save" => self
                 .supervisor
                 .save_shortcut(&params, params["sourceConversationId"].as_str()),
+            "shortcut.accept" => self.supervisor.accept_shortcut(
+                required(&params, "runId")?,
+                required(&params, "name")?,
+                params["description"].as_str().unwrap_or(""),
+            ),
             "shortcut.configure" => {
                 let key = params["clientKey"]
                     .as_str()
@@ -425,6 +431,7 @@ impl AppController {
                         &key,
                         params["modelId"].as_str(),
                         params["shortcutId"].as_str(),
+                        params["referenceConversationId"].as_str(),
                     )?,
                 ))
             }

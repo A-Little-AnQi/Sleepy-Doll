@@ -18,6 +18,7 @@ import "./details-panel.css";
 
 export function DetailsPanel({
   bootstrap,
+  conversationId,
   selectedTask,
   onSelectTask,
   onConnectTools,
@@ -186,7 +187,7 @@ export function DetailsPanel({
               className="secondary-action"
               onClick={() => configure(selected)}
             >
-              让 AI 修改这项任务
+              调整这项快捷入口
             </button>
           </>
         ) : (
@@ -228,14 +229,14 @@ export function DetailsPanel({
                 <p>
                   {query
                     ? "换个名称试试。"
-                    : "在对话中指定某一项已配置好的任务加入这里，或让 AI 在这里配置。"}
+                    : "在原对话中指定一个已有项加入这里，或在这里让 AI 识别并封装已有项。"}
                 </p>
                 {!query && (
                   <button
                     className="primary-action"
                     onClick={() => configure()}
                   >
-                    让 AI 配置任务
+                    封装已有项
                   </button>
                 )}
               </div>
@@ -254,6 +255,7 @@ export function DetailsPanel({
         bootstrap={bootstrap}
         open={configuring}
         target={configTarget}
+        referenceConversationId={conversationId}
         onClose={() => setConfiguring(false)}
         reload={reload}
       />

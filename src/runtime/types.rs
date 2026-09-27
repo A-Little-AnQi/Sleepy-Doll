@@ -118,6 +118,8 @@ pub struct Run {
     pub shortcut_configuration: bool,
     #[serde(default)]
     pub shortcut_target: Option<String>,
+    #[serde(default)]
+    pub shortcut_reference: Option<String>,
     pub id: String,
     pub conversation_id: String,
     pub prompt: String,

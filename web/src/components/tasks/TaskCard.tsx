@@ -130,7 +130,7 @@ export function TaskCard({
                     actions.askAi?.(task);
                   }}
                 >
-                  让 AI 修改
+                  调整入口
                 </button>
               )}
               {showSource &&

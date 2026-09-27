@@ -348,7 +348,16 @@ impl Journal {
         duration: i64,
         model_id: Option<&str>,
     ) -> Result<Run> {
-        self.create_configured(prompt, conversation, key, duration, model_id, false, None)
+        self.create_configured(
+            prompt,
+            conversation,
+            key,
+            duration,
+            model_id,
+            false,
+            None,
+            None,
+        )
     }
 
     pub fn create_configured(
@@ -360,6 +369,7 @@ impl Journal {
         model_id: Option<&str>,
         shortcut_configuration: bool,
         shortcut_target: Option<&str>,
+        shortcut_reference: Option<&str>,
     ) -> Result<Run> {
         let mut db = self.connection.lock().unwrap();
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -376,6 +386,7 @@ impl Journal {
                 || run.conversation_id != conversation
                 || run.shortcut_configuration != shortcut_configuration
                 || run.shortcut_target.as_deref() != shortcut_target
+                || run.shortcut_reference.as_deref() != shortcut_reference
             {
                 return Err(Error::Conflict(
                     "submission key reused with different input".into(),
@@ -395,6 +406,7 @@ impl Journal {
         let mut run = Run {
             shortcut_configuration,
             shortcut_target: shortcut_target.map(str::to_owned),
+            shortcut_reference: shortcut_reference.map(str::to_owned),
             id: uuid::Uuid::new_v4().to_string(),
             conversation_id: conversation.into(),
             prompt: prompt.into(),
