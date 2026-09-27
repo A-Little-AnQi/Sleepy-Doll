@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, subscribeNativeEvents } from "./ipc/api";
 import { Wordmark } from "./components/icons";
@@ -17,6 +17,7 @@ import { isRunning, readError, subscribeRuns, watchTasks } from "./session";
 import type { Bootstrap, TaskSummary } from "./ipc/types";
 import { hostPluginEnabled } from "./ipc/providers";
 import { useT } from "./i18n";
+import { applyBridgeStatus, watchBridgeStatus } from "./session/bridge-status";
 
 export type Page =
   | "chat"
@@ -36,6 +37,7 @@ export default function App() {
   );
   const [conversation, setConversation] = useState<string | undefined>();
   const [bootstrap, setBootstrap] = useState<Bootstrap>();
+  const bootstrapGeneration = useRef(0);
   const [detailsOpen, setDetailsOpen] = useState(
     () => localStorage.getItem("sleepy-doll-details-open") === "true",
   );
@@ -60,13 +62,30 @@ export default function App() {
   }, [detailsOpen]);
 
   const reload = useCallback(async () => {
+    const generation = ++bootstrapGeneration.current;
     try {
-      setBootstrap(await api.bootstrap());
+      const value = await api.bootstrap();
+      if (generation !== bootstrapGeneration.current) return;
+      bootstrapGeneration.current += 1;
+      setBootstrap(value);
       setError("");
     } catch (reason) {
+      if (generation !== bootstrapGeneration.current) return;
+      bootstrapGeneration.current += 1;
       setError(reason instanceof Error ? reason.message : readError(reason));
     }
   }, []);
+
+  const bridgeVisible = bootstrap ? hostPluginEnabled(bootstrap) : false;
+  useEffect(() => {
+    if (!bridgeVisible) return;
+    return watchBridgeStatus({
+      read: api.bridgeStatus,
+      generation: () => bootstrapGeneration.current,
+      publish: (bridge) =>
+        setBootstrap((previous) => applyBridgeStatus(previous, bridge)),
+    });
+  }, [bridgeVisible]);
 
   useEffect(() => {
     void reload();

@@ -727,6 +727,7 @@ impl AppController {
                 Ok(json!({"restartRequired":false}))
             }
             "bridge.state" => BgiClient::new(self.config.lock().unwrap().bridge.clone()).state(),
+            "bridge.status" => Ok(self.bridge_status()),
             "bridge.recoveryList" => crate::bridge::control::recovery("list", &[]),
             "bridge.restore" => crate::bridge::control::recovery(
                 "restore",
@@ -1104,7 +1105,34 @@ impl AppController {
     pub fn bridge_connected(&self) -> bool {
         let mut config = self.config.lock().unwrap().bridge.clone();
         config.timeout_ms = config.timeout_ms.min(2000);
-        BgiClient::new(config).info().is_ok()
+        BgiClient::new(config)
+            .info()
+            .is_ok_and(|info| info["enabled"] != false)
+    }
+
+    /// 给界面同步连接状态的被动探测；不连接、注入或刷新全部会话数据。
+    fn bridge_status(&self) -> Value {
+        let config = self.config.lock().unwrap().bridge.clone();
+        Self::bridge_status_for(config)
+    }
+
+    fn bridge_status_for(mut config: crate::config::BridgeConfig) -> Value {
+        config.timeout_ms = config.timeout_ms.min(2000);
+        if !config.enabled {
+            return json!({"enabled":false,"connected":false,"baseUrl":config.base_url,"launchSilently":config.launch_silently});
+        }
+        match crate::bridge::control::info(&config) {
+            Ok(info) => {
+                let stale = info["bridgeCode"]
+                    .as_str()
+                    .zip(crate::bridge::control::installed_bridge_code())
+                    .is_some_and(|(live, installed)| live != installed);
+                json!({"enabled":true,"connected":info["enabled"] != false,"baseUrl":config.base_url,"launchSilently":config.launch_silently,"stale":stale})
+            }
+            Err(error) => {
+                json!({"enabled":true,"connected":false,"baseUrl":config.base_url,"launchSilently":config.launch_silently,"error":error.to_string()})
+            }
+        }
     }
 
     /// 已连接的桥是否落后于安装目录。旧桥没有 bridgeCode 字段时视为一致，避免误报。
@@ -1201,22 +1229,7 @@ impl AppController {
                 })
             })
             .collect::<Vec<_>>();
-        let bridge_status = if config.bridge.enabled {
-            match crate::bridge::control::info(&config.bridge) {
-                Ok(info) => {
-                    let stale = info["bridgeCode"]
-                        .as_str()
-                        .zip(crate::bridge::control::installed_bridge_code())
-                        .is_some_and(|(live, installed)| live != installed);
-                    json!({"enabled":true,"connected":info["enabled"] != false,"baseUrl":config.bridge.base_url,"launchSilently":config.bridge.launch_silently,"stale":stale})
-                }
-                Err(error) => {
-                    json!({"enabled":true,"connected":false,"baseUrl":config.bridge.base_url,"launchSilently":config.bridge.launch_silently,"error":error.to_string()})
-                }
-            }
-        } else {
-            json!({"enabled":false,"connected":false,"baseUrl":config.bridge.base_url,"launchSilently":config.bridge.launch_silently})
-        };
+        let bridge_status = Self::bridge_status_for(config.bridge.clone());
         let plugins = extensions
             .plugins
             .list()

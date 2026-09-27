@@ -77,7 +77,9 @@ const pending = new Map<
   }
 >();
 
-const nativeEventListeners = new Set<(name: string, payload: unknown) => void>();
+const nativeEventListeners = new Set<
+  (name: string, payload: unknown) => void
+>();
 
 /** 桌面壳推送的原生事件（如急停）。仅桌面壳里有发送方。 */
 export function subscribeNativeEvents(
@@ -251,6 +253,7 @@ export const api = {
   setPluginEnabled: (id: string, enabled: boolean) =>
     invoke<{ restartRequired: boolean }>("plugin.setEnabled", { id, enabled }),
   bridgeState: () => invoke<unknown>("bridge.state"),
+  bridgeStatus: () => invoke<Bootstrap["bridge"]>("bridge.status"),
   bridgeRecovery: () =>
     invoke<{ hostRunning: boolean; records: RecoveryRecord[] }>(
       "bridge.recoveryList",
