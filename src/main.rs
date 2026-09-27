@@ -513,9 +513,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 window_id,
                 event: WindowEvent::Focused(false),
                 ..
-            } if tray_popup
-                .as_ref()
-                .is_some_and(|popup| popup.window.id() == window_id && popup.is_presented()) =>
+            } if tray_popup.as_ref().is_some_and(|popup| {
+                popup.window.id() == window_id && popup.lost_external_focus()
+            }) =>
             {
                 if let Some(popup) = tray_popup.as_mut() {
                     popup.hide();

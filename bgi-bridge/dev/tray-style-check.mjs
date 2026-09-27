@@ -71,7 +71,7 @@ try {
         background: style.backgroundColor,
       };
     });
-    assert.equal(geometry.border, "0px");
+    assert.equal(geometry.border, "1px");
     assert.equal(geometry.radius, "0px");
     assert(
       geometry.quitBottom <= geometry.bottom,

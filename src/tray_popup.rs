@@ -92,9 +92,8 @@ unsafe extern "system" fn erase_proc(
 /// 点击落在菜单窗口外就关闭。焦点事件在这个场景不可靠（托盘唤起的窗口
 /// 可能拿不到前台），成熟托盘工具用低级鼠标钩子做外部点击检测。
 extern "system" fn outside_click_proc(code: i32, wparam: usize, lparam: isize) -> isize {
-    use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetWindowRect, MSLLHOOKSTRUCT, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
+        IsChild, MSLLHOOKSTRUCT, WM_LBUTTONDOWN, WM_RBUTTONDOWN, WindowFromPoint,
     };
     let lparam = lparam as usize;
     if code >= 0
@@ -105,19 +104,12 @@ extern "system" fn outside_click_proc(code: i32, wparam: usize, lparam: isize) -
         let hwnd = POPUP_HWND.load(Ordering::Relaxed);
         if hwnd != 0 {
             let info = unsafe { &*(lparam as *const MSLLHOOKSTRUCT) };
-            let mut rect = RECT {
-                left: 0,
-                top: 0,
-                right: 0,
-                bottom: 0,
-            };
-            unsafe { GetWindowRect(hwnd as _, &mut rect) };
-            let inside = info.pt.x >= rect.left
-                && info.pt.x < rect.right
-                && info.pt.y >= rect.top
-                && info.pt.y < rect.bottom;
+            let hit = unsafe { WindowFromPoint(info.pt) };
+            let inside = hit == hwnd as _ || unsafe { IsChild(hwnd as _, hit) } != 0;
             if !inside {
-                let _ = proxy.send_event(UserEvent::TrayAction("dismiss".into()));
+                let _ = proxy.send_event(UserEvent::TrayAction(
+                    serde_json::json!({"action":"dismiss"}),
+                ));
             }
         }
     }
@@ -184,6 +176,26 @@ impl TrayPopup {
         directory: &std::path::Path,
         state: Value,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::build(target, proxy, directory.join("tray-webview"), state)
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub fn new_for_validation(
+        target: &EventLoopWindowTarget<UserEvent>,
+        proxy: EventLoopProxy<UserEvent>,
+        cache: std::path::PathBuf,
+        state: Value,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::build(target, proxy, cache, state)
+    }
+
+    fn build(
+        target: &EventLoopWindowTarget<UserEvent>,
+        proxy: EventLoopProxy<UserEvent>,
+        cache: std::path::PathBuf,
+        state: Value,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         if <crate::UiAssets as rust_embed::RustEmbed>::get("tray.html").is_none() {
             return Err("托盘界面资源缺失".into());
         }
@@ -206,11 +218,7 @@ impl TrayPopup {
             Ordering::Relaxed,
         );
         unsafe {
-            let border: u32 = if state["dark"] == true {
-                0x0035_3535
-            } else {
-                0x00d9_d9d9
-            };
+            let border: u32 = 0xffff_fffe; // DWMWA_COLOR_NONE: HTML paints the one complete client border.
             windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(
                 window.hwnd() as _,
                 34,
@@ -255,7 +263,7 @@ impl TrayPopup {
             );
             ShowWindow(window.hwnd() as _, SW_SHOWNOACTIVATE);
         }
-        let mut context = WebContext::new(Some(directory.join("tray-webview")));
+        let mut context = WebContext::new(Some(cache));
         let webview = WebViewBuilder::new_with_web_context(&mut context)
             .with_background_color(if state["dark"] == true {
                 (27, 27, 27, 255)
@@ -441,8 +449,26 @@ impl TrayPopup {
         self.window.set_focus();
     }
 
-    pub fn is_presented(&self) -> bool {
+    pub fn lost_external_focus(&self) -> bool {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetFocus;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsChild};
+        let root = self.window.hwnd() as HWND;
+        let foreground = unsafe { GetForegroundWindow() };
+        let focus = unsafe { GetFocus() };
+        // Parent WM_KILLFOCUS also fires when clicking the embedded WebView child.
+        // That is focus within this menu, not a request to dismiss it.
         self.request.presented
+            && !foreground.is_null()
+            && foreground != root
+            && focus != root
+            && unsafe { IsChild(root, foreground) } == 0
+            && unsafe { IsChild(root, focus) } == 0
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub fn validation_script(&self, script: &str) {
+        self.webview.evaluate_script(script).unwrap();
     }
 
     pub fn hide(&mut self) {
@@ -468,11 +494,7 @@ impl TrayPopup {
     pub fn update(&mut self, state: Value) {
         self.state = state;
         unsafe {
-            let border: u32 = if self.state["dark"] == true {
-                0x0035_3535
-            } else {
-                0x00d9_d9d9
-            };
+            let border: u32 = 0xffff_fffe;
             windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(
                 self.window.hwnd() as _,
                 34,

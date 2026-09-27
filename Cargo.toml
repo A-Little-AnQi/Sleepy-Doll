@@ -99,3 +99,8 @@ required-features = ["desktop"]
 [[test]]
 name = "tray-request"
 path = "bgi-bridge/dev/tray-request.rs"
+
+[[test]]
+name = "tray-popup-click"
+path = "bgi-bridge/dev/tray-popup-click.rs"
+required-features = ["desktop"]

@@ -4,8 +4,8 @@ body {
 .tray-menu {
   width: 100%;
   padding: 6px;
-  /* Native popup owns the outer border and corner; content fills its client area. */
-  border: 0;
+  /* HTML owns the complete edge; DWM only clips corners and supplies the shadow. */
+  border: 1px solid var(--border-strong);
   border-radius: 0;
   background: var(--surface);
   color: var(--text);
