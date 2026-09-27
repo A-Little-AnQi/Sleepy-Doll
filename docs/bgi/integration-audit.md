@@ -161,3 +161,9 @@ BGI 的技能、工具说明和单项功能卡明确直接资源／设置／领�
 不采用版本／二进制指纹白名单。读取 .NET 单文件中 BetterGI 主程序集的内嵌 Portable PDB，解析 SourceLink 并核对映射覆盖实际源码文档；官方仓库来源允许任意分支、提交、正式／测试版本，其他来源、缺失证据或解析失败拒绝。本机官方 0.66.0 实测来源为 babalae/better-genshin-impact；测试夹具覆盖相同版本号的两个 fork、任意新测试版本、伪域名、未覆盖实际文档的映射及损坏文件。19 项 C# 检查通过，未运行或修改被检查的 BGI 程序。
 
 检查位于 BGI 提供方的启动／注入、握手、调用和桥端，不改变通用 Agent 的决策或权限。已有连接的 PID 从操作系统解析主程序路径，不只相信 HTTP 响应中的官方来源声明；连接页同步来源拒绝信息。用户数据和脚本不参与来源判断。该算法识别构建元数据，不证明“官方发布流水线签发”：自行编译并保留官方来源、伪造 SourceLink 或复制官方发布文件仍可能通过。kaedelcb/1main2222 在本次 GitHub 比较中没有领先官方主线的源码变更，因此不可把文件内容相同的官方重分发识别成特定社区使用者。
+
+### 真实 MNO 发布包验证
+
+使用用户提供的现有仓库 `E:/BetterGIProject/mno/better-genshin-impact`，按用户选择切换到 `mno-version`（提交 `56bbb8907cd45856790679076d411f3921669afe`）。未修改该仓库源码或创建副本。执行 `dotnet publish BetterGenshinImpact/BetterGenshinImpact.csproj -c Release -p:PublishProfile=FolderProfile --disable-build-servers` 成功，保留项目默认 publish 输出。实际生成的单文件版本为 `0.78.91+mno.0924`。
+
+直接使用 Sleepy Doll 发布目录中的 `BgiBridge.Recovery.exe origin` 解析最终 `BetterGI.exe`，得到 `state=nonOfficial`、`evidence=embeddedSourceLink`、`repository=Bedrockx/better-genshin-impact`；本机官方 `D:/BetterGI/BetterGI.exe` 仍得到 `official`。随后在隔离配置／数据库下调用实际 AppController 的 `bridge.setEnabled`，返回 `ok=false`、`error=连接失败，请使用官方版本的BetterGI。`，在启动与注入前拒绝。首次隔离配置把目录指向未创建的 catalog 子目录导致驱动器启动失败，改为已有夹具根目录后验证通过。测试未启动 fork 程序或游戏，没有模型请求，隔离配置与数据库已清理。此结果覆盖真实发布包及连接入口，不只是人为构造 SourceLink JSON。
