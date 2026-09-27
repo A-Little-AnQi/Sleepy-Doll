@@ -39,7 +39,10 @@ export default function App() {
   const [bootstrap, setBootstrap] = useState<Bootstrap>();
   const bootstrapGeneration = useRef(0);
   const [detailsOpen, setDetailsOpen] = useState(
-    () => localStorage.getItem("sleepy-doll-details-open") === "true",
+    () =>
+      localStorage.getItem("sleepy-doll-details-open") === "true" ||
+      (localStorage.getItem("sleepy-doll-details-open") == null &&
+        window.innerWidth >= 1200),
   );
   const [selectedTask, setSelectedTask] = useState<string>();
   const [error, setError] = useState("");
@@ -161,6 +164,17 @@ export default function App() {
     if (bootstrap) watchTasks(bootstrap.tasks);
   }, [bootstrap]);
 
+  useEffect(() => {
+    const saved = () => void reload();
+    const models = () => setPage("models");
+    window.addEventListener("sleepy-doll:open-models", models);
+    window.addEventListener("sleepy-doll:shortcut-saved", saved);
+    return () => {
+      window.removeEventListener("sleepy-doll:shortcut-saved", saved);
+      window.removeEventListener("sleepy-doll:open-models", models);
+    };
+  }, [reload]);
+
   if (!bootstrap) {
     return (
       <div className="product-loading">
@@ -215,14 +229,11 @@ export default function App() {
           onConnectTools={openConnect}
           reload={reload}
           onClose={() => setDetailsOpen(false)}
+          onOpenTasks={() => setPage("tasks")}
         />
       }
       onPage={(next) => {
         setPage(next);
-        if (next !== "chat") {
-          setSelectedTask(undefined);
-          setDetailsOpen(false);
-        }
       }}
       onNew={() => {
         setConversation(undefined);

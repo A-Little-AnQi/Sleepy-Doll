@@ -11,7 +11,7 @@
 .task-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   align-content: start;
 }
 .record-list {
@@ -50,4 +50,40 @@
 .record small {
   color: var(--muted);
   font-size: 11px;
+}
+
+.tasks-intro {
+  margin: 8px 0 0;
+  color: var(--secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.tasks-page .page-title {
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.tasks-legacy {
+  margin-top: 28px;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+  font-size: 12px;
+  color: var(--secondary);
+}
+.tasks-legacy summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.tasks-legacy > p {
+  line-height: 1.7;
+}
+.tasks-legacy > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+.tasks-legacy > div > span {
+  flex: 1;
+  overflow-wrap: anywhere;
 }

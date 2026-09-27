@@ -338,6 +338,36 @@ impl Supervisor {
         duration: Option<i64>,
         model: Option<&str>,
     ) -> Result<Run> {
+        self.submit_with_purpose(prompt, conversation, key, duration, model, false, None)
+    }
+
+    pub fn configure_shortcut(
+        &self,
+        prompt: &str,
+        conversation: Option<&str>,
+        key: &str,
+        model: Option<&str>,
+        target: Option<&str>,
+    ) -> Result<Run> {
+        if let Some(id) = target {
+            let definition = self.tasks.definition(id)?;
+            if definition.deleted_at.is_some() {
+                return Err(Error::Config("这个快捷任务已被删除".into()));
+            }
+        }
+        self.submit_with_purpose(prompt, conversation, key, None, model, true, target)
+    }
+
+    fn submit_with_purpose(
+        &self,
+        prompt: &str,
+        conversation: Option<&str>,
+        key: &str,
+        duration: Option<i64>,
+        model: Option<&str>,
+        shortcut_configuration: bool,
+        shortcut_target: Option<&str>,
+    ) -> Result<Run> {
         if self.shutting_down.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(Error::Config("应用正在退出，请重新打开后发送".into()));
         }
@@ -359,9 +389,13 @@ impl Supervisor {
                 "消息过长：本次 {prompt_chars} 字符，加上系统提示超过上下文预算 {context_chars} 字符"
             )));
         }
-        let conversation = conversation
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("conversation-{key}"));
+        let conversation = conversation.map(str::to_owned).unwrap_or_else(|| {
+            if shortcut_configuration {
+                format!("shortcut-config-{key}")
+            } else {
+                format!("conversation-{key}")
+            }
+        });
         let duration = duration.unwrap_or(self.config.read().unwrap().runtime.duration_sec);
         if !(1..=86400).contains(&duration) {
             return Err(Error::Config("任务时限必须在 1 秒到 24 小时之间".into()));
@@ -386,9 +420,15 @@ impl Supervisor {
                     .map(|model| model.id.clone())
             })
             .ok_or_else(|| Error::Config("还没有配置模型。请先在设置里添加。".into()))?;
-        let run = self
-            .journal
-            .create(prompt, &conversation, key, duration, Some(&resolved))?;
+        let run = self.journal.create_configured(
+            prompt,
+            &conversation,
+            key,
+            duration,
+            Some(&resolved),
+            shortcut_configuration,
+            shortcut_target,
+        )?;
         // 每个对话都要有绑定的模型。
         self.journal
             .set_conversation_model(&conversation, Some(&resolved))?;
@@ -1123,6 +1163,28 @@ impl Supervisor {
                 },
                 attachment_text,
             );
+            let system = if run.shortcut_configuration {
+                let target_context = if let Some(id) = &run.shortcut_target {
+                    let definition = self.tasks.definition(id)?;
+                    let revision = self.tasks.published_revision(id)?;
+                    format!(
+                        "\n用户正在修改这项任务：{}。保存时使用 shortcut.save.id={} 更新原入口，不创建副本。当前绑定：{}。旧多步流程只用于理解原意，须重新绑定用户指定的具体任务。",
+                        definition.name,
+                        id,
+                        serde_json::to_string(&revision.map(|r| match r.shortcut {
+                            Some(binding) => json!({"binding":binding}),
+                            None => json!({"legacyNodes":r.nodes,"description":r.description}),
+                        }))?
+                    )
+                } else {
+                    String::new()
+                };
+                format!(
+                    "{system}\n\n本轮用户主动打开了快捷任务配置：按用户要求把具体任务配置好，再用 shortcut.save 保存用户指定的那一项任务入口。不要运行新任务，不生成通用流程，不复用整段对话或历史运行。用户界面只讲任务、用途和必要选择，内部工具、桥、接口和字段标识不对用户展示。目标未明确时一次问清；保存后说明已加入快捷任务，可以点击运行。{target_context}"
+                )
+            } else {
+                system
+            };
             let plan = self.journal.plan(&run.id)?;
             let definitions = self.definitions(&exposed);
             let definitions_json = serde_json::to_string(&definitions)?;
@@ -1885,26 +1947,26 @@ impl Supervisor {
             (
                 "task.save",
                 "保存快捷任务",
-                "把用户想反复做的一件事保存成通用快捷任务，不绑定 BGI。先按需 task.schema 阅读真实节点格式；所有节点用 kind，wait.probe 不带 kind。tool 必须是已登记工具名，插件内部 methodId 放在对应工具 arguments 中。只做静态校验和保存，绝不执行、也绝不产生任何外部写入；用户说「不要现在运行」时照此办理。\
-                 步骤类型：tool（固定工具与参数）、sequence（顺序子步骤，nodes）、condition（condition 三值判断，另有 then/otherwise/unknown 三个分支，unknown 必填）、\
-                 forEach（items 取值引用、itemKey、nodes、maxItems）、repeat（count 或 until、nodes、maxIterations）、wait（seconds 或 until+timeoutSeconds，可选只读 probe）、\
-                 result（受限模板 template，只允许 {{ nodes.<步骤ID>.字段 }}、{{ item }}、{{ iteration }}）。\
-                 取值引用写成 {\"kind\":\"nodeOutput\",\"node\":\"<步骤ID>\",\"path\":[\"字段\"]} 或用 {\"kind\":\"literal\",\"value\":…} 写常量。\
-                 每个 tool 步骤必须带 id、title、tool、arguments；参数里引用别的步骤输出时写成 {\"$ref\":<取值引用>}。\
-                 需要用户先确定的信息先问清楚再保存；工具契约或目标资源还没有证据时保存草稿并说明缺什么。",
-                json!({
-                    "id":{"type":"string","description":"要修改已有任务时填它的 ID；新建省略"},
-                    "name":{"type":"string","description":"任务名称，一到两句话能说明用途"},
-                    "description":{"type":"string","description":"一到两句具体说明：做什么、作用在哪个对象上"},
-                    "nodes":{"type":"array","items":{"type":"object"},"description":"顶层步骤，通常是 sequence 或 tool"},
-                    "limits":{"type":"object","description":"可选；留空用默认上限"},
-                    "publish":{"type":"boolean","description":"默认 true。静态校验通过就发布为可运行；false 只留草稿"}
-                }),
-                json!(["name", "description", "nodes"]),
+                "旧名称兼容入口。用户明确指定保存具体任务时绑定一个运行入口，不保存配置过程。",
+                json!({}),
+                json!([]),
                 ToolExecution {
                     effect: ToolEffect::InternalState,
                     deferred: false,
                     always_load: true,
+                    ..ToolExecution::default()
+                },
+            ),
+            (
+                "shortcut.save",
+                "添加快捷任务",
+                "只有用户明确要求加入快捷任务时，保存对话中已经配置好的具体某一项任务的运行入口。绑定一个真实工具及稳定目标参数，可附加最多四个只读准备调用。不是保存整段对话、配置过程或条件循环；保存不执行目标。内部工具和参数不得出现在面向用户的说明里。",
+                json!({}),
+                json!([]),
+                ToolExecution {
+                    effect: ToolEffect::LocalWrite,
+                    always_load: true,
+                    model_usage: crate::extension::ModelUsage::None,
                     ..ToolExecution::default()
                 },
             ),
@@ -1925,7 +1987,15 @@ impl Supervisor {
             .iter_mut()
             .find(|definition| definition.name == "task.save")
         {
-            definition.input_schema = operation::task_schema::save_schema();
+            definition.input_schema = operation::shortcuts::schema();
+            definition.execution.always_load = false;
+            definition.description = "兼容名称：用户明确要求保存具体某项任务时，使用 binding 绑定已配置任务的运行入口；不再保存整段对话或多步流程。优先使用 shortcut.save。".into();
+        }
+        if let Some(definition) = definitions
+            .iter_mut()
+            .find(|definition| definition.name == "shortcut.save")
+        {
+            definition.input_schema = operation::shortcuts::schema();
         }
         definitions.sort_by(|left, right| {
             left.source
@@ -1937,91 +2007,91 @@ impl Supervisor {
     /// 保存（必要时发布）一个快捷任务定义。
     ///
     /// 这里只做编译与落库，不产生外部写入。
-    fn save_task(&self, run: &Run, call: &ToolCall, arguments: &Value) -> Result<Value> {
-        use operation::task::{TaskLimits, TaskNode, WorkflowDefinition, compile};
+    fn save_task(&self, run: &Run, _call: &ToolCall, arguments: &Value) -> Result<Value> {
+        let mut arguments = arguments.clone();
+        if let Some(id) = &run.shortcut_target {
+            arguments["id"] = json!(id);
+        }
+        let result = self.save_shortcut(&arguments, Some(&run.conversation_id))?;
+        self.journal.emit(run, "shortcut.saved", result.clone())?;
+        Ok(result)
+    }
 
-        let nodes: Vec<TaskNode> = serde_json::from_value(arguments["nodes"].clone())
-            .map_err(|error| Error::Tool(format!("任务定义无法解析：{error}")))?;
-        let limits: Option<TaskLimits> = match arguments.get("limits") {
-            Some(value) if !value.is_null() => Some(serde_json::from_value(value.clone())?),
-            _ => None,
+    pub fn save_shortcut(&self, arguments: &Value, source: Option<&str>) -> Result<Value> {
+        use operation::{
+            shortcuts::{ShortcutBinding, nodes},
+            task::{WorkflowDefinition, compile},
         };
-        let task_id = arguments["id"]
+        let binding: ShortcutBinding = serde_json::from_value(arguments["binding"].clone())
+            .map_err(|_| Error::Config("请先配置好具体任务，再指定要保存的那一项".into()))?;
+        if binding.target_name.trim().is_empty() || binding.application_name.trim().is_empty() {
+            return Err(Error::Config("快捷任务需要明确的任务名称与所属应用".into()));
+        }
+        if matches!(
+            binding.action.tool.as_str(),
+            "shortcut.save" | "task.save" | "task.schema"
+        ) {
+            return Err(Error::Config("不能把添加快捷任务本身作为运行目标".into()));
+        }
+        let catalog = self.tool_catalog();
+        let task_nodes = nodes(&binding, &catalog)?;
+        let id = arguments["id"]
             .as_str()
             .filter(|id| !id.is_empty())
-            .map(str::to_owned);
-        let mut definition = match &task_id {
-            Some(id) => {
-                let mut existing = self.tasks.definition(id)?;
-                if existing.deleted_at.is_some() {
-                    return Err(Error::Tool("这个快捷任务已经被删除".into()));
-                }
-                existing.name = arguments["name"].as_str().unwrap_or(&existing.name).into();
-                existing.description = arguments["description"]
-                    .as_str()
-                    .unwrap_or(&existing.description)
-                    .into();
-                existing.updated_at = types::now();
-                existing
-            }
-            None => WorkflowDefinition {
-                id: uuid::Uuid::new_v4().to_string(),
-                name: arguments["name"].as_str().unwrap_or("新快捷任务").into(),
-                description: arguments["description"].as_str().unwrap_or("").into(),
-                source_conversation_id: Some(run.conversation_id.clone()),
-                source_message_id: Some(call.id.clone()),
-                source_title_snapshot: run.prompt.chars().take(120).collect(),
-                published_revision: None,
-                draft_revision: None,
-                archived_at: None,
-                deleted_at: None,
-                pinned: false,
-                last_run_id: None,
-                created_at: types::now(),
-                updated_at: types::now(),
-            },
-        };
-        let revision_number = self.tasks.next_revision_number(&definition.id)?;
-        let revision = compile(
-            &definition.id,
-            revision_number,
-            &definition.name,
-            &definition.description,
-            nodes,
-            limits,
-            &self.tool_catalog(),
-        )?;
-        let publish =
-            arguments["publish"].as_bool().unwrap_or(true) && revision.validation.publishable();
-        definition.draft_revision = Some(revision_number);
-        if publish {
-            definition.published_revision = Some(revision_number);
-            definition.draft_revision = None;
+            .map(str::to_owned)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let existing = arguments["id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .map(|_| self.tasks.definition(&id))
+            .transpose()?;
+        let name = arguments["name"].as_str().unwrap_or(&binding.target_name);
+        if name.trim().is_empty() || name.chars().count() > 120 {
+            return Err(Error::Config("任务名称需要 1 到 120 个字符".into()));
         }
-        if task_id.is_some() {
-            self.tasks.save_definition(&definition)?;
-        } else {
-            self.tasks.create_definition(&definition)?;
+        let description = arguments["description"].as_str().unwrap_or("");
+        let number = self.tasks.next_revision_number(&id)?;
+        let mut revision = compile(&id, number, name, description, task_nodes, None, &catalog)?;
+        if !revision.validation.publishable() {
+            return Err(Error::Config(
+                revision
+                    .validation
+                    .issues
+                    .first()
+                    .map(|issue| issue.message.clone())
+                    .unwrap_or_else(|| "这个任务尚未配置完整".into()),
+            ));
         }
-        self.tasks.save_revision(&revision)?;
-        let state = if publish {
-            operation::task::DefinitionState::ReadyUnverified
-        } else {
-            operation::task::DefinitionState::Draft
-        };
-        Ok(json!({
-            "taskId":definition.id,
-            "name":definition.name,
-            "revision":revision_number,
-            "state":state,
-            "stateLabel":state.label(),
-            "runnable":state.runnable(),
-            "zeroToken":revision.model_usage.is_deterministic(),
-            "modelUsage":revision.model_usage,
-            "issues":revision.validation.issues,
-            "missingBindings":revision.validation.missing_bindings,
-            "note":"已保存到当前对话的任务清单和快捷任务页；没有被执行。",
-        }))
+        revision.shortcut = Some(binding.clone());
+        let mut definition = existing.clone().unwrap_or_else(|| WorkflowDefinition {
+            id: id.clone(),
+            name: name.into(),
+            description: description.into(),
+            source_conversation_id: source.map(str::to_owned),
+            source_message_id: None,
+            source_title_snapshot: String::new(),
+            published_revision: None,
+            draft_revision: None,
+            archived_at: None,
+            deleted_at: None,
+            pinned: false,
+            last_run_id: None,
+            created_at: types::now(),
+            updated_at: types::now(),
+        });
+        if definition.deleted_at.is_some() {
+            return Err(Error::Conflict("这个快捷任务已被删除".into()));
+        }
+        definition.name = revision.name.clone();
+        definition.description = revision.description.clone();
+        definition.published_revision = Some(number);
+        definition.draft_revision = None;
+        definition.updated_at = types::now();
+        self.tasks
+            .save_shortcut_atomically(&definition, &revision)?;
+        Ok(
+            json!({"taskId":id,"name":definition.name,"runnable":true,"publishedRevision":number,"note":"已加入快捷任务，尚未运行。点击运行会直接执行这一项，不再调用对话模型。"}),
+        )
     }
 
     /// 按契约声明算出本次写入的实际影响。
@@ -2254,6 +2324,7 @@ impl Supervisor {
                 self.operations.store.get(a["id"].as_str().unwrap_or(""))?
             )),
             "task.save" => self.save_task(run, call, a),
+            "shortcut.save" => self.save_task(run, call, a),
             "task.schema" => Ok(operation::task_schema::describe(a["kind"].as_str())),
             "skills.reference" => {
                 let name = a["name"].as_str().unwrap_or("");

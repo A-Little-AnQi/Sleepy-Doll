@@ -364,3 +364,84 @@
     animation: none;
   }
 }
+
+.shortcut-shelf-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.shortcut-shelf-toolbar p {
+  flex: 1;
+  margin: 0;
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.shortcut-shelf-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.shortcut-purpose {
+  margin: 16px 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.shortcut-purpose h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.shortcut-purpose p {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.shortcut-purpose dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 12px;
+}
+.shortcut-purpose dt {
+  color: var(--muted);
+}
+.shortcut-purpose dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.shortcut-purpose small {
+  color: var(--muted);
+}
+.shortcut-run-error {
+  color: var(--error, #c97070);
+  overflow-wrap: anywhere;
+}
+.shortcut-name-field {
+  display: grid;
+  gap: 10px;
+}
+.shortcut-name-field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  background: var(--subtle);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+}
+.shortcut-shelf .details-body > .search-field {
+  width: 100%;
+}
+.shortcut-shelf-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.shortcut-shelf-footer button {
+  width: 100%;
+  font-size: 12px;
+}

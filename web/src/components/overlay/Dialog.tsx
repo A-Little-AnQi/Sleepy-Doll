@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useId,
   useRef,
   useState,
   type ReactNode,
@@ -18,6 +19,7 @@ export function Dialog({
   children,
   footer,
   compact = false,
+  className = "",
 }: {
   title: string;
   subtitle?: ReactNode;
@@ -26,9 +28,13 @@ export function Dialog({
   children: ReactNode;
   footer?: ReactNode;
   compact?: boolean;
+  className?: string;
 }) {
   const t = useT();
+  const titleId = useId();
   const layer = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
   const [present, setPresent] = useState(open);
 
   useEffect(() => {
@@ -55,26 +61,65 @@ export function Dialog({
 
   useEffect(() => {
     if (!open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const focusable = () =>
+      [
+        ...(layer.current?.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
+        ) ?? []),
+      ].filter((node) => node.getClientRects().length > 0);
+    const frame = requestAnimationFrame(() => {
+      const field =
+        layer.current?.querySelector<HTMLElement>("input, textarea");
+      (field ?? focusable()[0])?.focus();
+    });
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (
+        layer.current !==
+        [
+          ...document.querySelectorAll('.sd-dialog-layer[data-visible="true"]'),
+        ].at(-1)
+      )
+        return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        close.current();
+      }
+      if (event.key === "Tab") {
+        const items = focusable(),
+          first = items[0],
+          last = items.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", onKey);
+      if (previous?.isConnected) previous.focus();
+    };
+  }, [open]);
 
   if (!present) return null;
   return createPortal(
     <div ref={layer} className="sd-dialog-layer">
       <div className="sd-dialog-scrim" onClick={onClose} />
       <div
-        className={compact ? "sd-dialog is-compact" : "sd-dialog"}
+        className={`sd-dialog${compact ? " is-compact" : ""}${className ? ` ${className}` : ""}`}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="sd-dialog-title"
+        aria-labelledby={titleId}
       >
         <header className="sd-dialog-head">
           <div>
-            <h2 id="sd-dialog-title">{title}</h2>
+            <h2 id={titleId}>{title}</h2>
             {subtitle ? <p className="sd-dialog-path">{subtitle}</p> : null}
           </div>
           <button

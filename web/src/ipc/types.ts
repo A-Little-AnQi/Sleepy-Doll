@@ -136,6 +136,7 @@ export type DefinitionState =
   | "deleted";
 
 export interface TaskSummary {
+  shortcut?: ShortcutBinding | null;
   id: string;
   name: string;
   description: string;
@@ -156,6 +157,13 @@ export interface TaskSummary {
   updatedAt: string;
   lastRunId?: string | null;
   issue?: string | null;
+}
+
+export interface ShortcutBinding {
+  action: { tool: string; arguments: Record<string, unknown> };
+  prepare?: Array<{ tool: string; arguments: Record<string, unknown> }>;
+  targetName: string;
+  applicationName: string;
 }
 
 export interface TaskIssue {

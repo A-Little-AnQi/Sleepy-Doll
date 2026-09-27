@@ -114,6 +114,10 @@ impl RunState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Run {
+    #[serde(default)]
+    pub shortcut_configuration: bool,
+    #[serde(default)]
+    pub shortcut_target: Option<String>,
     pub id: String,
     pub conversation_id: String,
     pub prompt: String,

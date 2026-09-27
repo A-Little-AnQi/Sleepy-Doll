@@ -348,6 +348,19 @@ impl Journal {
         duration: i64,
         model_id: Option<&str>,
     ) -> Result<Run> {
+        self.create_configured(prompt, conversation, key, duration, model_id, false, None)
+    }
+
+    pub fn create_configured(
+        &self,
+        prompt: &str,
+        conversation: &str,
+        key: &str,
+        duration: i64,
+        model_id: Option<&str>,
+        shortcut_configuration: bool,
+        shortcut_target: Option<&str>,
+    ) -> Result<Run> {
         let mut db = self.connection.lock().unwrap();
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous: Option<String> = tx
@@ -359,7 +372,11 @@ impl Journal {
             .optional()?;
         if let Some(payload) = previous {
             let run: Run = serde_json::from_str(&payload)?;
-            if run.prompt != prompt || run.conversation_id != conversation {
+            if run.prompt != prompt
+                || run.conversation_id != conversation
+                || run.shortcut_configuration != shortcut_configuration
+                || run.shortcut_target.as_deref() != shortcut_target
+            {
                 return Err(Error::Conflict(
                     "submission key reused with different input".into(),
                 ));
@@ -376,6 +393,8 @@ impl Journal {
         }
         let stamp = now();
         let mut run = Run {
+            shortcut_configuration,
+            shortcut_target: shortcut_target.map(str::to_owned),
             id: uuid::Uuid::new_v4().to_string(),
             conversation_id: conversation.into(),
             prompt: prompt.into(),
@@ -837,6 +856,8 @@ impl Journal {
                      WHERE t.source_conversation_id=c.id AND t.deleted=0)
              FROM conversations c
              WHERE (?1=1 OR c.archived_at IS NULL)
+               AND c.id NOT LIKE 'task-%'
+               AND c.id NOT LIKE 'shortcut-config-%'
                AND (?2 IS NULL OR instr(lower(c.title),?2)>0)
              ORDER BY c.updated_at DESC
              LIMIT ?3 OFFSET ?4",

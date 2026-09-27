@@ -1,32 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../ipc/api";
 import { isRunning, readError, taskLabels } from "../../session";
-import { Toast } from "../overlay/Toast";
-import { ConfirmDialog } from "../overlay/ConfirmDialog";
-import type {
-  Bootstrap,
-  TaskInfo,
-  TaskSummary,
-  WorkflowDetail,
-} from "../../ipc/types";
-import { ChevronIcon, CloseIcon, HistoryIcon } from "../icons";
+import type { Bootstrap, TaskSummary } from "../../ipc/types";
+import {
+  ChevronIcon,
+  CloseIcon,
+  HistoryIcon,
+  PlusIcon,
+  SearchIcon,
+} from "../icons";
 import { TaskCard, type TaskActions } from "../tasks/TaskCard";
-import { MotionSwitch } from "../controls/MotionSwitch";
+import { taskRun, taskError } from "../tasks/task-display";
+import { ShortcutConfigurator } from "../tasks/ShortcutConfigurator";
+import { ConfirmDialog } from "../overlay/ConfirmDialog";
+import { Toast } from "../overlay/Toast";
 import "./details-panel.css";
-import { useT } from "../../i18n";
 
-/**
- * 右侧详情栏：当前对话产生的快捷任务，或选中的任务与运行详情。
- */
 export function DetailsPanel({
   bootstrap,
-  conversationId,
   selectedTask,
   onSelectTask,
-  onOpenConversation,
   onConnectTools,
   reload,
   onClose,
+  onOpenTasks,
 }: {
   bootstrap: Bootstrap;
   conversationId?: string | undefined;
@@ -36,178 +33,112 @@ export function DetailsPanel({
   onConnectTools?(): void;
   reload(): Promise<void>;
   onClose(): void;
+  onOpenTasks?(): void;
 }) {
-  const t = useT();
-  const [detail, setDetail] = useState<WorkflowDetail>();
+  const panel = useRef<HTMLElement>(null);
+  const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
-  const [pendingRemove, setPendingRemove] = useState<TaskSummary | null>(null);
-  const panelRef = useRef<HTMLElement>(null);
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-  const previousSelection = useRef(selectedTask);
-
-  useEffect(() => {
-    const panel = panelRef.current;
-    if (!panel) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const trigger = document.querySelector<HTMLElement>(
-      "[data-details-trigger]",
+  const [configuring, setConfiguring] = useState(false);
+  const [configTarget, setConfigTarget] = useState<TaskSummary>();
+  const [removing, setRemoving] = useState<TaskSummary | null>(null);
+  const [renaming, setRenaming] = useState<TaskSummary | null>(null);
+  const [newName, setNewName] = useState("");
+  const tasks = bootstrap.workflows
+    .filter(
+      (task) =>
+        task.shortcut && task.state !== "deleted" && task.state !== "archived",
+    )
+    .sort(
+      (a, b) =>
+        Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name),
     );
-    const restoreFocus = () => {
-      // Closing an inert exit layer can move focus to body. Navigation to an
-      // unrelated control should retain that control's focus instead.
-      if (
-        document.activeElement !== document.body &&
-        !panel.contains(document.activeElement)
-      )
-        return;
-      const target =
-        previous !== document.body &&
-        previous?.isConnected &&
-        previous.getClientRects().length
-          ? previous
-          : trigger;
-      if (target?.isConnected && target.getClientRects().length) target.focus();
-    };
-    const handleKey = (event: KeyboardEvent) => {
-      if (
-        event.key !== "Escape" ||
-        panel.querySelector('[aria-expanded="true"]')
-      )
-        return;
-      event.preventDefault();
-      event.stopPropagation();
-      closeRef.current();
-    };
-    panel.addEventListener("keydown", handleKey);
-    return () => {
-      panel.removeEventListener("keydown", handleKey);
-      restoreFocus();
-    };
-  }, []);
-
-  useEffect(() => {
-    // Navigation replaces the clicked task/back button in either presentation.
-    const navigated = previousSelection.current !== selectedTask;
-    previousSelection.current = selectedTask;
-    if (navigated && document.activeElement === document.body)
-      panelRef.current
-        ?.querySelector<HTMLButtonElement>(".details-head button")
-        ?.focus();
-  }, [selectedTask]);
-  // Bootstrap also updates during streaming. Only refresh detail when this
-  // workflow changes, and never show the previous workflow while loading another.
-  const selectedVersion = JSON.stringify(
-    bootstrap.workflows.find((task) => task.id === selectedTask),
+  const selected = bootstrap.workflows.find(
+    (task) =>
+      task.shortcut && task.state !== "deleted" && task.id === selectedTask,
   );
-  const currentDetail =
-    detail?.summary.id === selectedTask ? detail : undefined;
-  const tasks = conversationId
-    ? bootstrap.workflows.filter(
-        (task) => task.sourceConversationId === conversationId,
-      )
-    : [];
-  const runs = conversationId
-    ? bootstrap.tasks.filter((run) => run.conversationId === conversationId)
-    : [];
-
+  const visible = tasks.filter((task) =>
+    (task.name + task.description + task.shortcut?.applicationName)
+      .toLowerCase()
+      .includes(query.trim().toLowerCase()),
+  );
   useEffect(() => {
-    if (!selectedTask) {
-      setDetail(undefined);
-      return;
-    }
-    let alive = true;
-    setError("");
-    void api
-      .workflowGet(selectedTask)
-      .then((value) => {
-        if (alive) setDetail(value);
-      })
-      .catch((reason) => {
-        if (alive) setError(readError(reason));
-      });
-    return () => {
-      alive = false;
+    const element = panel.current;
+    if (!element) return;
+    const key = (event: KeyboardEvent) => {
+      if (
+        event.key === "Escape" &&
+        !element.querySelector('[aria-expanded="true"]')
+      )
+        onClose();
     };
-  }, [selectedTask, selectedVersion]);
-
+    element.addEventListener("keydown", key);
+    return () => element.removeEventListener("keydown", key);
+  }, [onClose]);
   const act = async (id: string, action: () => Promise<unknown>) => {
     setBusy(id);
     setError("");
     try {
       await action();
       await reload();
-      if (selectedTask) setDetail(await api.workflowGet(selectedTask));
     } catch (reason) {
-      setError(readError(reason));
+      setError(taskError(readError(reason)));
     } finally {
       setBusy("");
     }
   };
-
+  const configure = (target?: TaskSummary) => {
+    setConfigTarget(target);
+    setConfiguring(true);
+  };
   const actions: TaskActions = {
-    run: (task: TaskSummary) =>
-      void act(task.id, async () => {
-        const run = await api.runWorkflow(
-          task.id,
-          task.publishedRevision ?? undefined,
-        );
-        onOpenConversation(run.conversationId);
-      }),
-    askAi: (task) =>
-      onOpenConversation(task.sourceConversationId ?? conversationId ?? ""),
-    connect: () => onConnectTools?.(),
+    run: (task) =>
+      void act(task.id, () =>
+        api.runWorkflow(task.id, task.publishedRevision ?? undefined),
+      ),
+    stop: (task) => {
+      const run = taskRun(task, bootstrap.tasks);
+      if (run) void act(task.id, () => api.cancelTask(run.id));
+    },
     open: (task) => onSelectTask(task.id),
-    openSource: (task) => {
-      if (task.sourceConversationId)
-        onOpenConversation(task.sourceConversationId);
+    askAi: (task) => configure(task),
+    pin: (task, pinned) =>
+      void act(task.id, () => api.pinWorkflow(task.id, pinned)),
+    rename: (task) => {
+      setRenaming(task);
+      setNewName(task.name);
     },
     archive: (task, archived) =>
       void act(task.id, () => api.archiveWorkflow(task.id, archived)),
-    pin: (task, pinned) =>
-      void act(task.id, () => api.pinWorkflow(task.id, pinned)),
-    copy: (task) => void act(task.id, () => api.copyWorkflow(task.id)),
-    remove: (task) => {
-      setPendingRemove(task);
-    },
+    remove: (task) => setRemoving(task),
+    connect: () => onConnectTools?.(),
   };
-
+  const currentRun = selected ? taskRun(selected, bootstrap.tasks) : undefined;
   return (
     <aside
-      ref={panelRef}
-      className="details-panel"
-      aria-label={t.details.panel}
+      ref={panel}
+      className="details-panel shortcut-shelf"
+      aria-label="快捷任务"
     >
       <header className="details-head">
-        {selectedTask ? (
+        {selected ? (
           <button
-            className="icon-button details-back"
-            aria-label={t.details.backToTasks}
-            title={t.details.backToTasks}
+            className="icon-button"
+            aria-label="返回快捷任务"
             onClick={() => onSelectTask(undefined)}
           >
-            <ChevronIcon className="button-icon" />
+            <ChevronIcon className="button-icon shortcut-back-icon" />
           </button>
         ) : (
-          <span className="details-heading-icon" aria-hidden="true">
+          <span className="details-heading-icon">
             <HistoryIcon />
           </span>
         )}
-        <h2
-          title={selectedTask ? currentDetail?.summary.name : t.chat.tasksPanel}
-        >
-          {selectedTask
-            ? (currentDetail?.summary.name ?? t.details.taskDetail)
-            : t.chat.tasksPanel}
-        </h2>
-        {!selectedTask && tasks.length > 0 && (
-          <span className="details-count">{tasks.length}</span>
-        )}
+        <h2>{selected ? selected.name : "快捷任务"}</h2>
+        {!selected && <span className="details-count">{tasks.length}</span>}
         <button
           className="icon-button"
-          aria-label={t.nav.closeDetails}
-          title={t.nav.closeDetails}
+          aria-label="关闭快捷任务侧栏"
           onClick={onClose}
         >
           <CloseIcon className="button-icon" />
@@ -215,264 +146,155 @@ export function DetailsPanel({
       </header>
       {error && <Toast message={error} onDismiss={() => setError("")} />}
       <div className="details-body">
-        <MotionSwitch
-          viewKey={`${conversationId ?? "none"}:${selectedTask ?? "list"}`}
-          kind="panel"
-          className="details-content"
-        >
-          {selectedTask ? (
-            currentDetail ? (
-              <TaskDetail
-                detail={currentDetail}
-                runs={runs}
-                busy={busy}
-                actions={actions}
-                onOpenConversation={onOpenConversation}
-              />
-            ) : (
-              <div className="details-loading" role="status" aria-busy={!error}>
-                {!error && (
-                  <>
-                    <span />
-                    <span />
-                    <span />
-                  </>
+        {selected ? (
+          <>
+            <TaskCard
+              task={selected}
+              activeRun={currentRun}
+              busy={busy === selected.id}
+              actions={actions}
+            />
+            <section className="shortcut-purpose">
+              <h3>这项任务</h3>
+              <p>
+                {selected.description ||
+                  `运行 ${selected.shortcut?.targetName}`}
+              </p>
+              <dl>
+                <dt>应用</dt>
+                <dd>{selected.shortcut?.applicationName}</dd>
+                <dt>任务</dt>
+                <dd>{selected.shortcut?.targetName}</dd>
+              </dl>
+              <p className="muted">
+                点击运行即可执行，不会重新配置或重放对话。
+              </p>
+            </section>
+            {currentRun && (
+              <section className="shortcut-purpose">
+                <h3>{isRunning(currentRun) ? "正在运行" : "最近一次运行"}</h3>
+                <p>{taskLabels[currentRun.state] ?? currentRun.state}</p>
+                {currentRun.error && (
+                  <p className="shortcut-run-error">
+                    {taskError(currentRun.error)}
+                  </p>
                 )}
-                <p>{error || t.common.loading}</p>
-              </div>
-            )
-          ) : tasks.length || runs.length ? (
-            <>
-              {tasks.length > 0 && (
-                <section
-                  className="details-section"
-                  aria-label={t.tasks.tabTasks}
-                >
-                  <h3 className="details-section-title">{t.tasks.tabTasks}</h3>
-                  {tasks.map((task) => (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      busy={busy === task.id}
-                      actions={actions}
-                    />
-                  ))}
-                </section>
-              )}
-              {runs.length > 0 && (
-                <section
-                  className="details-section"
-                  aria-label={t.details.recentRuns}
-                >
-                  <h3 className="details-section-title">
-                    {t.details.recentRuns}
-                    <span>{runs.length}</span>
-                  </h3>
-                  <RunList runs={runs} />
-                </section>
-              )}
-            </>
-          ) : (
-            <div className="details-empty">
-              <span className="details-empty-icon" aria-hidden="true">
-                <HistoryIcon />
-              </span>
-              <h3>{t.tasks.empty}</h3>
-              <p>{t.tasks.emptyHow}</p>
+                <small>{new Date(currentRun.createdAt).toLocaleString()}</small>
+              </section>
+            )}
+            <button
+              className="secondary-action"
+              onClick={() => configure(selected)}
+            >
+              让 AI 修改这项任务
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="shortcut-shelf-toolbar">
+              <p>已保存的任务，随时点击运行。</p>
+              <button className="secondary-action" onClick={() => configure()}>
+                <PlusIcon className="button-icon" />
+                添加
+              </button>
             </div>
-          )}
-        </MotionSwitch>
+            {tasks.length > 4 && (
+              <label className="search-field">
+                <SearchIcon />
+                <input
+                  aria-label="搜索快捷任务"
+                  placeholder="搜索任务"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </label>
+            )}
+            {visible.length ? (
+              <div className="shortcut-shelf-list">
+                {visible.map((task) => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    activeRun={taskRun(task, bootstrap.tasks)}
+                    busy={busy === task.id}
+                    actions={actions}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="details-empty">
+                <HistoryIcon className="details-empty-icon" />
+                <h3>{query ? "没有匹配的任务" : "还没有快捷任务"}</h3>
+                <p>
+                  {query
+                    ? "换个名称试试。"
+                    : "在对话中指定某一项已配置好的任务加入这里，或让 AI 在这里配置。"}
+                </p>
+                {!query && (
+                  <button
+                    className="primary-action"
+                    onClick={() => configure()}
+                  >
+                    让 AI 配置任务
+                  </button>
+                )}
+              </div>
+            )}
+          </>
+        )}
       </div>
+      {!selected && (
+        <footer className="shortcut-shelf-footer">
+          <button className="subtle-action" onClick={onOpenTasks}>
+            查看全部任务与运行记录
+          </button>
+        </footer>
+      )}
+      <ShortcutConfigurator
+        bootstrap={bootstrap}
+        open={configuring}
+        target={configTarget}
+        onClose={() => setConfiguring(false)}
+        reload={reload}
+      />
       <ConfirmDialog
-        open={pendingRemove != null}
-        title={t.tasks.deleteTitle}
-        confirmLabel={t.tasks.deleteAction}
-        onClose={() => setPendingRemove(null)}
+        open={removing != null}
+        title="删除快捷任务"
+        confirmLabel="删除"
+        onClose={() => setRemoving(null)}
         onConfirm={() => {
-          const task = pendingRemove;
-          setPendingRemove(null);
+          const task = removing;
+          setRemoving(null);
           if (task) void act(task.id, () => api.deleteWorkflow(task.id));
         }}
       >
-        {pendingRemove ? (
-          <>
-            <p>{t.tasks.deleteNote(pendingRemove.name)}</p>
-            <p>{t.tasks.deleteKeepsRuns}</p>
-            {pendingRemove.runnable ? <p>{t.tasks.deleteKeepsActive}</p> : null}
-          </>
-        ) : null}
+        <p>删除「{removing?.name}」的快捷入口？</p>
+        <p>已经配置好的任务不会被删除，正在运行的任务也不会被停止。</p>
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={renaming != null}
+        title="重命名快捷任务"
+        confirmLabel="保存"
+        onClose={() => setRenaming(null)}
+        onConfirm={() => {
+          const task = renaming;
+          setRenaming(null);
+          if (task && newName.trim())
+            void act(task.id, () =>
+              api.renameWorkflow(task.id, newName.trim()),
+            );
+        }}
+      >
+        <label className="shortcut-name-field">
+          任务名称
+          <input
+            autoFocus
+            value={newName}
+            onChange={(event) => setNewName(event.target.value)}
+            maxLength={120}
+          />
+        </label>
       </ConfirmDialog>
     </aside>
-  );
-}
-
-function TaskDetail({
-  detail,
-  runs,
-  busy,
-  actions,
-  onOpenConversation,
-}: {
-  detail: WorkflowDetail;
-  runs: TaskInfo[];
-  busy: string;
-  actions: TaskActions;
-  onOpenConversation(id: string): void;
-}) {
-  const t = useT();
-  const { summary, revision } = detail;
-  const related = runs.filter(
-    (run) =>
-      run.source?.kind === "savedWorkflow" &&
-      run.source.workflowId === summary.id,
-  );
-  return (
-    <>
-      <section className="detail-block">
-        <h3>{t.apiExplorer.purpose}</h3>
-        <p>{summary.description || t.details.noDescriptionYet}</p>
-        <dl className="detail-facts">
-          <div>
-            <dt>{t.details.statusLabel}</dt>
-            <dd>{summary.stateLabel}</dd>
-          </div>
-          <div>
-            <dt>{t.details.dependsTools}</dt>
-            <dd>{t.details.stepsCount(summary.nodeCount)}</dd>
-          </div>
-          <div>
-            <dt>{t.details.callsModel}</dt>
-            <dd>
-              {summary.zeroToken
-                ? t.bridge.no
-                : summary.modelUsage === "possible"
-                  ? t.details.maybeCalls
-                  : t.details.cannotConfirm}
-            </dd>
-          </div>
-          <div>
-            <dt>{t.details.sourceChat}</dt>
-            <dd>
-              {summary.sourceDeleted ? (
-                t.details.sourceDeletedNote
-              ) : summary.sourceConversationId ? (
-                <button
-                  className="subtle-action"
-                  onClick={() =>
-                    onOpenConversation(summary.sourceConversationId as string)
-                  }
-                >
-                  {t.details.openSourceChat}
-                </button>
-              ) : (
-                t.details.extractedFromRun
-              )}
-            </dd>
-          </div>
-        </dl>
-        {summary.issue && <p className="muted">{summary.issue}</p>}
-        <div className="detail-actions">
-          {summary.runnable ? (
-            <button
-              className="primary-action"
-              disabled={busy === summary.id}
-              onClick={() => actions.run(summary)}
-            >
-              运行
-            </button>
-          ) : (
-            <button
-              className="secondary-action"
-              disabled={busy === summary.id}
-              onClick={() =>
-                summary.state === "unavailable"
-                  ? actions.connect?.(summary)
-                  : actions.askAi?.(summary)
-              }
-            >
-              {summary.actionLabel}
-            </button>
-          )}
-          {actions.remove ? (
-            <button
-              className="secondary-action"
-              disabled={busy === summary.id}
-              onClick={() => actions.remove?.(summary)}
-            >
-              删除任务
-            </button>
-          ) : null}
-        </div>
-      </section>
-      <section className="detail-block">
-        <h3>{t.details.version}</h3>
-        <p className="muted">
-          {summary.publishedRevision
-            ? t.details.publishedRevision(summary.publishedRevision)
-            : t.details.noRelease}
-          {revision
-            ? ` · ${t.details.nodeCount(revision.validation.nodeCount)}`
-            : ""}
-        </p>
-        {revision && revision.validation.issues.length > 0 && (
-          <details>
-            <summary>
-              待解决的问题 · {revision.validation.issues.length} 项
-            </summary>
-            <ul>
-              {revision.validation.issues.map((issue) => (
-                <li key={`${issue.nodeId}-${issue.message}`}>
-                  {issue.nodeId ? `${issue.nodeId}：` : ""}
-                  {issue.message}
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
-      </section>
-      <section className="detail-block">
-        <h3>{t.details.recentRuns}</h3>
-        {related.length ? (
-          <RunList runs={related} />
-        ) : (
-          <p className="muted">{t.details.noRuns}</p>
-        )}
-      </section>
-    </>
-  );
-}
-
-function RunList({ runs }: { runs: TaskInfo[] }) {
-  const t = useT();
-  return (
-    <ul className="detail-runs">
-      {[...runs]
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-        .slice(0, 10)
-        .map((run) => (
-          <li key={run.id} data-running={isRunning(run)}>
-            <div className="detail-run-meta">
-              <span className="detail-run-state">
-                <i aria-hidden="true" />
-                {taskLabels[run.state] ?? run.state}
-              </span>
-              <time
-                dateTime={run.createdAt}
-                title={new Date(run.createdAt).toLocaleString()}
-              >
-                {new Date(run.createdAt).toLocaleString("zh-CN", {
-                  month: "2-digit",
-                  day: "2-digit",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </time>
-            </div>
-            <p className="detail-run-prompt" title={run.prompt}>
-              {run.prompt || t.details.noDescriptionYet}
-            </p>
-          </li>
-        ))}
-    </ul>
   );
 }

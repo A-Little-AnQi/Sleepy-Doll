@@ -11,6 +11,18 @@
 .task-card:hover {
   border-color: var(--border-strong);
 }
+.task-card-application {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-card[data-running="true"] {
+  border-color: var(--border-strong);
+  background: var(--subtle);
+}
 .task-card[data-state="archived"] {
   opacity: 0.72;
 }

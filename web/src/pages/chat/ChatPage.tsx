@@ -4,7 +4,6 @@ import "./ChatPage.css";
 import { Transcript } from "../../components/chat/Transcript";
 import { api } from "../../ipc/api";
 import {
-  CheckIcon,
   HelpIcon,
   SendIcon,
   SettingsIcon,
@@ -33,6 +32,11 @@ import type { Plan } from "../../session";
 import { DEFAULT_CONTEXT_WINDOW } from "../../models/presets";
 
 interface Props {
+  configuration?: boolean;
+  configurationTarget?: string | undefined;
+  draftScope?: string;
+  onSubmitted?(conversationId: string): void;
+  onSending?(sending: boolean): void;
   bootstrap: Bootstrap;
   conversationId?: string | undefined;
   onConversation(id: string): void;
@@ -41,18 +45,7 @@ interface Props {
   onOpenModels?(): void;
 }
 
-export function RunPlanCard({
-  plan,
-  save,
-}: {
-  plan: Plan;
-  save?:
-    | {
-        disabled: boolean;
-        onClick(): void;
-      }
-    | undefined;
-}) {
+export function RunPlanCard({ plan }: { plan: Plan }) {
   const [expanded, setExpanded] = useState(false);
   const t = useT();
   return (
@@ -94,17 +87,6 @@ export function RunPlanCard({
           </div>
         </div>
       </div>
-      {save && (
-        <button
-          type="button"
-          className="subtle-action save-workflow-action"
-          disabled={save.disabled}
-          onClick={save.onClick}
-        >
-          <CheckIcon className="button-icon" />
-          保存为快捷任务
-        </button>
-      )}
     </section>
   );
 }
@@ -116,6 +98,11 @@ export function ChatPage({
   reload,
   onComposerDraft,
   onOpenModels,
+  configuration = false,
+  configurationTarget,
+  draftScope,
+  onSubmitted,
+  onSending,
 }: Props) {
   const t = useT();
   const data = useSession(conversationId);
@@ -130,7 +117,7 @@ export function ChatPage({
     loading,
   } = data;
   const busy = isRunning(task);
-  const draftKey = `sleepy-doll-draft:${conversationId ?? "new"}`;
+  const draftKey = `sleepy-doll-draft:${conversationId ?? draftScope ?? "new"}`;
   const [prompt, setPrompt] = useState(
     () => localStorage.getItem(draftKey) ?? "",
   );
@@ -142,6 +129,9 @@ export function ChatPage({
   const [notice, setNotice] = useState("");
   const [unread, setUnread] = useState(false);
   const [sending, setSending] = useState(false);
+  useEffect(() => {
+    onSending?.(sending);
+  }, [sending, onSending]);
   const [stopping, setStopping] = useState(false);
   const interrupting = stopping || task?.state === "cancelling";
   // 工具名取自工具定义里的 label，没有 label 的不进表。
@@ -158,7 +148,6 @@ export function ChatPage({
   );
   const [error, setError] = useState("");
   const [confirming, setConfirming] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [pendingModel, setPendingModel] = useState<string | null>(null);
   const conversation = bootstrap.conversations.find(
@@ -166,7 +155,12 @@ export function ChatPage({
   );
   const selectedModel = resolveConversationModel(
     bootstrap.models,
-    conversation,
+    configuration
+      ? {
+          modelId:
+            pendingModel ?? conversation?.modelId ?? task?.modelId ?? null,
+        }
+      : conversation,
     pendingModel,
   );
   const contextWindow =
@@ -273,13 +267,20 @@ export function ChatPage({
         if (alive.current && current.current === origin)
           setNotice(t.chat.queuedStep);
       } else {
-        const run = await api.submitTask(
-          value,
-          origin,
-          clientKey,
-          origin ? undefined : selectedModel,
-        );
+        const run = await (
+          configuration
+            ? (prompt: string, id?: string, key?: string, model?: string) =>
+                api.configureShortcut(
+                  prompt,
+                  id,
+                  key,
+                  model,
+                  configurationTarget,
+                )
+            : api.submitTask
+        )(value, origin, clientKey, origin ? undefined : selectedModel);
         session(run.conversationId).start();
+        onSubmitted?.(run.conversationId);
         if (alive.current && current.current === origin)
           onConversation(run.conversationId);
         if (queue && alive.current && current.current === origin)
@@ -321,7 +322,9 @@ export function ChatPage({
       ? undefined
       : phaseLabel(task);
   return (
-    <section className={`chat-workspace${welcome ? " is-welcome" : ""}`}>
+    <section
+      className={`chat-workspace${welcome ? " is-welcome" : ""}${configuration ? " is-configuration" : ""}`}
+    >
       <MotionSwitch
         viewKey={conversationId ?? "new"}
         className="chat-scene-switch"
@@ -344,7 +347,12 @@ export function ChatPage({
                 src={mascot}
                 alt={t.chat.mascotAlt}
               />
-              <h2>{t.chat.startNew}</h2>
+              <h2>{configuration ? "配置快捷任务" : t.chat.startNew}</h2>
+              {configuration && (
+                <p className="muted">
+                  告诉 AI 要添加哪一项任务。配置好后保存，以后点击即可运行。
+                </p>
+              )}
               {!bootstrap.models.length &&
                 (onOpenModels ? (
                   <button
@@ -389,34 +397,9 @@ export function ChatPage({
                   tasks={bootstrap.tasks}
                   currentTask={task}
                   contextActivities={contextActivities}
+                  hideInternals={configuration}
                 />
-                {plan && (
-                  <RunPlanCard
-                    plan={plan}
-                    save={
-                      task?.state === "succeeded"
-                        ? {
-                            disabled:
-                              saving ||
-                              bootstrap.workflows.some(
-                                (flow) =>
-                                  flow.lastRunId === task.id ||
-                                  flow.sourceConversationId ===
-                                    task.conversationId,
-                              ),
-                            onClick: () => {
-                              setSaving(true);
-                              void act(() =>
-                                plan.steps.every((step) => !!step.tool)
-                                  ? api.extractWorkflow(task.id, plan.goal)
-                                  : api.extractStrategy(task.id, plan.goal),
-                              ).finally(() => setSaving(false));
-                            },
-                          }
-                        : undefined
-                    }
-                  />
-                )}
+                {plan && !configuration && <RunPlanCard plan={plan} />}
                 {question && (
                   <section className="run-question">
                     <h3>{t.chat.needInfo}</h3>
@@ -640,6 +623,7 @@ export function ChatPage({
                     }
                     void act(async () => {
                       await api.setConversationModel(conversationId, id);
+                      if (configuration) setPendingModel(id);
                     });
                   }}
                 />

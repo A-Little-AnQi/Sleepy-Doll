@@ -43,7 +43,13 @@ try {
     {
       id: "task",
       name: "保留的快捷任务",
-      description: "fixture",
+      description: "运行指定的采集任务",
+      shortcut: {
+        applicationName: "BetterGI",
+        targetName: "指定的采集组",
+        prepare: [],
+        action: { tool: "fixture.run", arguments: { name: "指定的采集组" } },
+      },
       state: "draft",
       stateLabel: "草稿",
       actionLabel: "查看",
@@ -104,6 +110,7 @@ try {
     localStorage.setItem("sleepy-doll-locale", "zh");
     localStorage.setItem("sleepy-doll-theme", "dark");
     localStorage.setItem("sleepy-doll-sidebar-width", "248");
+    localStorage.setItem("sleepy-doll-details-open", "false");
   });
   await page.route("**/ipc", async (route) => {
     const request = route.request().postDataJSON();
@@ -316,9 +323,7 @@ try {
     0,
     "details panel bypassed confirmation",
   );
-  await taskDialog
-    .getByRole("button", { name: "删除任务", exact: true })
-    .click();
+  await taskDialog.getByRole("button", { name: "删除", exact: true }).click();
   await page.waitForFunction(
     () => !document.querySelector(".details-panel .task-card"),
   );

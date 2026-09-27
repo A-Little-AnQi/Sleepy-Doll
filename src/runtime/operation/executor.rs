@@ -55,6 +55,7 @@ impl StepResult {
 
 #[derive(Debug, Clone)]
 struct NodeReport {
+    id: String,
     result: StepResult,
     detail: String,
 }
@@ -195,6 +196,31 @@ impl<'a> TaskExecutor<'a> {
         let nodes = self.revision.nodes.clone();
         let mut stopped: Option<String> = None;
         self.walk(&nodes, &mut stopped).await?;
+        if self.revision.shortcut.is_some() {
+            let state = match self
+                .reports
+                .iter()
+                .find(|report| report.id == "launch")
+                .map(|report| report.result)
+            {
+                Some(StepResult::Succeeded) => RunState::Succeeded,
+                Some(StepResult::Unknown) => RunState::NeedsReview,
+                _ if self.reports_have_unknown() => RunState::NeedsReview,
+                _ => RunState::Failed,
+            };
+            let error = self
+                .reports
+                .iter()
+                .find(|report| matches!(report.result, StepResult::Failed | StepResult::Unknown))
+                .map(|report| report.detail.clone());
+            self.run.error = error;
+            self.run.result = Some(match state {
+                RunState::Succeeded => format!("已完成「{}」", self.revision.name),
+                RunState::NeedsReview => format!("「{}」的运行结果需要核对", self.revision.name),
+                _ => format!("未能运行「{}」", self.revision.name),
+            });
+            return Ok(state);
+        }
         let tally = |result: StepResult| {
             self.reports
                 .iter()
@@ -236,7 +262,17 @@ impl<'a> TaskExecutor<'a> {
             }
             self.budget.check_time()?;
             match self.execute(node).await {
-                Ok(()) => {}
+                Ok(()) => {
+                    if self.revision.shortcut.is_some()
+                        && node.id() != "launch"
+                        && self
+                            .reports
+                            .last()
+                            .is_some_and(|report| report.result != StepResult::Succeeded)
+                    {
+                        *stopped = Some(node.id().to_owned());
+                    }
+                }
                 Err(error @ Error::Cancelled) => return Err(error),
                 Err(error) => {
                     let message = error.user_message();
@@ -626,6 +662,7 @@ impl<'a> TaskExecutor<'a> {
 
     fn report(&mut self, id: &str, title: &str, result: StepResult, detail: String) -> Result<()> {
         self.reports.push(NodeReport {
+            id: id.into(),
             result,
             detail: detail.clone(),
         });

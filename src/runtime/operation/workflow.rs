@@ -87,6 +87,7 @@ impl Workflow {
             })
             .collect::<Vec<_>>();
         Some(WorkflowRevision {
+            shortcut: None,
             task_id: self.id.clone(),
             revision: self.revision,
             schema_version: super::task::SCHEMA_VERSION,

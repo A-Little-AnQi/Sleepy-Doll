@@ -1,0 +1,24 @@
+# 指定任务加入快捷任务
+
+只有用户明确说“加入快捷任务”“添加快捷入口”或在快捷任务 AI 配置区要求保存时创建。先配置好用户要的任务，确认精确名称、内容和当前调用契约。保存时不运行；不要把整个配置过程、订阅、准备组、UI 选择操作或历史 Job 放进入口。
+
+对于已配置的 BetterGI 调度器组，使用当前精确名称绑定 `bgi.run_script_group`。`bgi.api.invoke` 每次运行都要求当前运行已读取接口契约，所以在 binding.prepare 中放同一 methodId 的 bgi.api.describe；不要固化目录版本、临时 Job 或界面对象 ID。保存前已经读取实际契约，参数必须与之相符。
+
+```json
+{
+  "name": "血斛采集",
+  "description": "运行已配置好的血斛采集任务。",
+  "binding": {
+    "applicationName": "BetterGI",
+    "targetName": "Sleepy Doll-地图追踪-血斛",
+    "prepare": [{"tool": "bgi.api.describe", "arguments": {"methodId": "bgi.run_script_group"}}],
+    "action": {"tool": "bgi.api.invoke", "arguments": {"methodId": "bgi.run_script_group", "arguments": {"name": "Sleepy Doll-地图追踪-血斛"}}}
+  }
+}
+```
+
+这是 `shortcut.save` 的示例参数，任务名称以现场核实为准，不照抄示例创建组。原生运行入口已登记为单独工具时可直接绑定该工具；参数要使用该工具实际契约，不混用动态 invoke 的封装。
+
+修改入口时使用现有 id 更新；更改应用中的任务配置与更改入口是两件事，按用户要求分别完成。旧版流程先确定用户要留下的那一项任务再重新绑定，不运行旧流程进行猜测。
+
+普通运行请求不会顺手创建快捷入口。快捷任务运行时不重新订阅、配置或调用模型；前置未就绪时说明实际问题，由用户明确决定是否修改配置。面向用户只说“任务已加入快捷任务，点击即可运行”，不要展示工具、接口、桥接或绑定参数。

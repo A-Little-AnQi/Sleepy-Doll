@@ -370,6 +370,20 @@ export const api = {
       clientKey: crypto.randomUUID(),
       ...(expectedPublishedRevision ? { expectedPublishedRevision } : {}),
     }),
+  configureShortcut: (
+    prompt: string,
+    conversationId?: string,
+    clientKey: string = crypto.randomUUID(),
+    modelId?: string,
+    shortcutId?: string,
+  ) =>
+    invoke<TaskInfo>("shortcut.configure", {
+      prompt,
+      clientKey,
+      ...(conversationId ? { conversationId } : {}),
+      ...(modelId ? { modelId } : {}),
+      ...(shortcutId ? { shortcutId } : {}),
+    }),
   renameWorkflow: (id: string, name: string) =>
     invoke("workflow.rename", { id, name }),
   pinWorkflow: (id: string, pinned: boolean) =>

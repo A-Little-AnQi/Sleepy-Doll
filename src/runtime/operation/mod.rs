@@ -4,6 +4,7 @@ pub mod executor;
 pub mod kernel;
 pub mod operations;
 pub mod permissions;
+pub mod shortcuts;
 pub mod task;
 pub mod task_schema;
 pub mod task_store;

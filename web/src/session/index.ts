@@ -301,6 +301,11 @@ class Session {
               this.streams.delete(event.runId);
               refresh = true;
             }
+            if (event.kind === "shortcut.saved") {
+              window.dispatchEvent(
+                new CustomEvent("sleepy-doll:shortcut-saved"),
+              );
+            }
             if (event.kind === "cancel.requested") {
               const run = this.runs.get(event.runId);
               if (run && isRunning(run))

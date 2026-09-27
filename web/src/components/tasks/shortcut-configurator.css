@@ -1,0 +1,50 @@
+.sd-dialog.shortcut-configuration-dialog {
+  width: min(860px, 100%);
+  height: min(760px, 86vh);
+}
+.shortcut-configuration-dialog .sd-dialog-body {
+  padding: 0;
+  gap: 0;
+}
+.shortcut-configuration-dialog .sd-dialog-path {
+  font-family: inherit;
+  font-size: 12px;
+}
+.is-configuration .welcome-mascot {
+  display: none;
+}
+.is-configuration .chat-welcome {
+  padding: 24px;
+  gap: 10px;
+  max-width: 480px;
+}
+.is-configuration .chat-welcome h2 {
+  font-size: 22px;
+  letter-spacing: 0;
+}
+.is-configuration .chat-welcome p {
+  line-height: 1.7;
+}
+.is-configuration .chat-scroll {
+  padding: 24px;
+}
+.is-configuration .composer-dock {
+  padding: 12px 24px 20px;
+}
+
+.shortcut-config-state {
+  flex: 1;
+  align-self: center;
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.shortcut-configuration-dialog .sd-dialog-foot {
+  align-items: center;
+  flex-wrap: wrap;
+}
+@media (max-height: 650px) {
+  .sd-dialog.shortcut-configuration-dialog {
+    height: calc(100dvh - 48px);
+  }
+}

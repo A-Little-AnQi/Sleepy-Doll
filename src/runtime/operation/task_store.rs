@@ -17,6 +17,7 @@ use crate::{
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSummary {
+    pub shortcut: Option<super::shortcuts::ShortcutBinding>,
     pub id: String,
     pub name: String,
     pub description: String,
@@ -164,6 +165,28 @@ impl TaskStore {
                 definition.updated_at
             ],
         )?;
+        Ok(())
+    }
+
+    pub fn save_shortcut_atomically(
+        &self,
+        definition: &WorkflowDefinition,
+        revision: &WorkflowRevision,
+    ) -> Result<()> {
+        let mut db = self.connection.lock().unwrap();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute(
+            "INSERT INTO task_revisions(task_id,revision,payload,created_at) VALUES(?1,?2,?3,?4)",
+            params![
+                revision.task_id,
+                revision.revision,
+                serde_json::to_string(revision)?,
+                revision.created_at
+            ],
+        )?;
+        tx.execute("INSERT INTO task_definitions VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
+            ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,source_conversation_id=excluded.source_conversation_id,published_revision=excluded.published_revision,draft_revision=excluded.draft_revision,archived=excluded.archived,deleted=excluded.deleted,payload=excluded.payload,updated_at=excluded.updated_at",params![definition.id,definition.name,definition.description,definition.source_conversation_id,definition.published_revision,definition.draft_revision,definition.archived_at.is_some() as i32,definition.deleted_at.is_some() as i32,serde_json::to_string(definition)?,definition.updated_at])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -387,6 +410,9 @@ impl TaskStore {
             .map(|revision| revision.model_usage)
             .unwrap_or(ModelUsage::Unknown);
         TaskSummary {
+            shortcut: revision
+                .as_ref()
+                .and_then(|revision| revision.shortcut.clone()),
             id: definition.id.clone(),
             name: definition.name.clone(),
             description: definition.description.clone(),

@@ -156,6 +156,7 @@ impl AppController {
                 | "strategy.extract"
                 | "strategy.run"
                 | "workflow.run"
+                | "shortcut.save"
                 | "conversation.delete"
                 | "task.submit"
                 | "run.input"
@@ -409,6 +410,24 @@ impl AppController {
                 ))
             }
             "workflow.extract" => self.extract_task(&params),
+            "shortcut.save" => self
+                .supervisor
+                .save_shortcut(&params, params["sourceConversationId"].as_str()),
+            "shortcut.configure" => {
+                let key = params["clientKey"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                Ok(crate::runtime::types::public_run(
+                    &self.supervisor.configure_shortcut(
+                        required(&params, "prompt")?,
+                        params["conversationId"].as_str(),
+                        &key,
+                        params["modelId"].as_str(),
+                        params["shortcutId"].as_str(),
+                    )?,
+                ))
+            }
             "workflow.draft.create" | "workflow.draft.update" => self.save_draft(&params),
             "workflow.validate" => {
                 let task_id = required(&params, "id")?;

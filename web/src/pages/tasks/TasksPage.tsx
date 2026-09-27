@@ -1,310 +1,345 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "../../ipc/api";
-import { HistoryIcon, SearchIcon } from "../../components/icons";
+import { HistoryIcon, PlusIcon, SearchIcon } from "../../components/icons";
 import { TaskCard, type TaskActions } from "../../components/tasks/TaskCard";
+import { ShortcutConfigurator } from "../../components/tasks/ShortcutConfigurator";
+import { taskRun, taskError } from "../../components/tasks/task-display";
 import { isRunning, readError, taskLabels } from "../../session";
 import { Toast } from "../../components/overlay/Toast";
 import { ConfirmDialog } from "../../components/overlay/ConfirmDialog";
-import type { Bootstrap, TaskInfo, TaskSummary } from "../../ipc/types";
-import { MotionSwitch } from "../../components/controls/MotionSwitch";
 import { SlidingTabs } from "../../components/controls/SlidingTabs";
+import type { Bootstrap, TaskSummary } from "../../ipc/types";
 import "./TasksPage.css";
-import { useT, type Text } from "../../i18n";
 
-type Filter = "all" | "runnable" | "attention" | "archived";
-
-const filters = (t: Text): Array<{ id: Filter; label: string }> => [
-  { id: "all", label: t.tasks.all },
-  { id: "runnable", label: t.tasks.runnable },
-  { id: "attention", label: t.tasks.needsAttention },
-  { id: "archived", label: t.tasks.archived },
-];
-
-function matches(task: TaskSummary, filter: Filter) {
-  switch (filter) {
-    case "runnable":
-      return task.runnable;
-    case "attention":
-      return ["draft", "invalid", "unavailable"].includes(task.state);
-    case "archived":
-      return task.state === "archived";
-    default:
-      return task.state !== "archived";
-  }
-}
-
-/**
- * 快捷任务页：「快捷任务」与「运行记录」两个标签。
- */
 export function TasksPage({
   bootstrap,
   reload,
-  onOpenConversation,
   onOpenTask,
   onConnectTools,
 }: {
   bootstrap: Bootstrap;
   reload(): Promise<void>;
   onOpenConversation(id: string): void;
-  onOpenTask?: ((task: TaskSummary) => void) | undefined;
-  onConnectTools?: (() => void) | undefined;
+  onOpenTask?: (task: TaskSummary) => void;
+  onConnectTools?: () => void;
 }) {
-  const t = useT();
   const [tab, setTab] = useState<"tasks" | "runs">("tasks");
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
-  const [error, setError] = useState("");
+  const [archived, setArchived] = useState(false);
   const [busy, setBusy] = useState("");
-  const [tasks, setTasks] = useState<TaskSummary[]>(bootstrap.workflows);
-  const [pendingRemove, setPendingRemove] = useState<TaskSummary | null>(null);
-
-  useEffect(() => {
-    setTasks(bootstrap.workflows);
-  }, [bootstrap.workflows]);
-
+  const [error, setError] = useState("");
+  const [configuring, setConfiguring] = useState(false);
+  const [target, setTarget] = useState<TaskSummary>();
+  const [removing, setRemoving] = useState<TaskSummary | null>(null);
+  const [renaming, setRenaming] = useState<TaskSummary | null>(null);
+  const [newName, setNewName] = useState("");
+  const tasks = bootstrap.workflows.filter((task) => task.state !== "deleted");
+  const needle = query.trim().toLowerCase();
+  const visible = useMemo(
+    () =>
+      tasks
+        .filter(
+          (task) =>
+            task.shortcut &&
+            (archived
+              ? task.state === "archived"
+              : task.state !== "archived") &&
+            `${task.name} ${task.description} ${task.shortcut.applicationName} ${task.shortcut.targetName}`
+              .toLowerCase()
+              .includes(needle),
+        )
+        .sort(
+          (a, b) =>
+            Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name),
+        ),
+    [bootstrap.workflows, archived, needle],
+  );
+  const legacy = tasks.filter((task) => !task.shortcut);
+  const runs = bootstrap.tasks.filter(
+    (run) =>
+      run.source?.kind === "savedWorkflow" &&
+      run.prompt.toLowerCase().includes(needle),
+  );
   const act = async (id: string, action: () => Promise<unknown>) => {
     setBusy(id);
     setError("");
     try {
       await action();
       await reload();
-      setTasks(await api.workflowList());
     } catch (reason) {
-      setError(readError(reason));
+      setError(taskError(readError(reason)));
     } finally {
       setBusy("");
     }
   };
-
-  const visible = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return tasks.filter(
-      (task) =>
-        matches(task, filter) &&
-        (!needle ||
-          task.name.toLowerCase().includes(needle) ||
-          task.description.toLowerCase().includes(needle)),
-    );
-  }, [tasks, filter, query]);
-
+  const configure = (task?: TaskSummary) => {
+    setTarget(task);
+    setConfiguring(true);
+  };
   const actions: TaskActions = {
     run: (task) =>
-      void act(task.id, async () => {
-        const run = await api.runWorkflow(
-          task.id,
-          task.publishedRevision ?? undefined,
-        );
-        onOpenConversation(run.conversationId);
-      }),
+      void act(task.id, () =>
+        api.runWorkflow(task.id, task.publishedRevision ?? undefined),
+      ),
+    stop: (task) => {
+      const run = taskRun(task, bootstrap.tasks);
+      if (run) void act(task.id, () => api.cancelTask(run.id));
+    },
     rename: (task) => {
-      const name = window.prompt(t.tasks.renameHint, task.name);
-      if (name === null) return;
-      void act(task.id, () => api.renameWorkflow(task.id, name));
+      setRenaming(task);
+      setNewName(task.name);
     },
     pin: (task, pinned) =>
       void act(task.id, () => api.pinWorkflow(task.id, pinned)),
-    archive: (task, archived) =>
-      void act(task.id, () => api.archiveWorkflow(task.id, archived)),
-    copy: (task) => void act(task.id, () => api.copyWorkflow(task.id)),
-    remove: (task) => {
-      setPendingRemove(task);
-    },
-    askAi: (task) => {
-      onOpenConversation(task.sourceConversationId ?? "");
-      setError(t.tasks.editNote(task.name));
-    },
+    archive: (task, value) =>
+      void act(task.id, () => api.archiveWorkflow(task.id, value)),
+    remove: (task) => setRemoving(task),
+    askAi: (task) => configure(task),
     connect: () => onConnectTools?.(),
     open: (task) => onOpenTask?.(task),
-    openSource: (task) => {
-      if (task.sourceConversationId)
-        onOpenConversation(task.sourceConversationId);
-    },
   };
-
-  // 运行记录只收快捷任务的运行；普通对话的记录留在对话里，不混进来。
-  const runs = bootstrap.tasks.filter(
-    (run) =>
-      run.source?.kind !== "agent" &&
-      (!query.trim() ||
-        run.prompt.toLowerCase().includes(query.trim().toLowerCase())),
-  );
-
   return (
     <div className="page-sheet tasks-page">
       <div className="page-title">
-        <h2>{t.tasks.title}</h2>
-        <span className="muted">
-          {bootstrap.tasks.filter(isRunning).length} 项正在运行
-        </span>
+        <div>
+          <h2>快捷任务</h2>
+          <p className="tasks-intro">
+            把你指定的任务放在这里，之后点击即可运行。
+          </p>
+        </div>
+        <button className="primary-action" onClick={() => configure()}>
+          <PlusIcon className="button-icon" />
+          添加快捷任务
+        </button>
       </div>
       <div className="list-toolbar">
         <SlidingTabs
-          ariaLabel={t.tasks.heading}
+          ariaLabel="快捷任务"
           value={tab}
           onChange={setTab}
           items={[
-            { id: "tasks", name: t.tasks.tabTasks },
-            { id: "runs", name: t.tasks.runs },
+            { id: "tasks", name: "已保存任务" },
+            { id: "runs", name: "运行记录" },
           ]}
         />
+        <span className="muted">
+          {
+            bootstrap.tasks.filter(
+              (run) => run.source?.kind === "savedWorkflow" && isRunning(run),
+            ).length
+          }{" "}
+          项正在运行
+        </span>
       </div>
       {error && <Toast message={error} onDismiss={() => setError("")} />}
       <div className="list-toolbar">
         <label className="search-field">
           <SearchIcon />
           <input
-            aria-label={tab === "tasks" ? t.tasks.search : t.tasks.runsSearch}
-            placeholder={tab === "tasks" ? t.tasks.search : t.tasks.runsSearch}
+            aria-label={tab === "tasks" ? "搜索快捷任务" : "搜索运行记录"}
+            placeholder="搜索任务名称或应用"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
         {tab === "tasks" && (
           <div className="filter-row">
-            {filters(t).map((item) => (
-              <button
-                key={item.id}
-                className="subtle-action"
-                aria-pressed={filter === item.id}
-                onClick={() => setFilter(item.id)}
-              >
-                {item.label}
-              </button>
-            ))}
+            <button
+              className="subtle-action"
+              aria-pressed={!archived}
+              onClick={() => setArchived(false)}
+            >
+              已保存
+            </button>
+            <button
+              className="subtle-action"
+              aria-pressed={archived}
+              onClick={() => setArchived(true)}
+            >
+              已归档
+            </button>
           </div>
         )}
       </div>
-      <MotionSwitch viewKey={tab} kind="panel">
-        {tab === "tasks" ? (
-          visible.length ? (
+      {tab === "tasks" ? (
+        <>
+          {visible.length ? (
             <div className="task-grid">
               {visible.map((task) => (
                 <TaskCard
                   key={task.id}
                   task={task}
+                  activeRun={taskRun(task, bootstrap.tasks)}
                   busy={busy === task.id}
                   actions={actions}
-                  showSource
                 />
               ))}
             </div>
           ) : (
             <div className="empty-state">
               <HistoryIcon />
-              <h3>{query ? t.tasks.noMatch : t.tasks.empty}</h3>
-              <p>{query ? t.tasks.emptyHint : t.tasks.emptyHow}</p>
-              {query ? (
+              <h3>
+                {needle
+                  ? "没有匹配的任务"
+                  : archived
+                    ? "还没有归档任务"
+                    : "还没有快捷任务"}
+              </h3>
+              <p>
+                {needle
+                  ? "换个名称或清除筛选。"
+                  : archived
+                    ? "暂时不用的入口可以归档，随时恢复。"
+                    : "在对话中告诉 AI：把刚才配置好的某一项任务加入快捷任务。也可以在这里让 AI 配置。"}
+              </p>
+              {needle ? (
                 <button
                   className="secondary-action"
                   onClick={() => {
                     setQuery("");
-                    setFilter("all");
+                    setArchived(false);
                   }}
                 >
                   清除筛选
                 </button>
               ) : (
-                <button
-                  className="secondary-action"
-                  onClick={() => onOpenConversation("")}
-                >
-                  通过对话创建
-                </button>
+                !archived && (
+                  <button
+                    className="secondary-action"
+                    onClick={() => configure()}
+                  >
+                    让 AI 配置任务
+                  </button>
+                )
               )}
             </div>
-          )
-        ) : runs.length ? (
-          <div className="record-list">
-            {runs.map((run) => (
-              <RunRow
-                key={run.id}
-                run={run}
-                busy={busy === run.id}
-                onOpen={() => onOpenConversation(run.conversationId)}
-                onStop={() => void act(run.id, () => api.cancelTask(run.id))}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state">
-            <HistoryIcon />
-            <h3>{query ? t.tasks.runsNoMatch : t.tasks.runsEmpty}</h3>
-            <p>{query ? t.tasks.runsEmptyHint : t.tasks.runsEmptyHow}</p>
-          </div>
-        )}
-      </MotionSwitch>
+          )}
+          {legacy.length > 0 && !needle && !archived && (
+            <details className="tasks-legacy">
+              <summary>旧版流程 · {legacy.length} 项</summary>
+              <p>
+                原有内容已保留。指定其中的一项任务，让 AI 改为可直接运行的入口。
+              </p>
+              {legacy.map((task) => (
+                <div key={task.id}>
+                  <span>{task.name}</span>
+                  <button
+                    className="subtle-action"
+                    onClick={() => configure(task)}
+                  >
+                    让 AI 调整
+                  </button>
+                  <button
+                    className="subtle-action"
+                    onClick={() => setRemoving(task)}
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+            </details>
+          )}
+        </>
+      ) : runs.length ? (
+        <div className="record-list">
+          {runs.map((run) => {
+            const task = tasks.find(
+              (task) =>
+                run.source?.kind === "savedWorkflow" &&
+                task.id === run.source.workflowId,
+            );
+            return (
+              <div className="record" key={run.id}>
+                <div className="record-main">
+                  <span className="record-title">
+                    {task?.name ?? run.prompt}
+                  </span>
+                  <small>{new Date(run.createdAt).toLocaleString()}</small>
+                  {run.error && (
+                    <small className="shortcut-run-error">
+                      {taskError(run.error)}
+                    </small>
+                  )}
+                </div>
+                <span className="tag">
+                  {taskLabels[run.state] ?? run.state}
+                </span>
+                {isRunning(run) ? (
+                  <button
+                    className="subtle-action"
+                    disabled={busy === run.id || run.state === "cancelling"}
+                    onClick={() =>
+                      void act(run.id, () => api.cancelTask(run.id))
+                    }
+                  >
+                    {run.state === "cancelling" ? "正在停止" : "停止"}
+                  </button>
+                ) : (
+                  task?.shortcut && (
+                    <button
+                      className="subtle-action"
+                      onClick={() => onOpenTask?.(task)}
+                    >
+                      查看任务
+                    </button>
+                  )
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="empty-state">
+          <HistoryIcon />
+          <h3>{needle ? "没有匹配的记录" : "还没有运行记录"}</h3>
+          <p>快捷任务的运行结果会显示在这里。</p>
+        </div>
+      )}
+      <ShortcutConfigurator
+        bootstrap={bootstrap}
+        open={configuring}
+        target={target}
+        onClose={() => setConfiguring(false)}
+        reload={reload}
+      />
       <ConfirmDialog
-        open={pendingRemove != null}
-        title={t.tasks.deleteTitle}
-        confirmLabel={t.tasks.deleteAction}
-        onClose={() => setPendingRemove(null)}
+        open={removing != null}
+        title="删除快捷任务"
+        confirmLabel="删除"
+        onClose={() => setRemoving(null)}
         onConfirm={() => {
-          const task = pendingRemove;
-          setPendingRemove(null);
+          const task = removing;
+          setRemoving(null);
           if (task) void act(task.id, () => api.deleteWorkflow(task.id));
         }}
       >
-        {pendingRemove ? (
-          <>
-            <p>确定删除快捷任务「{pendingRemove.name}」？</p>
-            <p>{t.tasks.deleteKeepsRuns}</p>
-            {pendingRemove.runnable ? (
-              <p>此操作不会停止正在运行的任务。</p>
-            ) : null}
-          </>
-        ) : null}
+        <p>删除「{removing?.name}」的快捷入口？</p>
+        <p>已经配置好的任务不会被删除，正在运行的任务也不会被停止。</p>
       </ConfirmDialog>
-    </div>
-  );
-}
-
-function RunRow({
-  run,
-  busy,
-  onOpen,
-  onStop,
-}: {
-  run: TaskInfo;
-  busy: boolean;
-  onOpen(): void;
-  onStop(): void;
-}) {
-  const t = useT();
-  return (
-    <div className="record">
-      <div className="record-main">
-        <button className="record-title" onClick={onOpen}>
-          {run.prompt}
-        </button>
-        <small>
-          {new Date(run.createdAt).toLocaleString("zh-CN", {
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-          {run.source?.kind === "savedWorkflow" && t.tasks.suffix}
-        </small>
-        {run.error && <small>{run.error}</small>}
-      </div>
-      <span className="tag">{taskLabels[run.state] ?? run.state}</span>
-      {isRunning(run) ? (
-        <button
-          className="subtle-action"
-          disabled={busy || run.state === "cancelling"}
-          onClick={onStop}
-        >
-          {run.state === "queued"
-            ? "取消排队"
-            : run.state === "cancelling"
-              ? "正在停止"
-              : "停止任务"}
-        </button>
-      ) : (
-        <button className="subtle-action" onClick={onOpen}>
-          查看对话
-        </button>
-      )}
+      <ConfirmDialog
+        open={renaming != null}
+        title="重命名快捷任务"
+        confirmLabel="保存"
+        onClose={() => setRenaming(null)}
+        onConfirm={() => {
+          const task = renaming;
+          setRenaming(null);
+          if (task && newName.trim())
+            void act(task.id, () =>
+              api.renameWorkflow(task.id, newName.trim()),
+            );
+        }}
+      >
+        <label className="shortcut-name-field">
+          任务名称
+          <input
+            autoFocus
+            value={newName}
+            onChange={(event) => setNewName(event.target.value)}
+            maxLength={120}
+          />
+        </label>
+      </ConfirmDialog>
     </div>
   );
 }

@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import type { TaskSummary } from "../../ipc/types";
+import type { TaskSummary, TaskInfo } from "../../ipc/types";
+import { isRunning, taskLabels } from "../../session";
+import { taskError } from "./task-display";
 import { MoreIcon, PinIcon } from "../icons";
 import "./task-card.css";
 import { useT } from "../../i18n";
 
 export interface TaskActions {
+  stop?(task: TaskSummary): void;
   run(task: TaskSummary): void;
   rename?(task: TaskSummary): void;
   pin?(task: TaskSummary, pinned: boolean): void;
@@ -25,13 +28,16 @@ export function TaskCard({
   busy,
   actions,
   showSource,
+  activeRun,
 }: {
   task: TaskSummary;
   busy?: boolean;
   actions: TaskActions;
   showSource?: boolean;
+  activeRun?: TaskInfo | undefined;
 }) {
   const t = useT();
+  const running = isRunning(activeRun);
   const [menu, setMenu] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -57,7 +63,11 @@ export function TaskCard({
         ? () => actions.connect?.(task)
         : () => actions.open?.(task);
   return (
-    <article className="task-card" data-state={task.state}>
+    <article
+      className="task-card"
+      data-state={task.state}
+      data-running={running}
+    >
       <div className="task-card-head">
         <button className="task-card-name" onClick={() => actions.open?.(task)}>
           {task.name}
@@ -144,7 +154,9 @@ export function TaskCard({
                     actions.archive?.(task, task.state !== "archived");
                   }}
                 >
-                  {task.state === "archived" ? t.taskCard.restore : t.taskCard.archive}
+                  {task.state === "archived"
+                    ? t.taskCard.restore
+                    : t.taskCard.archive}
                 </button>
               )}
               {actions.remove && (
@@ -165,11 +177,23 @@ export function TaskCard({
       <p className="task-card-description">
         {task.description || t.taskCard.noDescription}
       </p>
+      {task.shortcut && (
+        <span className="task-card-application">
+          {task.shortcut.applicationName} · {task.shortcut.targetName}
+        </span>
+      )}
       <div className="task-card-foot">
         <span className="task-card-state" data-state={task.state}>
-          {task.stateLabel}
+          {running ||
+          (activeRun &&
+            task.state !== "unavailable" &&
+            task.state !== "archived")
+            ? (taskLabels[activeRun!.state] ?? task.stateLabel)
+            : task.shortcut && task.runnable
+              ? "可运行"
+              : task.stateLabel}
         </span>
-        {task.zeroToken && task.runnable && (
+        {!task.shortcut && task.zeroToken && task.runnable && (
           <span className="task-card-note" title={t.taskCard.offlineNote}>
             {t.taskCard.offlineShort}
           </span>
@@ -179,14 +203,27 @@ export function TaskCard({
         )}
         <button
           className="primary-action"
-          disabled={busy || task.state === "deleted"}
-          onClick={primary}
+          disabled={
+            busy ||
+            task.state === "deleted" ||
+            activeRun?.state === "cancelling"
+          }
+          onClick={running ? () => actions.stop?.(task) : primary}
         >
-          {busy ? t.app.running : task.actionLabel || t.taskCard.open}
+          {busy
+            ? "正在处理"
+            : running
+              ? activeRun?.state === "cancelling"
+                ? "正在停止"
+                : "停止"
+              : task.actionLabel || t.taskCard.open}
         </button>
       </div>
       {task.issue && task.state !== "archived" && (
-        <p className="task-card-issue">{task.issue}</p>
+        <p className="task-card-issue">{taskError(task.issue)}</p>
+      )}
+      {!running && activeRun?.error && task.state !== "archived" && (
+        <p className="task-card-issue">{taskError(activeRun.error)}</p>
       )}
     </article>
   );

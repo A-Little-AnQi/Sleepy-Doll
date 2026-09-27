@@ -519,6 +519,8 @@ impl TaskValidation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkflowRevision {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shortcut: Option<super::shortcuts::ShortcutBinding>,
     pub task_id: String,
     pub revision: u64,
     pub schema_version: u32,
@@ -712,6 +714,7 @@ pub fn compile(
         });
     }
     Ok(WorkflowRevision {
+        shortcut: None,
         task_id: task_id.into(),
         revision,
         schema_version: SCHEMA_VERSION,
