@@ -299,8 +299,15 @@ impl AppController {
                 let id = required(&params, "id")?;
                 let messages = self.supervisor.journal.conversation_messages(id)?;
                 let (activities, boundary) = self.supervisor.journal.context_activities(id)?;
+                let runs = self
+                    .supervisor
+                    .journal
+                    .conversation_runs(id)?
+                    .iter()
+                    .map(crate::runtime::types::public_run)
+                    .collect::<Vec<_>>();
                 Ok(
-                    json!({"id":id,"messages":messages,"contextActivities":activities,"contextActivityBoundary":boundary}),
+                    json!({"id":id,"messages":messages,"contextActivities":activities,"contextActivityBoundary":boundary,"runs":runs}),
                 )
             }
             "conversation.list" => Ok(json!(self.supervisor.conversations(

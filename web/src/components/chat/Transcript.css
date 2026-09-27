@@ -262,6 +262,11 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Outrank the global [role="status"] entrance rule, including when loaded later. */
+.turn-status[role="status"] {
+  animation: none;
+}
+
 .context-activity {
   display: flex;
   align-items: center;

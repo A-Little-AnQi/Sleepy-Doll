@@ -65,6 +65,15 @@ try {
   await page.addInitScript(() => {
     localStorage.setItem("sleepy-doll-locale", "zh");
     localStorage.setItem("sleepy-doll-theme", "dark");
+    window.eventReadStarts = 0;
+    const originalFetch = window.fetch;
+    window.fetch = function (...args) {
+      try {
+        if (JSON.parse(args[1]?.body ?? "{}").method === "events.read")
+          window.eventReadStarts++;
+      } catch {}
+      return originalFetch.apply(this, args);
+    };
   });
   const task = {
     id: "run",
@@ -79,7 +88,9 @@ try {
     kind,
     runId: "run",
     conversationId: "context-fixture",
-    data,
+    data: ["run.created", "run.changed"].includes(kind)
+      ? { ...data, revision: sequence }
+      : data,
   });
   const history = [
     { role: "user", content: "继续任务", runId: "run" },
@@ -127,6 +138,11 @@ try {
       result = {
         id: "context-fixture",
         messages: history,
+        runs: [
+          events.findLast((item) =>
+            ["run.created", "run.changed"].includes(item.kind),
+          )?.data ?? task,
+        ],
         contextActivities,
         contextActivityBoundary,
       };
@@ -248,15 +264,17 @@ try {
     false,
     "split historical event replay reopened process",
   );
-  const readsBeforeDeletion = eventReads;
-  await page.evaluate(() => window.forgetFixture());
+  await page.evaluate(() => {
+    window.forgetFixture();
+    window.readsAtDeletion = window.eventReadStarts;
+  });
   await page.waitForFunction(
     () => window.contextSnapshot.messages.length === 0,
   );
   await page.waitForTimeout(1200);
   assert.equal(
-    eventReads,
-    readsBeforeDeletion,
+    await page.evaluate(() => window.eventReadStarts),
+    await page.evaluate(() => window.readsAtDeletion),
     "deleted session kept polling or reopened itself",
   );
   assert.equal(
@@ -324,6 +342,7 @@ try {
       compactionInProcess: true,
       summaryClosesIntoDisclosure: true,
       historyStartsCollapsed: true,
+      authoritativeRunSnapshotPreventsOldEventRegression: true,
       usageTooltipHasNoCompaction: true,
       newFallback: 256000,
       reportedCapacityAdopted: true,

@@ -222,6 +222,7 @@ export const api = {
     invoke<{
       id: string;
       messages: MessageInfo[];
+      runs?: TaskInfo[];
       contextActivities?: import("./types").ContextActivity[];
       contextActivityBoundary?: number;
     }>("conversation.get", { id }),

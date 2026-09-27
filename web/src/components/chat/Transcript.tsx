@@ -16,6 +16,7 @@ import type { ContextActivity, MessageInfo, TaskInfo } from "../../ipc/types";
 import "./Transcript.css";
 import { useT } from "../../i18n";
 import { usePresentedText } from "./usePresentedText";
+import { isRunning } from "../../session";
 import { prepareCjkStrong, remarkCjkStrong } from "./remarkCjkStrong";
 
 type Call = NonNullable<MessageInfo["toolCalls"]>[number];
@@ -619,8 +620,13 @@ export const Transcript = memo(function Transcript({
             (part) =>
               part.kind === "context" && part.activity.state === "running",
           );
+        // A persisted response can still be commentary in an active run.
+        // Only completion may replace its stable indicator and collapse the process.
         const finalIndex =
-          terminal?.kind === "text" && !terminal.hasTools && !compacting
+          terminal?.kind === "text" &&
+          !terminal.hasTools &&
+          !compacting &&
+          (!active || !task || !isRunning(task))
             ? turn.parts.length - 1
             : -1;
         const answer = finalIndex >= 0 ? turn.parts[finalIndex] : undefined;
@@ -660,9 +666,9 @@ export const Transcript = memo(function Transcript({
                   >
                     <span className="activity-spinner" aria-hidden="true" />
                     <span>
-                      {!phase || phase === "等待模型响应"
-                        ? t.transcript.thinkingRunning
-                        : phase}
+                      {phase === "正在停止"
+                        ? phase
+                        : t.transcript.thinkingRunning}
                     </span>
                     <time aria-hidden="true">{seconds}s</time>
                   </div>

@@ -80,6 +80,7 @@ export interface ContextActivity {
 }
 
 export interface TaskInfo {
+  revision?: number;
   id: string;
   conversationId: string;
   prompt: string;

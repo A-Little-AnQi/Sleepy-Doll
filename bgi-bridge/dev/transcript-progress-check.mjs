@@ -16,6 +16,7 @@ const {useState}=React;
 const {createRoot}=ReactDOM;
 import {Transcript} from '/src/components/chat/Transcript.tsx';
 import '/src/product.css';
+import '/src/motion.css';
 function Fixture(){
  const [state,setState]=useState({messages:[],stream:'',phase:'等待模型响应',seconds:1,toolLabels:{},tasks:[],running:true});
  const [generation,setGeneration]=useState(0);
@@ -134,6 +135,11 @@ try {
     0,
     "thinking indicator must not be a disclosure",
   );
+  assert.equal(
+    await status.evaluate((node) => getComputedStyle(node).animationName),
+    "none",
+    "global status-enter overrides the thinking indicator's no-animation rule",
+  );
   await page.evaluate(
     () =>
       (window.fixtureStatus = document.querySelector(
@@ -157,6 +163,21 @@ try {
     await status.isVisible(),
     true,
     "reasoning-only response hid the thinking indicator",
+  );
+  state = {
+    ...state,
+    messages: [messages[0], message("继续，先确认已有任务。")],
+  };
+  await update();
+  assert.equal(
+    await status.isVisible(),
+    true,
+    "ongoing commentary temporarily hid the thinking indicator",
+  );
+  assert.equal(
+    await page.locator("[data-answer]").isVisible(),
+    false,
+    "ongoing commentary was treated as a final answer",
   );
   state = { ...processState, phase: "正在执行" };
   await update();
@@ -191,12 +212,63 @@ try {
   );
   assert.equal(await status.isVisible(), true);
   assert(
+    (await status.textContent()).includes("思考中"),
+    "tool execution replaced the independent thinking indicator",
+  );
+  assert(
     await page.evaluate(
       () =>
         window.fixtureProcess ===
         document.querySelector(".assistant .process-disclosure"),
     ),
     "status updates remounted process",
+  );
+  await page.evaluate(() => {
+    window.statusSamples = [];
+    window.watchStatus = true;
+    const sample = () => {
+      const node = document.querySelector(".assistant .turn-status");
+      window.statusSamples.push({
+        same: node === window.fixtureStatus,
+        visible: Boolean(node?.getClientRects().length),
+        opacity: node ? getComputedStyle(node).opacity : "0",
+        animation: node ? getComputedStyle(node).animationName : "missing",
+      });
+      if (window.watchStatus) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  for (const phase of [
+    "等待模型响应",
+    "等待工具完成",
+    "正在执行",
+    "正在核对结果",
+    "等待模型响应",
+  ]) {
+    state = { ...state, phase };
+    await update();
+    await page.waitForTimeout(32);
+    assert((await status.textContent()).includes("思考中"));
+  }
+  const activity = disclosure.locator(".activity-summary").first();
+  await activity.click();
+  await page.waitForTimeout(250);
+  await activity.click();
+  await page.waitForTimeout(250);
+  const samples = await page.evaluate(() => {
+    window.watchStatus = false;
+    return window.statusSamples;
+  });
+  assert(samples.length > 10);
+  assert(
+    samples.every(
+      (sample) =>
+        sample.same &&
+        sample.visible &&
+        sample.opacity === "1" &&
+        sample.animation === "none",
+    ),
+    "tool phase/disclosure updates blinked the thinking indicator",
   );
   state = {
     ...state,
@@ -284,6 +356,8 @@ try {
       independentThinkingIndicator: true,
       reasoningOnlyFeedback: true,
       statusNodePreserved: true,
+      productionMotionStylesCovered: true,
+      phaseAndDisclosureUpdatesNeverHideOrFadeStatus: true,
       finalCollapsesProcess: true,
       streamedFinalPreserved: true,
       historyStartsCollapsed: true,

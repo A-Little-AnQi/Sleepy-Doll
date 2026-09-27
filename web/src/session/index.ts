@@ -150,6 +150,30 @@ class Session {
     this.snapshot = { ...this.snapshot, ...patch };
     this.listeners.forEach((listener) => listener());
   }
+  private acceptRun(run: TaskInfo) {
+    const previous = this.runs.get(run.id);
+    if (previous && (previous.revision ?? 0) > (run.revision ?? 0)) return;
+    this.runs.set(run.id, run);
+    this.pendingRuns.set(run.id, run);
+    if (!isRunning(run)) {
+      this.approvals.delete(run.id);
+      this.questions.delete(run.id);
+      for (const activity of this.contextActivities.values())
+        if (activity.runId === run.id && activity.state === "running")
+          activity.state = "failed";
+    }
+  }
+  private acceptRunSnapshot(history: { runs?: TaskInfo[] }) {
+    for (const run of history.runs ?? []) this.acceptRun(run);
+  }
+  private currentTask() {
+    const runs = [...this.runs.values()];
+    return (
+      runs.find((run) => isRunning(run) && run.state !== "queued") ??
+      runs.find(isRunning) ??
+      runs.at(-1)
+    );
+  }
   private acceptHistory(messages: MessageInfo[]) {
     for (const message of messages) {
       if (
@@ -223,9 +247,15 @@ class Session {
             if (this.disposed) break;
             this.acceptHistory(history.messages);
             this.acceptContext(history);
+            this.acceptRunSnapshot(history);
+            const task = this.currentTask();
             this.publish({
+              task,
+              queued: [...this.runs.values()].filter(
+                (run) => run.state === "queued",
+              ),
               messages: history.messages,
-              stream: this.streamFor(this.snapshot.task?.id),
+              stream: this.streamFor(task?.id),
               contextActivities: [...this.contextActivities.values()].map(
                 (activity) => ({ ...activity }),
               ),
@@ -249,17 +279,8 @@ class Session {
             if (event.sequence <= this.cursor) continue;
             if (["run.created", "run.changed"].includes(event.kind)) {
               const run = event.data as unknown as TaskInfo;
-              this.runs.set(run.id, run);
-              this.pendingRuns.set(run.id, run);
+              this.acceptRun(run);
               refresh = true;
-              if (!isRunning(run)) {
-                this.approvals.delete(run.id);
-                this.questions.delete(run.id);
-                for (const activity of this.contextActivities.values()) {
-                  if (activity.runId === run.id && activity.state === "running")
-                    activity.state = "failed";
-                }
-              }
             }
             if (
               event.kind === "context.compaction.started" &&
@@ -354,11 +375,6 @@ class Session {
             }
             this.cursor = event.sequence;
           }
-          const runs = [...this.runs.values()];
-          const task =
-            runs.find((run) => isRunning(run) && run.state !== "queued") ??
-            runs.find(isRunning) ??
-            runs.at(-1);
           // Commit persisted messages and their stream replacement together.
           // Publishing in between briefly duplicates answers and changes height.
           const history =
@@ -367,7 +383,10 @@ class Session {
           if (history) {
             this.acceptHistory(history.messages);
             this.acceptContext(history);
+            this.acceptRunSnapshot(history);
           }
+          const runs = [...this.runs.values()];
+          const task = this.currentTask();
           if (batch.events.length || history || this.snapshot.error)
             this.publish({
               ...(history ? { messages: history.messages } : {}),
