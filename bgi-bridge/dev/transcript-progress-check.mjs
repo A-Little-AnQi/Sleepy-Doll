@@ -115,6 +115,50 @@ try {
       state,
       remount,
     });
+  const processState = state;
+  state = {
+    ...state,
+    messages: [messages[0]],
+    currentTask: { ...task, state: "deciding" },
+    seconds: 1,
+  };
+  await update();
+  const status = page.locator(".assistant .turn-status");
+  await status.waitFor();
+  assert(
+    (await status.textContent()).includes("思考中"),
+    "empty waiting turn has no thinking indicator",
+  );
+  assert.equal(
+    await status.locator("button, .sd-chevron").count(),
+    0,
+    "thinking indicator must not be a disclosure",
+  );
+  await page.evaluate(
+    () =>
+      (window.fixtureStatus = document.querySelector(
+        ".assistant .turn-status",
+      )),
+  );
+  state = {
+    ...state,
+    messages: [
+      messages[0],
+      { ...message(""), reasoning: { text: "内部推理内容" } },
+    ],
+    seconds: 2,
+  };
+  await update();
+  assert.equal(
+    await page.getByText("内部推理内容", { exact: true }).count(),
+    0,
+  );
+  assert.equal(
+    await status.isVisible(),
+    true,
+    "reasoning-only response hid the thinking indicator",
+  );
+  state = { ...processState, phase: "正在执行" };
   await update();
   const disclosure = page.locator(".assistant .process-disclosure");
   await disclosure
@@ -137,6 +181,15 @@ try {
     state = { ...state, seconds };
     await update();
   }
+  assert(
+    await page.evaluate(
+      () =>
+        window.fixtureStatus ===
+        document.querySelector(".assistant .turn-status"),
+    ),
+    "phase/clock updates remounted thinking indicator",
+  );
+  assert.equal(await status.isVisible(), true);
   assert(
     await page.evaluate(
       () =>
@@ -176,6 +229,11 @@ try {
       "已删除血斛的五条路线，其他路线保留。",
   );
   assert.equal(await disclosure.getAttribute("data-expanded"), "false");
+  assert.equal(
+    await status.isVisible(),
+    false,
+    "thinking indicator remained after final answer",
+  );
   assert.equal(
     await page.locator("[data-answer]").textContent(),
     final,
@@ -223,6 +281,8 @@ try {
   console.log(
     JSON.stringify({
       liveProgressVisible: true,
+      independentThinkingIndicator: true,
+      reasoningOnlyFeedback: true,
       statusNodePreserved: true,
       finalCollapsesProcess: true,
       streamedFinalPreserved: true,

@@ -56,6 +56,7 @@
 
 .process-disclosure[hidden],
 .process-disclosure-summary[hidden],
+.turn-status[hidden],
 .assistant-message[hidden] {
   display: none;
 }
@@ -243,6 +244,22 @@
 .process-status {
   color: var(--muted);
   font-size: var(--font-meta);
+}
+
+.turn-status {
+  display: inline-flex;
+  justify-self: start;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  min-height: 22px;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  animation: none;
+}
+
+.turn-status time {
+  font-variant-numeric: tabular-nums;
 }
 
 .activity-summary {

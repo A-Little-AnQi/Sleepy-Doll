@@ -167,3 +167,9 @@ BGI 的技能、工具说明和单项功能卡明确直接资源／设置／领�
 使用用户提供的现有仓库 `E:/BetterGIProject/mno/better-genshin-impact`，按用户选择切换到 `mno-version`（提交 `56bbb8907cd45856790679076d411f3921669afe`）。未修改该仓库源码或创建副本。执行 `dotnet publish BetterGenshinImpact/BetterGenshinImpact.csproj -c Release -p:PublishProfile=FolderProfile --disable-build-servers` 成功，保留项目默认 publish 输出。实际生成的单文件版本为 `0.78.91+mno.0924`。
 
 直接使用 Sleepy Doll 发布目录中的 `BgiBridge.Recovery.exe origin` 解析最终 `BetterGI.exe`，得到 `state=nonOfficial`、`evidence=embeddedSourceLink`、`repository=Bedrockx/better-genshin-impact`；本机官方 `D:/BetterGI/BetterGI.exe` 仍得到 `official`。随后在隔离配置／数据库下调用实际 AppController 的 `bridge.setEnabled`，返回 `ok=false`、`error=连接失败，请使用官方版本的BetterGI。`，在启动与注入前拒绝。首次隔离配置把目录指向未创建的 catalog 子目录导致驱动器启动失败，改为已有夹具根目录后验证通过。测试未启动 fork 程序或游戏，没有模型请求，隔离配置与数据库已清理。此结果覆盖真实发布包及连接入口，不只是人为构造 SourceLink JSON。
+
+## 独立的运行标志
+
+删除运行中折叠标题时遗漏了独立状态标志。真实对话“你能做哪些事”约 45 秒后完成，但首个正文前和只有推理事件时没有可见反馈。助手轮次顶部现保留非交互的状态行：思考中／当前阶段及用时；不包含按钮、箭头，不控制正文折叠。进度正文仍直接显示，最终正文出现后才收起过程并隐藏运行标志。等待用户／审批时使用既有交互卡，不误标思考中。
+
+浏览器回归新增空正文等待、仅推理事件、独立标志无折叠控件、计时／阶段变化不重新挂载及最终回答清除标志，原有过程可见、总结接续与历史首帧折叠检查继续通过。没有修改模型请求、上下文、决策或工具执行逻辑。

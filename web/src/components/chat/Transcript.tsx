@@ -589,6 +589,25 @@ export const Transcript = memo(function Transcript({
                 </div>
               ) : (
                 <>
+                  <div
+                    className="turn-status"
+                    role="status"
+                    hidden={
+                      !active ||
+                      Boolean(answer) ||
+                      ["awaitingUser", "awaitingApproval"].includes(
+                        task?.state ?? "",
+                      )
+                    }
+                  >
+                    <span className="activity-spinner" aria-hidden="true" />
+                    <span>
+                      {!phase || phase === "等待模型响应"
+                        ? t.transcript.thinkingRunning
+                        : phase}
+                    </span>
+                    <time aria-hidden="true">{seconds}s</time>
+                  </div>
                   <ProcessDisclosure
                     visible={hasProcess || (active && !answer)}
                     collapseKey={finalIndex >= 0 ? finalIndex : undefined}
