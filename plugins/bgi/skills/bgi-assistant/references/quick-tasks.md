@@ -12,7 +12,7 @@
     "applicationName": "BetterGI",
     "targetName": "Sleepy Doll-地图追踪-血斛",
     "prepare": [{"tool": "bgi.api.describe", "arguments": {"methodId": "bgi.run_script_group"}}],
-    "action": {"tool": "bgi.api.invoke", "arguments": {"methodId": "bgi.run_script_group", "arguments": {"name": "Sleepy Doll-地图追踪-血斛"}}}
+    "action": {"tool": "bgi.api.invoke", "arguments": {"methodId": "bgi.run_script_group", "arguments": {"groupName": "Sleepy Doll-地图追踪-血斛", "waitForCompletion": true}}}
   }
 }
 ```
@@ -24,3 +24,5 @@
 普通运行请求不会顺手创建快捷入口。快捷任务运行时不重新订阅、配置或调用模型；前置未就绪时说明实际问题，由用户明确决定是否修改配置。面向用户只说“任务已加入快捷任务，点击即可运行”，不要展示工具、接口、桥接或绑定参数。
 
 封装表单中的 shortcut.save 只生成预览，AI 应立即结束，不声称已保存；用户会在表单确认后保存。若提供原对话资料，复用其中已核实的具体名称并按需只读确认，不另开一项新任务。普通原对话中的明确加入请求则直接保存入口。
+
+快捷入口的配置组调用设置 waitForCompletion=true，只用于无模型执行器跟踪卡片运行／停止；普通对话的运行请求默认 false，启动交接后结束，不继承快捷入口的等待选项。

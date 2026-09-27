@@ -3,17 +3,17 @@
 ## 执行任务
 
 1. “跑个 X”“运行下 X”默认把 X 当作资源目标，先调用一次 `bgi.user.resolve`，使用用户原话或目标名称。它在本机未命中时自动查当前全仓索引。不要先 `bgi.api.search`，也不要列 AutoPathing 或逐条读取路线 JSON。用户明确指定本体动作或一条龙时才走对应原生动作。
-2. `verdict=run` 时直接读取 `bgi.run_script_group` 契约并传入精确 `name`。路径缺失时运行时会拒绝执行；不要在 `repair` 状态下调用它。
+2. `verdict=run` 时直接读取 `bgi.run_script_group` 契约并传入精确 `groupName`。路径缺失时运行时会拒绝执行；不要在 `repair` 状态下调用它。
 3. `verdict=repair` 时只处理 `missing` 列出的路径：更新仓库或订阅后再次 `resolve`。
 3a. `resourceFound` 表示已有中央仓库证据。直接用 `repository.items`，不用重复查或刷新；采集选择一个完整作者包并核对角色前提。describe/invoke `bgi.subscribe_script_resources` 安装该目录，再 `bgi.prepare_pathing_group`，使用返回的 groupName 运行。JS 候选按定义读取参数、订阅和配置。不能逐条读、重写或重命名叶子路线 JSON。
 3b. `notFound` 表示本机与当前全仓索引均未命中，核对名称后，确需更新才刷新一次再 resolve。`lookupFailed` 是仓库查询失败，处理返回的错误，不能报告资源不存在。单独使用 `bgi.repo.search` 时分类无结果也不能代表全仓不存在。
 3c. `create` 的 candidates 明确区分 `Pathing` 与 `Javascript`。JS 先 inspect_script，settings 来源是 manifest 的 settingsUi；读取参数、README 与必要源码后，用 `bgi.prepare_js_group` 的 folderName/settings 建组，随后运行返回的 groupName。本机自建 JS 可以执行，不要求中央仓库同名条目。地图追踪不能套 JS 设置流程。
 4. 只有准备提交执行时才调用一次 `bgi.state.get`，检查截图器、游戏句柄、任务锁和窗口状态。纯查询或文件编辑不需要状态快照。`ready` 以**进入游戏主界面**为准：截图器就绪但仍在登录或加载画面时调用会被拒绝，等 `bgi.get_status` 的 `ready=true` 再提交。`gameResolution.sixteenToNine=false` 时先把游戏或远程桌面会话调到 16:9（如 1920x1080），启动参数 `-screen-width` 对已初始化过的原神不生效。
-4b. 未就绪时直接 describe/invoke `bgi.start_game`，再 `bgi.get_status` / `bgi.wait_ready`；不要先搜索截图器 ViewModel 命令，更不能明知未就绪仍试跑。游戏已就绪直接 describe/invoke `bgi.run_script_group`，不用另找运行命令。
+4b. 未就绪时直接 describe/invoke `bgi.start_game`，再 `bgi.wait_ready` 一次阻塞等待（默认 120 秒，超时后报告，不由模型轮询）；不要先搜索截图器 ViewModel 命令，更不能明知未就绪仍试跑。游戏已就绪直接 describe/invoke `bgi.run_script_group`，不用另找运行命令。
 4a. 目标是每日/清体力/周常一条龙时用 `bgi.run_one_dragon`（宿主原生任务链，`configName` 可选），不要为它建调度器配置组；它收尾可能自动退出游戏。用户要求退出原神或任务链收尾时用 `bgi.exit_game`（正常关闭，超时强结束），核验 `gameHandle` 回落后即完成。
 5. 其他动作若已知道精确 `methodId`，直接 `bgi.api.describe`；否则只在 `command` 组按一个动作词搜索一次。
 6. 契约必须同时满足：`callable=true`、参数可提供、接口确实作用于目标对象。其他低层命令仍依赖界面当前选择时，不得声称能按名称执行。
-7. `bgi.api.invoke` 已由运行时跟踪 Job，等待期间不调用模型。普通“运行／启动”请求收到已接受、已启动或执行入口返回证据后，直接用 outcome/evidence 给最终总结并结束本轮；不再查询 Job、任务状态、日志、截图，不用睡眠轮询或重跑。启动或方法返回不写成业务全部完成。只有用户明确要求等待结果、后续步骤、进度或排错时才继续对应流程；等待使用阻塞工具或无需模型的流程，不由 AI 每轮轮询。
+7. 配置组普通运行使用 `waitForCompletion=false`（默认），只等宿主接受启动交接，立即总结并结束对话，不等整组脚本跑完，不查询 Job、状态、日志、截图或睡眠轮询。只有用户明确要等结果、后续步骤或跟踪时才用 true。调用由运行时阻塞，期间不调用模型。返回的 verified/verificationScope=launch 只核验交接，不代表业务成功；accepted=true 写“已提交运行”，不能写“全部完成”。快捷入口用 true 跟踪运行／停止，确定性执行器不调用模型。
 8. 接口不可调用时直接说明唯一阻塞项。不要继续换中英文、查插件、搜生命周期接口或让用户重复提供已经查到的信息。
 
 

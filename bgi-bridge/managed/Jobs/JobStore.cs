@@ -21,7 +21,7 @@ public static class JobState
         state is Cancelled or Completed or Failed or Interrupted;
 }
 
-/// <summary>BGI 不提供权威业务结果，默认 unknown，由 agent 用 state 观测收敛。</summary>
+/// <summary>业务成功默认 unknown；可单独核验配置或启动交接范围，不能扩大为业务全部完成。</summary>
 public static class Verification
 {
     public const string Unknown = "unknown";
@@ -78,13 +78,13 @@ public sealed class JobStore(int keep = 200)
     public JobSnapshot MarkRunning(string id) =>
         Update(id, job => job with { State = JobState.Running });
 
-    public JobSnapshot MarkCompleted(string id, object? result, bool verified = false) =>
+    public JobSnapshot MarkCompleted(string id, object? result, bool verified = false, string? reason = null) =>
         Update(id, job => job with
         {
             State = JobState.Completed,
             Result = result,
             VerificationStatus = verified ? "succeeded" : Verification.Unknown,
-            VerificationReason = verified ? "配置内存值与原子落盘结果已核验。" : "处理器已返回；结果含义按该接口 guide 的 verification 字段判定。",
+            VerificationReason = verified ? reason ?? "配置内存值与原子落盘结果已核验。" : "处理器已返回；结果含义按该接口 guide 的 verification 字段判定。",
             EndedAt = DateTimeOffset.UtcNow,
         });
 

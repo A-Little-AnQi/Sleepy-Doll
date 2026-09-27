@@ -61,9 +61,10 @@ public static class StatusTools
         registry.Register(
             "bgi.wait_ready",
             Group,
-            "最多等待 20 秒，期间读取当前游戏状态；就绪、分辨率错误或游戏未运行时立即返回。",
-            async (_, cancellation) =>
+            "默认阻塞等待 120 秒（可指定 1 到 180 秒），就绪、分辨率错误或游戏未运行时立即返回；不由模型轮询。",
+            async (arguments, cancellation) =>
             {
+                var seconds = arguments.TryGetProperty("timeoutSeconds", out var timeout) ? timeout.GetInt32() : 120;
                 var watch = Stopwatch.StartNew();
                 while (true)
                 {
@@ -74,7 +75,7 @@ public static class StatusTools
                             ? "resolution"
                         : watch.Elapsed >= TimeSpan.FromSeconds(5) && !Host.GameProcessRunning() && !Host.CaptureReady
                             ? "notRunning"
-                        : watch.Elapsed >= TimeSpan.FromSeconds(20) ? "timeout" : null;
+                        : watch.Elapsed >= TimeSpan.FromSeconds(seconds) ? "timeout" : null;
                     if (outcome is not null)
                         return new
                         {
@@ -88,19 +89,15 @@ public static class StatusTools
                     await Task.Delay(TimeSpan.FromSeconds(2), cancellation).ConfigureAwait(false);
                 }
             },
-            inputSchema: System.Text.Json.JsonSerializer.SerializeToElement(new
-            {
-                type = "object",
-                additionalProperties = false,
-            }),
+            inputSchema: AgentSchemas.Object(("timeoutSeconds",ArgumentSchema.Parse("""{"type":"integer","minimum":1,"maximum":180,"default":120,"description":"等待主界面的最长秒数；默认 120，整个等待在工具内阻塞，不逐次调用模型。"}"""),false)),
             guide: new AgentGuide(
                 "等待游戏就绪",
-                "在游戏启动后等待最多 20 秒，返回最新状态；发现非 16:9 时不继续等主界面。",
+                "在游戏启动后默认阻塞等待最多 120 秒，返回最新状态；发现非 16:9 时不继续等主界面。",
                 ["bgi.start_game 返回仍在加载，需要等待游戏进入主界面时。"],
                 ["BetterGI 桥已连接。"],
                 ["只观测状态，不操作游戏。"],
-                "outcome=ready 才能继续游戏任务；resolution 应先修正分辨率；notRunning 表示游戏进程未运行；timeout 只表示这 20 秒尚未就绪。",
-                "以 ready 与 runtime.gameResolution 核对；timeout 后可按需要再次等待，不要用 PowerShell 睡眠。",
+                "outcome=ready 才能继续游戏任务；resolution 应先修正分辨率；notRunning 表示游戏进程未运行；timeout 只表示本次限时内尚未就绪。",
+                "以 ready 与 runtime.gameResolution 核对；timeout 后向用户报告仍未就绪，不继续模型轮询或 PowerShell 睡眠。",
                 "只读。",
                 [System.Text.Json.JsonSerializer.SerializeToElement(new { })]));
 
@@ -109,7 +106,7 @@ public static class StatusTools
             "bgi.start_game",
             Group,
             "启动原神并让 BetterGI 开始截图，然后返回最新状态。游戏或截图器没就绪时先调用它，等 ready=true 再执行任务；"
-                + "启动后仍在加载是正常状态，用 bgi.get_status 继续查看，不要把它当成失败。",
+                + "启动后仍在加载是正常状态，用 bgi.wait_ready 一次阻塞等待，不要把它当成失败。",
             async (_, cancellation) =>
             {
                 cancellation.ThrowIfCancellationRequested();
@@ -126,6 +123,9 @@ public static class StatusTools
                         elapsedMs = 0L,
                         note = ResolutionNote(runningReady),
                         runtime = runningDetail,
+                        verified = true,
+                        verificationScope = "launch",
+                        verificationReason = "已观察到运行中的游戏与截图器；未核验登录或脚本业务结果。",
                     };
                 }
 
@@ -157,6 +157,9 @@ public static class StatusTools
                     elapsedMs = watch.ElapsedMilliseconds,
                     note = ResolutionNote(ready),
                     runtime = detail,
+                    verified = Host.CaptureReady || Host.GameProcessRunning(),
+                    verificationScope = "launch",
+                    verificationReason = "只核验已观察到游戏进程或截图器，未核验登录或脚本业务结果。",
                 };
             },
             readOnly: false);
@@ -169,9 +172,9 @@ public static class StatusTools
             return ResolutionWarning();
         if (!ready)
             return Host.CaptureReady
-                ? "截图器已就绪，但游戏还没进入主界面；用 bgi.get_status 等到 ready=true（以主界面为准）再运行任务。"
+                ? "截图器已就绪，但游戏还没进入主界面；用 bgi.wait_ready 阻塞等到 ready=true（以主界面为准）再运行任务。"
                 : Host.GameProcessRunning()
-                    ? "原神进程已启动，截图器尚未就绪；稍后读取状态。"
+                    ? "原神进程已启动，截图器尚未就绪；用 bgi.wait_ready 一次阻塞等待。"
                     : Host.DisplaySize() is { } display
                         ? $"原神进程未运行；当前桌面会话为 {display.Width}x{display.Height}。先确认它能容纳目标游戏分辨率，再启动。"
                         : "原神进程未运行；先确认所需分辨率，再用 bgi.start_game 启动。";

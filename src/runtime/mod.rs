@@ -2517,6 +2517,15 @@ impl Supervisor {
             "bgi.api.read" | "bgi.api.invoke" => {
                 let id = a["methodId"].as_str().unwrap_or("");
                 let contract = bridge.describe(id, cancel).await?;
+                if call.name == "bgi.api.invoke"
+                    && id == "bgi.run_script_group"
+                    && !contract["inputSchema"]["properties"]["waitForCompletion"].is_object()
+                {
+                    return Err(Error::Tool(
+                        "当前连接仍在使用旧版启动接口，请重启 BetterGI 后重试。这次没有启动脚本。"
+                            .into(),
+                    ));
+                }
                 let version = contract["catalogVersion"]
                     .as_str()
                     .ok_or_else(|| Error::Tool("当前 BetterGI 连接缺少接口说明".into()))?;
@@ -2533,7 +2542,16 @@ impl Supervisor {
                             .into(),
                     ));
                 }
-                let arguments = &a["arguments"];
+                let mut effective_arguments = a["arguments"].clone();
+                if call.name == "bgi.api.invoke"
+                    && id == "bgi.run_script_group"
+                    && matches!(run.source, RunSource::SavedWorkflow { .. })
+                    && effective_arguments.is_object()
+                    && effective_arguments.get("waitForCompletion").is_none()
+                {
+                    effective_arguments["waitForCompletion"] = json!(true);
+                }
+                let arguments = &effective_arguments;
                 let issues = crate::extension::validate(arguments, &contract["inputSchema"], "$");
                 if !issues.is_empty() {
                     return Err(Error::Tool(format!(

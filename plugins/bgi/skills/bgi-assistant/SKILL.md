@@ -21,13 +21,13 @@ alwaysLoad: true
 - 当前可见编辑器、窗口或列表设置：稳定入口优先；需要原生交互时读取 bgi-operator 的 native-ui.md，使用 bgi.ui.read/write/invoke/respond/operation 完成输入、保存与核验，不因弹窗而删掉功能。
 - 删除配置组：定位精确 name/sha256，describe/invoke `bgi.delete_script_group`；不要求界面选中、不改成禁用。
 - 删除路线／JS／键鼠资源：已有路径用 inspect_local_resource → delete_local_resource；未知路径用 user.list 或组的 referencedResources 定位。不要用运行用的 resolve，也不操作 UI。只删路线时保留组，仍被引用先说明冲突；同时删组和资源时先删组。接口缺失检查桥版本，不无限试 UI。
-- 停止任务：关联原 Job；无 Job 时 `bgi.stop_current_task`。取消请求或 timeout 都不表示已经停止。
+- 停止任务：完整等待 Job 用原 Job；仅启动 Job 已结束时用 `bgi.stop_current_task`，不能当作脚本结束。核验停止。
 - 其他功能或对象不明确：用 `bgi.feature.search` 搜索用户目标，再 `bgi.feature.read` 读取最相关条目。索引覆盖源码功能，但当前能否调用仍以 `bgi.api.describe` 为准。
 - 用户指定快捷任务：读取 references/quick-tasks.md，保存指定入口，不自动生成。
 - 总体能力：以“功能目录”搜索流程摘要并按 nextOffset 分页。
 
-运行请求默认在宿主接受启动或执行入口返回后，以已有证据给一次最终总结并结束对话，不继续查状态、日志、截图，不轮询、睡眠或再启动任务。`api.invoke` 已由运行时等待 Job，等待期间不调用模型。已启动不写成业务已完成；只有用户明确要求等待、查看进度、后续步骤或排错时才继续相应流程。
+配置组默认 waitForCompletion=false，交接后结束，不查状态或重跑；仅明确等结果或后续步骤时 true。总结只说目标与启动结果，不复述字段名或主动提守护。启动不是业务完成。未就绪用 start_game，再 wait_ready 阻塞等待（默认120秒），超时报阻碍，不让模型轮询。快捷入口用 true 跟踪卡片，执行器无模型。
 
-具体链路按功能卡的 references（skill/name/path）读取；不要加载全部卡片或无关资料。
+按功能卡 references（skill/name/path）读取具体链路，不加载无关卡片。
 
 权限由运行时处理；明确授权的目标不重复问许可。缺少真正必要的选择或参数才询问。只报告已核验的结果和一个真实阻塞项，普通回复不讲程序集、反射或接口实现。

@@ -51,7 +51,7 @@
 
 启动所选父节点，确保 BetterGI 接收到的是目录级任务并会递归运行其下路线。打开地图追踪页面、订阅成功或把节点加入配置组都只是准备完成，不是用户目标完成；继续执行到任务真正进入运行状态。
 
-游戏未就绪直接 `bgi.start_game` 后核对 `bgi.get_status` / `bgi.wait_ready`，再运行 `bgi.run_script_group`。这些稳定入口直接 describe/invoke，不搜索程序集、桥缓存或低层 ViewModel 命令。
+游戏未就绪直接 `bgi.start_game` 后核对 `bgi.wait_ready` 阻塞等待主界面（默认 120 秒），再运行 `bgi.run_script_group`。这些稳定入口直接 describe/invoke，不搜索程序集、桥缓存或低层 ViewModel 命令。
 
 面向用户只需说明所选作者包、关键角色/队伍和已经开始。例如：“已经选了白白喵的甜甜花路线包，下面的路线会按整组依次运行。”不讨论挑了几条，也不列出全部 JSON 文件。
 
@@ -60,3 +60,5 @@
 ## JavaScript 收集脚本
 
 只有当用户目标本身需要库存统计、材料 CD、长期补货、复杂前置流程，或仓库没有适合的路线包时，才优先选择 JavaScript 收集脚本。此时读取 `manifest.json`、`settings.json`、README 和必要源码，自行订阅、配置并运行；普通的一次性材料采集优先使用完整地图追踪父节点。
+
+普通运行配置组省略 waitForCompletion 或明确 false：宿主接受后结束对话；仅用户明确要求等结果时用 true。就绪准备由 wait_ready 阻塞完成，超时报告阻碍，不连续多轮 state.get 查询。

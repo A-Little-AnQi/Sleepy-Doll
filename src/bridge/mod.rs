@@ -492,7 +492,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ("bgi.api.read", "读取 BetterGI 状态", "调用刚通过 api.describe 确认的只读接口。用于读取宿主当前设置或诊断；不用于读取 User 文件。arguments 必须满足该接口 inputSchema。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"无参数接口传空对象"}},"required":["methodId","arguments"],"additionalProperties":false}), {
             Arc::new(move |_: &Value| Err(Error::Tool("该接口必须通过运行时的契约检查调用".into()))) as BridgeToolFn
         }),
-        ("bgi.api.invoke", "执行 BetterGI 操作", "只调用本次运行已经 api.describe 的写接口。直接改资源／设置／领域数据优先，界面操作优先级最低。删除路线或脚本先 inspect_local_resource，再调用 delete_local_resource；不先选中、右键、导航或展开树。运行时已等待 Job，等待期间不调用模型。普通运行／启动请求取得启动或执行返回证据后，给最终总结并结束，不再 job.get、查状态或日志，也不重跑；明确要求等待／后续步骤／排错时才继续。completed 不自动表示业务成功。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"严格满足本次已读取的 inputSchema"}},"required":["methodId","arguments"],"additionalProperties":false}), {
+        ("bgi.api.invoke", "执行 BetterGI 操作", "只调用本次运行已经 api.describe 的写接口。直接改资源／设置／领域数据优先，界面操作优先级最低。删除路线或脚本先 inspect_local_resource，再调用 delete_local_resource；不先选中、右键、导航或展开树。配置组 run_script_group 默认 waitForCompletion=false，只等启动交接，不等待整组；仅用户明确要等结果或后续步骤才 true。游戏启动后的加载用 wait_ready 阻塞等待，不让模型循环查状态。运行时等待期间不调用模型，取得交接证据后给最终总结并结束，不再 job.get、查状态或日志，也不重跑；明确要求等待／后续步骤／排错时才继续。completed 不自动表示业务成功。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"严格满足本次已读取的 inputSchema"}},"required":["methodId","arguments"],"additionalProperties":false}), {
             Arc::new(move |_: &Value| Err(Error::Tool("该接口必须通过运行时的授权与 Job 跟踪调用".into()))) as BridgeToolFn
         }),
         (

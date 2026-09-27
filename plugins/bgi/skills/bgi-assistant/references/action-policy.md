@@ -22,7 +22,7 @@
 
 只检查与当前动作有关的项目：BetterGI/游戏是否就绪、是否已有冲突任务、所需队伍或脚本是否存在、关键游戏设置是否满足、资源消耗选项是否明确。不要每次都做全套体检。
 
-没就绪就自己把它弄就绪。每次新运行先读取当前状态，旧 `gameHandle` 不代表游戏仍在。先比较 `runtime.displayResolution` 与用户要求的游戏尺寸；当前会话小于目标时，不写入无效配置、不反复重启，也不擅自降低目标分辨率，只说明需要先调整远程会话。尺寸足够且游戏进程已关闭时，先描述并调用 `bgi.set_game_resolution`，再调用 `bgi.start_game`，回读实际 `runtime.gameResolution` 和 `ready`。**若窗口分辨率非 16:9，先处理这个已知阻碍，不要继续用 shell 睡眠或反复轮询主界面**：在 `lifecycle` 组描述 `bgi.exit_game` 与 `bgi.set_game_resolution`，依次关闭游戏、写入目标分辨率、重新启动，再回读实际分辨率。分辨率符合要求而 `ready=false` 时，描述并调用 `bgi.wait_ready`；只有它返回 `ready=true` 才执行游戏任务，`timeout` 只是这 20 秒未就绪，不能当作任务完成。目录里没有 `bgi.start_game` 时，用 `bgi.api.search` 在 `command` 组找启动触发器命令（`cmd.home_page.start_trigger`）；若 `callable=false`，明确说明需要用户在 BetterGI 启动页点击启动。
+没就绪就自己把它弄就绪。每次新运行先读取当前状态，旧 `gameHandle` 不代表游戏仍在。先比较 `runtime.displayResolution` 与用户要求的游戏尺寸；当前会话小于目标时，不写入无效配置、不反复重启，也不擅自降低目标分辨率，只说明需要先调整远程会话。尺寸足够且游戏进程已关闭时，先描述并调用 `bgi.set_game_resolution`，再调用 `bgi.start_game`，以 `bgi.wait_ready` 阻塞等待并回读实际 `runtime.gameResolution` 和 `ready`。**若窗口分辨率非 16:9，先处理这个已知阻碍，不要继续用 shell 睡眠或反复轮询主界面**：在 `lifecycle` 组描述 `bgi.exit_game` 与 `bgi.set_game_resolution`，依次关闭游戏、写入目标分辨率、重新启动，再回读实际分辨率。分辨率符合要求而 `ready=false` 时，描述并调用 `bgi.wait_ready`；只有它返回 `ready=true` 才执行游戏任务，`timeout` 只是这 20 秒未就绪，不能当作任务完成。目录里没有 `bgi.start_game` 时，用 `bgi.api.search` 在 `command` 组找启动触发器命令（`cmd.home_page.start_trigger`）；若 `callable=false`，明确说明需要用户在 BetterGI 启动页点击启动。
 
 **把「请你先启动游戏」当成答复等于把工作退回给用户，任何级别下都不允许。** 尤其不要因为某次调用被「游戏尚未就绪」拒绝就停下来 —— 那条错误本身就是让你先启动再重试的指令。`bgi.start_game` 失败时会带上缺的那一项（未配置原神安装路径、未开启联动启动、没有游戏窗口），照它说的做或如实转述。
 

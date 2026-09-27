@@ -400,8 +400,10 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
                         ? new HostTaskCancellation(cancellation.Token) : null;
                     var result = await handler(arguments, cancellation.Token).ConfigureAwait(false);
                     if (hostCancellation is not null) await hostCancellation.CompleteAsync().ConfigureAwait(false);
-                    var verified = JsonSerializer.SerializeToElement(result).TryGetProperty("verified", out var check) && check.ValueKind == JsonValueKind.True;
-                    jobs.MarkCompleted(job.JobId, result, verified);
+                    var evidence = JsonSerializer.SerializeToElement(result);
+                    var verified = evidence.TryGetProperty("verified", out var check) && check.ValueKind == JsonValueKind.True;
+                    var reason = evidence.TryGetProperty("verificationReason", out var explanation) && explanation.ValueKind == JsonValueKind.String ? explanation.GetString() : null;
+                    jobs.MarkCompleted(job.JobId, result, verified, reason);
                 }
                 catch (OperationCanceledException) { jobs.MarkCancelled(job.JobId); }
                 catch (Exception error) { jobs.MarkFailed(job.JobId, BridgeExceptionTranslator.Describe(error)); }

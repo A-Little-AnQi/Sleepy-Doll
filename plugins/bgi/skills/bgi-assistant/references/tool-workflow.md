@@ -19,7 +19,7 @@
 | 一条龙 | `bgi.run_one_dragon` | 运行宿主原生日常任务链（每日/清体力/周常）；`configName` 可选 |
 | 退出游戏 | `bgi.exit_game` | 结束原神进程（正常关闭，超时强结束）；收尾或用户要求退出时用 |
 | 游戏分辨率 | `bgi.set_game_resolution` | 先确认桌面能容纳目标尺寸；关游戏后写入当前国服/国际服显示记录，启动后再核对实际窗口 |
-| 等待主界面 | `bgi.wait_ready` | 启动后等待最多 20 秒；非 16:9、游戏未运行或已就绪时立即返回，不用 shell 睡眠 |
+| 等待主界面 | `bgi.wait_ready` | 启动后默认阻塞等待最多 120 秒；非 16:9、游戏未运行或已就绪时立即返回，不用 shell 睡眠 |
 | 用户资源 | `bgi.user.resolve` / `bgi.user.list` / `bgi.user.read` / `bgi.user.inspect_script` / `bgi.user.write` / `bgi.user.restore` | 采集和运行先 `resolve`；其余读写见 `bgi-operator` |
 | 中央仓库资料 | `bgi.repo.search` / `bgi.repo.read` | 按脚本标题定位，再直接读取 Git 对象中的文档、参数和 JS；未订阅也可读，支持行号与关键词上下文 |
 | 订阅与准备地图追踪 | `bgi.subscribe_script_resources` / `bgi.prepare_pathing_group` | 稳定宿主入口直接 api.describe/invoke；选择父目录，由宿主导入文件并构造完整配置组 |

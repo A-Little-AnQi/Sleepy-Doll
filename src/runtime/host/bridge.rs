@@ -85,6 +85,15 @@ impl Bridge {
                 req = req.header("idempotency-key", key);
             }
         }
+        if matches!(path, "/bridge/v1/invoke" | "/bridge/v1/read")
+            && body.is_some_and(|value| value["methodId"] == "bgi.wait_ready")
+        {
+            let seconds = body
+                .and_then(|value| value["arguments"]["timeoutSeconds"].as_u64())
+                .unwrap_or(120)
+                .clamp(1, 180);
+            req = req.timeout(Duration::from_secs(seconds + 10));
+        }
         let response =
             tokio::select! {_ = cancel.cancelled()=>return Err(Error::Cancelled),r=req.send()=>r?};
         let status = response.status();
@@ -332,7 +341,7 @@ impl Bridge {
         );
         if snapshot["instanceId"] != instance || (requires_capture && !game_ready(&snapshot)) {
             return Err(Error::Tool(
-                "游戏尚未就绪（以进入主界面为准）。先调用 bgi.start_game 启动原神，用 bgi.get_status 等到 ready=true 再重试；截图器就绪但仍在登录或加载画面时不要提交动作。"
+                "游戏尚未就绪（以进入主界面为准）。先调用 bgi.start_game 启动原神，用 bgi.wait_ready 阻塞等到 ready=true 再重试，不由模型轮询；截图器就绪但仍在登录或加载画面时不要提交动作。"
                     .into(),
             ));
         }

@@ -23,6 +23,9 @@
 .PARAMETER Output
     Folder for payload.bin and payload.json. Defaults to ..\target\setup.
 
+.PARAMETER BridgeDirectory
+    Optional compiled bridge directory to embed without replacing a running product.
+
 .PARAMETER Executable
     Optional built application to embed without replacing a running product.
     Plugin files always come from the formal source directory.
@@ -31,7 +34,8 @@
 param(
     [string]$Source,
     [string]$Output,
-    [string]$Executable
+    [string]$Executable,
+    [string]$BridgeDirectory
 )
 
 Set-StrictMode -Version Latest
@@ -106,6 +110,17 @@ if ($Executable) {
         if ($file.Path -eq 'sleepy-doll.exe') {
             $file.Full = $built.FullName
             $file.Size = $built.Length
+        }
+    }
+}
+
+if ($BridgeDirectory) {
+    $compiledBridge = (Resolve-Path -LiteralPath $BridgeDirectory).Path
+    foreach ($file in $files) {
+        if ($file.Path -like 'bridge/*') {
+            $compiled = Get-Item -LiteralPath (Join-Path $compiledBridge $file.Path.Substring('bridge/'.Length))
+            $file.Full = $compiled.FullName
+            $file.Size = $compiled.Length
         }
     }
 }

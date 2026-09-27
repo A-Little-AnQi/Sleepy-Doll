@@ -19,6 +19,7 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--case", choices=["launch_group","all"],default="all")
     args = parser.parse_args()
     config = json.loads(args.config.read_text(encoding="utf-8-sig"))
     model = next(item for item in config["models"] if item["id"] == config["activeModel"])
@@ -47,10 +48,11 @@ def main():
         {"name": "bgi.job.get", "description": "读取桥 Job 当前状态", "input_schema": {"type": "object", "properties": {"jobId": {"type": "string"}}}},
     ]
     cases = [
-        ("returned_group", "跑个血斛", "bgi.run_script_group", {"groupName": "血斛"}, {"groupName": "血斛", "resolved": True, "executed": True}, False),
+        ("launch_group", "跑下千星脚本", "bgi.run_script_group", {"groupName": "千星"}, {"groupName": "千星", "resolved": True, "accepted":True,"executed":False,"executionMode":"launch","verificationScope":"launch"}, False),
         ("accepted_task", "启动伐木任务", "cmd.wood.start", {}, {"started": True, "taskRunning": True}, False),
         ("explicit_followup", "跑个血斛，结束后检查日志有没有路线失败", "bgi.run_script_group", {"groupName": "血斛"}, {"groupName": "血斛", "resolved": True, "executed": True}, True),
     ]
+    if args.case != "all": cases=[case for case in cases if case[0]==args.case]
     usage_total = 0
     for name, prompt, method, arguments, result, allow_calls in cases:
         evidence = {"ok": True, "value": {"jobId": "synthetic-job", "outcome": "verifiedSucceeded", "evidence": {"state": "completed", "result": result}}}
@@ -76,6 +78,7 @@ def main():
             assert calls, f"{name}: explicit follow-up was discarded"
         else:
             assert not calls and text and output.get("stop_reason") != "max_tokens", f"{name}: model continued or failed to provide a final answer"
+            if name=="launch_group": assert not re.search(r"resolved|accepted|verificationScope|waitForCompletion|executionMode",text), "Implementation fields leaked into ordinary launch reply"
         print(json.dumps({"case": name, "toolCalls": len(calls), "finalText": text[:160], "stopReason": output.get("stop_reason")}, ensure_ascii=False), flush=True)
     print(json.dumps({"passed": len(cases), "modelRequests": len(cases), "reportedTokens": usage_total, "realBgiActions": 0, "userDataModified": False}))
 
