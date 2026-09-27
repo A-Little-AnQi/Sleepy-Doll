@@ -206,7 +206,7 @@ export function ChatPage({
     setPrompt(value);
     localStorage.setItem(draftKey, value);
   };
-  const send = async (queue = false) => {
+  const send = async () => {
     const value = prompt.trim();
     if (
       !value ||
@@ -230,7 +230,7 @@ export function ChatPage({
     const supplementRun =
       pending?.prompt === value
         ? pending.runId
-        : busy && task && !queue
+        : busy && task
           ? task.id
           : undefined;
     sessionStorage.setItem(
@@ -258,8 +258,6 @@ export function ChatPage({
         session(run.conversationId).start();
         if (alive.current && current.current === origin)
           onConversation(run.conversationId);
-        if (queue && alive.current && current.current === origin)
-          setNotice(t.chat.queued);
       }
       sessionStorage.removeItem(retryKey);
       // The server has accepted this prompt. A shell refresh failure must not
@@ -479,21 +477,6 @@ export function ChatPage({
             onDismiss={() => setError("")}
           />
         )}
-        {data.queued.length > 0 && (
-          <div className="queued-list">
-            {data.queued.map((run) => (
-              <div key={run.id}>
-                <span>排队中 · {run.prompt}</span>
-                <button
-                  className="subtle-action"
-                  onClick={() => void act(() => api.cancelTask(run.id))}
-                >
-                  取消排队
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
         <ComposerDeck>
           <ComposerField
             ref={textarea}
@@ -542,21 +525,6 @@ export function ChatPage({
                 }
               />
             </div>
-            {busy && (
-              <button
-                className="subtle-action"
-                disabled={
-                  !prompt.trim() ||
-                  sending ||
-                  stopping ||
-                  task?.state === "cancelling"
-                }
-                title={t.chat.waitCurrentRun}
-                onClick={() => void send(true)}
-              >
-                {t.chat.queuedSend}
-              </button>
-            )}
             <div className="composer-submit">
               <ContextMeter
                 used={contextUsed}

@@ -249,20 +249,6 @@
   opacity: 0.22;
 }
 
-.queued-list > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-  gap: 10px;
-}
-
-.queued-list span {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
 @media (max-width: 1000px) {
   .chat-welcome h2 {
     font-size: 25px;

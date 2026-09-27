@@ -89,7 +89,6 @@ export interface Snapshot {
   shortcutProposal: ShortcutProposal | undefined;
   messages: MessageInfo[];
   task: TaskInfo | undefined;
-  queued: TaskInfo[];
   stream: string;
   contextActivities: ContextActivity[];
   question: string;
@@ -102,7 +101,6 @@ const empty: Snapshot = {
   shortcutProposal: undefined,
   messages: [],
   task: undefined,
-  queued: [],
   stream: "",
   contextActivities: [],
   question: "",
@@ -251,9 +249,6 @@ class Session {
             const task = this.currentTask();
             this.publish({
               task,
-              queued: [...this.runs.values()].filter(
-                (run) => run.state === "queued",
-              ),
               messages: history.messages,
               stream: this.streamFor(task?.id),
               contextActivities: [...this.contextActivities.values()].map(
@@ -385,13 +380,11 @@ class Session {
             this.acceptContext(history);
             this.acceptRunSnapshot(history);
           }
-          const runs = [...this.runs.values()];
           const task = this.currentTask();
           if (batch.events.length || history || this.snapshot.error)
             this.publish({
               ...(history ? { messages: history.messages } : {}),
               task,
-              queued: runs.filter((run) => run.state === "queued"),
               stream: this.streamFor(task?.id),
               contextActivities: [...this.contextActivities.values()].map(
                 (activity) => ({ ...activity }),

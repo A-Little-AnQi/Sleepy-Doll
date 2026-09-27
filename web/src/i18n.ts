@@ -93,12 +93,10 @@ const zh = {
     sendFollowUp: "发送补充",
     stop: "停止任务",
     approvalLevel: "审批级别",
-    waitCurrentRun: "当前任务结束后开始",
     model: "模型",
     addModelFirst: "请在「设置 → 模型」中添加模型",
     configureModels: "配置模型",
     queuedStep: "补充内容将在当前步骤结束后处理。",
-    queued: "已排队，当前任务结束后开始。",
     mascotAlt: "蜷坐在月亮上熟睡的木偶",
     statusRunning: "进行中",
     statusDone: "已完成",
@@ -113,8 +111,6 @@ const zh = {
     approvalExpired: "确认已过期",
     saveAsTask: "保存为快捷任务",
     jumpToLatest: "有新内容 · 回到最新",
-    queuedRun: (prompt: string) => `排队中 · ${prompt}`,
-    queuedSend: "排队发送",
   },
 
   transcript: {
@@ -552,12 +548,10 @@ const en: Dict = {
     sendFollowUp: "Send follow-up",
     stop: "Stop task",
     approvalLevel: "Approval level",
-    waitCurrentRun: "Start after the current task finishes",
     model: "Model",
     addModelFirst: "Add a model in Settings → Models",
     configureModels: "Configure models",
     queuedStep: "Your follow-up will be processed after the current step.",
-    queued: "Queued. Starts after the current task finishes.",
     mascotAlt: "A puppet curled up asleep on the moon",
     statusRunning: "Running",
     statusDone: "Done",
@@ -572,8 +566,6 @@ const en: Dict = {
     approvalExpired: "This confirmation has expired",
     saveAsTask: "Save as quick task",
     jumpToLatest: "New content · jump to latest",
-    queuedRun: (prompt: string) => `Queued · ${prompt}`,
-    queuedSend: "Queue send",
   },
 
   transcript: {

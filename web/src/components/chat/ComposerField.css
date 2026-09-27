@@ -1,0 +1,15 @@
+/* 光标用主字体的度量，中文占位文字也使用同一字体，避免回退字体偏移。 */
+textarea.sd-field.is-bare.sd-composer-field {
+  font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 24px;
+  min-height: 46px;
+  padding: 11px 0;
+  overflow-y: auto;
+}
+
+.sd-composer-field::placeholder {
+  font: inherit;
+  letter-spacing: inherit;
+}
