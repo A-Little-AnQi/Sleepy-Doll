@@ -156,6 +156,9 @@ impl AppController {
                 | "strategy.extract"
                 | "strategy.run"
                 | "workflow.run"
+                | "conversation.delete"
+                | "task.submit"
+                | "run.input"
                 | "workflow.extract"
                 | "permission.set"
                 | "config.write"
@@ -292,7 +295,11 @@ impl AppController {
             }
             "conversation.get" => {
                 let id = required(&params, "id")?;
-                Ok(json!({"id":id,"messages":self.supervisor.journal.conversation_messages(id)?}))
+                let messages = self.supervisor.journal.conversation_messages(id)?;
+                let (activities, boundary) = self.supervisor.journal.context_activities(id)?;
+                Ok(
+                    json!({"id":id,"messages":messages,"contextActivities":activities,"contextActivityBoundary":boundary}),
+                )
             }
             "conversation.list" => Ok(json!(self.supervisor.conversations(
                 &crate::runtime::store::journal::ConversationQuery {
@@ -367,10 +374,10 @@ impl AppController {
                     return Ok(json!({
                         "requiresConfirmation":true,
                         "affects":summary,
-                        "keeps":"快捷任务与运行证据会保留，来源显示为已删除",
+                        "keeps":"会停止这个对话的运行，并永久删除消息、事件、检查点与执行记录。独立保存的快捷任务保留。",
                     }));
                 }
-                Ok(self.supervisor.journal.delete_conversation(id)?)
+                crate::runtime::executor().block_on(self.supervisor.delete_conversation(id))
             }
             "task.list" => Ok(json!(
                 self.supervisor
@@ -1339,7 +1346,7 @@ impl AppController {
             options: ModelOptions::default(),
         };
         let models = list_remote_models(&config, params["modelsUrl"].as_str())?;
-        Ok(json!({ "models": models }))
+        Ok(serde_json::to_value(models)?)
     }
 
     fn use_model(&self, model_id: &str) -> Result<Value> {

@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::{
@@ -25,7 +26,14 @@ const COMPAT_SUFFIXES: &[&str] = &[
     "/claude",
 ];
 
-pub fn list_remote_models(config: &ModelConfig, models_url: Option<&str>) -> Result<Vec<String>> {
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCatalog {
+    pub models: Vec<String>,
+    pub context_windows: std::collections::BTreeMap<String, u64>,
+}
+
+pub fn list_remote_models(config: &ModelConfig, models_url: Option<&str>) -> Result<ModelCatalog> {
     if config.protocol != ModelProtocol::OllamaChat
         && config.api_key.as_deref().unwrap_or("").is_empty()
     {
@@ -75,15 +83,15 @@ pub fn list_remote_models(config: &ModelConfig, models_url: Option<&str>) -> Res
             last_empty = true;
             continue;
         };
-        let ids = parse_catalog(&body);
-        if ids.is_empty() {
+        let catalog = parse_catalog(&body);
+        if catalog.models.is_empty() {
             last_empty = true;
             continue;
         }
-        return Ok(ids);
+        return Ok(catalog);
     }
     if last_empty {
-        return Ok(Vec::new());
+        return Ok(ModelCatalog::default());
     }
     Err(Error::Config(
         "这个服务没有模型列表，请手动填写模型名称。".into(),
@@ -167,27 +175,79 @@ fn strip_compat_suffix(base: &str) -> Option<String> {
     None
 }
 
-pub(crate) fn parse_catalog(body: &Value) -> Vec<String> {
-    let mut ids = Vec::new();
-    let mut push = |value: &str| {
+pub(crate) fn parse_catalog(body: &Value) -> ModelCatalog {
+    let mut catalog = ModelCatalog::default();
+    let mut push = |value: &str, item: &Value| {
         let id = value.trim().trim_start_matches("models/");
-        if !id.is_empty() && !ids.iter().any(|existing| existing == id) {
-            ids.push(id.to_string());
+        if id.is_empty() {
+            return;
+        }
+        if !catalog.models.iter().any(|existing| existing == id) {
+            catalog.models.push(id.to_string());
+        }
+        let window = [
+            &item["context_length"],
+            &item["context_window"],
+            &item["contextWindow"],
+            &item["inputTokenLimit"],
+        ]
+        .into_iter()
+        .filter_map(Value::as_u64)
+        .find(|value| (8192..=2_000_000).contains(value));
+        if let Some(window) = window {
+            catalog
+                .context_windows
+                .entry(id.to_string())
+                .or_insert(window);
         }
     };
     if let Some(items) = body["data"].as_array() {
         for item in items {
             if let Some(id) = item["id"].as_str() {
-                push(id);
+                push(id, item);
             }
         }
     }
     if let Some(items) = body["models"].as_array() {
         for item in items {
             if let Some(id) = item["id"].as_str().or_else(|| item["name"].as_str()) {
-                push(id);
+                push(id, item);
             }
         }
     }
-    ids
+    catalog
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn catalog_preserves_reported_capacity_and_ignores_invalid_limits() {
+        let catalog = parse_catalog(&json!({"data":[
+            {"id":"large","context_length":1_000_000,"top_provider":{"context_length":32000}},
+            {"id":"small","context_window":32768},
+            {"id":"unknown"}, {"id":"invalid","context_length":0},
+            {"id":"large","context_length":128000}
+        ],"models":[{"name":"models/gemini","inputTokenLimit":1048576}]}));
+        assert_eq!(
+            catalog.models,
+            vec!["large", "small", "unknown", "invalid", "gemini"]
+        );
+        assert_eq!(catalog.context_windows["large"], 1_000_000);
+        assert_eq!(catalog.context_windows["small"], 32768);
+        assert_eq!(catalog.context_windows["gemini"], 1048576);
+        assert!(!catalog.context_windows.contains_key("unknown"));
+        assert!(!catalog.context_windows.contains_key("invalid"));
+    }
+
+    #[test]
+    fn missing_capacity_uses_new_default_without_overwriting_explicit_limits() {
+        let default: crate::config::ModelOptions = serde_json::from_value(json!({})).unwrap();
+        let saved: crate::config::ModelOptions =
+            serde_json::from_value(json!({"contextWindow":128000})).unwrap();
+        assert_eq!(default.context_window, 256000);
+        assert_eq!(saved.context_window, 128000);
+    }
 }

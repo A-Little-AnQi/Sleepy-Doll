@@ -16,6 +16,7 @@ import {
   isTaskRunActive,
   readError,
   taskLabels,
+  forgetSession,
 } from "../../session";
 import type { Bootstrap, ConversationInfo } from "../../ipc/types";
 import { hostPluginEnabled } from "../../ipc/providers";
@@ -1182,13 +1183,6 @@ function ConversationRow({
           onClick={onOpen}
         >
           <span className="app-conversation-title">{entry.title}</span>
-          {running && (
-            <span
-              className="conversation-status running"
-              title={taskLabels[running.state] ?? t.app.running}
-              aria-label={taskLabels[running.state] ?? t.app.running}
-            />
-          )}
         </button>
         <div className="app-conversation-actions">
           <button
@@ -1224,6 +1218,13 @@ function ConversationRow({
             <TrashIcon className="button-icon" />
           </button>
         </div>
+        {running && (
+          <span
+            className="conversation-status running"
+            title={taskLabels[running.state] ?? t.app.running}
+            aria-label={taskLabels[running.state] ?? t.app.running}
+          />
+        )}
       </li>
       <ConfirmDialog
         open={asking != null}
@@ -1234,13 +1235,17 @@ function ConversationRow({
           const preview = asking;
           setAsking(null);
           if (!preview) return;
-          void onAct(() => api.deleteConversation(entry.id, true));
+          void onAct(async () => {
+            const result = await api.deleteConversation(entry.id, true);
+            if (result.deleted) forgetSession(entry.id);
+            return result;
+          });
         }}
       >
         {asking ? (
           <>
             <p>
-              会删除「{asking.title}」里的消息和运行记录
+              会永久删除「{asking.title}」里的消息和运行记录
               {asking.tasks ? `，其中 ${asking.tasks} 个快捷任务会保留` : ""}。
             </p>
             {asking.keeps ? <p>{asking.keeps}</p> : null}

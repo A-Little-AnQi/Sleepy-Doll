@@ -136,7 +136,9 @@ const zh = {
 
   context: {
     compacted: "较早的对话内容已压缩；完整记录保存在本机",
-    compactedShort: "已压缩",
+    compactedShort: "上下文已压缩",
+    compacting: "正在压缩上下文",
+    compactionFailed: "上下文压缩未完成",
     inModel: "模型使用的上下文",
     cacheHit: (tokens: string) => `缓存命中 ${tokens}`,
   },
@@ -298,6 +300,13 @@ const zh = {
     timeoutLabel: "响应超时（秒）",
     window: "上下文与输出",
     contextLabel: "上下文长度",
+    contextReported:
+      "建议值来自服务返回的模型容量。已保存或手动填写的值不会被自动覆盖。",
+    contextFallback:
+      "服务未报告容量；无法识别的模型以 256k 为起始值，请按实际模型核对。",
+    useContextSuggestion: "使用建议值",
+    contextLocalFallback:
+      "本机模型未报告容量，沿用 32k 起始值；请按实际加载的窗口设置。",
     maxOutputLabel: "最大输出",
     promptCacheLabel: "提示缓存",
     setDefault: "设为默认",
@@ -587,7 +596,9 @@ const en: Dict = {
   context: {
     compacted:
       "Earlier chat content was compacted; the full record is saved locally",
-    compactedShort: "Compacted",
+    compactedShort: "Context compacted",
+    compacting: "Compacting context",
+    compactionFailed: "Context compaction incomplete",
     inModel: "Context used by the model",
     cacheHit: (tokens: string) => `Cache hit ${tokens}`,
   },
@@ -752,6 +763,13 @@ const en: Dict = {
     timeoutLabel: "Response timeout (s)",
     window: "Context and output",
     contextLabel: "Context length",
+    contextReported:
+      "Suggested capacity is reported by the service. Saved and manual values are preserved.",
+    contextFallback:
+      "The service did not report capacity. Unknown models start at 256k; check the actual model limit.",
+    useContextSuggestion: "Use suggestion",
+    contextLocalFallback:
+      "The local model did not report capacity. Start at 32k and use the window actually loaded.",
     maxOutputLabel: "Max output",
     promptCacheLabel: "Prompt cache",
     setDefault: "Set as default",

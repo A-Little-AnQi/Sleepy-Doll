@@ -11,6 +11,8 @@ import { Switch } from "../../components/controls/Switch";
 import type { Bootstrap, ModelInfo } from "../../ipc/types";
 import {
   MODEL_PRESETS,
+  DEFAULT_CONTEXT_WINDOW,
+  suggestedContextWindow,
   matchPreset,
   normalizeEndpoint,
   presetById,
@@ -50,6 +52,7 @@ type ModelForm = {
   apiKey: string;
   timeoutMs: number;
   contextWindow: number;
+  contextWindowManual: boolean;
   maxOutputTokens: number;
   auth: ModelAuthMode;
   promptCache: boolean;
@@ -65,7 +68,8 @@ function emptyForm(id = `model-${Date.now()}`): ModelForm {
     baseUrl: "",
     apiKey: "",
     timeoutMs: 120000,
-    contextWindow: 200_000,
+    contextWindow: DEFAULT_CONTEXT_WINDOW,
+    contextWindowManual: false,
     maxOutputTokens: 8192,
     auth: "auto",
     promptCache: true,
@@ -85,7 +89,9 @@ function fromPreset(
     baseUrl: preset.baseUrl,
     apiKey: "",
     timeoutMs: preset.timeoutMs,
-    contextWindow: preset.contextWindow,
+    contextWindow:
+      preset.id === "ollama" ? preset.contextWindow : DEFAULT_CONTEXT_WINDOW,
+    contextWindowManual: false,
     maxOutputTokens: preset.maxOutputTokens,
     auth: preset.auth,
     promptCache: true,
@@ -103,11 +109,20 @@ function formFor(model?: ModelInfo): ModelForm {
     baseUrl: model.baseUrl,
     apiKey: "",
     timeoutMs: model.timeoutMs ?? 120000,
-    contextWindow: model.contextWindow ?? 200_000,
+    contextWindow: model.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+    contextWindowManual: true,
     maxOutputTokens: model.maxOutputTokens ?? 8192,
     auth: model.auth ?? "auto",
     promptCache: model.promptCache !== false,
   };
+}
+
+function contextSuggestion(form: ModelForm, reported: Record<string, number>) {
+  const fallback =
+    form.preset === "ollama"
+      ? presetById("ollama")!.contextWindow
+      : DEFAULT_CONTEXT_WINDOW;
+  return suggestedContextWindow(form.model, reported, fallback);
 }
 
 export function ModelsPage({
@@ -128,6 +143,9 @@ export function ModelsPage({
   const [form, setForm] = useState<ModelForm>(() => formFor(selected));
   const drafts = useRef(new Map<string, ModelForm>());
   const [catalog, setCatalog] = useState<string[]>([]);
+  const [contextWindows, setContextWindows] = useState<Record<string, number>>(
+    {},
+  );
   const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
   const [listing, setListing] = useState(false);
@@ -146,7 +164,8 @@ export function ModelsPage({
         form.model !== selected.model ||
         form.baseUrl !== selected.baseUrl ||
         form.timeoutMs !== (selected.timeoutMs ?? 120000) ||
-        form.contextWindow !== (selected.contextWindow ?? 200_000) ||
+        form.contextWindow !==
+          (selected.contextWindow ?? DEFAULT_CONTEXT_WINDOW) ||
         form.maxOutputTokens !== (selected.maxOutputTokens ?? 8192) ||
         form.auth !== (selected.auth ?? "auto") ||
         form.promptCache !== (selected.promptCache !== false)));
@@ -154,6 +173,7 @@ export function ModelsPage({
     setSelectedId(id);
     setForm(next);
     setCatalog([]);
+    setContextWindows({});
     setAdvanced(false);
     setError("");
     setNotice("");
@@ -181,6 +201,7 @@ export function ModelsPage({
   const applyPreset = (presetId: string) => {
     const next = presetById(presetId);
     setCatalog([]);
+    setContextWindows({});
     if (!next) {
       updateForm((draft) => ({ ...emptyForm(draft.id), apiKey: draft.apiKey }));
       return;
@@ -193,7 +214,19 @@ export function ModelsPage({
   const change = (
     key: "name" | "protocol" | "model" | "baseUrl" | "apiKey",
     value: string,
-  ) => updateForm((draft) => ({ ...draft, [key]: value }));
+  ) =>
+    updateForm((draft) => ({
+      ...draft,
+      [key]: value,
+      ...(key === "model" && !draft.contextWindowManual
+        ? {
+            contextWindow: contextSuggestion(
+              { ...draft, model: value },
+              contextWindows,
+            ),
+          }
+        : {}),
+    }));
   const fetchModels = async () => {
     setListing(true);
     setError("");
@@ -211,13 +244,27 @@ export function ModelsPage({
       });
       const models = result.models.filter(Boolean);
       setCatalog(models);
+      const reported = result.contextWindows ?? {};
+      setContextWindows(reported);
       if (!models.length) {
         setNotice(t.models.noModels);
         return;
       }
-      if (!form.model || !models.includes(form.model)) {
-        change("model", models[0]!);
-      }
+      updateForm((draft) => {
+        const model =
+          !draft.model || !models.includes(draft.model)
+            ? models[0]!
+            : draft.model;
+        return {
+          ...draft,
+          model,
+          ...(!draft.contextWindowManual
+            ? {
+                contextWindow: contextSuggestion({ ...draft, model }, reported),
+              }
+            : {}),
+        };
+      });
       setNotice(t.models.fetched(models.length));
     } catch (reason) {
       setError(readError(reason));
@@ -238,11 +285,12 @@ export function ModelsPage({
     setBusy(true);
     setError("");
     try {
-      await api.saveModel(form);
+      const { contextWindowManual: _manual, ...modelInput } = form;
+      await api.saveModel(modelInput);
       await reload();
       setSelectedId(form.id);
       drafts.current.delete(selectedId);
-      const saved = { ...form, apiKey: "" };
+      const saved = { ...form, apiKey: "", contextWindowManual: true };
       drafts.current.set(form.id, saved);
       setForm(saved);
       setNotice(t.models.saved);
@@ -510,6 +558,7 @@ export function ModelsPage({
                           updateForm((draft) => ({
                             ...draft,
                             contextWindow: Number(event.target.value),
+                            contextWindowManual: true,
                           }))
                         }
                       />
@@ -530,6 +579,35 @@ export function ModelsPage({
                         }
                       />
                     </label>
+                  </div>
+                  <div className="model-context-suggestion">
+                    <span>
+                      {contextWindows[form.model]
+                        ? t.models.contextReported
+                        : form.preset === "ollama"
+                          ? t.models.contextLocalFallback
+                          : t.models.contextFallback}
+                    </span>
+                    <button
+                      type="button"
+                      className="subtle-action"
+                      onClick={() =>
+                        updateForm((draft) => ({
+                          ...draft,
+                          contextWindow: contextSuggestion(
+                            draft,
+                            contextWindows,
+                          ),
+                          contextWindowManual: false,
+                        }))
+                      }
+                    >
+                      {t.models.useContextSuggestion} ·{" "}
+                      {Math.round(
+                        contextSuggestion(form, contextWindows) / 1000,
+                      )}
+                      k
+                    </button>
                   </div>
                   {form.protocol === "anthropic-messages" && (
                     <label className="toggle-row">

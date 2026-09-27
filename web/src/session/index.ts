@@ -1,6 +1,11 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { api } from "../ipc/api";
-import type { MessageInfo, RunApproval, TaskInfo } from "../ipc/types";
+import type {
+  ContextActivity,
+  MessageInfo,
+  RunApproval,
+  TaskInfo,
+} from "../ipc/types";
 
 /** 把任意抛出物变成给人看的一句话。 */
 export function readError(reason: unknown): string {
@@ -84,6 +89,7 @@ export interface Snapshot {
   task: TaskInfo | undefined;
   queued: TaskInfo[];
   stream: string;
+  contextActivities: ContextActivity[];
   question: string;
   approval: RunApproval | undefined;
   plan: Plan | undefined;
@@ -95,6 +101,7 @@ const empty: Snapshot = {
   task: undefined,
   queued: [],
   stream: "",
+  contextActivities: [],
   question: "",
   approval: undefined,
   plan: undefined,
@@ -106,6 +113,7 @@ class Session {
   listeners = new Set<() => void>();
   private cursor = 0;
   private running = false;
+  private disposed = false;
   private runs = new Map<string, TaskInfo>();
   private pendingRuns = new Map<string, TaskInfo>();
   private streams = new Map<
@@ -116,12 +124,21 @@ class Session {
   private questions = new Map<string, string>();
   private approvals = new Map<string, RunApproval>();
   private plans = new Map<string, Plan>();
+  private contextActivities = new Map<number, ContextActivity>();
+  private contextActivityBoundary = 0;
   constructor(readonly id: string) {}
   subscribe = (listener: () => void) => {
+    if (this.disposed) return () => {};
     this.listeners.add(listener);
     this.start();
     return () => {
       this.listeners.delete(listener);
+      if (
+        this.disposed &&
+        !this.listeners.size &&
+        sessions.get(this.id) === this
+      )
+        sessions.delete(this.id);
     };
   };
   read = () => this.snapshot;
@@ -155,11 +172,40 @@ class Session {
       ? (this.streams.get(runId) ?? []).map((part) => part.text).join("")
       : "";
   }
+  private acceptContext(history: {
+    contextActivities?: ContextActivity[];
+    contextActivityBoundary?: number;
+  }) {
+    if (history.contextActivities == null) return;
+    this.contextActivities = new Map(
+      history.contextActivities.map((activity) => [
+        activity.id,
+        { ...activity },
+      ]),
+    );
+    this.contextActivityBoundary = history.contextActivityBoundary ?? 0;
+  }
   start() {
+    if (this.disposed) return;
     if (!this.running) {
       this.running = true;
       void this.consume();
     }
+  }
+  dispose() {
+    const wasSubscribed = this.listeners.size > 0;
+    this.disposed = true;
+    this.runs.clear();
+    this.pendingRuns.clear();
+    this.streams.clear();
+    this.streamBoundaries.clear();
+    this.questions.clear();
+    this.approvals.clear();
+    this.plans.clear();
+    this.contextActivities.clear();
+    this.publish({ ...empty });
+    this.listeners.clear();
+    return wasSubscribed;
   }
   private async consume() {
     let failures = 0;
@@ -170,19 +216,27 @@ class Session {
         try {
           if (needsHistory) {
             const history = await api.conversation(this.id);
+            if (this.disposed) break;
             this.acceptHistory(history.messages);
+            this.acceptContext(history);
             this.publish({
               messages: history.messages,
               stream: this.streamFor(this.snapshot.task?.id),
+              contextActivities: [...this.contextActivities.values()].map(
+                (activity) => ({ ...activity }),
+              ),
               loading: false,
             });
             needsHistory = false;
           }
           const batch = await api.events(this.id, this.cursor);
+          if (this.disposed) break;
           if (batch.snapshotRequired) {
             // 事件窗口被裁过，游标已经对不上：重取消息快照并从头续流。
             this.cursor = 0;
             this.streams.clear();
+            this.contextActivities.clear();
+            this.contextActivityBoundary = 0;
             needsHistory = true;
             continue;
           }
@@ -197,7 +251,38 @@ class Session {
               if (!isRunning(run)) {
                 this.approvals.delete(run.id);
                 this.questions.delete(run.id);
+                for (const activity of this.contextActivities.values()) {
+                  if (activity.runId === run.id && activity.state === "running")
+                    activity.state = "failed";
+                }
               }
+            }
+            if (
+              event.kind === "context.compaction.started" &&
+              event.sequence > this.contextActivityBoundary
+            ) {
+              this.contextActivities.set(event.sequence, {
+                id: event.sequence,
+                runId: event.runId,
+                state: "running",
+              });
+            }
+            if (
+              event.kind === "context.compacted" &&
+              event.data.mode === "summary" &&
+              event.sequence > this.contextActivityBoundary
+            ) {
+              const activity = [...this.contextActivities.values()].findLast(
+                (item) =>
+                  item.runId === event.runId && item.state === "running",
+              );
+              if (activity) activity.state = "completed";
+              else
+                this.contextActivities.set(event.sequence, {
+                  id: event.sequence,
+                  runId: event.runId,
+                  state: "completed",
+                });
             }
             if (
               event.kind === "assistant.delta" &&
@@ -264,13 +349,20 @@ class Session {
           // Publishing in between briefly duplicates answers and changes height.
           const history =
             refresh || failures ? await api.conversation(this.id) : undefined;
-          if (history) this.acceptHistory(history.messages);
+          if (this.disposed) break;
+          if (history) {
+            this.acceptHistory(history.messages);
+            this.acceptContext(history);
+          }
           if (batch.events.length || history || this.snapshot.error)
             this.publish({
               ...(history ? { messages: history.messages } : {}),
               task,
               queued: runs.filter((run) => run.state === "queued"),
               stream: this.streamFor(task?.id),
+              contextActivities: [...this.contextActivities.values()].map(
+                (activity) => ({ ...activity }),
+              ),
               question:
                 task?.state === "awaitingUser"
                   ? (this.questions.get(task.id) ?? "")
@@ -290,6 +382,7 @@ class Session {
             await new Promise((resolve) => setTimeout(resolve, 1000));
           }
         } catch (error) {
+          if (this.disposed) break;
           failures++;
           this.publish({
             error: `暂时无法同步对话，正在重试。${readError(error)}`,
@@ -302,7 +395,10 @@ class Session {
             ),
           );
         }
-      } while (this.listeners.size || [...this.runs.values()].some(isRunning));
+      } while (
+        !this.disposed &&
+        (this.listeners.size || [...this.runs.values()].some(isRunning))
+      );
     } catch (error) {
       this.publish({
         error: error instanceof Error ? error.message : String(error),
@@ -314,6 +410,10 @@ class Session {
   }
 }
 const sessions = new Map<string, Session>();
+export function forgetSession(id: string) {
+  const entry = sessions.get(id);
+  if (entry && !entry.dispose()) sessions.delete(id);
+}
 export function session(id: string) {
   let entry = sessions.get(id);
   if (!entry) {

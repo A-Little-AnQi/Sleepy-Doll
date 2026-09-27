@@ -64,9 +64,9 @@ pub struct ModelOptions {
     pub prompt_cache: bool,
 }
 
-/// 主流模型的窗口量级，配置里按实际模型改。
+/// 未获知模型容量时的起始窗口；模型列表返回容量时由设置界面采用。
 const fn default_context_window() -> u64 {
-    200_000
+    256_000
 }
 impl Default for ModelOptions {
     fn default() -> Self {

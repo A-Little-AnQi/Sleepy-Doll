@@ -262,6 +262,15 @@
   font-variant-numeric: tabular-nums;
 }
 
+.context-activity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 27px;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
 .activity-summary {
   width: fit-content;
   max-width: 100%;

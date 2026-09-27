@@ -33,6 +33,196 @@ pub struct ConversationMessage {
     pub stream_boundary: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextActivity {
+    pub id: u64,
+    pub run_id: String,
+    pub state: &'static str,
+}
+
+#[cfg(test)]
+mod context_activity_tests {
+    use super::*;
+
+    fn deletion_journal() -> Journal {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE runtime_runs(id TEXT PRIMARY KEY,conversation_id TEXT,client_key TEXT UNIQUE,state TEXT,revision INTEGER,payload TEXT);
+            CREATE TABLE runtime_events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,conversation_id TEXT,run_id TEXT,kind TEXT,data TEXT);
+            CREATE TABLE runtime_attempts(id TEXT,run_id TEXT,call_id TEXT,payload TEXT);
+            CREATE TABLE runtime_approvals(id TEXT,run_id TEXT,payload TEXT);
+            CREATE TABLE runtime_plans(run_id TEXT,revision INTEGER,payload TEXT);
+            CREATE TABLE runtime_inputs(id INTEGER PRIMARY KEY,run_id TEXT,kind TEXT,content TEXT,consumed INTEGER);
+            CREATE TABLE runtime_artifacts(id TEXT,run_id TEXT,content TEXT);
+            CREATE TABLE runtime_leases(instance_id TEXT,attempt_id TEXT);").unwrap();
+        crate::runtime::store::migrations::migrate(&mut connection).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE runtime_message_owners(message_id INTEGER,run_id TEXT);
+            CREATE TABLE runtime_input_keys(run_id TEXT,client_key TEXT,kind TEXT,content TEXT);",
+            )
+            .unwrap();
+        Journal {
+            connection: Mutex::new(connection),
+            notify: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+
+    #[test]
+    fn permanent_deletion_removes_related_rows_and_preserves_other_chats_and_tasks() {
+        let journal = deletion_journal();
+        let mut run = journal
+            .create("private prompt", "deleted", "deleted-key", 300, None)
+            .unwrap();
+        journal.save(&mut run, RunState::Cancelled).unwrap();
+        let mut other = journal
+            .create("preserved prompt", "kept", "kept-key", 300, None)
+            .unwrap();
+        journal.save(&mut other, RunState::Cancelled).unwrap();
+        {
+            let db = journal.connection.lock().unwrap();
+            db.execute(
+                "INSERT INTO runtime_attempts VALUES('attempt',?1,'call','private')",
+                [&run.id],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO runtime_approvals VALUES('approval',?1,'private')",
+                [&run.id],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO runtime_inputs VALUES(1,?1,'input','private',0)",
+                [&run.id],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO runtime_plans VALUES(?1,1,'private')",
+                [&run.id],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO runtime_artifacts VALUES('artifact',?1,'private')",
+                [&run.id],
+            )
+            .unwrap();
+            db.execute("INSERT INTO task_definitions VALUES('task','task','saved independently','deleted',1,NULL,0,0,'{}','now')",[]).unwrap();
+            db.execute("INSERT INTO runtime_operations VALUES('operation',?1,'fixture','done',1,'{}','now','now')",[&run.id]).unwrap();
+            db.execute("INSERT INTO runtime_evidence VALUES('evidence','operation','fixture','private','now')",[]).unwrap();
+            db.execute("INSERT INTO runtime_operation_events(operation_id,kind,payload,created_at) VALUES('operation','done','private','now')",[]).unwrap();
+            db.execute(
+                "INSERT INTO runtime_artifact_refs VALUES('artifact','run',?1,'result','now')",
+                [&run.id],
+            )
+            .unwrap();
+            db.execute("INSERT INTO runtime_artifact_refs VALUES('shared','resourceSnapshot','snapshot','content','now')",[]).unwrap();
+            db.execute("INSERT INTO runtime_notifications VALUES('notification','run','{\"target\":{\"conversationId\":\"deleted\"}}','now',NULL)",[]).unwrap();
+        }
+        let result = journal.delete_conversation("deleted").unwrap();
+        assert_eq!(result["permanent"], true);
+        assert_eq!(result["tasksKept"], 1);
+        assert_eq!(
+            journal.conversation_messages("kept").unwrap()[0]
+                .message
+                .content,
+            "preserved prompt"
+        );
+        assert_eq!(journal.get(&other.id).unwrap().id, other.id);
+        let db = journal.connection.lock().unwrap();
+        for table in [
+            "runtime_attempts",
+            "runtime_approvals",
+            "runtime_inputs",
+            "runtime_plans",
+            "runtime_artifacts",
+            "runtime_operations",
+            "runtime_evidence",
+            "runtime_operation_events",
+            "runtime_notifications",
+        ] {
+            let count: i64 = db
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} retained deleted chat data");
+        }
+        let events: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM runtime_events WHERE conversation_id='deleted'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let checkpoints: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM runtime_checkpoints WHERE run_id=?1",
+                [&run.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!((events, checkpoints), (0, 0));
+        let shared: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM runtime_artifact_refs WHERE owner_kind='resourceSnapshot'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(shared, 1);
+    }
+
+    #[test]
+    fn leased_execution_prevents_partial_conversation_deletion() {
+        let journal = deletion_journal();
+        let mut run = journal
+            .create("preserve on failure", "chat", "key", 300, None)
+            .unwrap();
+        journal.save(&mut run, RunState::Cancelled).unwrap();
+        {
+            let db = journal.connection.lock().unwrap();
+            db.execute(
+                "INSERT INTO runtime_attempts VALUES('attempt',?1,'call','private')",
+                [&run.id],
+            )
+            .unwrap();
+            db.execute("INSERT INTO runtime_leases VALUES('host','attempt')", [])
+                .unwrap();
+        }
+        assert!(journal.delete_conversation("chat").is_err());
+        assert_eq!(journal.conversation_messages("chat").unwrap().len(), 1);
+        assert!(journal.get(&run.id).is_ok());
+    }
+
+    #[test]
+    fn snapshot_pairs_compactions_and_marks_interrupted_records() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE runtime_runs(id TEXT,state TEXT);
+            CREATE TABLE runtime_events(sequence INTEGER,conversation_id TEXT,run_id TEXT,kind TEXT,data TEXT);
+            INSERT INTO runtime_runs VALUES ('active','\"deciding\"'),('ended','\"failed\"');
+            INSERT INTO runtime_events VALUES
+              (1,'chat','active','context.compaction.started','{}'),
+              (2,'chat','active','context.compacted','{\"mode\":\"summary\"}'),
+              (3,'chat','active','context.compacted','{\"clearedResults\":1}'),
+              (4,'chat','active','context.compaction.started','{}'),
+              (5,'chat','ended','context.compaction.started','{}'),
+              (6,'other','active','context.compaction.started','{}');").unwrap();
+        let journal = Journal {
+            connection: Mutex::new(connection),
+            notify: Arc::new(tokio::sync::Notify::new()),
+        };
+        let (activities, boundary) = journal.context_activities("chat").unwrap();
+        assert_eq!(boundary, 5);
+        assert_eq!(
+            activities
+                .iter()
+                .map(|activity| (activity.id, activity.state))
+                .collect::<Vec<_>>(),
+            vec![(1, "completed"), (4, "running"), (5, "failed")]
+        );
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationGroup {
@@ -265,6 +455,16 @@ impl Journal {
     }
     pub fn list(&self) -> Result<Vec<Run>> {
         self.query_runs("SELECT payload FROM runtime_runs ORDER BY rowid DESC LIMIT 100")
+    }
+    pub fn conversation_runs(&self, id: &str) -> Result<Vec<Run>> {
+        let db = self.connection.lock().unwrap();
+        let mut query = db.prepare("SELECT payload FROM runtime_runs WHERE conversation_id=?1")?;
+        let rows = query
+            .query_map([id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter()
+            .map(|payload| serde_json::from_str(&payload).map_err(Error::from))
+            .collect()
     }
     pub fn pending(&self) -> Result<Vec<Run>> {
         self.query_runs("SELECT payload FROM runtime_runs WHERE state NOT IN ('\"answered\"','\"succeeded\"','\"partial\"','\"failed\"','\"cancelled\"','\"needsReview\"') ORDER BY rowid")
@@ -819,6 +1019,37 @@ impl Journal {
             [id],
             |row| row.get(0),
         )?;
+        let leased: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM runtime_leases WHERE attempt_id IN
+            (SELECT id FROM runtime_attempts WHERE run_id IN (SELECT id FROM runtime_runs WHERE conversation_id=?1)))
+            OR EXISTS(SELECT 1 FROM runtime_resource_leases WHERE operation_id IN
+            (SELECT id FROM runtime_operations WHERE run_id IN (SELECT id FROM runtime_runs WHERE conversation_id=?1)))", [id], |row| row.get(0))?;
+        if leased {
+            return Err(Error::Conflict(
+                "这个对话仍有未结束的执行，请先停止执行再删除".into(),
+            ));
+        }
+        tx.execute("DELETE FROM runtime_artifact_refs WHERE (owner_kind='run' AND owner_id IN (SELECT id FROM runtime_runs WHERE conversation_id=?1))
+            OR (owner_kind='operation' AND owner_id IN (SELECT id FROM runtime_operations WHERE run_id IN (SELECT id FROM runtime_runs WHERE conversation_id=?1)))", [id])?;
+        tx.execute("DELETE FROM runtime_evidence WHERE operation_id IN (SELECT id FROM runtime_operations WHERE run_id IN (SELECT id FROM runtime_runs WHERE conversation_id=?1))",[id])?;
+        tx.execute("DELETE FROM runtime_operation_events WHERE operation_id IN (SELECT id FROM runtime_operations WHERE run_id IN (SELECT id FROM runtime_runs WHERE conversation_id=?1))",[id])?;
+        tx.execute("DELETE FROM runtime_operations WHERE run_id IN (SELECT id FROM runtime_runs WHERE conversation_id=?1)",[id])?;
+        tx.execute("DELETE FROM runtime_notifications WHERE json_extract(payload,'$.target.conversationId')=?1 OR json_extract(payload,'$.target.runId') IN (SELECT id FROM runtime_runs WHERE conversation_id=?1)",[id])?;
+        tx.execute("DELETE FROM runtime_metrics WHERE json_extract(payload,'$.labels.conversationId')=?1 OR json_extract(payload,'$.labels.runId') IN (SELECT id FROM runtime_runs WHERE conversation_id=?1)",[id])?;
+        for table in [
+            "runtime_attempts",
+            "runtime_approvals",
+            "runtime_plans",
+            "runtime_inputs",
+            "runtime_input_keys",
+            "runtime_artifacts",
+            "runtime_checkpoints",
+            "runtime_workflow_runs",
+            "task_runs",
+        ] {
+            tx.execute(&format!("DELETE FROM {table} WHERE run_id IN (SELECT id FROM runtime_runs WHERE conversation_id=?1)"),[id])?;
+        }
+        tx.execute("DELETE FROM runtime_events WHERE conversation_id=?1", [id])?;
+        tx.execute("DELETE FROM runtime_preferences WHERE scope=?1", [id])?;
         tx.execute(
             "DELETE FROM runtime_message_owners WHERE run_id IN (SELECT id FROM runtime_runs WHERE conversation_id=?1)",
             [id],
@@ -835,6 +1066,7 @@ impl Journal {
             "messages":messages,
             "runs":runs,
             "tasksKept":tasks,
+            "permanent":true,
         }))
     }
 
@@ -1003,6 +1235,62 @@ impl Journal {
         self.touch();
         Ok(())
     }
+    /// Load compaction records before the first paint; event replay must not reopen old process panels.
+    pub fn context_activities(&self, conversation: &str) -> Result<(Vec<ContextActivity>, u64)> {
+        let db = self.connection.lock().unwrap();
+        let mut query = db.prepare("SELECT e.sequence,e.run_id,e.kind,r.state FROM runtime_events e
+            LEFT JOIN runtime_runs r ON r.id=e.run_id WHERE e.conversation_id=?1 AND
+            (e.kind='context.compaction.started' OR (e.kind='context.compacted' AND json_extract(e.data,'$.mode')='summary'))
+            ORDER BY e.sequence")?;
+        let rows = query.query_map([conversation], |row| {
+            Ok((
+                row.get::<_, u64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })?;
+        let mut activities: Vec<ContextActivity> = vec![];
+        let mut ended = std::collections::HashSet::new();
+        let mut boundary = 0;
+        for row in rows {
+            let (id, run_id, kind, state) = row?;
+            boundary = id;
+            if state
+                .as_deref()
+                .and_then(|state| serde_json::from_str::<RunState>(state).ok())
+                .is_some_and(|state| state.terminal() || state == RunState::Blocked)
+            {
+                ended.insert(run_id.clone());
+            }
+            if kind == "context.compaction.started" {
+                activities.push(ContextActivity {
+                    id,
+                    run_id,
+                    state: "running",
+                });
+            } else if let Some(activity) = activities
+                .iter_mut()
+                .rev()
+                .find(|activity| activity.run_id == run_id && activity.state == "running")
+            {
+                activity.state = "completed";
+            } else {
+                activities.push(ContextActivity {
+                    id,
+                    run_id,
+                    state: "completed",
+                });
+            }
+        }
+        for activity in &mut activities {
+            if activity.state == "running" && ended.contains(&activity.run_id) {
+                activity.state = "failed";
+            }
+        }
+        Ok((activities, boundary))
+    }
+
     pub fn conversation_messages(&self, conversation: &str) -> Result<Vec<ConversationMessage>> {
         let db = self.connection.lock().unwrap();
         // Legacy rows have no stored boundary. A completed event always follows

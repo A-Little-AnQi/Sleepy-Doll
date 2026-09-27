@@ -30,6 +30,7 @@ import { ComposerField } from "../../components/chat/ComposerField";
 import { estimateMessagesTokens } from "../../session/context-usage";
 import { useT } from "../../i18n";
 import type { Plan } from "../../session";
+import { DEFAULT_CONTEXT_WINDOW } from "../../models/presets";
 
 interface Props {
   bootstrap: Bootstrap;
@@ -118,7 +119,16 @@ export function ChatPage({
 }: Props) {
   const t = useT();
   const data = useSession(conversationId);
-  const { messages, task, stream, question, approval, plan, loading } = data;
+  const {
+    messages,
+    task,
+    stream,
+    contextActivities,
+    question,
+    approval,
+    plan,
+    loading,
+  } = data;
   const busy = isRunning(task);
   const draftKey = `sleepy-doll-draft:${conversationId ?? "new"}`;
   const [prompt, setPrompt] = useState(
@@ -160,10 +170,10 @@ export function ChatPage({
     pendingModel,
   );
   const contextWindow =
-    task?.contextWindow ||
+    (busy ? task?.contextWindow : undefined) ||
     bootstrap.models.find((entry) => entry.id === selectedModel)
       ?.contextWindow ||
-    200_000;
+    DEFAULT_CONTEXT_WINDOW;
   const contextUsed =
     task?.contextTokens ?? estimateMessagesTokens(messages, [stream, prompt]);
   const current = useRef(conversationId);
@@ -378,6 +388,7 @@ export function ChatPage({
                   toolLabels={toolLabels}
                   tasks={bootstrap.tasks}
                   currentTask={task}
+                  contextActivities={contextActivities}
                 />
                 {plan && (
                   <RunPlanCard
@@ -600,7 +611,6 @@ export function ChatPage({
               <ContextMeter
                 used={contextUsed}
                 window={contextWindow}
-                compacted={Boolean(task?.contextCompacted)}
                 cacheHit={
                   task?.promptCacheHit ? (task.promptCacheHitTokens ?? 0) : 0
                 }

@@ -219,7 +219,12 @@ export const api = {
   cancelTask: (id: string) => invoke<TaskInfo>("task.cancel", { id }),
   resumeTask: (id: string) => invoke<TaskInfo>("task.resume", { id }),
   conversation: (id: string) =>
-    invoke<{ id: string; messages: MessageInfo[] }>("conversation.get", { id }),
+    invoke<{
+      id: string;
+      messages: MessageInfo[];
+      contextActivities?: import("./types").ContextActivity[];
+      contextActivityBoundary?: number;
+    }>("conversation.get", { id }),
   useModel: (id: string) =>
     invoke<{ activeModel: string }>("model.use", { id }),
   deleteModel: (id: string) =>
@@ -247,7 +252,11 @@ export const api = {
     apiKey: string;
     auth?: string;
     modelsUrl?: string;
-  }) => invoke<{ models: string[] }>("model.list", probe),
+  }) =>
+    invoke<{ models: string[]; contextWindows?: Record<string, number> }>(
+      "model.list",
+      probe,
+    ),
   setSkillEnabled: (name: string, enabled: boolean) =>
     invoke<{ enabled: boolean }>("skill.setEnabled", { name, enabled }),
   setPluginEnabled: (id: string, enabled: boolean) =>

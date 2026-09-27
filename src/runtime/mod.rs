@@ -129,6 +129,7 @@ pub struct Supervisor {
     config: RwLock<AppConfig>,
     extensions: RwLock<RuntimeExtensions>,
     active: Mutex<HashMap<String, CancellationToken>>,
+    deleting_conversations: Mutex<HashSet<String>>,
     model_gate: tokio::sync::RwLock<()>,
     catalog: host::catalog::Catalog,
     hooks: RwLock<Arc<host::hooks::HookBus>>,
@@ -302,6 +303,7 @@ impl Supervisor {
                 adapters,
             }),
             active: Mutex::new(HashMap::new()),
+            deleting_conversations: Mutex::new(HashSet::new()),
             model_gate: tokio::sync::RwLock::new(()),
             catalog,
             hooks: RwLock::new(hook_bus),
@@ -590,6 +592,7 @@ impl Supervisor {
             return Ok(());
         }
         let runs = self.journal.pending()?;
+        let deleting = self.deleting_conversations.lock().unwrap().clone();
         let mut occupied = HashSet::new();
         let mut active = self.active.lock().unwrap();
         for run in &runs {
@@ -601,6 +604,7 @@ impl Supervisor {
             if !matches!(run.state, RunState::Queued | RunState::Recovering)
                 || active.contains_key(&run.id)
                 || occupied.contains(&run.conversation_id)
+                || deleting.contains(&run.conversation_id)
                 || active.len() >= 4
             {
                 continue;
@@ -704,6 +708,43 @@ impl Supervisor {
             self.journal.save(&mut run, RunState::Cancelled)?;
         }
         Ok(run)
+    }
+
+    pub async fn delete_conversation(&self, id: &str) -> Result<Value> {
+        if !self
+            .deleting_conversations
+            .lock()
+            .unwrap()
+            .insert(id.to_owned())
+        {
+            return Err(Error::Conflict("这个对话正在删除".into()));
+        }
+        let result = async {
+            let runs = self.journal.conversation_runs(id)?;
+            for run in &runs {
+                self.cancel(&run.id)?;
+            }
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            loop {
+                let busy = {
+                    let active = self.active.lock().unwrap();
+                    runs.iter().any(|run| active.contains_key(&run.id))
+                };
+                if !busy {
+                    break;
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err(Error::Conflict(
+                        "正在停止对话运行，结束后才能彻底删除".into(),
+                    ));
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            self.journal.delete_conversation(id)
+        }
+        .await;
+        self.deleting_conversations.lock().unwrap().remove(id);
+        result
     }
 
     /// 取消所有正在执行和排队的运行（急停）。返回请求停止的数量。

@@ -7,12 +7,10 @@ import { useLocale } from "../../appearance/locale";
 export function ContextMeter({
   used,
   window,
-  compacted = false,
   cacheHit = 0,
 }: {
   used: number;
   window: number;
-  compacted?: boolean;
   cacheHit?: number;
 }) {
   const t = useT();
@@ -73,9 +71,6 @@ export function ContextMeter({
             <span>{english ? "Cache hit" : "缓存命中"}</span>
             <span>{formatTokens(cacheHit)}</span>
           </span>
-        ) : null}
-        {compacted ? (
-          <span className="sd-context-hint-note">{t.context.compacted}</span>
         ) : null}
       </span>
     </div>

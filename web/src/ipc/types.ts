@@ -73,6 +73,12 @@ export interface MessageInfo {
     text?: string;
   };
 }
+export interface ContextActivity {
+  id: number;
+  runId: string;
+  state: "running" | "completed" | "failed";
+}
+
 export interface TaskInfo {
   id: string;
   conversationId: string;

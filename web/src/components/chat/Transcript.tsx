@@ -12,7 +12,7 @@ import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 import { AlertIcon, CheckIcon, CopyIcon } from "../icons";
 import { DisclosureChevron } from "../controls/DisclosureChevron";
-import type { MessageInfo, TaskInfo } from "../../ipc/types";
+import type { ContextActivity, MessageInfo, TaskInfo } from "../../ipc/types";
 import "./Transcript.css";
 import { useT } from "../../i18n";
 import { usePresentedText } from "./usePresentedText";
@@ -29,10 +29,12 @@ type Part =
       visibleText: string;
       hasTools?: boolean;
       revealing?: boolean;
+      boundary?: number;
     }
   | { kind: "reasoning"; text: string }
   | { kind: "stream"; text: string; visibleText: string }
-  | { kind: "activities"; activities: Activity[] };
+  | { kind: "activities"; activities: Activity[] }
+  | { kind: "context"; activity: ContextActivity };
 export interface Turn {
   key: string;
   role: "user" | "assistant";
@@ -84,6 +86,7 @@ export function buildTurns(
     "messages" | "stream" | "revealingMessages"
   >,
   streamRunId?: string,
+  contextActivities: ContextActivity[] = [],
 ): Turn[] {
   const results = new Map(
     messages
@@ -134,6 +137,9 @@ export function buildTurns(
           presentation?.messages[messageIndex]?.content ?? message.content,
         hasTools: Boolean(message.toolCalls?.length),
         revealing: presentation?.revealingMessages.has(messageIndex) ?? false,
+        ...(message.streamBoundary != null
+          ? { boundary: message.streamBoundary }
+          : {}),
       });
     if (calls.length) {
       let part = turn.parts.at(-1);
@@ -148,6 +154,43 @@ export function buildTurns(
         })),
       );
     }
+  }
+  for (const activity of contextActivities) {
+    let turn = [...turns]
+      .reverse()
+      .find(
+        (candidate) =>
+          candidate.role === "assistant" && candidate.runId === activity.runId,
+      );
+    if (!turn) {
+      const userIndex = turns.findIndex(
+        (candidate) =>
+          candidate.role === "user" && candidate.runId === activity.runId,
+      );
+      if (userIndex < 0) continue;
+      turn = {
+        key: keyFor("assistant", activity.runId),
+        role: "assistant",
+        runId: activity.runId,
+        parts: [],
+      };
+      turns.splice(userIndex + 1, 0, turn);
+    }
+    const nextText = turn.parts.findIndex(
+      (part) =>
+        part.kind === "text" &&
+        part.boundary != null &&
+        part.boundary >= activity.id,
+    );
+    const last = turn.parts.at(-1);
+    // Legacy messages may not have event boundaries. Keep their final answer outside the process.
+    const at =
+      nextText >= 0
+        ? nextText
+        : last?.kind === "text" && !last.hasTools
+          ? turn.parts.length - 1
+          : turn.parts.length;
+    turn.parts.splice(at, 0, { kind: "context", activity });
   }
   if (stream) {
     let turn = turns.at(-1);
@@ -509,6 +552,7 @@ export const Transcript = memo(function Transcript({
   tasks = [],
   currentTask,
   running = Boolean(phase),
+  contextActivities = [],
 }: {
   messages: MessageInfo[];
   stream: string;
@@ -518,11 +562,18 @@ export const Transcript = memo(function Transcript({
   tasks?: TaskInfo[];
   currentTask?: TaskInfo | undefined;
   running?: boolean;
+  contextActivities?: ContextActivity[];
 }) {
   const t = useT();
   const presented = usePresentedText(messages, stream, currentTask?.id);
   // 先用完整消息决定折叠结构，吐字只改变正文的可见内容。
-  const turns = buildTurns(messages, stream, presented, currentTask?.id);
+  const turns = buildTurns(
+    messages,
+    stream,
+    presented,
+    currentTask?.id,
+    contextActivities,
+  );
   // 首个 delta 到来前就占据同一助手轮次，等待状态不另建一个临时节点。
   const latest = turns.at(-1);
   if (
@@ -562,8 +613,14 @@ export const Transcript = memo(function Transcript({
           running &&
           (!currentTask || !turn.runId || currentTask.id === turn.runId);
         const terminal = turn.parts.at(-1);
+        const compacting =
+          active &&
+          turn.parts.some(
+            (part) =>
+              part.kind === "context" && part.activity.state === "running",
+          );
         const finalIndex =
-          terminal?.kind === "text" && !terminal.hasTools
+          terminal?.kind === "text" && !terminal.hasTools && !compacting
             ? turn.parts.length - 1
             : -1;
         const answer = finalIndex >= 0 ? turn.parts[finalIndex] : undefined;
@@ -594,6 +651,7 @@ export const Transcript = memo(function Transcript({
                     role="status"
                     hidden={
                       !active ||
+                      compacting ||
                       Boolean(answer) ||
                       ["awaitingUser", "awaitingApproval"].includes(
                         task?.state ?? "",
@@ -630,6 +688,30 @@ export const Transcript = memo(function Transcript({
                             labels={toolLabels}
                             active={active}
                           />
+                        ) : part.kind === "context" ? (
+                          <div
+                            className="context-activity"
+                            key={`context:${part.activity.id}`}
+                            data-state={part.activity.state}
+                          >
+                            {part.activity.state === "running" ? (
+                              <span
+                                className="activity-spinner"
+                                aria-hidden="true"
+                              />
+                            ) : part.activity.state === "completed" ? (
+                              <CheckIcon className="activity-icon" />
+                            ) : (
+                              <AlertIcon className="activity-icon" />
+                            )}
+                            <span>
+                              {part.activity.state === "running"
+                                ? t.context.compacting
+                                : part.activity.state === "completed"
+                                  ? t.context.compactedShort
+                                  : t.context.compactionFailed}
+                            </span>
+                          </div>
                         ) : part.kind === "text" || part.kind === "stream" ? (
                           <div
                             key={`text:${at}`}

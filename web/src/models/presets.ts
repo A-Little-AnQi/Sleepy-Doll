@@ -16,8 +16,10 @@ export type ModelPreset = {
   timeoutMs: number;
 };
 
+export const DEFAULT_CONTEXT_WINDOW = 256_000;
+
 const DEFAULTS = {
-  contextWindow: 200_000,
+  contextWindow: DEFAULT_CONTEXT_WINDOW,
   maxOutputTokens: 8192,
   timeoutMs: 120_000,
 };
@@ -194,6 +196,26 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
 
 export function normalizeEndpoint(url: string) {
   return url.trim().replace(/\/+$/, "");
+}
+
+export function suggestedContextWindow(
+  model: string,
+  reported: Record<string, number> = {},
+  fallback = DEFAULT_CONTEXT_WINDOW,
+) {
+  const limit = reported[model];
+  if (
+    limit != null &&
+    Number.isInteger(limit) &&
+    limit >= 8192 &&
+    limit <= 2_000_000
+  )
+    return limit;
+  return (
+    MODEL_PRESETS.find(
+      (preset) => preset.model && preset.model === model.trim(),
+    )?.contextWindow ?? fallback
+  );
 }
 
 export function presetById(id: string) {

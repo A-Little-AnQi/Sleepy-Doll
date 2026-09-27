@@ -35,6 +35,7 @@ try {
     updatedAt: "2026-09-27T00:00:00Z",
   }));
   let mode = "fullAccess";
+  let showRunningStatus = true;
   let failPreview = false;
   const deletionRequests = [];
   const taskDeletionRequests = [];
@@ -65,7 +66,16 @@ try {
     runtimeToolLabels: {},
     plugins: [],
     conversations,
-    tasks: [],
+    tasks: showRunningStatus
+      ? conversations.map((entry) => ({
+          id: `run-${entry.id}`,
+          conversationId: entry.id,
+          prompt: "fixture",
+          state: "deciding",
+          createdAt: entry.createdAt,
+          updatedAt: entry.updatedAt,
+        }))
+      : [],
     strategies: [],
     workflows,
     operations: [],
@@ -161,6 +171,7 @@ try {
         row: rect(node),
         title: rect(node.querySelector(".app-conversation-title")),
         actions: rect(node.querySelector(".app-conversation-actions")),
+        status: rect(node.querySelector(".conversation-status")),
         buttons: [
           ...node.querySelectorAll(".app-conversation-actions button"),
         ].map(rect),
@@ -200,6 +211,23 @@ try {
         after.row.height,
         "hover changed row height",
       );
+      const center = (box) => box.y + box.height / 2;
+      assert(
+        Math.abs(center(after.status) - center(after.row)) < 0.5,
+        "running dot is not vertically centered",
+      );
+      assert(
+        Math.abs(after.row.right - after.status.right - 10) < 0.5,
+        "running dot is not at the row's right edge",
+      );
+      assert(
+        Math.abs(before.status.x - after.status.x) < 0.5,
+        "hover moved the running dot",
+      );
+      assert(
+        after.actions.right <= after.status.x,
+        "actions overlap the running dot",
+      );
       assert(after.title.right <= after.actions.x, "actions cover the title");
       for (const button of after.buttons) {
         assert(
@@ -219,6 +247,9 @@ try {
     }
   }
   console.log(JSON.stringify({ geometryCases }));
+  showRunningStatus = false;
+  await page.reload();
+  await row("first").waitFor();
   await row("first").hover();
   await row("first")
     .getByRole("button", { name: "删除对话", exact: true })
