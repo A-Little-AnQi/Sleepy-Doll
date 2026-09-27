@@ -90,3 +90,8 @@ required-features = ["dev-ipc"]
 name = "sleepy-doll-setup"
 path = "src/bin/sleepy-doll-setup.rs"
 required-features = ["setup"]
+
+[[test]]
+name = "desktop-startup"
+path = "bgi-bridge/dev/desktop-startup.rs"
+required-features = ["desktop"]

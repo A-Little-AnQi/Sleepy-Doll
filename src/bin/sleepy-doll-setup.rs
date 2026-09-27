@@ -3,6 +3,8 @@
 //! 安装程序的窗口与 IPC：把界面挂起来，请求转给 `sleepy_doll::setup`，进度推回去。
 
 // 桌面壳的窗口改造，按路径引入。
+#[path = "../desktop_startup.rs"]
+mod desktop_startup;
 #[path = "../window_chrome.rs"]
 mod window_chrome;
 
@@ -61,6 +63,7 @@ enum Push {
 #[derive(Debug)]
 enum UserEvent {
     ToWeb(Push),
+    FrontendReady(bool),
     Window(window_chrome::Action),
     /// 文件夹选择框与目录确认要在主线程上弹。
     Browse {
@@ -123,6 +126,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     let window = WindowBuilder::new()
+        .with_visible(false)
+        .with_background_color(desktop_startup::background(true))
         .with_title(TITLE)
         .with_inner_size(Size::Logical(LogicalSize::new(WIDTH, HEIGHT)))
         // window_chrome::install 会加回 WS_THICKFRAME，尺寸用上下限钉死。
@@ -137,6 +142,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let ipc_proxy = proxy.clone();
     let ipc_hwnd = window_chrome::hwnd_id(&window);
     let webview = WebViewBuilder::new_with_web_context(&mut web_context)
+        .with_background_color(desktop_startup::background(true))
         .with_asynchronous_custom_protocol(
             "sleepy".into(),
             move |_webview_id, request, responder| {
@@ -151,17 +157,38 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .build(&window)?;
 
     window_chrome::install(&window);
+    let mut startup = desktop_startup::DesktopStartup::prime(&window, false);
+    let mut pending = Vec::new();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
+            Event::UserEvent(UserEvent::FrontendReady(dark)) => {
+                if startup.is_ready() {
+                    return;
+                }
+                let _ = webview.set_background_color(desktop_startup::background(dark));
+                if startup.present(&window, dark, true) {
+                    for payload in std::mem::take(&mut pending) {
+                        let _ = proxy.send_event(UserEvent::ToWeb(payload));
+                    }
+                }
+            }
             Event::UserEvent(UserEvent::ToWeb(Push::Reply(payload))) => {
+                if !startup.is_ready() {
+                    pending.push(Push::Reply(payload));
+                    return;
+                }
                 if let Ok(serialized) = serde_json::to_string(&payload) {
                     let _ =
                         webview.evaluate_script(&format!("window.__setupReceive?.({serialized});"));
                 }
             }
             Event::UserEvent(UserEvent::ToWeb(Push::State(state))) => {
+                if !startup.is_ready() {
+                    pending.push(Push::State(state));
+                    return;
+                }
                 if let Ok(serialized) = serde_json::to_string(&state) {
                     let _ =
                         webview.evaluate_script(&format!("window.__setupState?.({serialized});"));
@@ -220,6 +247,12 @@ fn dispatch_ipc(request: Request<String>, proxy: EventLoopProxy<UserEvent>, hwnd
         return;
     };
     match request.method.as_str() {
+        "window.ready" => {
+            let _ = proxy.send_event(UserEvent::FrontendReady(
+                request.params["dark"].as_bool().unwrap_or(true),
+            ));
+            return;
+        }
         "window.drag" => {
             // 与主程序一致：拖动在指针按下时进入系统移动循环。
             #[cfg(target_os = "windows")]

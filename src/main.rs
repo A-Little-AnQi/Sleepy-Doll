@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[cfg(target_os = "windows")]
-mod tray_popup;
+mod desktop_startup;
 mod window_chrome;
 
 use std::{
@@ -22,7 +21,7 @@ use sleepy_doll::{app::AppController, logging, runtime::types::Event as AgentEve
 use tao::platform::windows::{IconExtWindows, WindowBuilderExtWindows};
 use tao::{
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize, Position, Size},
-    event::{Event, StartCause, WindowEvent},
+    event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
     window::{Window, WindowBuilder},
 };
@@ -119,12 +118,9 @@ enum UserEvent {
     OpenSettings,
     #[cfg(target_os = "windows")]
     OpenHelp,
+    FrontendReady(bool),
     #[cfg(target_os = "windows")]
-    ShowTrayMenu(f64, f64),
-    #[cfg(target_os = "windows")]
-    TrayAction(String),
-    #[cfg(target_os = "windows")]
-    TrayTheme(bool),
+    WindowTheme(bool),
     #[cfg(target_os = "windows")]
     BridgeFailed(String),
     #[cfg(target_os = "windows")]
@@ -300,7 +296,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     // 窗口保持不透明：圆角由 DWM 切（Win11），Win10 上是方角。透明管线会被拖动等
     // DWM 状态变化打破，不能用。
+    let startup_dark = std::fs::read_to_string(user_directory.join("tray-theme.txt"))
+        .is_ok_and(|value| value.trim() == "dark");
     let builder = WindowBuilder::new()
+        .with_visible(false)
+        .with_background_color(desktop_startup::background(startup_dark))
         .with_title("Sleepy Doll")
         .with_inner_size(placement.map_or(
             Size::Logical(LogicalSize::new(1360.0, 860.0)),
@@ -308,12 +308,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .with_min_inner_size(Size::Logical(LogicalSize::new(900.0, 620.0)));
     let builder = if let Some(placement) = placement {
-        builder
-            .with_position(Position::Physical(PhysicalPosition::new(
-                placement.x,
-                placement.y,
-            )))
-            .with_maximized(placement.maximized)
+        builder.with_position(Position::Physical(PhysicalPosition::new(
+            placement.x,
+            placement.y,
+        )))
     } else {
         builder
     };
@@ -335,6 +333,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let ipc_config_path = config_path.clone();
     let ipc_hwnd = window_chrome::hwnd_id(&window);
     let webview = WebViewBuilder::new_with_web_context(&mut web_context)
+        .with_background_color(desktop_startup::background(startup_dark))
         .with_asynchronous_custom_protocol(
             "sleepy".into(),
             move |_webview_id, request, responder| {
@@ -389,27 +388,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut placement_deadline = None;
     #[cfg(target_os = "windows")]
     let mut shutting_down = false;
-    #[cfg(target_os = "windows")]
-    let mut tray_popup: Option<tray_popup::TrayPopup> = None;
-    #[cfg(target_os = "windows")]
-    // 上次会话的主题落在用户目录，托盘面板预热不依赖前端回传的时序。
-    let tray_theme_path = user_directory.join("tray-theme.txt");
-    #[cfg(target_os = "windows")]
-    let mut tray_menu_state = json!({
-        "dark": std::fs::read_to_string(&tray_theme_path)
-            .map(|text| text.trim() == "dark")
-            .unwrap_or(false),
-        "active": false,
-        "bridge": bridge_enabled.load(Ordering::Relaxed),
-        "bridgeBusy": false,
-    });
-
+    let mut startup = desktop_startup::DesktopStartup::prime(
+        &window,
+        placement.is_some_and(|value| value.maximized),
+    );
     let surface = DesktopSurface { webview, window };
-    event_loop.run(move |event, event_target, control_flow| {
+    let mut pending_messages = Vec::new();
+    #[cfg(target_os = "windows")]
+    let mut bridge_busy = false;
+    event_loop.run(move |event, _, control_flow| {
         let window = &surface.window;
         let webview = &surface.webview;
-        #[cfg(target_os = "windows")]
-        let mut refresh_tray_menu = false;
         if placement_deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
             save_window_placement(
                 &placement_path,
@@ -433,112 +422,37 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         match event {
             Event::LoopDestroyed => {
                 window.set_visible(false);
-                #[cfg(target_os = "windows")]
-                if let Some(popup) = tray_popup.as_mut() {
-                    popup.hide();
-                }
             }
-            #[cfg(target_os = "windows")]
-            Event::WindowEvent {
-                window_id,
-                event: WindowEvent::Focused(false) | WindowEvent::CloseRequested,
-                ..
-            } if tray_popup
-                .as_ref()
-                .is_some_and(|popup| popup.window.id() == window_id) =>
-            {
-                if let Some(popup) = tray_popup.as_mut() {
-                    popup.hide();
+            Event::UserEvent(UserEvent::FrontendReady(dark)) => {
+                if startup.is_ready() {
+                    return;
                 }
-            }
-            #[cfg(target_os = "windows")]
-            Event::NewEvents(StartCause::Init) => {
-                // 预热托盘 WebView：页面按持久化主题在启动时渲染好，
-                // 首次右键不等 WebView2 冷启动，宿主擦除层也是主题色，不闪白。
-                if tray_popup.is_none()
-                    && let Err(error) = tray_popup::TrayPopup::new(
-                        event_target,
-                        proxy.clone(),
-                        &user_directory,
-                        tray_menu_state.clone(),
-                    )
-                {
-                    log::warn!("托盘面板预热失败，将在首次使用时重试：{error}");
-                }
-                tray_popup::install_outside_click_hook(proxy.clone());
-            }
-            #[cfg(target_os = "windows")]
-            Event::UserEvent(UserEvent::ShowTrayMenu(x, y)) => {
-                tray_menu_state["active"] = json!(controller.has_active_runs());
-                if tray_popup.is_none() {
-                    match tray_popup::TrayPopup::new(
-                        event_target,
-                        proxy.clone(),
-                        &user_directory,
-                        tray_menu_state.clone(),
-                    ) {
-                        Ok(popup) => tray_popup = Some(popup),
-                        Err(error) => {
-                            log::warn!("托盘面板不可用，使用系统菜单：{error}");
-                            if let Some(tray) = tray.as_ref() {
-                                use tray_icon::menu::ContextMenu;
-                                unsafe {
-                                    tray.menu.show_context_menu_for_hwnd(
-                                        window_chrome::hwnd_id(window),
-                                        Some(PhysicalPosition::new(x as i32, y as i32).into()),
-                                    );
-                                }
-                            }
-                        }
+                let _ = webview.set_background_color(desktop_startup::background(dark));
+                if startup.present(window, dark, true) {
+                    for payload in std::mem::take(&mut pending_messages) {
+                        let _ = proxy.send_event(UserEvent::ToWeb(payload));
                     }
                 }
-                if let Some(popup) = tray_popup.as_mut() {
-                    popup.show(x, y, tray_menu_state.clone());
-                }
             }
             #[cfg(target_os = "windows")]
-            Event::UserEvent(UserEvent::TrayTheme(dark)) => {
-                tray_menu_state["dark"] = json!(dark);
-                // 持久化给下次启动的托盘预热用，绕开前端回传的时序。
-                let _ = std::fs::write(&tray_theme_path, if dark { "dark" } else { "light" });
-                // 托盘面板不在了就重建：主题切换也可能发生在关闭托盘面板之后。
-                if tray_popup.is_none()
-                    && let Err(error) = tray_popup::TrayPopup::new(
-                        event_target,
-                        proxy.clone(),
-                        &user_directory,
-                        tray_menu_state.clone(),
-                    )
-                {
-                    log::warn!("托盘面板预热失败，将在首次使用时重试：{error}");
-                }
-                refresh_tray_menu = true;
-            }
-            #[cfg(target_os = "windows")]
-            Event::UserEvent(UserEvent::TrayAction(action)) => {
-                if let Some(popup) = tray_popup.as_mut() {
-                    match action.as_str() {
-                        "ready" => popup.ready(),
-                        "shown" => popup.present(),
-                        "bridge" => {}
-                        _ => popup.hide(),
-                    }
-                }
-                let action = match action.as_str() {
-                    "open" => Some(UserEvent::ShowWindow),
-                    "settings" => Some(UserEvent::OpenSettings),
-                    "help" => Some(UserEvent::OpenHelp),
-                    "folder" => Some(UserEvent::OpenUserDirectory),
-                    "bridge" => Some(UserEvent::ToggleBridge),
-                    "stop" => Some(UserEvent::PanicStop),
-                    "quit" => Some(UserEvent::Quit),
-                    _ => None,
-                };
-                if let Some(action) = action {
-                    let _ = proxy.send_event(action);
-                }
+            Event::UserEvent(UserEvent::WindowTheme(dark)) => {
+                window.set_background_color(Some(desktop_startup::background(dark)));
+                window.set_theme(Some(if dark {
+                    tao::window::Theme::Dark
+                } else {
+                    tao::window::Theme::Light
+                }));
+                let _ = webview.set_background_color(desktop_startup::background(dark));
+                let _ = std::fs::write(
+                    user_directory.join("tray-theme.txt"),
+                    if dark { "dark" } else { "light" },
+                );
             }
             Event::UserEvent(UserEvent::ToWeb(payload)) => {
+                if !startup.is_ready() {
+                    pending_messages.push(payload);
+                    return;
+                }
                 if let Ok(serialized) = serde_json::to_string(&payload) {
                     let _ = webview
                         .evaluate_script(&format!("window.__sleepyDollReceive?.({serialized});"));
@@ -577,6 +491,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 event: WindowEvent::Resized(size),
                 ..
             } if window_id == window.id() => {
+                if !startup.is_ready() {
+                    return;
+                }
                 if !window.is_maximized() && !window.is_minimized() {
                     normal_size = size;
                 }
@@ -596,6 +513,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 event: WindowEvent::Moved(position),
                 ..
             } if window_id == window.id() => {
+                if !startup.is_ready() {
+                    return;
+                }
                 if !window.is_maximized() && !window.is_minimized() {
                     normal_position = position;
                 }
@@ -632,15 +552,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::ShowWindow) => {
-                window.set_minimized(false);
-                window.set_visible(true);
-                window.set_focus();
+                if startup.is_ready() {
+                    window.set_minimized(false);
+                    window.set_visible(true);
+                    window.set_focus();
+                }
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::OpenSettings | UserEvent::OpenHelp) => {
-                window.set_minimized(false);
-                window.set_visible(true);
-                window.set_focus();
+                if startup.is_ready() {
+                    window.set_minimized(false);
+                    window.set_visible(true);
+                    window.set_focus();
+                }
                 let name = if matches!(event, Event::UserEvent(UserEvent::OpenSettings)) {
                     "openSettings"
                 } else {
@@ -650,11 +574,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::ToggleBridge) => {
-                if tray_menu_state["bridgeBusy"] == true {
+                if bridge_busy {
                     return;
                 }
-                tray_menu_state["bridgeBusy"] = json!(true);
-                refresh_tray_menu = true;
+                bridge_busy = true;
                 if let Some(tray) = tray.as_ref() {
                     tray.bridge.set_enabled(false);
                 }
@@ -704,9 +627,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     // 还是退出。丢弃 TrayIcon 时图标也从通知区移除。
                     (_, false) => {
                         tray = None;
-                        if let Some(popup) = tray_popup.as_mut() {
-                            popup.hide();
-                        }
                     }
                 }
             }
@@ -717,9 +637,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     tray.bridge.set_checked(enabled);
                     tray.bridge.set_enabled(true);
                 }
-                tray_menu_state["bridge"] = json!(enabled);
-                tray_menu_state["bridgeBusy"] = json!(false);
-                refresh_tray_menu = true;
+                bridge_busy = false;
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::BridgeFailed(message)) => {
@@ -728,11 +646,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     tray.bridge.set_checked(enabled);
                     tray.bridge.set_enabled(true);
                 }
-                tray_menu_state["bridgeBusy"] = json!(false);
-                refresh_tray_menu = true;
-                if let Some(popup) = tray_popup.as_mut() {
-                    popup.hide();
-                }
+                bridge_busy = false;
                 let _ = proxy.send_event(UserEvent::ShowWindow);
                 let _ = proxy.send_event(UserEvent::ToWeb(
                     json!({"kind":"event","id":"trayError","result":{"message":message}}),
@@ -744,17 +658,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(tray) = tray.as_ref() {
                     tray.set_active(active);
                 }
-                tray_menu_state["active"] = json!(active);
-                refresh_tray_menu = true;
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::PanicStop) => {
                 // 游戏在前台时用户按不回主窗口：急停要先掐掉所有运行，
                 // 再把窗口带回前台，让对话重新可见。
                 let stopped = controller.cancel_active_runs();
-                window.set_minimized(false);
-                window.set_visible(true);
-                window.set_focus();
+                if startup.is_ready() {
+                    window.set_minimized(false);
+                    window.set_visible(true);
+                    window.set_focus();
+                }
                 window.request_user_attention(Some(tao::window::UserAttentionType::Critical));
                 let _ = proxy.send_event(UserEvent::ToWeb(
                     json!({"kind":"event","id":"panicStop","result":{"stopped":stopped}}),
@@ -765,24 +679,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::Quit) => {
-                if let Some(popup) = tray_popup.as_mut() {
-                    popup.hide();
-                }
                 begin_shutdown(window, &controller, &proxy, &mut shutting_down);
             }
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::ShutdownFinished) => {
                 window.set_visible(false);
-                if let Some(popup) = tray_popup.as_mut() {
-                    popup.hide();
-                }
                 *control_flow = ControlFlow::Exit;
             }
             _ => {}
-        }
-        #[cfg(target_os = "windows")]
-        if refresh_tray_menu && let Some(popup) = tray_popup.as_mut() {
-            popup.update(tray_menu_state.clone());
         }
         if !matches!(*control_flow, ControlFlow::Exit)
             && let Some(deadline) = placement_deadline
@@ -1052,26 +956,18 @@ fn create_tray(
 
     TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
         if let TrayIconEvent::Click {
-            button,
+            button: MouseButton::Left,
             button_state: MouseButtonState::Up,
-            position,
             ..
         } = event
         {
-            match button {
-                MouseButton::Left => {
-                    let _ = proxy.send_event(UserEvent::ShowWindow);
-                }
-                MouseButton::Right => {
-                    let _ = proxy.send_event(UserEvent::ShowTrayMenu(position.x, position.y));
-                }
-                _ => {}
-            }
+            let _ = proxy.send_event(UserEvent::ShowWindow);
         }
     }));
     let mut builder = TrayIconBuilder::new()
         .with_tooltip("Sleepy Doll · 关闭窗口后继续运行")
-        .with_menu_on_left_click(false);
+        .with_menu_on_left_click(false)
+        .with_menu(Box::new(menu));
     // 图标编在 exe 的资源里，界面、窗口和托盘共用同一份。
     match Icon::from_resource(APP_ICON, Some((32, 32))) {
         Ok(icon) => builder = builder.with_icon(icon),
@@ -1083,7 +979,6 @@ fn create_tray(
         status: status_item,
         stop,
         quit,
-        menu,
     };
     handles.set_active(active);
     Ok(handles)
@@ -1165,7 +1060,6 @@ fn menu_glyph(glyph: MenuGlyph, color: [u8; 4]) -> Option<tray_icon::menu::Icon>
 #[cfg(target_os = "windows")]
 struct TrayHandles {
     icon: tray_icon::TrayIcon,
-    menu: tray_icon::menu::Menu,
     bridge: tray_icon::menu::CheckMenuItem,
     /// 只读状态行：有运行进行中时提示急停热键。
     status: tray_icon::menu::MenuItem,
@@ -1207,9 +1101,15 @@ fn dispatch_ipc(
     let parsed = serde_json::from_str::<IpcRequest>(request.body());
     if let Ok(request) = &parsed {
         match request.method.as_str() {
+            "window.ready" => {
+                let _ = proxy.send_event(UserEvent::FrontendReady(
+                    request.params["dark"].as_bool().unwrap_or(false),
+                ));
+                return;
+            }
             #[cfg(target_os = "windows")]
             "window.setTheme" => {
-                let _ = proxy.send_event(UserEvent::TrayTheme(request.params["theme"] == "dark"));
+                let _ = proxy.send_event(UserEvent::WindowTheme(request.params["theme"] == "dark"));
                 return;
             }
             "window.state" => {

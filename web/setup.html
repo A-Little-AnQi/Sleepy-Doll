@@ -23,6 +23,40 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      function showBootError(message) {
+        const root = document.getElementById("root");
+        if (!root || root.childElementCount) return;
+        root.style.padding = "48px";
+        root.style.font = "16px sans-serif";
+        root.style.color =
+          document.documentElement.dataset.theme === "dark"
+            ? "#e9e9e9"
+            : "#202020";
+        root.textContent = `安装界面载入失败：${message}`;
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            window.ipc?.postMessage(
+              JSON.stringify({
+                id: "desktop-ready",
+                method: "window.ready",
+                params: {
+                  dark: document.documentElement.dataset.theme === "dark",
+                },
+              }),
+            );
+          }),
+        );
+      }
+      window.addEventListener(
+        "error",
+        (event) => showBootError(event.message || "页面资源未能载入"),
+        true,
+      );
+      window.addEventListener("unhandledrejection", (event) =>
+        showBootError(event.reason?.message ?? String(event.reason)),
+      );
+    </script>
     <script type="module" src="/src/setup/main.tsx"></script>
   </body>
 </html>

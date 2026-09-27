@@ -28,13 +28,31 @@
         const root = document.getElementById("root");
         if (!root || root.childElementCount) return;
         document.body.style.margin = "0";
-        document.body.style.background = "#211b29";
-        document.body.style.color = "#f2e9d7";
+        const dark = document.documentElement.dataset.theme === "dark";
+        document.body.style.background = dark ? "#1b1b1b" : "#fff";
+        document.body.style.color = dark ? "#e9e9e9" : "#202020";
         root.style.padding = "72px";
         root.style.font = "18px sans-serif";
         root.textContent = `界面载入失败：${message}`;
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            window.ipc?.postMessage(
+              JSON.stringify({
+                id: "desktop-ready",
+                method: "window.ready",
+                params: {
+                  dark: document.documentElement.dataset.theme === "dark",
+                },
+              }),
+            );
+          }),
+        );
       }
-      window.addEventListener("error", (event) => showBootError(event.message));
+      window.addEventListener(
+        "error",
+        (event) => showBootError(event.message || "页面资源未能载入"),
+        true,
+      );
       window.addEventListener("unhandledrejection", (event) =>
         showBootError(event.reason?.message ?? String(event.reason)),
       );
