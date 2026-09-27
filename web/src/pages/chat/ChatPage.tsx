@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import mascot from "../../brand/mascot.webp";
 import "./ChatPage.css";
 import { Transcript } from "../../components/chat/Transcript";
@@ -26,6 +33,7 @@ import { resolveConversationModel } from "../../models";
 import { ContextMeter } from "../../components/chat/ContextMeter";
 import { ComposerDeck } from "../../components/chat/ComposerDeck";
 import { ComposerField } from "../../components/chat/ComposerField";
+import { QuestionCard } from "../../components/chat/QuestionCard";
 import { estimateMessagesTokens } from "../../session/context-usage";
 import { useT } from "../../i18n";
 import type { Plan } from "../../session";
@@ -119,6 +127,13 @@ export function ChatPage({
   const [notice, setNotice] = useState("");
   const [unread, setUnread] = useState(false);
   const [sending, setSending] = useState(false);
+  const [submittedQuestion, setSubmittedQuestion] = useState("");
+  const questionKey = question ? `${task?.id}:${question}` : "";
+  const replySubmitted = Boolean(
+    questionKey && submittedQuestion === questionKey,
+  );
+  const inputId = useId();
+  const questionId = useId();
   const [stopping, setStopping] = useState(false);
   const interrupting = stopping || task?.state === "cancelling";
   // 工具名取自工具定义里的 label，没有 label 的不进表。
@@ -185,6 +200,9 @@ export function ChatPage({
     setStopping(false);
   }, [task?.id, busy]);
   useEffect(() => {
+    if (!question) setSubmittedQuestion("");
+  }, [question]);
+  useEffect(() => {
     if (!busy && !approval) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -211,6 +229,7 @@ export function ChatPage({
     if (
       !value ||
       sending ||
+      replySubmitted ||
       stopping ||
       task?.state === "cancelling" ||
       !bootstrap.models.length
@@ -245,9 +264,10 @@ export function ChatPage({
     try {
       if (supplementRun) {
         await api.supplement(supplementRun, value, clientKey);
-        // 补充说明在当前步骤结束后处理。
-        if (alive.current && current.current === origin)
-          setNotice(t.chat.queuedStep);
+        if (alive.current && current.current === origin) {
+          if (questionKey) setSubmittedQuestion(questionKey);
+          else setNotice(t.chat.queuedStep);
+        }
       } else {
         const run = await api.submitTask(
           value,
@@ -366,10 +386,15 @@ export function ChatPage({
                 />
                 {plan && <RunPlanCard plan={plan} />}
                 {question && (
-                  <section className="run-question">
-                    <h3>{t.chat.needInfo}</h3>
-                    <p>{question}</p>
-                  </section>
+                  <QuestionCard
+                    id={questionId}
+                    question={question}
+                    submitted={replySubmitted}
+                    inputId={inputId}
+                    onReply={() =>
+                      textarea.current?.focus({ preventScroll: true })
+                    }
+                  />
                 )}
                 {approval && (
                   <section className="run-approval">
@@ -477,8 +502,26 @@ export function ChatPage({
             onDismiss={() => setError("")}
           />
         )}
-        <ComposerDeck>
+        <ComposerDeck className={question ? "is-awaiting-reply" : undefined}>
+          {question && (
+            <div className="composer-reply-context">
+              <span aria-live="polite">
+                {replySubmitted ? t.chat.replySent : t.chat.answeringQuestion}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  document
+                    .getElementById(questionId)
+                    ?.scrollIntoView({ block: "nearest" })
+                }
+              >
+                {t.chat.viewQuestion}
+              </button>
+            </div>
+          )}
           <ComposerField
+            id={inputId}
             ref={textarea}
             aria-label={t.chat.message}
             placeholder={
@@ -596,20 +639,29 @@ export function ChatPage({
                   )}
                 </button>
               )}
-              {(!busy || prompt.trim()) && (
+              {(!busy || question || prompt.trim()) && (
                 <button
                   type="button"
-                  className="send-action"
-                  aria-label={busy ? t.chat.sendFollowUp : t.chat.send}
-                  title={
-                    !bootstrap.models.length
-                      ? t.chat.addModelFirst
+                  className={`send-action${question ? " send-reply-action" : ""}`}
+                  aria-label={
+                    question
+                      ? t.chat.sendReply
                       : busy
                         ? t.chat.sendFollowUp
                         : t.chat.send
                   }
+                  title={
+                    !bootstrap.models.length
+                      ? t.chat.addModelFirst
+                      : question
+                        ? t.chat.sendReply
+                        : busy
+                          ? t.chat.sendFollowUp
+                          : t.chat.send
+                  }
                   disabled={
                     sending ||
+                    replySubmitted ||
                     stopping ||
                     task?.state === "cancelling" ||
                     !prompt.trim() ||
@@ -618,6 +670,11 @@ export function ChatPage({
                   onClick={() => void send()}
                 >
                   <SendIcon className="button-icon" />
+                  {question && (
+                    <span>
+                      {sending ? t.chat.sendingReply : t.chat.sendReply}
+                    </span>
+                  )}
                 </button>
               )}
             </div>

@@ -81,7 +81,6 @@
   margin: 0 auto;
 }
 
-.run-question,
 .run-approval,
 .run-error {
   width: min(100%, 680px);
@@ -180,14 +179,12 @@
   }
 }
 
-.run-question h3,
 .run-approval h3,
 .run-error h3 {
   margin: 0 0 10px;
   font-size: 13px;
 }
 
-.run-question p,
 .run-approval p,
 .run-error p {
   margin: 0;

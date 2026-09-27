@@ -485,7 +485,7 @@ const markdownComponents: Components = {
   },
 };
 
-const MarkdownText = memo(function MarkdownText({
+export const MarkdownText = memo(function MarkdownText({
   text,
   streaming = false,
 }: {

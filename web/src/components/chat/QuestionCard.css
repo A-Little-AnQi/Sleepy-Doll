@@ -1,0 +1,121 @@
+.question-card {
+  width: 100%;
+  padding: 18px 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--layout-radius);
+  background: var(--subtle);
+}
+
+.question-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.question-card-header > svg {
+  width: 18px;
+  height: 18px;
+  color: var(--gold);
+  flex-shrink: 0;
+}
+
+.question-card-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.question-card-badge {
+  margin-left: auto;
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.question-card-body {
+  color: var(--text);
+}
+
+.question-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.question-card-footer p {
+  flex: 1;
+  margin: 0;
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.question-card-footer button {
+  flex-shrink: 0;
+}
+
+.sd-composer-deck.is-awaiting-reply,
+.sd-composer-deck.is-awaiting-reply:focus-within {
+  border-color: color-mix(in srgb, var(--gold) 65%, var(--border));
+}
+
+.composer-reply-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.composer-reply-context button {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--secondary);
+  font-size: 12px;
+}
+
+.composer-submit .send-reply-action {
+  display: inline-flex;
+  gap: 6px;
+  width: auto;
+  border-radius: var(--radius);
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .sd-composer-deck.is-awaiting-reply .composer-actions {
+    flex-wrap: wrap;
+  }
+  .sd-composer-deck.is-awaiting-reply .composer-submit {
+    max-width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .sd-composer-deck.is-awaiting-reply .composer-model {
+    max-width: 112px;
+  }
+  .question-card {
+    padding: 16px;
+  }
+  .question-card-header {
+    flex-wrap: wrap;
+  }
+  .question-card-footer {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .question-card-footer p {
+    flex-basis: 100%;
+  }
+}

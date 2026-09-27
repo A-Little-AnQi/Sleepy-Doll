@@ -16,12 +16,13 @@ import {ChatPage} from '/src/pages/chat/ChatPage.tsx';
 import {PREVIEW_PERMISSION} from '/src/ipc/types.ts';
 import '/src/product.css';
 import '/src/motion.css';
-const bootstrap={models:[{id:'fixture-model',name:'Fixture',model:'fixture',active:true,contextWindow:256000}],
+const bootstrap={models:[{id:'fixture-model',name:'智谱 GLM 很长的模型名称',model:'fixture',active:true,contextWindow:256000}],
  conversations:[{id:'composer-fixture',title:'Fixture',modelId:'fixture-model'}],tools:[],
  permission:PREVIEW_PERMISSION,runtimeToolLabels:{}};
 function Fixture(){
  const [conversationId,setConversation]=React.useState('composer-fixture');
  window.showNew=()=>setConversation(undefined);
+ window.showQuestion=()=>setConversation('question-fixture');
  return React.createElement('div',{style:{height:'100vh'}},
   React.createElement(ChatPage,{bootstrap,conversationId,onConversation:setConversation,reload:async()=>{}}));
 }
@@ -51,6 +52,9 @@ try {
   const errors = [];
   const calls = [];
   let rejectNextInput = false;
+  let resumeQuestion = false;
+  const question =
+    "需要确认 **挖矿配置**。请告诉我：①要用哪个脚本（莉奈或矿产资源批发）？②要调整哪些项目（运行时长、区域、队伍）？③如果沿用现有参数，请说明。";
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() =>
     localStorage.setItem("sleepy-doll-locale", "zh"),
@@ -71,9 +75,49 @@ try {
       result = {
         id: request.params.id,
         messages: [],
-        runs: [{ ...task, conversationId: request.params.id }],
+        runs: [
+          {
+            ...task,
+            conversationId: request.params.id,
+            state:
+              request.params.id === "question-fixture" && !resumeQuestion
+                ? "awaitingUser"
+                : "deciding",
+          },
+        ],
       };
-    if (request.method === "events.read") result = { events: [] };
+    if (request.method === "events.read") {
+      const events =
+        request.params.conversationId === "question-fixture"
+          ? [
+              {
+                sequence: 1,
+                kind: "question",
+                runId: task.id,
+                conversationId: "question-fixture",
+                data: { question },
+              },
+              ...(resumeQuestion
+                ? [
+                    {
+                      sequence: 2,
+                      kind: "run.changed",
+                      runId: task.id,
+                      conversationId: "question-fixture",
+                      data: {
+                        ...task,
+                        revision: 2,
+                        conversationId: "question-fixture",
+                      },
+                    },
+                  ]
+                : []),
+            ]
+          : [];
+      result = {
+        events: events.filter((event) => event.sequence > request.params.after),
+      };
+    }
     if (request.method === "task.submit")
       result = {
         ...task,
@@ -215,12 +259,66 @@ try {
     document.querySelector("textarea").placeholder.includes("补充说明"),
   );
   assert.equal(calls.filter((call) => call.method === "task.submit").length, 1);
+  await page.evaluate(() => window.showQuestion());
+  const card = page.getByRole("region", { name: "请回答后继续" });
+  await card.waitFor();
+  assert.equal(await card.locator("ol > li").count(), 3);
+  assert.equal(await card.locator("strong").innerText(), "挖矿配置");
+  assert.equal(
+    await card.getByText("等待你的回复", { exact: true }).count(),
+    1,
+  );
+  const replyButton = page.getByRole("button", {
+    name: "发送回复",
+    exact: true,
+  });
+  assert.ok(await replyButton.isVisible());
+  assert.ok(await replyButton.isDisabled());
+  await card.getByRole("button", { name: "填写回复" }).click();
+  assert.ok(await input.evaluate((node) => document.activeElement === node));
+  await input.fill("莉奈，队伍采矿，运行30分钟");
+  assert.ok(await replyButton.isEnabled());
+  await page.getByRole("button", { name: "查看问题" }).click();
+  assert.ok(await card.isVisible());
+  // Capture only in memory; never write screenshots or touch user data.
+  if (process.argv.includes("--visual"))
+    images.push((await page.screenshot()).toString("base64"));
+  for (const width of [360, 800, 1100]) {
+    await page.setViewportSize({ width, height: 850 });
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(resolve)),
+    );
+    assert.ok(
+      await page
+        .locator(".composer-dock")
+        .evaluate((node) => node.scrollWidth <= node.clientWidth + 1),
+    );
+  }
+  rejectNextInput = true;
+  await replyButton.click();
+  await page.getByText("Fixture retry", { exact: true }).waitFor();
+  assert.equal(await input.inputValue(), "莉奈，队伍采矿，运行30分钟");
+  assert.ok(await card.isVisible());
+  await replyButton.click();
+  await page.getByRole("region", { name: "回复已发送" }).waitFor();
+  assert.ok(await replyButton.isDisabled());
+  const answers = calls.filter(
+    (call) =>
+      call.method === "run.input" && call.params.content.includes("运行30分钟"),
+  );
+  assert.equal(answers.length, 2);
+  assert.equal(answers[0].params.clientKey, answers[1].params.clientKey);
+  assert.equal(answers[1].params.id, "active-run");
+  assert.equal(calls.filter((call) => call.method === "task.submit").length, 1);
+  resumeQuestion = true;
+  await page.waitForFunction(() => !document.querySelector(".question-card"));
+  assert.equal(await replyButton.count(), 0);
   assert.deepEqual(errors, []);
   report = {
     passed: true,
     empty,
     checks:
-      "font/baseline, multiline/resize/limit, no queue, follow-up/retry, new message/Shift+Enter",
+      "font/baseline, multiline/resize/limit, no queue, follow-up/retry, new message/Shift+Enter, formatted question/reply focus/submit/retry/resume/mobile",
     images,
   };
 } finally {
