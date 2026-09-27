@@ -117,6 +117,26 @@ public static class CatalogTools
         registry.Register("bgi.rollback_settings", "settings", "",
             (arguments, cancellation) => Ui.InvokeAsync<object?>(() => SettingsTransactions.Engine.Rollback(arguments.GetProperty("changeId").GetString()!, cancellation)),
             readOnly: false, destructive: true);
+        registry.Register("bgi.preview_setting_restore", "settings", "从历史变更中恢复所选设置的预览", (arguments, cancellation) => Ui.InvokeAsync<object?>(() =>
+        {
+            cancellation.ThrowIfCancellationRequested();
+            var preview = SettingsTransactions.Engine.PreviewRestore(arguments.GetProperty("changeId").GetString()!,
+                arguments.GetProperty("recordVersion").GetString()!, arguments.GetProperty("paths").EnumerateArray().Select(path => path.GetString()!).ToArray());
+            var wire = JsonSerializer.SerializeToNode(preview)!.AsObject();
+            var idle = Host.TaskSemaphoreCount();
+            var changed = wire["differences"]!.AsArray().Any(row => row!["changed"]!.GetValue<bool>());
+            wire["canApply"] = idle > 0 && changed;
+            wire["reason"] = !changed ? "当前已经是这些值，无需恢复。" : idle is null ? "无法确认当前任务状态，请重新连接或退出 BetterGI 后恢复。" : idle == 0 ? "BetterGI 正在执行任务，请先停止任务再恢复设置。" : null;
+            wire["hostRunning"] = true;
+            return wire;
+        }), inputSchema: AgentSchemas.Object(("changeId",AgentSchemas.Text("历史变更 ID。"),true),
+            ("recordVersion",AgentSchemas.Text("变更记录的当前版本。"),true),
+            ("paths",ArgumentSchema.Parse("""{"type":"array","minItems":1,"maxItems":20,"uniqueItems":true,"items":{"type":"string"},"description":"明确选择这份记录中的设置路径。"}"""),true)),
+            guide: new AgentGuide("预览恢复所选设置", "读取历史记录的修改前值，生成当前设置到目标值的恢复预览；不会立即恢复，不覆盖其他设置。",
+                ["用户明确要求把特定设置恢复到某次历史记录中的值。"], ["记录属于当前 BetterGI；路径是记录中明确选中的项。"], ["只建立十分钟有效的预览计划。"],
+                "canApply=true 才可确认；differences 包含当前值、恢复值、联动项以及此项后来是否改过。敏感内容不显示。",
+                "确认后使用 commit_settings(planId)，核验变更后的内存值与文件；目标项变化会拒绝恢复，不影响无关后续修改。",
+                "恢复本身产生新变更记录，可再次选择其修改前值撤销。", [], "bridge-setting-recovery"));
         registry.Register("bgi.list_commands", "command", "", (arguments, _) =>
         {
             var includeDangerous = arguments.TryGetProperty("includeDangerous", out var d) && d.GetBoolean();

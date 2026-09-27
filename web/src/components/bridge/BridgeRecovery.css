@@ -1,13 +1,38 @@
 .bridge-recovery {
   display: grid;
-  gap: 22px;
+  gap: 20px;
+  min-width: 0;
 }
-
+.bridge-recovery .page-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.recovery-intro {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+.recovery-explanation {
+  border: 1px solid var(--border);
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--subtle);
+  font-size: 12px;
+  color: var(--secondary);
+  line-height: 1.8;
+}
+.recovery-explanation p {
+  margin: 0;
+}
+.recovery-explanation p + p {
+  margin-top: 6px;
+}
 .recovery-list {
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  overflow: hidden;
 }
-
 .recovery-row {
   display: flex;
   align-items: center;
@@ -16,35 +41,176 @@
   padding: 16px;
   border-bottom: 1px solid var(--border);
 }
-
 .recovery-row:hover {
   background: var(--hover);
 }
-
 .recovery-row:last-child {
   border-bottom: 0;
 }
-
 .recovery-row > div {
   display: grid;
   gap: 6px;
   min-width: 0;
 }
-
 .recovery-row strong {
   font-size: var(--font-body);
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
-
 .recovery-row p {
   margin: 0;
   font-size: var(--font-meta);
   line-height: 1.5;
-  overflow-wrap: anywhere;
   color: var(--secondary);
 }
-
 .recovery-row small {
   color: var(--muted);
   font-size: var(--font-label);
+}
+.recovery-location {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recovery-row > button {
+  flex-shrink: 0;
+}
+.recovery-success {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 12px;
+}
+.recovery-success > span {
+  flex: 1;
+}
+.sd-dialog.recovery-preview-dialog {
+  width: min(860px, 100%);
+  height: auto;
+  max-height: calc(100dvh - 48px);
+}
+.recovery-preview-dialog .sd-dialog-path {
+  font: 12px/1.6 inherit;
+}
+.recovery-preview-dialog .sd-dialog-body {
+  overflow: auto;
+  gap: 16px;
+}
+.recovery-preview-dialog .sd-dialog-foot {
+  align-items: center;
+  flex-wrap: wrap;
+}
+.recovery-preview-status {
+  flex: 1;
+  min-width: 180px;
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.recovery-mode {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.recovery-mode [aria-pressed="true"] {
+  background: var(--selected);
+  border-color: var(--border-strong);
+}
+.recovery-target {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.recovery-full-warning,
+.recovery-blocker {
+  margin: 0;
+  border: 1px solid var(--border-strong);
+  padding: 12px;
+  border-radius: 9px;
+  background: var(--subtle);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.recovery-fields {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  padding: 12px;
+  border-radius: 10px;
+}
+.recovery-fields legend {
+  font-size: 12px;
+  color: var(--secondary);
+  padding: 0 4px;
+}
+.recovery-fields label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  cursor: pointer;
+}
+.recovery-error {
+  margin: 0;
+  color: var(--error, #c97070);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.recovery-differences {
+  display: grid;
+  gap: 10px;
+}
+.recovery-difference {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  min-width: 0;
+}
+.recovery-difference-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+.recovery-difference-title span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.recovery-values {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 12px;
+}
+.recovery-values small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.recovery-values pre {
+  margin: 6px 0 0;
+  padding: 10px;
+  max-height: 200px;
+  overflow: auto;
+  background: var(--subtle);
+  border-radius: 8px;
+  font: 12px/1.7 var(--font-family);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.recovery-repreview {
+  justify-self: start;
+}
+@media (max-width: 700px) {
+  .recovery-values {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .bridge-recovery .list-toolbar {
+    flex-wrap: wrap;
+  }
 }

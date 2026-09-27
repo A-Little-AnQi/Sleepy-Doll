@@ -1,0 +1,6 @@
+<Project>
+<PropertyGroup><BaseIntermediateOutputPath>../../target/dotnet/recovery-checks-obj/</BaseIntermediateOutputPath><MSBuildProjectExtensionsPath>../../target/dotnet/recovery-checks-obj/</MSBuildProjectExtensionsPath></PropertyGroup>
+<Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk"/>
+<PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF><UseAppHost>false</UseAppHost><EnableDefaultCompileItems>false</EnableDefaultCompileItems><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><OutputPath>../../target/dotnet/recovery-checks/</OutputPath></PropertyGroup>
+<ItemGroup><Compile Include="RecoveryChecks.cs"/><ProjectReference Include="../managed/BgiBridge.csproj"/></ItemGroup><Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk"/>
+</Project>

@@ -431,7 +431,36 @@ export interface BridgeCatalog {
   catalogVersion?: string;
 }
 
+export interface RecoveryPreview {
+  mode: "fields" | "full";
+  online: boolean;
+  changeId: string;
+  recordVersion: string;
+  currentVersion: string;
+  configPath: string;
+  planId?: string;
+  paths: string[];
+  hostRunning?: boolean;
+  canApply: boolean;
+  requiresExit?: boolean;
+  reason?: string | null;
+  differences: Array<{
+    path: string;
+    label: string;
+    current: unknown;
+    restore: unknown;
+    changed: boolean;
+    laterChanged?: boolean;
+    related?: boolean;
+  }>;
+}
 export interface RecoveryRecord {
+  fields?: Array<{ path: string; label: string }>;
+  kind?: "change" | "snapshot" | "unavailable";
+  hostExecutable?: string;
+  snapshotDigest?: string;
+  parentChangeId?: string | null;
+  canPreview?: boolean;
   changeId: string;
   recordVersion?: string;
   currentVersion?: string;

@@ -5,6 +5,7 @@ import type {
   ConversationInfo,
   MessageInfo,
   RecoveryRecord,
+  RecoveryPreview,
   RunEvent,
   SavedStrategy,
   TaskInfo,
@@ -265,15 +266,29 @@ export const api = {
   bridgeState: () => invoke<unknown>("bridge.state"),
   bridgeStatus: () => invoke<Bootstrap["bridge"]>("bridge.status"),
   bridgeRecovery: () =>
-    invoke<{ hostRunning: boolean; records: RecoveryRecord[] }>(
-      "bridge.recoveryList",
-    ),
-  restoreBridgeConfig: (record: RecoveryRecord) =>
-    invoke<{ restored: boolean; recoveryChangeId: string }>("bridge.restore", {
+    invoke<{
+      hostRunning: boolean;
+      runningTargets?: string[];
+      records: RecoveryRecord[];
+    }>("bridge.recoveryList"),
+  bridgeRecoveryStatus: (targets: string[]) =>
+    invoke<{ runningTargets: string[] }>("bridge.recoveryStatus", { targets }),
+  previewBridgeRecovery: (
+    record: RecoveryRecord,
+    mode: "fields" | "full",
+    paths: string[],
+  ) =>
+    invoke<RecoveryPreview>("bridge.recoveryPreview", {
       changeId: record.changeId,
       recordVersion: record.recordVersion,
-      currentVersion: record.currentVersion,
+      mode,
+      paths,
     }),
+  restoreBridgeConfig: (preview: RecoveryPreview) =>
+    invoke<{ restored: boolean; online: boolean; recoveryChangeId: string }>(
+      "bridge.restore",
+      { ...preview },
+    ),
   bridgeCatalog: (query = "", group = "", offset = 0) =>
     invoke<BridgeCatalog>("bridge.catalog", { query, group, offset }),
   bridgeDescribe: (methodId: string) =>

@@ -3,6 +3,7 @@
 pub mod control;
 pub(crate) mod features;
 pub(crate) mod origin;
+pub mod recovery;
 pub(crate) mod resolve;
 pub(crate) mod retrieval;
 

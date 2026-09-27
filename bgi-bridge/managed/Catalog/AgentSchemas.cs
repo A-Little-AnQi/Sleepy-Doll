@@ -105,6 +105,14 @@ public static class AgentSchemas
         if (id.StartsWith("setting.") || id == "bgi.get_setting") return Setting;
         return id switch
         {
+            "bgi.preview_setting_restore" => ResultObject(description,
+                ("planId", Text("确认后提交的恢复预览计划。"), true), ("changeId", Text("源历史记录。"), true),
+                ("recordVersion", Text("源记录版本。"), true), ("currentVersion", Text("当前配置文件版本。"), true),
+                ("mode", Text("fields，只恢复所选设置。"), true), ("online", Flag("通过当前连接恢复。"), true),
+                ("canApply", Flag("是否允许确认恢复。"), true), ("reason", Any("不可恢复的具体原因。"), false),
+                ("configPath", Text("这份记录对应的配置位置。",1024), true),
+                ("paths", ArrayOf(Text("明确选中的设置路径。"),"所选项。"), true),
+                ("differences", ArrayOf(Any("label、当前值、恢复值、后续修改和联动项。"),"恢复差异，敏感值遮蔽。"), true)),
             "bgi.ping" => ResultObject(description, ("ok", Flag("桥请求处理成功。"), true), ("hostLoaded", Flag("BetterGI 程序集可见。"), true), ("at", Text("观测时间，ISO 8601。"), true)),
             "bgi.get_status" => ResultObject(description, ("ready", Flag("当前状态检查是否就绪。"), true), ("runtime", Any("截图、窗口和独立任务状态；未能观测的项必须保留未知。"), true), ("observedAt", Text("ISO 8601 观测时间。"), true)),
             "bgi.stop_current_task" => ResultObject(description, ("stopped", Flag("宿主任务锁是否已释放。"), true), ("outcome", Text("stopped、alreadyIdle 或 timeout。"), true)),

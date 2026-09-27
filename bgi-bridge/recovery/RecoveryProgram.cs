@@ -17,13 +17,15 @@ try
         return;
     }
     var bridgeDir = AppContext.BaseDirectory;
-    InstallPaths.Ensure(bridgeDir);
     var records = InstallPaths.ChangeRecordDirectory(bridgeDir);
-    object result = args.Length == 1 && args[0] == "list"
-        ? SettingsRecovery.List(records)
-        : args.Length == 4 && args[0] == "restore"
-            ? SettingsRecovery.Restore(records, args[1], args[2], args[3])
-            : throw new ArgumentException("Recovery list | restore <changeId> <recordVersion> <currentVersion>");
+    object result = args switch {
+        ["list"] => SettingsRecovery.List(records),
+        ["status",var targets] => SettingsRecovery.Status(JsonSerializer.Deserialize<string[]>(targets)??[]),
+        ["preview",var id,var version,var mode,var paths] => SettingsRecovery.Preview(records,id,version,mode,JsonSerializer.Deserialize<string[]>(paths)??[]),
+        ["restore",var id,var version,var current,var mode,var paths] => SettingsRecovery.Restore(records,id,version,current,mode,JsonSerializer.Deserialize<string[]>(paths)??[]),
+        ["restore",var id,var version,var current] => SettingsRecovery.Restore(records,id,version,current),
+        _ => throw new ArgumentException("Recovery request is invalid"),
+    };
     Console.WriteLine(JsonSerializer.Serialize(new { ok = true, result }, options));
 }
 catch (Exception error)

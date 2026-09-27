@@ -48,6 +48,26 @@ public static class SourceDocumentation
             ? values.Deserialize<string[]>() : null;
     }
 
+    public static SourceEntry? ConfigPath(string path)
+    {
+        var owner = "BetterGenshinImpact.Core.Config.AllConfig";
+        var parts = path.Split('.');
+        for (var index = 0; index < parts.Length; index++)
+        {
+            var prefix = $"P:{owner}.";
+            var entry = Entries.FirstOrDefault(pair => pair.Key.StartsWith(prefix, StringComparison.Ordinal)
+                && pair.Key[prefix.Length..].Equals(parts[index], StringComparison.OrdinalIgnoreCase)).Value;
+            if (entry is null || index == parts.Length - 1) return entry;
+            var type = entry.ValueType?.TrimEnd('?');
+            var candidates = Entries.Keys.Where(key => key.StartsWith("P:", StringComparison.Ordinal))
+                .Select(key => key[2..key.LastIndexOf('.')]).Distinct()
+                .Where(name => name.EndsWith("." + type, StringComparison.Ordinal)).ToArray();
+            if (candidates.Length != 1) return null;
+            owner = candidates[0];
+        }
+        return null;
+    }
+
     private static JsonElement Load()
     {
         var assembly = typeof(SourceDocumentation).Assembly;

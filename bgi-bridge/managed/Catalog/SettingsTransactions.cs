@@ -12,7 +12,7 @@ namespace BgiBridge.Catalog;
 
 public sealed record SettingChange(string Path, JsonElement Value, string ExpectedVersion);
 public sealed record StoredSettingChange(string Path, JsonElement Before, JsonElement After,
-    bool BeforeDiskPresent, JsonElement BeforeDisk, JsonElement AfterDisk, bool AfterDiskPresent = true);
+    bool BeforeDiskPresent, JsonElement BeforeDisk, JsonElement AfterDisk, bool AfterDiskPresent = true, string? DisplayName = null);
 public sealed class SettingChangeRecord
 {
     public int Format { get; set; } = 1;
@@ -35,7 +35,12 @@ public sealed class SettingsTransactionEngine(
     Func<JsonSerializerOptions> optionsProvider, string recordDirectory,
     Func<string?>? executableProvider = null, Action? validateMutation = null)
 {
-    private sealed record Plan(string Id, DateTimeOffset Expires, string RootVersion, string FileVersion, List<SettingChange> Changes);
+    private sealed record Plan(string Id, DateTimeOffset Expires, string RootVersion, string FileVersion, List<SettingChange> Changes)
+    {
+        public string? RestoreSource { get; init; }
+        public string? RecordVersion { get; init; }
+        public Dictionary<string, (bool Present, JsonElement Value)> DiskScope { get; init; } = [];
+    }
     private readonly Dictionary<string, Plan> _plans = new(StringComparer.Ordinal);
     private readonly object _gate = new();
     private static readonly JsonSerializerOptions RecordJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true };
@@ -52,9 +57,11 @@ public sealed class SettingsTransactionEngine(
         return bytes;
     }
     private static bool Equal(JsonElement left, JsonElement right) => ValueContract.Canonical(left) == ValueContract.Canonical(right);
-    private static JsonObject ObjectFrom(byte[] bytes, JsonElement fallback) => bytes.Length == 0
-        ? JsonNode.Parse(fallback.GetRawText())!.AsObject()
-        : JsonNode.Parse(bytes, documentOptions: new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip })!.AsObject();
+    private static JsonObject ObjectFrom(byte[] bytes, JsonElement fallback) {
+        if(bytes.Length==0)return JsonNode.Parse(fallback.GetRawText())!.AsObject();
+        using var reader=new StreamReader(new MemoryStream(bytes),Encoding.UTF8,true);
+        return JsonNode.Parse(reader.ReadToEnd(),documentOptions:new JsonDocumentOptions{AllowTrailingCommas=true,CommentHandling=JsonCommentHandling.Skip})!.AsObject();
+    }
     private static JsonElement NodeValue(JsonNode? node) => node is null ? ArgumentSchema.Parse("null") : JsonSerializer.SerializeToElement(node);
 
     public object Preview(IReadOnlyList<SettingChange> requested)
@@ -118,9 +125,21 @@ public sealed class SettingsTransactionEngine(
             cancellation.ThrowIfCancellationRequested();
             validateMutation?.Invoke();
             var root = rootProvider();
-            if (ValueContract.Version(RootSnapshot(root)) != plan.RootVersion || Digest(DiskBytes(ConfigPath)) != plan.FileVersion)
+            if (plan.RestoreSource is null && (ValueContract.Version(RootSnapshot(root)) != plan.RootVersion || Digest(DiskBytes(ConfigPath)) != plan.FileVersion))
                 throw new BridgeException("CONFIG_CONFLICT", "预览后配置已变化，未提交任何修改。", 409);
-            var result = Apply(plan.Id, root, plan.Changes, null);
+            if (plan.RestoreSource is not null)
+            {
+                if (Digest(File.ReadAllBytes(RecordPath(plan.RestoreSource))) != plan.RecordVersion)
+                    throw new BridgeException("CONFIG_CONFLICT", "备份记录已变化，请重新预览。", 409);
+                var disk = ObjectFrom(DiskBytes(ConfigPath), RootSnapshot(root));
+                foreach (var (path, expected) in plan.DiskScope)
+                {
+                    var present = TryGet(disk, path, out var value);
+                    if (present != expected.Present || present && !Equal(NodeValue(value), expected.Value))
+                        throw new BridgeException("CONFIG_CONFLICT", "选择的设置在预览后已变化，请重新预览；没有恢复任何内容。", 409);
+                }
+            }
+            var result = Apply(plan.Id, root, plan.Changes, null, plan.RestoreSource);
             _plans.Remove(plan.Id);
             return Public(result);
         }
@@ -171,6 +190,44 @@ public sealed class SettingsTransactionEngine(
     };
     public object Describe(string id) => Public(ReadRecord(id));
 
+    public object PreviewRestore(string id, string expectedRecordVersion, IReadOnlyList<string> paths)
+    {
+        lock (_gate)
+        {
+            var record = ReadRecord(id);
+            if (Digest(File.ReadAllBytes(RecordPath(id))) != expectedRecordVersion)
+                throw new BridgeException("CONFIG_CONFLICT", "备份记录已变化，请重新预览。", 409);
+            var selected = SettingsRecovery.SelectChanges(record, paths);
+            var root = rootProvider();
+            var entries = SettingsCatalog.Build(root).ToDictionary(entry => entry.Path, StringComparer.Ordinal);
+            var changes = selected.Select(saved => {
+                var entry = entries.GetValueOrDefault(saved.Path) ?? throw BridgeException.NotFound("当前版本没有备份中的设置，请改选其他项。");
+                return new SettingChange(saved.Path, saved.Before, entry.ValueVersion);
+            }).ToArray();
+            var wire = JsonSerializer.SerializeToElement(Preview(changes));
+            var planId = wire.GetProperty("planId").GetString()!;
+            var plan = _plans[planId];
+            var disk = ObjectFrom(DiskBytes(ConfigPath), RootSnapshot(root));
+            var scope = plan.Changes.ToDictionary(change => change.Path, change => {
+                var present = TryGet(disk, change.Path, out var value);
+                return (present, NodeValue(value));
+            });
+            _plans[planId] = plan with { RestoreSource = id, RecordVersion = expectedRecordVersion, DiskScope = scope };
+            return new {
+                mode = "fields", online = true, changeId = id, recordVersion = expectedRecordVersion,
+                currentVersion = Digest(DiskBytes(ConfigPath)), configPath = ConfigPath, planId,
+                canApply = true, paths = paths.ToArray(),
+                differences = plan.Changes.Select(change => new {
+                    path = change.Path, label = SettingsRecovery.Label(change.Path),
+                    current = SettingsRecovery.SafeValue(change.Path, ValueContract.Snapshot(SettingsCatalog.Resolve(root, change.Path).Property.GetValue(SettingsCatalog.Resolve(root, change.Path).Owner), entries[change.Path].ClrType)),
+                    restore = SettingsRecovery.SafeValue(change.Path, change.Value),
+                    laterChanged = selected.FirstOrDefault(saved => saved.Path == change.Path) is { } original && !Equal(ValueContract.Snapshot(SettingsCatalog.Resolve(root, change.Path).Property.GetValue(SettingsCatalog.Resolve(root, change.Path).Owner), entries[change.Path].ClrType), original.After),
+                    related = !paths.Contains(change.Path), changed = !Equal(ValueContract.Snapshot(SettingsCatalog.Resolve(root, change.Path).Property.GetValue(SettingsCatalog.Resolve(root, change.Path).Owner), entries[change.Path].ClrType), change.Value),
+                }).ToArray(),
+            };
+        }
+    }
+
     public object Checkpoint(string operation)
     {
         lock (_gate)
@@ -189,7 +246,7 @@ public sealed class SettingsTransactionEngine(
         }
     }
 
-    private SettingChangeRecord Apply(string id, object root, IReadOnlyList<SettingChange> changes, SettingChangeRecord? inverse)
+    private SettingChangeRecord Apply(string id, object root, IReadOnlyList<SettingChange> changes, SettingChangeRecord? inverse, string? restoreSource = null)
     {
         var path = ConfigPath;
         var beforeSnapshot = RootSnapshot(root);
@@ -197,7 +254,7 @@ public sealed class SettingsTransactionEngine(
         var disk = ObjectFrom(beforeFile, beforeSnapshot);
         var prepared = new List<(object Owner, PropertyInfo Property, object? Before, object? After, string Path)>();
         var entries = SettingsCatalog.Build(root).ToDictionary(item => item.Path, StringComparer.Ordinal);
-        var record = new SettingChangeRecord { ChangeId = id, ConfigPath = path, BeforeFileBase64 = System.Convert.ToBase64String(beforeFile.Length == 0 ? Encoding.UTF8.GetBytes(beforeSnapshot.GetRawText()) : beforeFile), ParentChangeId = inverse?.ChangeId, HostExecutable = executableProvider?.Invoke() };
+        var record = new SettingChangeRecord { ChangeId = id, ConfigPath = path, BeforeFileBase64 = System.Convert.ToBase64String(beforeFile.Length == 0 ? Encoding.UTF8.GetBytes(beforeSnapshot.GetRawText()) : beforeFile), ParentChangeId = restoreSource ?? inverse?.ChangeId, Operation = restoreSource is null ? null : "setting-restore", HostExecutable = executableProvider?.Invoke() };
         foreach (var change in changes)
         {
             var entry = entries.GetValueOrDefault(change.Path)
@@ -209,7 +266,7 @@ public sealed class SettingsTransactionEngine(
             var next = inverse is null ? ValueContract.Convert(change.Value, property, change.Path)
                 : JsonSerializer.Deserialize(change.Value.GetRawText(), property.PropertyType, ValueContract.Json);
             var existed = TryGet(disk, change.Path, out var oldDisk);
-            record.Changes.Add(new(change.Path, old, ValueContract.Snapshot(next, property.PropertyType), existed, NodeValue(oldDisk), ArgumentSchema.Parse("null")));
+            record.Changes.Add(new(change.Path, old, ValueContract.Snapshot(next, property.PropertyType), existed, NodeValue(oldDisk), ArgumentSchema.Parse("null"), DisplayName: SettingsRecovery.Label(change.Path)));
             prepared.Add((owner, property, JsonSerializer.Deserialize(old.GetRawText(), property.PropertyType, ValueContract.Json), next, change.Path));
         }
         var callback = root.GetType().GetProperty("OnAnyChangedAction");
@@ -325,7 +382,7 @@ public sealed class SettingsTransactionEngine(
         if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) throw BridgeException.InvalidArgument("恢复记录不能是重解析链接。");
         var record = JsonSerializer.Deserialize<SettingChangeRecord>(File.ReadAllText(path), RecordJson)
             ?? throw BridgeException.InvalidArgument("恢复记录无效。");
-        if (record.Format != 1 || record.ChangeId != id || record.ConfigPath != ConfigPath)
+        if (record.Format != 1 || record.ChangeId != id || !record.ConfigPath.Equals(ConfigPath, StringComparison.OrdinalIgnoreCase))
             throw BridgeException.InvalidArgument("恢复记录与当前 BetterGI 配置不匹配。");
         if (record.BackupDigest != Digest(System.Convert.FromBase64String(record.BeforeFileBase64)))
             throw BridgeException.InvalidArgument("恢复记录校验失败。");
@@ -348,9 +405,11 @@ public sealed class SettingsTransactionEngine(
         operation = record.Operation,
         verified = record.State is "committed" or "rolledBack", error = record.Error,
         backupFile = RecordPath(record.ChangeId),
+        recordVersion = Digest(File.ReadAllBytes(RecordPath(record.ChangeId))),
         differences = record.Changes.Select(change => new
         {
             path = change.Path,
+            label = change.DisplayName ?? SettingsRecovery.Label(change.Path),
             before = SettingsCatalog.IsSensitive(change.Path) ? (object)"***REDACTED***" : change.Before,
             after = SettingsCatalog.IsSensitive(change.Path) ? (object)"***REDACTED***" : change.After,
         }),

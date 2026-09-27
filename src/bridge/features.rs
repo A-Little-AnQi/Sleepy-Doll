@@ -243,6 +243,7 @@ mod tests {
             ("run_script_group", "bgi.run_script_group"),
             ("把配置组重命名", "workflow.group.edit"),
             ("开启自动拾取", "workflow.settings"),
+            ("配置恢复", "workflow.settings.recovery"),
             ("开始刷首领", "workflow.task.run"),
             ("解释脚本参数什么意思", "workflow.javascript"),
             ("更新订阅路线", "workflow.repository"),
@@ -275,9 +276,9 @@ mod tests {
         assert!(index.read("untrusted-guessed-id").is_err());
         let first = index.search("功能目录", None, 0, 12).unwrap();
         let second = index.search("功能目录", None, 12, 12).unwrap();
-        assert_eq!(first["total"], 18);
+        assert_eq!(first["total"], 19);
         assert_eq!(first["nextOffset"], 12);
-        assert_eq!(second["items"].as_array().unwrap().len(), 6);
+        assert_eq!(second["items"].as_array().unwrap().len(), 7);
         assert!(second["nextOffset"].is_null());
     }
 

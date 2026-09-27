@@ -769,14 +769,17 @@ impl AppController {
             "bridge.state" => BgiClient::new(self.config.lock().unwrap().bridge.clone()).state(),
             "bridge.status" => Ok(self.bridge_status()),
             "bridge.recoveryList" => crate::bridge::control::recovery("list", &[]),
-            "bridge.restore" => crate::bridge::control::recovery(
-                "restore",
-                &[
-                    required(&params, "changeId")?,
-                    required(&params, "recordVersion")?,
-                    required(&params, "currentVersion")?,
-                ],
-            ),
+            "bridge.recoveryStatus" => {
+                crate::bridge::control::recovery("status", &[&params["targets"].to_string()])
+            }
+            "bridge.recoveryPreview" => {
+                let config = self.config.lock().unwrap().bridge.clone();
+                crate::bridge::recovery::preview(&config, &params)
+            }
+            "bridge.restore" => {
+                let config = self.config.lock().unwrap().bridge.clone();
+                crate::bridge::recovery::restore(&config, &params)
+            }
             "bridge.catalog" | "bridge.describe" => {
                 let mut config = self.config.lock().unwrap().bridge.clone();
                 config.enabled = true;
