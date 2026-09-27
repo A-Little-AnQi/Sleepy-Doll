@@ -94,6 +94,9 @@ def build(data):
             continue
         assessment = item["chainAssessment"]
         alternative = item.get("stableAlternative", "")
+        resource_deletion = item["methodId"] in {"cmd.map_pathing.delete", "cmd.js_list.delete_script", "cmd.key_mouse_record_page.delete_script", "cmd.map_pathing.set_right_click_selection", "cmd.js_list.set_right_click_selection"}
+        if resource_deletion:
+            alternative = "bgi.inspect_local_resource → bgi.delete_local_resource；已有路径不选择、右键、导航或建立上下文"
         result.append({"id": item["methodId"], "kind": "command", "title": item.get("label") or item.get("summary") or item["name"],
                        "summary": item.get("summary") or item["name"], "keywords": [item["name"], item["owner"].split(".")[-1]],
                        "availability": assessment, "methodIds": [item["methodId"]], "inputSources": item.get("parameters") or [],
@@ -103,6 +106,10 @@ def build(data):
                        "verification": "按当前契约 verification 读取目标状态／文件／日志；async void、弹窗或内部事件不能凭处理器返回报完成",
                        "references": [ref("execution.md"), ref("viewmodel-usage.md", "bgi-assistant")],
                        "source": {"path": item["source"], "line": item["line"]}, "sourceRevision": revision})
+        result[-1]["routingPriority"] = "uiFallback"
+        if resource_deletion:
+            result[-1]["related"] = ["workflow.resource.delete"]
+            result[-1]["steps"] = ["用户要删除资源时优先走 workflow.resource.delete：取得真实路径，describe/read inspect_local_resource 后 describe/invoke delete_local_resource", "本命令是界面兜底；仅用户明确要操作该 UI，或当前直接接口无法完成且原生界面能完成时才继续", "新运行重新 describe 当前契约；旧对话的选择引用和失败命令不作为默认下一步"]
     for item in data["settings"]:
         if not item.get("publicExposure", True):
             continue

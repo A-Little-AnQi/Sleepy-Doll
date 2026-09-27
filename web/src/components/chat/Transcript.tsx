@@ -340,21 +340,24 @@ function ProcessDisclosure({
   children,
   visible = true,
   collapseKey,
+  autoExpanded = false,
 }: {
   label: string;
   elapsed?: string | undefined;
   children: ReactNode;
   visible?: boolean;
   collapseKey?: number | undefined;
+  autoExpanded?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [choice, setChoice] = useState<boolean | null>(null);
   const [present, setPresent] = useState(false);
   const [version, setVersion] = useState(collapseKey);
   if (version !== collapseKey) {
     setVersion(collapseKey);
-    setExpanded(false);
+    setChoice(null);
     setPresent(false);
   }
+  const expanded = autoExpanded || (version === collapseKey && Boolean(choice));
   useEffect(() => {
     if (expanded || !present) return;
     const timer = window.setTimeout(() => setPresent(false), 220);
@@ -369,10 +372,11 @@ function ProcessDisclosure({
       <button
         type="button"
         className="process-disclosure-summary"
+        hidden={autoExpanded}
         aria-expanded={expanded}
         onClick={() => {
           if (!expanded) setPresent(true);
-          setExpanded((open) => !open);
+          setChoice(!expanded);
         }}
       >
         <span className="process-disclosure-label" role="status">
@@ -387,7 +391,7 @@ function ProcessDisclosure({
         inert={!expanded}
       >
         <div className="activity-disclosure-inner">
-          {present ? children : null}
+          {expanded || present ? children : null}
         </div>
       </div>
     </section>
@@ -586,11 +590,10 @@ export const Transcript = memo(function Transcript({
               ) : (
                 <>
                   <ProcessDisclosure
-                    visible={hasProcess || active}
+                    visible={hasProcess || (active && !answer)}
                     collapseKey={finalIndex >= 0 ? finalIndex : undefined}
-                    label={
-                      active && !answer && phase ? phase : t.transcript.process
-                    }
+                    autoExpanded={!answer}
+                    label={t.transcript.process}
                     elapsed={
                       active && !answer
                         ? `${seconds}s`

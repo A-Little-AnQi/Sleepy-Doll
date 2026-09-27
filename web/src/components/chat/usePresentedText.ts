@@ -40,10 +40,6 @@ export function usePresentedText(
       };
       buffers.current.set(key, buffer);
     } else {
-      if (buffer.kind === "stream" && kind === "answer" && !immediate) {
-        buffer.visible = 0;
-        buffer.credit = 0;
-      }
       buffer.kind = kind;
       if (immediate) buffer.visible = text.length;
       if (!text.startsWith(buffer.target.slice(0, buffer.visible))) {
@@ -71,7 +67,7 @@ export function usePresentedText(
       `${owner}:${ordinal}`,
       message.content,
       message.toolCalls?.length ? "process" : "answer",
-      historical || Boolean(message.toolCalls?.length),
+      historical,
     );
     if (buffer.visible < buffer.target.length) revealingMessages.add(index);
     return {

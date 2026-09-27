@@ -477,14 +477,14 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             let client = client.clone();
             Arc::new(move |a: &Value| client.catalog_page_with_limit(a["query"].as_str().unwrap_or(""),a["group"].as_str(),a["offset"].as_u64().unwrap_or(0),a["limit"].as_u64().unwrap_or(8))) as BridgeToolFn
         }),
-        ("bgi.api.describe", "读取接口说明", "读取一个精确 methodId 的用途、参数、前置条件、副作用、结果判定和回退边界。每个候选读一次；callable=false 时以 unavailableReason 为最终结论。", json!({"type":"object","properties":{"methodId":{"type":"string","description":"来自 api.search 的精确 ID"}},"required":["methodId"],"additionalProperties":false}), {
+        ("bgi.api.describe", "读取接口说明", "读取精确 methodId 的当前契约，再 read/invoke。直接资源／设置／领域接口优先，cmd.*、bgi.ui.* 与页面上下文是最低优先级；能直接操作数据时不操作界面。callable=false 说明当前接口限制。", json!({"type":"object","properties":{"methodId":{"type":"string","description":"来自当前证据的精确 ID；资源删除用 bgi.inspect_local_resource / bgi.delete_local_resource，不选地图追踪界面删除命令"}},"required":["methodId"],"additionalProperties":false}), {
             let client = client.clone();
             Arc::new(move |a: &Value| client.describe(a["methodId"].as_str().unwrap_or(""))) as BridgeToolFn
         }),
         ("bgi.api.read", "读取 BetterGI 状态", "调用刚通过 api.describe 确认的只读接口。用于读取宿主当前设置或诊断；不用于读取 User 文件。arguments 必须满足该接口 inputSchema。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"无参数接口传空对象"}},"required":["methodId","arguments"],"additionalProperties":false}), {
             Arc::new(move |_: &Value| Err(Error::Tool("该接口必须通过运行时的契约检查调用".into()))) as BridgeToolFn
         }),
-        ("bgi.api.invoke", "执行 BetterGI 操作", "调用刚通过 api.describe 确认的写接口。运行时显示审批并跟踪 Job 到终态；返回 outcome/evidence 后直接按契约核验，不重复调用 job.get。不能把 completed 或处理器返回自动当成业务成功。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"严格满足已读取的 inputSchema"}},"required":["methodId","arguments"],"additionalProperties":false}), {
+        ("bgi.api.invoke", "执行 BetterGI 操作", "只调用本次运行已经 api.describe 的写接口。直接改资源／设置／领域数据优先，界面操作优先级最低。删除路线或脚本先 inspect_local_resource，再调用 delete_local_resource；不先选中、右键、导航或展开树。返回 outcome/evidence 后按契约核验，不重复 job.get；completed 不自动表示业务成功。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"严格满足本次已读取的 inputSchema"}},"required":["methodId","arguments"],"additionalProperties":false}), {
             Arc::new(move |_: &Value| Err(Error::Tool("该接口必须通过运行时的授权与 Job 跟踪调用".into()))) as BridgeToolFn
         }),
         (

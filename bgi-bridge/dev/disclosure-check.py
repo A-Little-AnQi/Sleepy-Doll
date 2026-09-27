@@ -151,8 +151,8 @@ def main():
                 return
             elif method=="bgi.delete_local_resource":
                 assert value["arguments"]["expectedVersion"]=="a"*64
-                target=user/value["arguments"]["path"];backup=TEMP/"deleted-route-payload";target.rename(backup)
-                result={"result":{"deleted":True,"verified":True,"deletedFiles":5,"backupId":"fixture-resource-backup","path":value["arguments"]["path"]}}
+                target=user/value["arguments"]["path"];files=sum(1 for path in target.rglob('*.json'));backup=TEMP/"deleted-route-payload"/value["requestId"];backup.parent.mkdir(exist_ok=True);target.rename(backup)
+                result={"result":{"deleted":True,"verified":True,"deletedFiles":files,"backupId":value["requestId"],"path":value["arguments"]["path"]}}
             elif method == "bgi.run_script_group":
                 result = {"finished": True, "verified": True, "name": value["arguments"]["name"]}
             else:
@@ -203,14 +203,16 @@ def main():
         cases = {"chat": "17加25是多少？", "catalog": "BGI目前有哪些功能，按分类简短列举一下。",
                  "delete": "帮我把植绒草那个配置组删一下，以后我不采了，留着碍事。",
                  "js": "使用历练点完成每日委托这个脚本的movePartyName有什么用？",
-                 "run": "帮我跑下血斛。", "delete_resources":"血斛的配置组还有路线也删一下"}
+                 "run": "帮我跑下血斛。", "delete_resources":"血斛的配置组还有路线也删一下", "delete_route":"血斛的路线删一下"}
         for name in args.cases.split(","):
             active_case[0] = name
-            if name=="delete_resources":
-                (user/"AutoPathing/稻妻/血斛.json").unlink()
+            if name in {"delete_resources", "delete_route"}:
+                (user/"AutoPathing/稻妻/血斛.json").unlink(missing_ok=True)
                 folder="地方特产/稻妻/血斛/血斛@固定作者包"
                 for index in range(1,6):dump(user/"AutoPathing"/folder/f"路线{index}.json",{"positions":[{"id":index}]})
                 dump(user/"ScriptGroup/血斛.json",{"name":"血斛","projects":[{"name":f"路线{index}.json","type":"Pathing","folderName":folder,"status":"Enabled"} for index in range(1,6)]})
+                if name=="delete_route": (user/"ScriptGroup/血斛.json").unlink()
+                dump(user/"AutoPathing/地方特产/稻妻/海灵芝/路线.json",{"positions":[{"id":1}]})
             begin = len(requests)
             run = rpc("run.submit", {"prompt": cases[name], "durationSec": 180})
             end = time.monotonic() + 190
@@ -243,9 +245,10 @@ def main():
             elif name == "run":
                 assert names[0] == "bgi.user.resolve"
                 assert any(item["case"] == name and item["method"] == "bgi.run_script_group" and item["arguments"]["name"] == "血斛" for item in invokes)
-            elif name=="delete_resources":
+            elif name in {"delete_resources", "delete_route"}:
                 assert not (user/"ScriptGroup/血斛.json").exists()
                 assert not (user/"AutoPathing/地方特产/稻妻/血斛/血斛@固定作者包").exists()
+                assert (user/"AutoPathing/地方特产/稻妻/海灵芝/路线.json").exists()
                 assert any(item["case"]==name and item["method"]=="bgi.delete_local_resource" for item in invokes)
                 assert not any(call["arguments"].get("methodId","").startswith(("bgi.ui.","cmd.map_pathing","bgi.create_command","bgi.list_command","bgi.open_page")) for call in calls)
                 assert len(calls)<=18, evidence

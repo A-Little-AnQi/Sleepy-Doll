@@ -55,6 +55,7 @@
 }
 
 .process-disclosure[hidden],
+.process-disclosure-summary[hidden],
 .assistant-message[hidden] {
   display: none;
 }

@@ -11,6 +11,8 @@ alwaysLoad: true
 
 用户描述目标即可。能从资源、接口或日志取得的信息自行读取；已有证据直接复用，不反复发现同一接口。不要把某个界面命令不可调用当成整个业务不可执行，也不要把请求已发出当成目标完成。
 
+调用优先级：直接资源／设置／领域数据接口 → 已有业务脚本或任务 → ViewModel／原生界面兜底。用户要删除、修改或运行一个目标，并不意味着要打开界面；真实路径、名称和版本足够时直接操作数据。调用前读取当前直接接口契约。只有用户明确要打开／操作界面，或直接接口无法完成而原生界面可以完成时才使用 UI。
+
 ## 选择下一步
 
 - “执行／运行／采集某个材料、路线或脚本”：直接 `bgi.user.resolve`，按返回的资源类型和 verdict 准备、运行；本机未安装不等于仓库不存在。
@@ -18,7 +20,7 @@ alwaysLoad: true
 - 编写／修改 JS，或 OCR、图像、宿主 API：加载 `bgi-javascript` 的 writing.md，通过 api.read 的 bgi.js_api.search/read 查询实际引擎契约。
 - 当前可见编辑器、窗口或列表设置：稳定入口优先；需要原生交互时读取 bgi-operator 的 native-ui.md，使用 bgi.ui.read/write/invoke/respond/operation 完成输入、保存与核验，不因弹窗而删掉功能。
 - 删除配置组：定位精确 name/sha256，describe/invoke `bgi.delete_script_group`；不要求界面选中、不改成禁用。
-- 删除路线／JS／键鼠等本机资源：优先使用配置组 read 返回的 referencedResources 真实引用路径，直接 inspect_local_resource → delete_local_resource；不从资源根目录重新遍历，不创建页面上下文、导航、展开树或枚举选项。配置组和资源是两个目标，先删已定位组，再查资源并删除核验。接口在当前桥不存在时报告版本缺口，不无限试 UI。
+- 删除路线／JS／键鼠等本机资源：已有路径直接 describe/read inspect_local_resource → describe/invoke delete_local_resource；未知路径用 user.list 的一层目录按目标定位，或配置组 read 的 referencedResources。不要用运行用的 resolve 订阅／运行资源，也不需要保留配置组存在才能删除路线。不创建页面上下文、导航、选择、右键、展开树或枚举 UI 选项。只删路线时保留配置组，若组仍引用先说明该冲突，不擅自删组；同时删组和资源时先删已定位组再删资源。接口缺失先确认桥版本，不无限试 UI。
 - 停止任务：关联原 Job；无 Job 时 `bgi.stop_current_task`。取消请求或 timeout 都不表示已经停止。
 - 其他功能或对象不明确：用 `bgi.feature.search` 搜索用户目标，再 `bgi.feature.read` 读取最相关条目。索引覆盖源码功能，但当前能否调用仍以 `bgi.api.describe` 为准。
 - 询问总体能力：以“功能目录”搜索流程摘要并按 nextOffset 分页；不要读取全部单项卡片。

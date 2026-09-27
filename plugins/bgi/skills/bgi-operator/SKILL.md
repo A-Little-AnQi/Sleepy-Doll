@@ -8,6 +8,8 @@ tags: BGI操作
 
 按当前目标读取一份相关流程，已取得的路径、版本和接口 ID 可复用。bgi.feature.search/read 返回单项卡片，bgi.api.describe 返回当前调用契约；静态索引不授予执行权限，不证明运行中的版本有该接口。
 
+直接资源、设置和领域数据接口优先；界面命令、页面上下文和 ui.* 是最低优先级。先 describe 当前直接接口；read/invoke 按本次契约 effect 选择。删除路线无需先选中路线、打开页面或建立上下文。
+
 | 当前目标 | skills.reference 的 path |
 |---|---|
 | 查询、创建、修改或删除配置组／用户资源 | [references/resources.md](references/resources.md) |
