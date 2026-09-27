@@ -102,6 +102,7 @@ try {
   const page = await browser.newPage();
   page.on("pageerror", (error) => console.error(error.message));
   let connected = false;
+  let bridgeError;
   let bootstrapCalls = 0;
   let statusCalls = 0;
   const bootstrap = () => ({
@@ -133,7 +134,7 @@ try {
     notifications: [],
     conversationGroups: { groups: [], membership: {}, order: [] },
     permission: { mode: "fullAccess", label: "允许执行", levels: [] },
-    bridge: { ...offline, connected },
+    bridge: { ...offline, connected, error: bridgeError },
   });
   await page.addInitScript(() => {
     localStorage.setItem("sleepy-doll-version", "0.1.0");
@@ -148,7 +149,7 @@ try {
     }
     if (request.method === "bridge.status") {
       statusCalls++;
-      result = { ...offline, connected };
+      result = { ...offline, connected, error: bridgeError };
     }
     await route.fulfill({
       contentType: "application/json",
@@ -211,6 +212,26 @@ try {
     { timeout: 7000 },
   );
   assert(statusCalls >= 3);
+  connected = false;
+  bridgeError = "连接失败，请使用官方版本的BetterGI。";
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForFunction(
+    () =>
+      document.querySelector(".bridge-connection-row span")?.textContent ===
+      "连接失败，请使用官方版本的BetterGI。",
+    undefined,
+    { timeout: 7000 },
+  );
+  connected = true;
+  bridgeError = undefined;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForFunction(
+    () =>
+      document.querySelector(".bridge-connection-row strong")?.textContent ===
+      "已连接",
+    undefined,
+    { timeout: 7000 },
+  );
   console.log(
     JSON.stringify({
       unit: "merge, no overlap, stale response and cleanup passed",

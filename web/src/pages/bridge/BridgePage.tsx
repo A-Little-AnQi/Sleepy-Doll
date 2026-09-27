@@ -57,7 +57,10 @@ export function BridgePage({
     ? { title: t.bridge.connecting, detail: t.bridge.connectingNote }
     : bridge.connected
       ? { title: t.nav.connected, detail: t.bridge.bgRunning }
-      : { title: t.nav.disconnected, detail: t.bridge.bgNotRunning };
+      : {
+          title: t.nav.disconnected,
+          detail: bridge.error ?? t.bridge.bgNotRunning,
+        };
   return (
     <div className="page-sheet bridge-page">
       <header className="bridge-overview" data-motion="panel">

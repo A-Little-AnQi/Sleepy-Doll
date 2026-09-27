@@ -3,15 +3,22 @@ using System.Text.Json;
 using BgiBridge;
 using BgiBridge.Catalog;
 using BgiBridge.Protocol;
+using BgiBridge.Bgi;
 
 Console.OutputEncoding = new UTF8Encoding(false);
 var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 // 本程序与桥组件同目录，所以从自己的目录读出同一个数据根。
-var bridgeDir = AppContext.BaseDirectory;
-InstallPaths.Ensure(bridgeDir);
-var records = InstallPaths.ChangeRecordDirectory(bridgeDir);
 try
 {
+    // 来源检查只读目标程序；不初始化恢复目录，也不读取用户配置。
+    if (args.Length == 2 && args[0] == "origin")
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new { ok = true, result = HostOrigin.Inspect(args[1]) }, options));
+        return;
+    }
+    var bridgeDir = AppContext.BaseDirectory;
+    InstallPaths.Ensure(bridgeDir);
+    var records = InstallPaths.ChangeRecordDirectory(bridgeDir);
     object result = args.Length == 1 && args[0] == "list"
         ? SettingsRecovery.List(records)
         : args.Length == 4 && args[0] == "restore"

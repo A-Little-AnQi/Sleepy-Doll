@@ -92,7 +92,7 @@ pub fn is_host_running() -> bool {
 /// 连接前保证宿主在运行：没运行就找到安装位置启动它，并等进程出现。
 fn ensure_host_running(config: &BridgeConfig) -> Result<()> {
     if host_running() {
-        return Ok(());
+        return super::origin::require_running_hosts();
     }
     let executable = locate_host(config).ok_or_else(|| {
         Error::Tool(
@@ -100,6 +100,7 @@ fn ensure_host_running(config: &BridgeConfig) -> Result<()> {
                 .into(),
         )
     })?;
+    super::origin::require_path(&executable)?;
     let directory = executable
         .parent()
         .ok_or_else(|| Error::Config("BetterGI 安装路径无效。".into()))?
@@ -439,6 +440,7 @@ pub fn info(config: &BridgeConfig) -> Result<Value> {
             "连上的不是可用的 BetterGI。请退出 BetterGI 后重试。".into(),
         ));
     }
+    super::origin::require_info(&value)?;
     Ok(value)
 }
 
@@ -545,6 +547,7 @@ fn pin_configured_root(settings: &mut Value, install: &Path, dir: &Path) -> bool
 }
 
 pub fn enable(config: &BridgeConfig) -> Result<()> {
+    super::origin::require_running_hosts()?;
     if info(config).is_ok() {
         return control(config, true);
     }

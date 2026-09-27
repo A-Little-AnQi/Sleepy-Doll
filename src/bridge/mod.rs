@@ -2,6 +2,7 @@
 
 pub mod control;
 pub(crate) mod features;
+pub(crate) mod origin;
 pub(crate) mod resolve;
 pub(crate) mod retrieval;
 
@@ -369,6 +370,9 @@ impl BgiClient {
         if !self.config.enabled {
             return Err(Error::Tool("BGI Bridge 未启用".into()));
         }
+        if path != "/bridge/v1/info" {
+            control::info(&self.config)?;
+        }
         let url = format!("{}{}", self.config.base_url.trim_end_matches('/'), path);
         let token = self.config.token.as_deref().unwrap_or_default();
         let mut response = if method == "GET" {
@@ -386,7 +390,11 @@ impl BgiClient {
             }
             request.send_json(body.unwrap_or(&Value::Null))?
         };
-        Ok(response.body_mut().read_json()?)
+        let value: Value = response.body_mut().read_json()?;
+        if path == "/bridge/v1/info" {
+            origin::require_info(&value)?;
+        }
+        Ok(value)
     }
 }
 

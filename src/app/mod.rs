@@ -1130,7 +1130,13 @@ impl AppController {
                 json!({"enabled":true,"connected":info["enabled"] != false,"baseUrl":config.base_url,"launchSilently":config.launch_silently,"stale":stale})
             }
             Err(error) => {
-                json!({"enabled":true,"connected":false,"baseUrl":config.base_url,"launchSilently":config.launch_silently,"error":error.to_string()})
+                let message = match &error {
+                    Error::Tool(message) if message == crate::bridge::origin::REJECTED_MESSAGE => {
+                        message.clone()
+                    }
+                    _ => error.to_string(),
+                };
+                json!({"enabled":true,"connected":false,"baseUrl":config.base_url,"launchSilently":config.launch_silently,"error":message})
             }
         }
     }

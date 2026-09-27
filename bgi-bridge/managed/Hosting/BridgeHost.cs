@@ -31,6 +31,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
 
     public void Start()
     {
+        HostOrigin.RequireOfficial();
         var (host, port) = config.ResolveEndpoint();
         Port = port;
 
@@ -119,6 +120,8 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
 
         if (!Authorized(request))
             throw BridgeException.Unauthorized();
+
+        HostOrigin.RequireOfficial();
 
         if (path == "/bridge/v1/control" && request.HttpMethod == "POST")
         {
@@ -242,6 +245,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
         catalogVersion = _catalogVersion,
         instanceId = _instanceId,
         processId = Environment.ProcessId,
+        hostOrigin = HostOrigin.Current,
         enabled = Volatile.Read(ref _enabled) != 0,
         features = new[] { "catalog", "invoke", "jobs", "state", "control", "idempotency", "agentGuides", "settingsTransactions" },
         methods = registry.Count,

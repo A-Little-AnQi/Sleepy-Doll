@@ -29,6 +29,7 @@ public static class Entry
             var bridgeDir = Marshal.PtrToStringUni(parameters) ?? "";
             BridgeDir = bridgeDir;
             Diagnostics.Attach(bridgeDir);
+            HostOrigin.RequireOfficial();
             InstallPaths.Ensure(bridgeDir);
             Diagnostics.Write($"Entry.Start 被调用。bridgeDir={bridgeDir}");
 

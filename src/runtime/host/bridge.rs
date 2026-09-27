@@ -58,6 +58,15 @@ impl Bridge {
         if !self.config.enabled {
             return Err(Error::Tool("BGI Bridge 未启用".into()));
         }
+        if path != "/bridge/v1/info" {
+            let config = self.config.clone();
+            tokio::select! {
+                _ = cancel.cancelled() => return Err(Error::Cancelled),
+                checked = tokio::task::spawn_blocking(move || crate::bridge::control::info(&config)) => {
+                    checked.map_err(|_| Error::Tool(crate::bridge::origin::REJECTED_MESSAGE.into()))??;
+                }
+            }
+        }
         let url = format!("{}{}", self.config.base_url.trim_end_matches('/'), path);
         let mut req = self
             .client
@@ -96,6 +105,15 @@ impl Bridge {
             } else {
                 format!("Bridge {}: {code} {detail}", status.as_u16())
             }));
+        }
+        if path == "/bridge/v1/info" {
+            let info = value.clone();
+            tokio::select! {
+                _ = cancel.cancelled() => return Err(Error::Cancelled),
+                checked = tokio::task::spawn_blocking(move || crate::bridge::origin::require_info(&info)) => {
+                    checked.map_err(|_| Error::Tool(crate::bridge::origin::REJECTED_MESSAGE.into()))??;
+                }
+            }
         }
         Ok(value)
     }
