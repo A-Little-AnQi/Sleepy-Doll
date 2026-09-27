@@ -315,9 +315,11 @@
 }
 .composer-menu [data-ui="select-root"] {
   width: auto;
+  max-width: 100%;
 }
 .composer-menu [data-ui="select-trigger"] {
   width: auto;
+  max-width: 100%;
   height: var(--control-height);
   min-height: var(--control-height);
   gap: 4px;
@@ -329,6 +331,9 @@
   font-size: var(--font-body);
   font-weight: 500;
   color: var(--secondary);
+}
+.composer-menu [data-ui="select-trigger"] > span {
+  min-width: 0;
 }
 /* 对齐文字字面和箭头图形，而不只对齐各自的外框。 */
 .composer-menu [data-ui="select-trigger"]:hover,

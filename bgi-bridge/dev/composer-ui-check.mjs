@@ -293,6 +293,15 @@ try {
         .locator(".composer-dock")
         .evaluate((node) => node.scrollWidth <= node.clientWidth + 1),
     );
+    assert.ok(
+      await page.locator(".composer-model").evaluate((node) => {
+        const parent = node.getBoundingClientRect();
+        const trigger = node
+          .querySelector('[data-ui="select-trigger"]')
+          .getBoundingClientRect();
+        return trigger.right <= parent.right + 1;
+      }),
+    );
   }
   rejectNextInput = true;
   await replyButton.click();
