@@ -11,6 +11,7 @@ import {
   StopIcon,
 } from "../components/icons";
 import { Switch } from "../components/controls/Switch";
+import { ContextMenu } from "../components/shell/ContextMenu";
 import "../product.css";
 import "./tray.css";
 
@@ -204,4 +205,9 @@ function TrayMenu() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<TrayMenu />);
+createRoot(document.getElementById("root")!).render(
+  <>
+    <TrayMenu />
+    <ContextMenu />
+  </>,
+);

@@ -277,3 +277,40 @@
     grid-template-columns: minmax(0, 1fr) auto;
   }
 }
+
+/* API Key 输入行：输入框 + 显示/隐藏小眼睛 */
+.key-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.key-field input {
+  width: 100%;
+  padding-right: 40px;
+}
+
+.key-reveal {
+  position: absolute;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted, #888);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.key-reveal:hover {
+  color: var(--text, #202020);
+  background: var(--hover, #ececec);
+}
+
+.key-reveal svg {
+  width: 17px;
+  height: 17px;
+}

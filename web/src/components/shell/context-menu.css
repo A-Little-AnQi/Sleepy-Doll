@@ -1,0 +1,40 @@
+/* 自绘右键菜单。桌面壳已关闭 WebView2 原生菜单（ContextMenu.tsx），
+   这里只借用产品令牌，明暗主题随 :root / .dark 自动切换。 */
+.context-menu {
+  position: fixed;
+  z-index: 1100; /* 弹层里最高（Select 1000、Dialog 200）。 */
+  min-width: 176px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--layout-radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  user-select: none;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--font-body);
+  text-align: left;
+  cursor: default;
+}
+
+.context-menu-item[data-active="true"]:not(:disabled) {
+  background: var(--hover);
+}
+
+.context-menu-item:disabled {
+  color: var(--muted);
+}
+
+.context-menu-rule {
+  margin: 4px 6px;
+  border-top: 1px solid var(--border);
+}

@@ -2,46 +2,33 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../../ipc/api";
 import { isRunning, readError, taskLabels } from "../../session";
 import type { Bootstrap, TaskSummary } from "../../ipc/types";
-import {
-  ChevronIcon,
-  CloseIcon,
-  HistoryIcon,
-  PlusIcon,
-  SearchIcon,
-} from "../icons";
+import { ChevronIcon, CloseIcon, HistoryIcon, SearchIcon } from "../icons";
 import { TaskCard, type TaskActions } from "../tasks/TaskCard";
 import { taskRun, taskError } from "../tasks/task-display";
-import { ShortcutConfigurator } from "../tasks/ShortcutConfigurator";
 import { ConfirmDialog } from "../overlay/ConfirmDialog";
 import { Toast } from "../overlay/Toast";
 import "./details-panel.css";
 
 export function DetailsPanel({
   bootstrap,
-  conversationId,
   selectedTask,
   onSelectTask,
   onConnectTools,
   reload,
   onClose,
-  onOpenTasks,
 }: {
   bootstrap: Bootstrap;
-  conversationId?: string | undefined;
   selectedTask?: string | undefined;
   onSelectTask(id: string | undefined): void;
   onOpenConversation(id: string): void;
   onConnectTools?(): void;
   reload(): Promise<void>;
   onClose(): void;
-  onOpenTasks?(): void;
 }) {
   const panel = useRef<HTMLElement>(null);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
-  const [configuring, setConfiguring] = useState(false);
-  const [configTarget, setConfigTarget] = useState<TaskSummary>();
   const [removing, setRemoving] = useState<TaskSummary | null>(null);
   const [renaming, setRenaming] = useState<TaskSummary | null>(null);
   const [newName, setNewName] = useState("");
@@ -88,10 +75,6 @@ export function DetailsPanel({
       setBusy("");
     }
   };
-  const configure = (target?: TaskSummary) => {
-    setConfigTarget(target);
-    setConfiguring(true);
-  };
   const actions: TaskActions = {
     run: (task) =>
       void act(task.id, () =>
@@ -102,7 +85,6 @@ export function DetailsPanel({
       if (run) void act(task.id, () => api.cancelTask(run.id));
     },
     open: (task) => onSelectTask(task.id),
-    askAi: (task) => configure(task),
     pin: (task, pinned) =>
       void act(task.id, () => api.pinWorkflow(task.id, pinned)),
     rename: (task) => {
@@ -168,7 +150,8 @@ export function DetailsPanel({
                 <dd>{selected.shortcut?.targetName}</dd>
               </dl>
               <p className="muted">
-                点击运行即可执行，不会重新配置或重放对话。
+                点击运行即可执行，不会重新配置或重放对话。要调整绑定，在对话里让
+                AI 修改这个入口。
               </p>
             </section>
             {currentRun && (
@@ -183,22 +166,14 @@ export function DetailsPanel({
                 <small>{new Date(currentRun.createdAt).toLocaleString()}</small>
               </section>
             )}
-            <button
-              className="secondary-action"
-              onClick={() => configure(selected)}
-            >
-              调整这项快捷入口
-            </button>
           </>
         ) : (
           <>
-            <div className="shortcut-shelf-toolbar">
-              <p>已保存的任务，随时点击运行。</p>
-              <button className="secondary-action" onClick={() => configure()}>
-                <PlusIcon className="button-icon" />
-                添加
-              </button>
-            </div>
+            {tasks.length > 0 && (
+              <div className="shortcut-shelf-toolbar">
+                <p>已保存的任务，随时点击运行。</p>
+              </div>
+            )}
             {tasks.length > 4 && (
               <label className="search-field">
                 <SearchIcon />
@@ -224,41 +199,20 @@ export function DetailsPanel({
               </div>
             ) : (
               <div className="details-empty">
-                <HistoryIcon className="details-empty-icon" />
-                <h3>{query ? "没有匹配的任务" : "还没有快捷任务"}</h3>
+                <span className="details-empty-icon">
+                  <HistoryIcon />
+                </span>
+                <h3>{query ? "没有匹配的任务" : "还没有入口"}</h3>
                 <p>
                   {query
                     ? "换个名称试试。"
-                    : "在原对话中指定一个已有项加入这里，或在这里让 AI 识别并封装已有项。"}
+                    : "在对话里输入「创建快捷任务」，保存后会出现在这里。"}
                 </p>
-                {!query && (
-                  <button
-                    className="primary-action"
-                    onClick={() => configure()}
-                  >
-                    封装已有项
-                  </button>
-                )}
               </div>
             )}
           </>
         )}
       </div>
-      {!selected && (
-        <footer className="shortcut-shelf-footer">
-          <button className="subtle-action" onClick={onOpenTasks}>
-            查看全部任务与运行记录
-          </button>
-        </footer>
-      )}
-      <ShortcutConfigurator
-        bootstrap={bootstrap}
-        open={configuring}
-        target={configTarget}
-        referenceConversationId={conversationId}
-        onClose={() => setConfiguring(false)}
-        reload={reload}
-      />
       <ConfirmDialog
         open={removing != null}
         title="删除快捷任务"

@@ -110,7 +110,6 @@ try {
     localStorage.setItem("sleepy-doll-locale", "zh");
     localStorage.setItem("sleepy-doll-theme", "dark");
     localStorage.setItem("sleepy-doll-sidebar-width", "248");
-    localStorage.setItem("sleepy-doll-details-open", "false");
   });
   await page.route("**/ipc", async (route) => {
     const request = route.request().postDataJSON();

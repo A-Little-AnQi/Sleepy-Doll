@@ -79,6 +79,8 @@
   font-variant-numeric: tabular-nums;
 }
 .details-body {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -164,7 +166,8 @@
   justify-content: center;
   gap: 10px;
   min-height: 220px;
-  padding: 32px 18px 64px;
+  /* 上下对称：垂直位置交给 flex 居中，padding 只做最小呼吸。 */
+  padding: 24px 18px;
   text-align: center;
 }
 .details-empty-icon {
@@ -428,6 +431,8 @@
   width: 100%;
   box-sizing: border-box;
   padding: 10px 12px;
+  /* 固定行盒，中文占位与光标不随字体回退下沉。 */
+  line-height: 20px;
   background: var(--subtle);
   color: var(--text);
   border: 1px solid var(--border-strong);
@@ -435,13 +440,4 @@
 }
 .shortcut-shelf .details-body > .search-field {
   width: 100%;
-}
-.shortcut-shelf-footer {
-  padding: 10px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-}
-.shortcut-shelf-footer button {
-  width: 100%;
-  font-size: 12px;
 }

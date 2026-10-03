@@ -9,7 +9,7 @@ use tao::{
     window::{Window, WindowBuilder},
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use wry::{WebContext, WebView, WebViewBuilder};
+use wry::{WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows};
 
 use crate::{UserEvent, tray_request::TrayRequest};
 
@@ -290,6 +290,7 @@ impl TrayPopup {
             })
             .with_url("sleepy-tray://localhost/")
             .with_initialization_script(format!("window.__TRAY_STATE__={state};"))
+            .with_default_context_menus(false)
             .with_devtools(cfg!(debug_assertions))
             .with_navigation_handler(|url| {
                 matches!(
@@ -443,8 +444,23 @@ impl TrayPopup {
         };
         self.position();
         unsafe {
-            use windows_sys::Win32::UI::WindowsAndMessaging::{SW_SHOW, ShowWindow};
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                HWND_TOPMOST, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+                SetWindowPos, ShowWindow,
+            };
             ShowWindow(self.window.hwnd() as _, SW_SHOW);
+            // 创建时带的 WS_EX_TOPMOST 只保证进入置顶带；带内排位不会自动提前，
+            // 会被其他置顶窗口（全屏游戏、置顶工具）盖住。每次显示都重插到
+            // 置顶带最前。
+            SetWindowPos(
+                self.window.hwnd() as _,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            );
         }
         self.window.set_focus();
     }

@@ -107,7 +107,7 @@ function formFor(model?: ModelInfo): ModelForm {
     protocol: model.protocol,
     model: model.model,
     baseUrl: model.baseUrl,
-    apiKey: "",
+    apiKey: model.apiKey ?? "",
     timeoutMs: model.timeoutMs ?? 120000,
     contextWindow: model.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
     contextWindowManual: true,
@@ -147,6 +147,7 @@ export function ModelsPage({
     {},
   );
   const [advanced, setAdvanced] = useState(false);
+  const [showKey, setShowKey] = useState(false);
   const [busy, setBusy] = useState(false);
   const [listing, setListing] = useState(false);
   const [error, setError] = useState("");
@@ -157,7 +158,7 @@ export function ModelsPage({
   const needsKey = preset?.needsKey !== false;
   const dirty =
     creating ||
-    Boolean(form.apiKey) ||
+    form.apiKey !== (selected?.apiKey ?? "") ||
     (selected != null &&
       (form.name !== selected.name ||
         form.protocol !== selected.protocol ||
@@ -175,6 +176,7 @@ export function ModelsPage({
     setCatalog([]);
     setContextWindows({});
     setAdvanced(false);
+    setShowKey(false);
     setError("");
     setNotice("");
   };
@@ -290,7 +292,7 @@ export function ModelsPage({
       await reload();
       setSelectedId(form.id);
       drafts.current.delete(selectedId);
-      const saved = { ...form, apiKey: "", contextWindowManual: true };
+      const saved = { ...form, contextWindowManual: true };
       drafts.current.set(form.id, saved);
       setForm(saved);
       setNotice(t.models.saved);
@@ -444,11 +446,11 @@ export function ModelsPage({
                 />
               </label>
               {needsKey && (
-                <>
-                  <label>
-                    <span>API Key</span>
+                <label>
+                  <span>API Key</span>
+                  <div className="key-field">
                     <input
-                      type="password"
+                      type={showKey ? "text" : "password"}
                       autoComplete="off"
                       aria-label={t.models.apiKey}
                       required={creating}
@@ -460,8 +462,28 @@ export function ModelsPage({
                       value={form.apiKey}
                       onChange={(event) => change("apiKey", event.target.value)}
                     />
-                  </label>
-                </>
+                    <button
+                      type="button"
+                      className="key-reveal"
+                      aria-label={showKey ? "隐藏密钥" : "显示密钥"}
+                      aria-pressed={showKey}
+                      onClick={() => setShowKey((shown) => !shown)}
+                    >
+                      {showKey ? (
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M12 5C5.5 5 1.7 11.2 1.6 11.5a1 1 0 0 0 0 .9C1.7 12.8 5.5 19 12 19s10.3-6.2 10.4-6.6a1 1 0 0 0 0-.9C22.3 11.2 18.5 5 12 5Zm0 11.5A4.5 4.5 0 1 1 16.5 12 4.5 4.5 0 0 1 12 16.5Z" fill="currentColor"/>
+                          <circle cx="12" cy="12" r="2.6" fill="currentColor"/>
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M12 5C5.5 5 1.7 11.2 1.6 11.5a1 1 0 0 0 0 .9l1.8-.9C4.7 9.9 7.8 7 12 7s7.3 2.9 8.6 4.5c-.4.5-1.2 1.5-2.4 2.4l1.3 1.5c1.8-1.4 2.8-3.1 2.9-3.4a1 1 0 0 0 0-.9C22.3 11.2 18.5 5 12 5Z" fill="currentColor"/>
+                          <path d="M4.3 3 3 4.3l16.7 16.7 1.3-1.3Z" fill="currentColor"/>
+                          <path d="M8.1 9.3A4.4 4.4 0 0 0 12 16.4c1.2 0 2.3-.5 3.1-1.2l-1.4-1.4A2.5 2.5 0 0 1 9.5 10.7Z" fill="currentColor"/>
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </label>
               )}
               <div className="model-field">
                 <span>{t.models.modelLabel}</span>

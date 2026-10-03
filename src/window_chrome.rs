@@ -46,6 +46,9 @@ pub fn set_drag_strip(_height: f64, _controls_width: f64, _can_maximize: bool) {
 #[cfg(not(target_os = "windows"))]
 pub fn begin_system_drag(_hwnd: isize) {}
 
+#[cfg(not(target_os = "windows"))]
+pub fn begin_system_resize(_hwnd: isize, _direction: &str) {}
+
 /// 窗口句柄的数值形态，跨平台外壳都能拿到一个可传递的值。
 #[cfg(target_os = "windows")]
 pub fn hwnd_id(window: &tao::window::Window) -> isize {
@@ -59,7 +62,7 @@ pub fn hwnd_id(_window: &tao::window::Window) -> isize {
 }
 
 #[cfg(target_os = "windows")]
-pub use platform::{begin_system_drag, install, perform, set_drag_strip};
+pub use platform::{begin_system_drag, begin_system_resize, install, perform, set_drag_strip};
 
 #[cfg(target_os = "windows")]
 mod platform {
@@ -70,19 +73,18 @@ mod platform {
 
     use tao::{platform::windows::WindowExtWindows, window::Window};
     use windows_sys::Win32::{
-        Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
+        Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute},
         UI::{
-            HiDpi::GetDpiForWindow,
+            HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi},
             Input::KeyboardAndMouse::ReleaseCapture,
             WindowsAndMessaging::{
-                GW_CHILD, GW_HWNDNEXT, GWL_STYLE, GetParent, GetSystemMetrics, GetWindow,
-                GetWindowLongPtrW, GetWindowRect, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION,
-                HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, HTTRANSPARENT, IsZoomed,
-                NCCALCSIZE_PARAMS, SM_CXFRAME, SM_CXPADDEDBORDER, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-                SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageW, SetWindowLongPtrW,
-                SetWindowPos, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN,
-                WS_THICKFRAME,
+                GWL_STYLE, GetCursorPos, GetWindowLongPtrW, GetWindowRect, HTBOTTOM, HTBOTTOMLEFT,
+                HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT,
+                IsZoomed, NCCALCSIZE_PARAMS, SM_CXFRAME, SM_CXPADDEDBORDER, SWP_FRAMECHANGED,
+                SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageW,
+                SetWindowLongPtrW, SetWindowPos, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDBLCLK,
+                WM_NCLBUTTONDOWN, WS_THICKFRAME,
             },
         },
     };
@@ -99,7 +101,6 @@ mod platform {
 
     /// 子类化标识，取值只需彼此不同。
     const PARENT_SUBCLASS: usize = 1;
-    const CHILD_SUBCLASS: usize = 2;
 
     // comctl32 的子类化接口，windows-sys 没有导出。wry 在同一个父窗口上也用
     // 这一套（WebView2 靠它跟随窗口尺寸），两边走同一条链才能并存。
@@ -141,7 +142,7 @@ mod platform {
         }
     }
 
-    /// 让窗口无边框、可缩放、可最大化，并按系统能力加上圆角。在窗口建好之后调用。
+    /// 安装无边框窗口行为，保留原窗口的缩放能力。
     pub fn install(window: &Window) {
         let hwnd = window.hwnd() as HWND;
         unsafe {
@@ -151,7 +152,12 @@ mod platform {
 
             // 无装饰的窗口没有 WS_THICKFRAME，而缩放循环、贴边吸附、拖离最大化都挂在它上面。
             let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
-            SetWindowLongPtrW(hwnd, GWL_STYLE, (style | WS_THICKFRAME) as isize);
+            let style = if window.is_resizable() {
+                style | WS_THICKFRAME
+            } else {
+                style & !WS_THICKFRAME
+            };
+            SetWindowLongPtrW(hwnd, GWL_STYLE, style as isize);
             SetWindowPos(
                 hwnd,
                 std::ptr::null_mut(),
@@ -161,11 +167,6 @@ mod platform {
                 0,
                 SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
             );
-
-            // WebView2 的子窗口这时已经建好并铺满客户区，边缘的命中测试要由它让出来。
-            for child in children(hwnd) {
-                SetWindowSubclass(child, Some(child_proc), CHILD_SUBCLASS, 0);
-            }
 
             apply_rounding(hwnd);
         }
@@ -190,6 +191,36 @@ mod platform {
         }
     }
 
+    /// 从界面边缘进入当前窗口的系统缩放循环。
+    pub fn begin_system_resize(hwnd: isize, direction: &str) {
+        let hit = match direction {
+            "left" => HTLEFT,
+            "right" => HTRIGHT,
+            "top" => HTTOP,
+            "bottom" => HTBOTTOM,
+            "topLeft" => HTTOPLEFT,
+            "topRight" => HTTOPRIGHT,
+            "bottomLeft" => HTBOTTOMLEFT,
+            "bottomRight" => HTBOTTOMRIGHT,
+            _ => return,
+        };
+        let hwnd = hwnd as HWND;
+        unsafe {
+            if IsZoomed(hwnd) != 0 || GetWindowLongPtrW(hwnd, GWL_STYLE) as u32 & WS_THICKFRAME == 0
+            {
+                return;
+            }
+            let mut point = POINT::default();
+            if GetCursorPos(&mut point) == 0 {
+                return;
+            }
+            let position =
+                (((point.y as u32 & 0xFFFF) << 16) | (point.x as u32 & 0xFFFF)) as LPARAM;
+            ReleaseCapture();
+            SendMessageW(hwnd, WM_NCLBUTTONDOWN, hit as WPARAM, position);
+        }
+    }
+
     unsafe extern "system" fn parent_proc(
         hwnd: HWND,
         message: u32,
@@ -206,8 +237,8 @@ mod platform {
                 unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
                 unsafe { (*params).rgrc[0] = proposed };
                 if unsafe { IsZoomed(hwnd) } != 0 {
-                    // 最大化时窗口被外扩了恰好一条边框，客户区要缩回去。
-                    let frame = unsafe { frame_thickness() };
+                    // 最大化时扣除系统外扩到工作区之外的缩放边框。
+                    let frame = unsafe { frame_thickness(hwnd) };
                     let rect = unsafe { &mut (*params).rgrc[0] };
                     rect.left += frame;
                     rect.top += frame;
@@ -240,28 +271,6 @@ mod platform {
         }
     }
 
-    unsafe extern "system" fn child_proc(
-        hwnd: HWND,
-        message: u32,
-        wparam: WPARAM,
-        lparam: LPARAM,
-        _id: usize,
-        _data: usize,
-    ) -> LRESULT {
-        // WebView2 的子窗口铺满整个客户区，答 HTCLIENT 会把边框那一条也算进自己的
-        // 地盘，缩放会整个失效。边缘与标题栏条带都交还给父窗口，两边用同一套判断。
-        if message == WM_NCHITTEST {
-            let parent = unsafe { GetParent(hwnd) };
-            if !parent.is_null() {
-                let hit = unsafe { resize_hit(parent, lparam) };
-                if hit != HTCLIENT as LRESULT || unsafe { in_drag_strip(parent, lparam) } {
-                    return HTTRANSPARENT as LRESULT;
-                }
-            }
-        }
-        unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
-    }
-
     /// 命中点是否落在自绘标题栏的条带里（控制按钮组除外）。条带未上报时恒为否。
     unsafe fn in_drag_strip(hwnd: HWND, lparam: LPARAM) -> bool {
         let strip = STRIP_HEIGHT.load(Ordering::Relaxed);
@@ -287,9 +296,11 @@ mod platform {
         }
     }
 
-    /// 边框窄带的命中测试。父窗口按它给出命中码，子窗口按它决定是否让位。
+    /// 当前窗口边缘窄带的命中测试。
     unsafe fn resize_hit(hwnd: HWND, lparam: LPARAM) -> LRESULT {
-        if unsafe { IsZoomed(hwnd) } != 0 {
+        if unsafe { IsZoomed(hwnd) } != 0
+            || unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } as u32 & WS_THICKFRAME == 0
+        {
             return HTCLIENT as LRESULT;
         }
         let mut rect = RECT::default();
@@ -299,7 +310,7 @@ mod platform {
         // 屏幕坐标可以是负数，所以先按无符号取位，再按有符号解释。
         let x = (lparam & 0xFFFF) as u16 as i16 as i32;
         let y = ((lparam >> 16) & 0xFFFF) as u16 as i16 as i32;
-        let frame = unsafe { frame_thickness() };
+        let frame = unsafe { frame_thickness(hwnd) };
         let code = match (
             x < rect.left + frame,
             x >= rect.right - frame,
@@ -320,17 +331,10 @@ mod platform {
     }
 
     /// 系统认定的边框宽度。
-    unsafe fn frame_thickness() -> i32 {
-        unsafe { GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER) }
-    }
-
-    unsafe fn children(parent: HWND) -> Vec<HWND> {
-        let mut found = Vec::new();
-        let mut child = unsafe { GetWindow(parent, GW_CHILD) };
-        while !child.is_null() {
-            found.push(child);
-            child = unsafe { GetWindow(child, GW_HWNDNEXT) };
+    unsafe fn frame_thickness(hwnd: HWND) -> i32 {
+        let dpi = unsafe { GetDpiForWindow(hwnd) };
+        unsafe {
+            GetSystemMetricsForDpi(SM_CXFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)
         }
-        found
     }
 }

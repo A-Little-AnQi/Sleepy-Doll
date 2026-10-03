@@ -136,6 +136,43 @@ export function TitleBar({
   );
 }
 
+const resizeDirections = [
+  "left",
+  "right",
+  "top",
+  "bottom",
+  "topLeft",
+  "topRight",
+  "bottomLeft",
+  "bottomRight",
+] as const;
+
+export function WindowResizeHandles() {
+  const onResize = (
+    event: ReactPointerEvent<HTMLDivElement>,
+    direction: (typeof resizeDirections)[number],
+  ) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    window.ipc?.postMessage(
+      JSON.stringify({
+        id: crypto.randomUUID(),
+        method: "window.resize",
+        params: { direction },
+      }),
+    );
+  };
+  return resizeDirections.map((direction) => (
+    <div
+      key={direction}
+      className={`window-resize-handle resize-${direction}`}
+      aria-hidden="true"
+      onPointerDown={(event) => onResize(event, direction)}
+    />
+  ));
+}
+
 function isControl(target: EventTarget | null) {
   return target instanceof Element && target.closest(".title-bar-controls");
 }
