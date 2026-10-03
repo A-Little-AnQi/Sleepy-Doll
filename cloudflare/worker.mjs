@@ -39,8 +39,10 @@ async function download(request, env, ctx, url) {
   const cacheRequest = new Request(url, { method: "GET", headers: request.headers });
   const cached = cache && await cache.match(cacheRequest);
   if (cached) {
-    if (request.method === "HEAD") { await cached.body?.cancel(); return new Response(null, cached); }
-    return cached;
+    const headers = new Headers(cached.headers);
+    headers.set("X-Sleepy-Doll-Gateway", "guarded-r2");
+    if (request.method === "HEAD") { await cached.body?.cancel(); return new Response(null, { status: cached.status, headers }); }
+    return new Response(cached.body, { status: cached.status, headers });
   }
   try {
     // 不读取目录、不探测元数据、不重试；每次进入此分支最多执行一次 R2 操作。
@@ -59,7 +61,7 @@ async function download(request, env, ctx, url) {
     headers.set("Cache-Control", "public, max-age=31536000, immutable");
     headers.set("X-Content-Type-Options", "nosniff");
     headers.set("X-Sleepy-Doll-Gateway", "guarded-r2");
-    if (request.method === "HEAD") return new Response(null, { headers: new Headers([...headers, ["Content-Length", String(object.size)]]) });
+    if (request.method === "HEAD") { headers.set("Content-Length", String(object.size)); return new Response(null, { headers }); }
     if (!("body" in object)) return new Response(null, { status: request.headers.has("If-None-Match") ? 304 : 412, headers });
     let status = 200;
     if (object.range) {

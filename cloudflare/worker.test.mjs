@@ -108,3 +108,16 @@ test("缺失对象与 R2 故障不发生重试，Range 正常返回部分内容"
   assert.equal(response.status, 206); assert.equal(response.headers.get("Content-Range"), "bytes 0-2/9");
   assert.equal(await response.text(), "ins"); assert.equal(fixture.reads, 1);
 });
+
+test("旧 CDN 缓存命中仍经过保护入口，且不会读取 R2", async () => {
+  const original = globalThis.caches;
+  try {
+    globalThis.caches = { default: { match: async () => new Response("installer", { headers: { "Content-Length": "9" } }) } };
+    const fixture = downloadEnv();
+    const response = await worker.fetch(new Request(downloadUrl), fixture.env);
+    assert.equal(response.headers.get("X-Sleepy-Doll-Gateway"), "guarded-r2");
+    assert.equal(await response.text(), "installer"); assert.equal(fixture.reads, 0);
+  } finally {
+    if (original === undefined) delete globalThis.caches; else globalThis.caches = original;
+  }
+});
