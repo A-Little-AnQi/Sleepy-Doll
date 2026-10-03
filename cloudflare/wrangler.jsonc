@@ -6,6 +6,9 @@
   "workers_dev": false,
   "routes": [{ "pattern": "sleepy-doll-api.restless-nh3.com", "custom_domain": true }],
   "r2_buckets": [{ "binding": "RELEASES", "bucket_name": "sleepy-doll-releases" }],
-  "ratelimits": [{ "name": "EVENT_LIMIT", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } }],
+  "ratelimits": [
+    { "name": "EVENT_LIMIT", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
+    { "name": "DOWNLOAD_LIMIT", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } }
+  ],
   "observability": { "enabled": false }
 }

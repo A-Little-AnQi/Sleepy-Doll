@@ -19,13 +19,20 @@ jobs:
       npm_config_cache: ${{ github.workspace }}/target/ci/npm-cache
       WRANGLER_LOG_PATH: ${{ github.workspace }}/target/ci/wrangler
       WRANGLER_SEND_METRICS: "false"
+      CLOUDFLARE_ACCOUNT_ID: "31b280af27ff4bf0d338ecd49cf27902"
+      R2_BUCKET: sleepy-doll-releases
     steps:
       - uses: actions/checkout@v4
       - run: mkdir -p "$TMPDIR"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test cloudflare/worker.test.mjs
+      - run: node --test cloudflare/worker.test.mjs installer/r2-budget.test.mjs
+      - name: Audit R2 storage budget
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: node installer/publish-r2.mjs --audit
       - name: Deploy API and analytics
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

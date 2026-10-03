@@ -46,3 +46,65 @@ test("官网仅记录允许的文档路由，不转发查询参数", () => {
   assert.equal(validateEvent({ ...web, pagePath: "/docs/guide" }).events[0].params.page_location, "https://sleepy-doll.restless-nh3.com/#/docs/guide");
   assert.equal(validateEvent({ ...web, pagePath: "/docs/guide?secret=private" }).events[0].params.page_location, "https://sleepy-doll.restless-nh3.com/");
 });
+
+const downloadUrl = "https://sleepy-doll-download.restless-nh3.com/releases/0.0.1/Sleepy-Doll-0.0.1-setup.exe";
+function downloadEnv({ found = true, allowed = true, fail = false, ranged = false } = {}) {
+  let reads = 0;
+  const object = () => ({
+    size: 9, storageClass: "Standard", httpEtag: '"fixture"',
+    writeHttpMetadata(headers) { headers.set("Content-Type", "application/octet-stream"); },
+    ...(ranged ? { range: { offset: 0, length: 3 } } : {}),
+  });
+  return {
+    get reads() { return reads; },
+    env: {
+      DOWNLOAD_LIMIT: { limit: async () => ({ success: allowed }) },
+      RELEASES: {
+        async get() { reads++; if (fail) throw Error("storage"); return found ? { ...object(), body: new Response(ranged ? "ins" : "installer").body } : null; },
+        async head() { reads++; return found ? object() : null; },
+      },
+    },
+  };
+}
+test("下载和 HEAD 每次最多读取一次 R2，响应可供客户端校验", async () => {
+  for (const method of ["GET", "HEAD"]) {
+    const fixture = downloadEnv();
+    const response = await worker.fetch(new Request(downloadUrl, { method }), fixture.env);
+    assert.equal(response.status, 200); assert.equal(fixture.reads, 1);
+    assert.equal(response.headers.get("X-Sleepy-Doll-Gateway"), "guarded-r2");
+    assert.equal(await response.text(), method === "HEAD" ? "" : "installer");
+  }
+});
+test("不合法路径、查询串、方法和多段 Range 在访问 R2 前拒绝", async () => {
+  const requests = [
+    new Request(downloadUrl + "?random=1"),
+    new Request(downloadUrl.replace("Sleepy-Doll-0.0.1", "Sleepy-Doll-0.0.2")),
+    new Request(downloadUrl + "/anything"),
+    new Request(downloadUrl, { method: "POST" }),
+    new Request(downloadUrl, { headers: { Range: "bytes=0-1,5-7" } }),
+  ];
+  for (const request of requests) {
+    const fixture = downloadEnv();
+    assert((await worker.fetch(request, fixture.env)).status >= 400); assert.equal(fixture.reads, 0);
+  }
+});
+test("限流、缺失保护绑定和手动暂停均不访问 R2", async () => {
+  const blocked = downloadEnv({ allowed: false });
+  assert.equal((await worker.fetch(new Request(downloadUrl), blocked.env)).status, 429);
+  assert.equal(blocked.reads, 0);
+  const paused = downloadEnv(); paused.env.DOWNLOADS_DISABLED = "true";
+  assert.equal((await worker.fetch(new Request(downloadUrl), paused.env)).status, 503); assert.equal(paused.reads, 0);
+  const absent = downloadEnv(); delete absent.env.DOWNLOAD_LIMIT;
+  assert.equal((await worker.fetch(new Request(downloadUrl), absent.env)).status, 503); assert.equal(absent.reads, 0);
+});
+test("缺失对象与 R2 故障不发生重试，Range 正常返回部分内容", async () => {
+  for (const options of [{ found: false }, { fail: true }]) {
+    const fixture = downloadEnv(options);
+    const response = await worker.fetch(new Request(downloadUrl), fixture.env);
+    assert.equal(response.status, options.fail ? 502 : 404); assert.equal(fixture.reads, 1);
+  }
+  const fixture = downloadEnv({ ranged: true });
+  const response = await worker.fetch(new Request(downloadUrl, { headers: { Range: "bytes=0-2" } }), fixture.env);
+  assert.equal(response.status, 206); assert.equal(response.headers.get("Content-Range"), "bytes 0-2/9");
+  assert.equal(await response.text(), "ins"); assert.equal(fixture.reads, 1);
+});
