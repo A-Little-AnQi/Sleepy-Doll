@@ -909,7 +909,8 @@ fn absolute(base: &Path, path: &Path) -> PathBuf {
     }
 }
 
-fn expand_env(value: &mut serde_json::Value) -> Result<()> {
+/// 展开 `${ENV:NAME}` 形式的字符串值；测试 CLI 复用同一语义解析模型配置。
+pub fn expand_env(value: &mut serde_json::Value) -> Result<()> {
     match value {
         serde_json::Value::String(text) => {
             if let Some(name) = text

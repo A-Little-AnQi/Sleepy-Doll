@@ -41,6 +41,16 @@ pub struct ContextActivity {
     pub state: &'static str,
 }
 
+/// 同一请求再次打开（崩溃重放）时的结果：open 保持原状不发新事件，
+/// answered 保留已存答案，superseded 保持结束。身份是 (run_id, request_id)。
+#[derive(Debug)]
+pub enum QuestionReopen {
+    Opened,
+    Open,
+    Answered(Value),
+    Superseded,
+}
+
 #[cfg(test)]
 mod context_activity_tests {
     use super::*;
@@ -306,6 +316,35 @@ impl Journal {
         )?;
         crate::runtime::store::migrations::migrate(&mut connection)?;
         connection.execute_batch("CREATE TABLE IF NOT EXISTS runtime_input_keys(run_id TEXT NOT NULL REFERENCES runtime_runs(id) ON DELETE CASCADE,client_key TEXT NOT NULL,kind TEXT NOT NULL,content TEXT NOT NULL,PRIMARY KEY(run_id,client_key));")?;
+        // 问题请求以 (run_id, request_id) 为身份：requestId 用的是 tool call.id，
+        // 只在任务内唯一，跨任务会重复。旧开发库是单列主键，搬完数据再替换。
+        let question_table_sql: Option<String> = connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name='runtime_question_requests'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(sql) = question_table_sql {
+            if sql.contains("PRIMARY KEY(run_id,id)") {
+                // 已是新形状。
+            } else {
+                connection.execute_batch(
+                    "ALTER TABLE runtime_question_requests RENAME TO runtime_question_requests_legacy;
+                     CREATE TABLE runtime_question_requests(id TEXT NOT NULL, run_id TEXT NOT NULL REFERENCES runtime_runs(id) ON DELETE CASCADE, conversation_id TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL, answers TEXT, answer_key TEXT, created_at TEXT NOT NULL, answered_at TEXT, PRIMARY KEY(run_id,id));
+                     INSERT INTO runtime_question_requests(id,run_id,conversation_id,status,payload,answers,answer_key,created_at,answered_at) SELECT id,run_id,conversation_id,status,payload,answers,answer_key,created_at,answered_at FROM runtime_question_requests_legacy;
+                     DROP TABLE runtime_question_requests_legacy;",
+                )?;
+            }
+        } else {
+            connection.execute_batch(
+                "CREATE TABLE runtime_question_requests(id TEXT NOT NULL, run_id TEXT NOT NULL REFERENCES runtime_runs(id) ON DELETE CASCADE, conversation_id TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL, answers TEXT, answer_key TEXT, created_at TEXT NOT NULL, answered_at TEXT, PRIMARY KEY(run_id,id));",
+            )?;
+        }
+        connection.execute_batch(
+            "CREATE INDEX IF NOT EXISTS runtime_question_requests_run ON runtime_question_requests(run_id,status);
+             CREATE INDEX IF NOT EXISTS runtime_question_requests_conversation ON runtime_question_requests(conversation_id,status);",
+        )?;
         connection.execute_batch(
             "CREATE INDEX IF NOT EXISTS runtime_events_run ON runtime_events(run_id,sequence);",
         )?;
@@ -360,6 +399,9 @@ impl Journal {
         )
     }
 
+    // 参数是创建一条配置运行所需的最小完整集合；引入结构体只是搬家不降复杂度，
+    // 且会连带动 call site，维持现有 API。
+    #[allow(clippy::too_many_arguments)]
     pub fn create_configured(
         &self,
         prompt: &str,
@@ -808,6 +850,244 @@ impl Journal {
         tx.commit()?;
         self.touch();
         Ok(())
+    }
+
+    /// 记录待回答的结构化问题，并在同一事务里发出 question 事件与取代旧请求。
+    /// 同一 run 同时最多一个 open 请求；已结束的请求不得重开。
+    pub fn open_question_request(
+        &self,
+        run: &Run,
+        request_id: &str,
+        request: &Value,
+        event_data: &Value,
+    ) -> Result<QuestionReopen> {
+        let mut db = self.connection.lock().unwrap();
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<(String, String, Option<String>)> = tx
+            .query_row(
+                "SELECT status,payload,answers FROM runtime_question_requests WHERE run_id=?1 AND id=?2",
+                params![run.id, request_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        if let Some((status, saved_payload, saved_answers)) = existing {
+            // 同一 request id 只能对应同一组题目，换题目必须换 call。
+            let same_questions = serde_json::from_str::<Value>(&saved_payload)
+                .map(|saved| saved["questions"] == request["questions"])
+                .unwrap_or(false);
+            if !same_questions {
+                return Err(Error::Conflict("同一请求标识的题目不一致".into()));
+            }
+            return match status.as_str() {
+                // open 重放：幂等，不再发待回答事件。
+                "open" => {
+                    tx.commit()?;
+                    Ok(QuestionReopen::Open)
+                }
+                // answered 重放：保留答案，绝不重开。
+                "answered" => {
+                    tx.commit()?;
+                    let answers = saved_answers
+                        .as_deref()
+                        .map(serde_json::from_str)
+                        .transpose()?
+                        .unwrap_or(Value::Null);
+                    Ok(QuestionReopen::Answered(answers))
+                }
+                // superseded 重放：保持结束，交回主循环按用户新输入继续。
+                _ => {
+                    tx.commit()?;
+                    Ok(QuestionReopen::Superseded)
+                }
+            };
+        }
+        let stale: Vec<String> = {
+            let mut q = tx.prepare(
+                "SELECT id FROM runtime_question_requests WHERE run_id=?1 AND status='open' AND id<>?2",
+            )?;
+            q.query_map(params![run.id, request_id], |r| r.get(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for id in &stale {
+            tx.execute(
+                "UPDATE runtime_question_requests SET status='superseded',answered_at=?2 WHERE run_id=?3 AND id=?1 AND status='open'",
+                params![id, now(), run.id],
+            )?;
+            Self::insert_event(
+                &tx,
+                run,
+                "question.superseded",
+                &json!({"requestId":id,"reason":"replaced"}),
+            )?;
+        }
+        tx.execute(
+            "INSERT INTO runtime_question_requests(id,run_id,conversation_id,status,payload,created_at) VALUES(?1,?2,?3,'open',?4,?5)",
+            params![request_id, run.id, run.conversation_id, request.to_string(), now()],
+        )?;
+        Self::insert_event(&tx, run, "question", event_data)?;
+        tx.commit()?;
+        self.touch();
+        Ok(QuestionReopen::Opened)
+    }
+
+    /// 专用答复通道：先按请求题目归一答案，再做幂等比较；幂等合法重试优先于
+    /// 状态校验。答案、状态与事件同事务落库。返回 true 表示新记录了答案。
+    pub fn answer_question_request(
+        &self,
+        run_id: &str,
+        request_id: &str,
+        answers: &Value,
+        key: Option<&str>,
+    ) -> Result<bool> {
+        let mut db = self.connection.lock().unwrap();
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // clientKey 绑定到 run 内的一次请求：换请求或换答案都拒绝，不跨请求串。
+        if let Some(key) = key {
+            let keyed: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM runtime_question_requests WHERE run_id=?1 AND answer_key=?2",
+                    params![run_id, key],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if keyed.as_deref() != Some(request_id) && keyed.is_some() {
+                return Err(Error::Conflict("同一请求标识不能用于不同的问题".into()));
+            }
+        }
+        let row: Option<(String, Option<String>, String)> = tx
+            .query_row(
+                "SELECT status,answers,payload FROM runtime_question_requests WHERE run_id=?1 AND id=?2",
+                params![run_id, request_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let Some((status, saved_answers, saved_payload)) = row else {
+            return Err(Error::Config("问题不存在或不属于该任务".into()));
+        };
+        // 先按题目校验并归一：空白、未知 id、非法类型一律拒绝，之后才比较幂等。
+        let questions: Vec<crate::runtime::questions::Question> = serde_json::from_value(
+            serde_json::from_str::<Value>(&saved_payload)?["questions"].clone(),
+        )?;
+        let normalized = crate::runtime::questions::validate_answers(&questions, answers)?;
+        if status == "answered" {
+            let saved: Value = saved_answers
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?
+                .unwrap_or(Value::Null);
+            return if saved == normalized {
+                Ok(false)
+            } else {
+                Err(Error::Conflict("已回答的问题不能更改答案".into()))
+            };
+        }
+        if status != "open" {
+            return Err(Error::Conflict("该问题已失效，不能回答".into()));
+        }
+        // 归属与状态校验放在幂等之后：已成功请求的合法重试不能被拒绝。
+        let payload: String = tx.query_row(
+            "SELECT payload FROM runtime_runs WHERE id=?1",
+            [run_id],
+            |r| r.get(0),
+        )?;
+        let current: Run = serde_json::from_str(&payload)?;
+        if current.state != RunState::AwaitingUser {
+            return Err(Error::Conflict("当前不在等待回答".into()));
+        }
+        tx.execute(
+            "UPDATE runtime_question_requests SET status='answered',answers=?2,answer_key=?3,answered_at=?4 WHERE run_id=?5 AND id=?1 AND status='open'",
+            params![request_id, normalized.to_string(), key, now(), run_id],
+        )?;
+        Self::insert_event(
+            &tx,
+            &current,
+            "question.answered",
+            &json!({"requestId":request_id}),
+        )?;
+        tx.commit()?;
+        self.touch();
+        Ok(true)
+    }
+
+    /// 把 run 当前 open 的问题标记为 superseded（新补充输入接管时调用）。
+    pub fn supersede_question_requests(&self, run: &Run, reason: &str) -> Result<Vec<String>> {
+        let mut db = self.connection.lock().unwrap();
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let stale: Vec<String> = {
+            let mut q = tx.prepare(
+                "SELECT id FROM runtime_question_requests WHERE run_id=?1 AND status='open'",
+            )?;
+            q.query_map(params![run.id], |r| r.get(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for id in &stale {
+            tx.execute(
+                "UPDATE runtime_question_requests SET status='superseded',answered_at=?2 WHERE run_id=?3 AND id=?1 AND status='open'",
+                params![id, now(), run.id],
+            )?;
+            Self::insert_event(
+                &tx,
+                run,
+                "question.superseded",
+                &json!({"requestId":id,"reason":reason}),
+            )?;
+        }
+        tx.commit()?;
+        self.touch();
+        Ok(stale)
+    }
+
+    /// 查询某次请求的当前状态与已存答案，user.ask 等待循环消费。
+    pub fn question_request_state(
+        &self,
+        run_id: &str,
+        request_id: &str,
+    ) -> Result<Option<(String, Option<String>)>> {
+        let db = self.connection.lock().unwrap();
+        let row: Option<(String, Option<String>)> = db
+            .query_row(
+                "SELECT status,answers FROM runtime_question_requests WHERE id=?1 AND run_id=?2",
+                params![request_id, run_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    /// 会话当前真正 open 的问题请求，conversation.get 快照给前端，
+    /// 不依赖可能已被裁剪的旧事件重放。
+    /// 只算仍处于 awaitingUser 的运行：结束/取消运行留下的 open 记录不得进快照。
+    pub fn open_question_requests(&self, conversation: &str) -> Result<Vec<Value>> {
+        let db = self.connection.lock().unwrap();
+        let mut q = db.prepare(
+            "SELECT q.id,q.run_id,q.payload,q.created_at FROM runtime_question_requests q \
+             JOIN runtime_runs r ON r.id=q.run_id \
+             WHERE q.conversation_id=?1 AND q.status='open' AND r.state='\"awaitingUser\"' \
+             ORDER BY q.rowid",
+        )?;
+        let rows = q
+            .query_map([conversation], |r| {
+                Ok((
+                    r.get::<_, String>(0),
+                    r.get::<_, String>(1),
+                    r.get::<_, String>(2),
+                    r.get::<_, String>(3),
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter()
+            .map(|row| {
+                let (id, run_id, payload, created_at) = row;
+                let (id, run_id, payload, created_at) = (id?, run_id?, payload?, created_at?);
+                let payload: Value = serde_json::from_str(&payload)?;
+                Ok(json!({
+                    "requestId":id,
+                    "runId":run_id,
+                    "questions":payload["questions"],
+                    "createdAt":created_at,
+                }))
+            })
+            .collect()
     }
     pub fn finish(&self, run: &mut Run, next: RunState) -> Result<bool> {
         if run.state.terminal() || !next.terminal() {
@@ -1776,5 +2056,586 @@ impl Journal {
             params![serde_json::to_string(&run)?, run.id],
         )?;
         Ok(run)
+    }
+}
+
+#[cfg(test)]
+mod question_request_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn journal(name: &str) -> (Journal, PathBuf) {
+        // 统一放本任务登记的 target/.tmp/shortcut-runtime 根内。
+        let dir = PathBuf::from("target/.tmp/shortcut-runtime/question-journal-tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{name}.db"));
+        // Journal::open 首次建表会写 VACUUM 备份，按前缀一并清掉上次残留。
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().starts_with(name) {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+        (Journal::open(&path).unwrap(), path)
+    }
+
+    fn run_to_awaiting(journal: &Journal, id: &str, conversation: &str) -> Run {
+        let mut run = journal
+            .create(
+                "测试目标",
+                conversation,
+                format!("key-{id}").as_str(),
+                3600,
+                None,
+            )
+            .unwrap();
+        for next in [
+            RunState::Preflighting,
+            RunState::Deciding,
+            RunState::AwaitingUser,
+        ] {
+            journal.save(&mut run, next).unwrap();
+        }
+        run
+    }
+
+    fn request(id: &str) -> Value {
+        json!({"requestId":id,"questions":[
+            {"id":"mode","header":"运行方式","question":"怎么跑？","options":[{"label":"启动","description":"立即运行"},{"label":"检查"}]}
+        ]})
+    }
+
+    fn answers() -> Value {
+        json!({"mode":{"answers":["启动"]}})
+    }
+
+    fn event_count(journal: &Journal, kind: &str) -> i64 {
+        journal
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM runtime_events WHERE kind=?1",
+                [kind],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    fn user_message_count(journal: &Journal) -> i64 {
+        journal
+            .connection
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM messages WHERE role='user'", [], |r| {
+                r.get(0)
+            })
+            .unwrap()
+    }
+
+    fn status(journal: &Journal, run_id: &str, request_id: &str) -> String {
+        journal
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT status FROM runtime_question_requests WHERE run_id=?1 AND id=?2",
+                params![run_id, request_id],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn same_call_id_coexists_across_runs() {
+        let (journal, path) = journal("cross-run");
+        let a = run_to_awaiting(&journal, "run-a", "c-a");
+        let b = run_to_awaiting(&journal, "run-b", "c-b");
+        // 真实 tool call.id 可跨任务重复：同 id 并存，互不串。
+        journal
+            .open_question_request(&a, "call-1", &request("call-1"), &json!({"question":"q"}))
+            .unwrap();
+        journal
+            .open_question_request(&b, "call-1", &request("call-1"), &json!({"question":"q"}))
+            .unwrap();
+        assert!(
+            journal
+                .answer_question_request(&a.id, "call-1", &answers(), Some("client-1"))
+                .unwrap()
+        );
+        assert_eq!(status(&journal, &a.id, "call-1"), "answered");
+        // b 的同名请求不受影响，仍 open；clientKey 按 run 作用域，同名 key 在 b 内重新绑定。
+        assert!(
+            journal
+                .answer_question_request(
+                    &b.id,
+                    "call-1",
+                    &json!({"mode":{"answers":["检查"]}}),
+                    Some("client-1")
+                )
+                .unwrap()
+        );
+        assert_eq!(status(&journal, &b.id, "call-1"), "answered");
+        // b 内同 key 换答案拒绝。
+        assert!(
+            journal
+                .answer_question_request(&b.id, "call-1", &answers(), Some("client-1"))
+                .is_err()
+        );
+        // clientKey 在 run 内绑定到具体请求：a 的 key 再用于 a 的另一个请求要拒绝。
+        journal
+            .open_question_request(&a, "call-2", &request("call-2"), &json!({"question":"q"}))
+            .unwrap();
+        assert!(
+            journal
+                .answer_question_request(&a.id, "call-2", &answers(), Some("client-1"))
+                .is_err()
+        );
+        // 其他 run / 未知请求不能答。
+        assert!(
+            journal
+                .answer_question_request(&b.id, "call-2", &answers(), None)
+                .is_err()
+        );
+        assert!(
+            journal
+                .answer_question_request(&a.id, "call-none", &answers(), None)
+                .is_err()
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn answer_records_without_user_message_and_retries_stay_idempotent() {
+        let (journal, path) = journal("answer-roundtrip");
+        let run = run_to_awaiting(&journal, "run-a", "c-a");
+        journal
+            .open_question_request(
+                &run,
+                "call-1",
+                &request("call-1"),
+                &json!({"question":"怎么跑？","request":request("call-1")}),
+            )
+            .unwrap();
+        // 刷新重放：question 事件带结构化 request。
+        let stored: String = journal
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT data FROM runtime_events WHERE kind='question' AND run_id=?1",
+                [&run.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let stored: Value = serde_json::from_str(&stored).unwrap();
+        assert_eq!(stored["request"]["requestId"], json!("call-1"));
+        assert_eq!(stored["request"]["questions"][0]["id"], json!("mode"));
+        assert_eq!(stored["question"], json!("怎么跑？"));
+
+        let before = user_message_count(&journal);
+        assert!(
+            journal
+                .answer_question_request(&run.id, "call-1", &answers(), Some("client-1"))
+                .unwrap()
+        );
+        // 答复不新增 user 聊天消息，状态与事件同事务落库。
+        assert_eq!(user_message_count(&journal), before);
+        assert_eq!(status(&journal, &run.id, "call-1"), "answered");
+        assert_eq!(event_count(&journal, "question.answered"), 1);
+
+        // 归一后幂等：首答带空白，合法重试不带空白也命中，不冲突。
+        assert!(
+            !journal
+                .answer_question_request(
+                    &run.id,
+                    "call-1",
+                    &json!({"mode":{"answers":[" 启动 "]}}),
+                    Some("client-1")
+                )
+                .unwrap()
+        );
+        assert_eq!(event_count(&journal, "question.answered"), 1);
+        // 无 key 的同答案重试同样幂等成功。
+        assert!(
+            !journal
+                .answer_question_request(&run.id, "call-1", &answers(), None)
+                .unwrap()
+        );
+        // 同 key 不同答案拒绝。
+        assert!(
+            journal
+                .answer_question_request(
+                    &run.id,
+                    "call-1",
+                    &json!({"mode":{"answers":["检查"]}}),
+                    Some("client-1")
+                )
+                .is_err()
+        );
+        // 已成功请求的合法重试不能被 terminal 状态挡住。
+        let mut run = run;
+        journal.finish(&mut run, RunState::Answered).unwrap();
+        assert!(
+            !journal
+                .answer_question_request(&run.id, "call-1", &answers(), Some("client-2"))
+                .unwrap()
+        );
+        // 已回答后改答案拒绝；非法类型与未知 id 一律拒绝。
+        assert!(
+            journal
+                .answer_question_request(
+                    &run.id,
+                    "call-1",
+                    &json!({"mode":{"answers":["检查"]}}),
+                    Some("client-2")
+                )
+                .is_err()
+        );
+        for invalid in [
+            json!({"mode":{"answers":["启动"]},"unknown":{"answers":["x"]}}),
+            json!({"mode":{"answers":[true]}}),
+            json!({"mode":"启动"}),
+            json!({}),
+        ] {
+            assert!(
+                journal
+                    .answer_question_request(&run.id, "call-1", &invalid, None)
+                    .is_err()
+            );
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn reopen_preserves_state_and_never_reopens_answered() {
+        let (journal, path) = journal("reopen");
+        let run = run_to_awaiting(&journal, "run-r", "c-r");
+        journal
+            .open_question_request(&run, "call-1", &request("call-1"), &json!({"question":"q"}))
+            .unwrap();
+        // open 重放：幂等，不重复发 question 事件。
+        assert!(matches!(
+            journal
+                .open_question_request(&run, "call-1", &request("call-1"), &json!({"question":"q"}))
+                .unwrap(),
+            QuestionReopen::Open
+        ));
+        assert_eq!(event_count(&journal, "question"), 1);
+        // 同 id 换题目拒绝。
+        let other =
+            json!({"requestId":"call-1","questions":[{"id":"else","header":"h","question":"q"}]});
+        assert!(
+            journal
+                .open_question_request(&run, "call-1", &other, &json!({"question":"q"}))
+                .is_err()
+        );
+        journal
+            .answer_question_request(&run.id, "call-1", &answers(), Some("client-1"))
+            .unwrap();
+        // answered 重放：保留答案，不重开、不再发事件。
+        match journal
+            .open_question_request(&run, "call-1", &request("call-1"), &json!({"question":"q"}))
+            .unwrap()
+        {
+            QuestionReopen::Answered(answers) => {
+                assert_eq!(answers["mode"]["answers"][0], json!("启动"))
+            }
+            other => panic!("应保留答案，实际 {other:?}"),
+        }
+        assert_eq!(status(&journal, &run.id, "call-1"), "answered");
+        assert_eq!(event_count(&journal, "question"), 1);
+        // superseded 重放：保持结束，不再打开。
+        journal
+            .open_question_request(&run, "call-2", &request("call-2"), &json!({"question":"q"}))
+            .unwrap();
+        assert!(matches!(
+            journal
+                .open_question_request(&run, "call-2", &request("call-2"), &json!({"question":"q"}))
+                .unwrap(),
+            QuestionReopen::Open
+        ));
+        journal
+            .supersede_question_requests(&run, "supplemented")
+            .unwrap();
+        assert!(matches!(
+            journal
+                .open_question_request(&run, "call-2", &request("call-2"), &json!({"question":"q"}))
+                .unwrap(),
+            QuestionReopen::Superseded
+        ));
+        assert_eq!(status(&journal, &run.id, "call-2"), "superseded");
+        assert!(
+            journal
+                .answer_question_request(&run.id, "call-2", &answers(), None)
+                .is_err()
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn supplement_supersedes_and_stays_unconsumed_for_main_loop() {
+        let (journal, path) = journal("supplement");
+        let run = run_to_awaiting(&journal, "run-b", "c-b");
+        journal
+            .open_question_request(&run, "call-1", &request("call-1"), &json!({"question":"q"}))
+            .unwrap();
+        // 真实新补充到达（run.input 不区分等待状态）。
+        journal
+            .input_once(&run.id, "supplement", "算了，直接跑默认", Some("s-1"))
+            .unwrap();
+        assert_eq!(
+            journal
+                .supersede_question_requests(&run, "supplemented")
+                .unwrap(),
+            vec!["call-1".to_string()]
+        );
+        assert_eq!(status(&journal, &run.id, "call-1"), "superseded");
+        assert!(
+            journal
+                .answer_question_request(&run.id, "call-1", &answers(), Some("client-1"))
+                .is_err()
+        );
+        // 补充未被 user.ask 消费：留给主循环按 Role::User 取用。
+        assert!(journal.has_inputs(&run.id).unwrap());
+        assert_eq!(
+            journal.drain_inputs(&run.id).unwrap(),
+            vec!["算了，直接跑默认".to_string()]
+        );
+        // 答复优先完成后同时到来的补充也保留：回答不动 inputs。
+        journal
+            .open_question_request(&run, "call-2", &request("call-2"), &json!({"question":"q"}))
+            .unwrap();
+        journal
+            .input_once(&run.id, "supplement", "顺便加一条", Some("s-2"))
+            .unwrap();
+        journal
+            .answer_question_request(&run.id, "call-2", &answers(), Some("client-2"))
+            .unwrap();
+        assert!(journal.has_inputs(&run.id).unwrap());
+        assert_eq!(
+            journal.drain_inputs(&run.id).unwrap(),
+            vec!["顺便加一条".to_string()]
+        );
+        // 同文新请求可再次回答。
+        journal
+            .open_question_request(&run, "call-3", &request("call-3"), &json!({"question":"q"}))
+            .unwrap();
+        assert!(
+            journal
+                .answer_question_request(&run.id, "call-3", &answers(), Some("client-1"))
+                .unwrap()
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn awaiting_state_required_and_answers_validated() {
+        let (journal, path) = journal("ownership");
+        let run = run_to_awaiting(&journal, "run-c", "c-c");
+        journal
+            .open_question_request(&run, "call-1", &request("call-1"), &json!({"question":"q"}))
+            .unwrap();
+        // 不在 AwaitingUser 时不能答。
+        let mut run = run;
+        journal.save(&mut run, RunState::Deciding).unwrap();
+        assert!(
+            journal
+                .answer_question_request(&run.id, "call-1", &answers(), None)
+                .is_err()
+        );
+        journal.save(&mut run, RunState::Executing).unwrap();
+        journal.save(&mut run, RunState::AwaitingUser).unwrap();
+        for invalid in [
+            json!({}),
+            json!({"mode":{"answers":["启动"]},"unknown":{"answers":["x"]}}),
+            json!({"mode":{"answers":[" "]}}),
+            json!({"mode":{"answers":[]}}),
+        ] {
+            assert!(
+                journal
+                    .answer_question_request(&run.id, "call-1", &invalid, None)
+                    .is_err()
+            );
+        }
+        // 回到等待后同一 open 请求仍可答。
+        assert!(
+            journal
+                .answer_question_request(&run.id, "call-1", &answers(), None)
+                .unwrap()
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn opening_new_request_replaces_still_open_one() {
+        let (journal, path) = journal("replace");
+        let run = run_to_awaiting(&journal, "run-e", "c-e");
+        journal
+            .open_question_request(&run, "call-1", &request("call-1"), &json!({"question":"q"}))
+            .unwrap();
+        journal
+            .open_question_request(&run, "call-2", &request("call-2"), &json!({"question":"q"}))
+            .unwrap();
+        assert_eq!(status(&journal, &run.id, "call-1"), "superseded");
+        assert_eq!(status(&journal, &run.id, "call-2"), "open");
+        assert!(
+            journal
+                .answer_question_request(&run.id, "call-1", &answers(), None)
+                .is_err()
+        );
+        assert!(
+            journal
+                .answer_question_request(&run.id, "call-2", &answers(), None)
+                .unwrap()
+        );
+        assert_eq!(event_count(&journal, "question.superseded"), 1);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn legacy_single_pk_table_migrates_with_data() {
+        let dir = PathBuf::from("target/.tmp/shortcut-runtime/question-journal-tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("legacy-migrate.db");
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
+        // 先用正常 open 建全库，再把问题请求表降级回旧形状（单列主键）。
+        let legacy_run_id;
+        {
+            let bootstrap = Journal::open(&path).unwrap();
+            let mut run = bootstrap
+                .create("旧目标", "c-old", "key-old", 3600, None)
+                .unwrap();
+            legacy_run_id = run.id.clone();
+            for next in [
+                RunState::Preflighting,
+                RunState::Deciding,
+                RunState::AwaitingUser,
+            ] {
+                bootstrap.save(&mut run, next).unwrap();
+            }
+            bootstrap
+                .connection
+                .lock()
+                .unwrap()
+                .execute_batch(
+                    "DROP INDEX IF EXISTS runtime_question_requests_conversation;
+                     DROP INDEX IF EXISTS runtime_question_requests_run;
+                     DROP TABLE runtime_question_requests;
+                     CREATE TABLE runtime_question_requests(id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runtime_runs(id) ON DELETE CASCADE, conversation_id TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL, answers TEXT, answer_key TEXT, created_at TEXT NOT NULL, answered_at TEXT);",
+                )
+                .unwrap();
+            bootstrap
+                .connection
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO runtime_question_requests(id,run_id,conversation_id,status,payload,created_at) VALUES('call-old',?1,'c-old','answered','{\"requestId\":\"call-old\",\"questions\":[{\"id\":\"mode\",\"header\":\"h\",\"question\":\"q\"}]}','2026-01-01T00:00:00Z')",
+                    params![run.id],
+                )
+                .unwrap();
+        }
+        // 打开时迁移：数据保留，且新库允许同 id 存在于不同 run。
+        let journal = Journal::open(&path).unwrap();
+        let (status, payload): (String, String) = journal
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT status,payload FROM runtime_question_requests WHERE run_id=?1 AND id='call-old'",
+                [&legacy_run_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "answered");
+        // 已回答的旧数据原样保留，不因迁移被重开或清空。
+        let payload: Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(payload["questions"][0]["id"], json!("mode"));
+        let count: i64 = journal
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM runtime_question_requests WHERE id='call-old'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn conversation_snapshot_lists_open_requests() {
+        let (journal, path) = journal("snapshot");
+        let a = run_to_awaiting(&journal, "run-s1", "c-s");
+        let b = run_to_awaiting(&journal, "run-s2", "c-s");
+        journal
+            .open_question_request(&a, "call-1", &request("call-1"), &json!({"question":"q"}))
+            .unwrap();
+        journal
+            .open_question_request(&b, "call-2", &request("call-2"), &json!({"question":"q"}))
+            .unwrap();
+        let open = journal.open_question_requests("c-s").unwrap();
+        assert_eq!(open.len(), 2);
+        assert_eq!(open[0]["requestId"], json!("call-1"));
+        assert_eq!(open[0]["runId"], json!(a.id));
+        assert_eq!(open[0]["questions"][0]["id"], json!("mode"));
+        assert!(open[0]["createdAt"].as_str().is_some());
+        // 已回答的从快照消失。
+        journal
+            .answer_question_request(&a.id, "call-1", &answers(), None)
+            .unwrap();
+        let open = journal.open_question_requests("c-s").unwrap();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0]["requestId"], json!("call-2"));
+        // 其他会话不受影响。
+        assert!(
+            journal
+                .open_question_requests("c-other")
+                .unwrap()
+                .is_empty()
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn cancelled_run_hides_open_requests_from_snapshot() {
+        let (journal, path) = journal("cancelq");
+        let mut a = run_to_awaiting(&journal, "run-x1", "c-x");
+        let b = run_to_awaiting(&journal, "run-x2", "c-x");
+        journal
+            .open_question_request(&a, "call-x1", &request("call-x1"), &json!({"question":"q"}))
+            .unwrap();
+        journal
+            .open_question_request(&b, "call-x2", &request("call-x2"), &json!({"question":"q"}))
+            .unwrap();
+        assert_eq!(journal.open_question_requests("c-x").unwrap().len(), 2);
+        // run a 走取消路径：cancelling 起快照就不再返回它的 open 请求。
+        journal.save(&mut a, RunState::Cancelling).unwrap();
+        let open = journal.open_question_requests("c-x").unwrap();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0]["requestId"], json!("call-x2"));
+        journal.finish(&mut a, RunState::Cancelled).unwrap();
+        // 终态后依旧不复活；仍 awaitingUser 的 run b 不受影响。
+        let open = journal.open_question_requests("c-x").unwrap();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0]["requestId"], json!("call-x2"));
+        // 旧记录保留历史，不因快照过滤被改写或删除。
+        let status: String = journal
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT status FROM runtime_question_requests WHERE run_id=?1 AND id='call-x1'",
+                [&a.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "open");
+        let _ = std::fs::remove_file(&path);
     }
 }

@@ -3,6 +3,7 @@ pub mod gateway;
 pub mod host;
 pub mod operation;
 pub mod policy;
+pub mod questions;
 pub mod store;
 pub mod types;
 pub mod workspace;
@@ -53,6 +54,164 @@ fn remember_discovered(run: &mut Run, exposed: &HashSet<String>) {
     run.discovered = names;
 }
 
+/// 是否为配置组启动调用（含旧的每组一次接口）。只认方法 ID，不认业务结果
+/// 里恰好叫 executionMode 之类的字段。
+fn is_group_invoke(call: &ToolCall) -> bool {
+    call.name == "bgi.api.invoke"
+        && matches!(
+            call.arguments["methodId"].as_str().unwrap_or(""),
+            "bgi.run_script_group" | "bgi.run_script_groups"
+        )
+}
+
+/// 是否为无参数的收尾关游戏调用。只认这个可靠形状；带参数的退出语义不明，
+/// 不并入合并计划。
+fn is_exit_game_invoke(call: &ToolCall) -> bool {
+    call.name == "bgi.api.invoke"
+        && call.arguments["methodId"].as_str() == Some("bgi.exit_game")
+        && call.arguments["arguments"]
+            .as_object()
+            .is_some_and(|arguments| arguments.is_empty())
+}
+
+/// 从一次配置组启动调用里取出可合并的组名与收尾、等待选项。参数形状不可
+/// 靠或带有语义不明的额外字段时返回 None，交回正常执行路径给出精确错误，
+/// 不猜合并方式。
+fn mergeable_group_call(call: &ToolCall) -> Option<(Vec<String>, bool, bool)> {
+    let arguments = &call.arguments["arguments"];
+    if !arguments.is_object() {
+        return None;
+    }
+    for key in arguments.as_object()?.keys() {
+        if !matches!(
+            key.as_str(),
+            "groupNames"
+                | "closeGameAfter"
+                | "waitForCompletion"
+                | "name"
+                | "groupName"
+                | "scriptGroupName"
+        ) {
+            return None;
+        }
+    }
+    let names = match call.arguments["methodId"].as_str()? {
+        "bgi.run_script_groups" => arguments["groupNames"]
+            .as_array()?
+            .iter()
+            .map(|value| value.as_str().map(str::to_owned))
+            .collect::<Option<Vec<String>>>()?,
+        "bgi.run_script_group" => vec![
+            arguments["name"]
+                .as_str()
+                .or_else(|| arguments["groupName"].as_str())
+                .or_else(|| arguments["scriptGroupName"].as_str())?
+                .to_owned(),
+        ],
+        _ => return None,
+    };
+    if names.is_empty() {
+        return None;
+    }
+    let close = arguments["closeGameAfter"].as_bool().unwrap_or(false);
+    let wait = arguments["waitForCompletion"].as_bool().unwrap_or(false);
+    Some((names, close, wait))
+}
+
+/// 纯合并成员分析：只取第一段连续的配置组启动调用；紧随其后、且是整批最后
+/// 一个的无参 exit_game 收尾并入 closeGameAfter。中间夹着其它调用、退出出
+/// 现在组之前或批中，都不合并。返回成员下标、保序组名与收尾、等待选项。
+fn group_launch_members(calls: &[ToolCall]) -> Option<(Vec<usize>, Vec<String>, bool, bool)> {
+    let first = calls.iter().position(is_group_invoke)?;
+    let mut member_indexes = Vec::new();
+    let mut names = Vec::new();
+    let mut close = false;
+    let mut wait = false;
+    let mut index = first;
+    while index < calls.len() && is_group_invoke(&calls[index]) {
+        let (group, call_close, call_wait) = mergeable_group_call(&calls[index])?;
+        member_indexes.push(index);
+        names.extend(group);
+        close = close || call_close;
+        wait = wait || call_wait;
+        index += 1;
+    }
+    if index == calls.len().saturating_sub(1) && is_exit_game_invoke(&calls[index]) {
+        // 收尾退出必须在所有组运行动作之后，且是本批最后一项。
+        member_indexes.push(index);
+        close = true;
+    }
+    if member_indexes.len() < 2 || names.len() > 32 {
+        return None;
+    }
+    Some((member_indexes, names, close, wait))
+}
+
+/// 普通对话的后台交接判定：Agent 来源、非入口封装、配置组启动调用，且桥
+/// 结果是明确成功的 launch 交接（分类委托给 executor 的聚合核验，
+/// completion／失败／unknown 都不终结，走正常流程）。
+fn launch_handoff(call: &ToolCall, run: &Run, output: &Value) -> Option<(Vec<String>, bool)> {
+    if !matches!(run.source, RunSource::Agent)
+        || run.shortcut_configuration
+        || !is_group_invoke(call)
+    {
+        return None;
+    }
+    if !operation::executor::launch_submitted(output) {
+        return None;
+    }
+    let (names, close, wait) = mergeable_group_call(call)?;
+    (!wait).then_some((names, close))
+}
+
+/// 后台交接的确定性最终消息：短、自然，只陈述已提交范围与收尾方式，不暗示
+/// 业务已完成，也不向用户复述「同批调用／工具结果」等内部字段；确有无法执
+/// 行的后续任务时点名数量。
+fn handoff_message(names: &[String], close: bool, pending_tasks: usize) -> String {
+    let mut text = if names.is_empty() {
+        "已提交配置组后台运行计划，宿主将按顺序执行。".to_owned()
+    } else {
+        let listed = names
+            .iter()
+            .map(|name| format!("「{name}」"))
+            .collect::<Vec<_>>()
+            .join("");
+        if close {
+            format!("已提交{listed}后台运行计划，完成后会关闭原神。")
+        } else {
+            format!("已提交{listed}后台运行计划，宿主将继续执行完成。")
+        }
+    };
+    if pending_tasks > 0 {
+        text.push_str(&format!(
+            "后续 {pending_tasks} 项任务尚未执行，需要时再告诉我。"
+        ));
+    }
+    text
+}
+
+/// 后台交接后未执行调用的占位结果：历史里每个工具调用都要有配对结果。
+/// 守护查询与业务任务分开表述，业务未执行会体现在最终答复里。
+fn handoff_skipped_error(guard: bool) -> Error {
+    if guard {
+        Error::Tool("后台计划已交接并结束本轮，此查询未执行。".into())
+    } else {
+        Error::Tool("后台计划已交接并结束本轮，此任务未执行；需要时请再发起。".into())
+    }
+}
+
+/// 同批配置组启动调用归一成一次 run_script_groups 的执行计划。
+struct GroupLaunchPlan {
+    /// 运行时内部使用的合并调用；不进入 assistant 轮，不单独记工具历史。
+    merged: ToolCall,
+    /// 原调用在批次里的下标，各自拿到配对结果。
+    member_indexes: Vec<usize>,
+    /// 合并后的保序组名，用于最终消息。
+    names: Vec<String>,
+    close: bool,
+    wait: bool,
+}
+
 fn context_overflow(error: &Error) -> bool {
     let text = match error {
         Error::Http(message) | Error::ModelProtocol(message) | Error::Conflict(message) => {
@@ -78,21 +237,20 @@ fn clean_compaction_summary(text: &str) -> String {
 }
 
 /// 与领域无关的底座：语气、证据纪律、内部实现的边界。领域说明由提供方的能力包分发。
-const CORE_AGENT_POLICY: &str = r#"你是 Sleepy Doll，一个本地桌面助手。使用简体中文。
+pub const CORE_AGENT_POLICY: &str = r#"你是 Sleepy Doll，一个本地桌面助手。使用简体中文。
 
 "Sleepy Doll" 是产品身份，不是角色扮演。不要自称别的角色，不编造身份设定，也不需要反复介绍自己；用直接、可靠、不过度热情的语气体现"少操心、直接办事"。
 
 工作方式：
 1. 用实际执行和读取到的结果回答，先给结果再给依据。只陈述有可靠依据的事实；无法观测、无法核实的事情直接说明不知道，不编造，也不用无关的工具去猜。
-2. 先查完本机能够取得的信息，再判断是否真的缺少用户输入。只问无法自行取得、且不同答案会改变结果的信息，一次问完。
+2. 可观测的事实自己取：文件、配置、接口状态能读到就读，不回问用户。只有真正缺少人类意图——不同答案会改变目标或涉及不可逆结果——才用 user.ask 尽早一次问清必要缺项，不穷举确认，不把自己查得到的东西拿来问。
 3. 需要启动程序、更新内容、修改配置或执行任务时，直接去做。要不要先征求同意由运行时的审批级别决定，不要在对话里替它先问一遍；被拦下时再说明它在等什么。涉及不可逆结果时说明它实际会改掉什么。
 4. 一个数据源已经明确报出连接或鉴权错误时，不再调用依赖它的其他工具，直接报告这一个阻塞项。
 5. 回复先给结果；只附必要证据、生效条件，或一个无法自行解决的阻塞项。不要给用户罗列选择题来代替继续工作，也不要把自己能做到的准备步骤交回给用户。
 6. 软件目录内的本机操作使用 workspace 工具。用户没有 Node、Python、Git 或其他开发环境，命令只通过 PowerShell 执行；不要让用户安装中间件或运行时。路径必须落在软件目录内，越界或被拒绝就停止，不要改用其他方式绕过。宿主软件的配置只能走对应的桥，不能用 workspace 文件或 PowerShell 改。
 
 对用户说话：
-- 多步骤执行时，在关键节点用一两句话说明进展与发现（正在查什么、刚确认了什么），
-  让用户跟得上方向；琐碎的重复检查不逐条报，中间说明不写长文、不展开细节。
+- 普通请求默认工具静默执行：中间过程不写旁白，做完给一段最终结果。真正缺少必要信息时用 user.ask 的独立控件问，不在普通正文里复述问题或选项；仅当用户明确要求过程或进度说明时才在中途说明，普通排障同样静默执行后只给最终结果。
 - 全部完成后给一段总结：先给结果与结论，再覆盖过程要点、生效条件或阻塞项。
   逐步的工具调用细节留在界面的过程时间线里（用户可展开），总结不复述每一笔。
 - 问什么就答什么。范围跟问句走：问入口只给入口，问能不能只答能不能。不要把相邻功能、产品总览、未点名的步骤或「接下来还可以」写进答复；问 1 不要答成 123456。
@@ -100,7 +258,7 @@ const CORE_AGENT_POLICY: &str = r#"你是 Sleepy Doll，一个本地桌面助手
 - 进程、注入、反射、程序集、服务、方法、路由、端点、RPC、schema、序列化、HTTP 状态码都是内部实现，不是用户要看的内容；把它们翻译成用户的功能和结果。
 - 只有用户明确要求开发排障时，才展开内部标识和原始错误摘要。"#;
 
-fn configured_agent_instructions(prompt: &str) -> &str {
+pub fn configured_agent_instructions(prompt: &str) -> &str {
     // 早期版本生成的默认提示词，内容与当前政策重复；用户自己写的保留。
     if prompt.starts_with("你是 Sleepy Doll，一个操作 BetterGI 的桌面 Agent。")
         && (prompt.contains("# 接口分两层") || prompt.contains("# 用户配置在文件里"))
@@ -380,6 +538,9 @@ impl Supervisor {
         )
     }
 
+    // 参数与 Journal::create_configured 一一对应；两者保持同一签名以避免
+    // 调用侧再打包一层结构体，维持现有 API。
+    #[allow(clippy::too_many_arguments)]
     fn submit_with_purpose(
         &self,
         prompt: &str,
@@ -651,6 +812,19 @@ impl Supervisor {
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
         self.definitions(&HashSet::new())
     }
+
+    /// 运行异常收尾的终态判定：用户取消永远是取消终态，结果未知的外部动作
+    /// 证据另行登记，不遮蔽取消；只有非取消错误在有未知动作时才 NeedsReview。
+    fn terminal_state_on_error(error: &Error, unknown: bool) -> RunState {
+        if matches!(error, Error::Cancelled) {
+            RunState::Cancelled
+        } else if unknown {
+            RunState::NeedsReview
+        } else {
+            RunState::Failed
+        }
+    }
+
     fn schedule(self: &Arc<Self>) -> Result<()> {
         if self.shutting_down.load(std::sync::atomic::Ordering::SeqCst) {
             return Ok(());
@@ -703,13 +877,32 @@ impl Supervisor {
                             })
                         })
                         .unwrap_or(true);
-                    let next = if unknown {
-                        RunState::NeedsReview
-                    } else if matches!(e, Error::Cancelled) {
-                        RunState::Cancelled
-                    } else {
-                        RunState::Failed
-                    };
+                    // 用户停止就是取消终态：即使存在结果未知的外部动作也不改判
+                    // NeedsReview——那些动作的证据保留在 attempts 里，另行登记供核对。
+                    let next = Supervisor::terminal_state_on_error(&e, unknown);
+                    if unknown && next == RunState::Cancelled {
+                        let pending: Vec<Value> = s
+                            .journal
+                            .attempts(&run.id)
+                            .map(|attempts| {
+                                attempts
+                                    .iter()
+                                    .filter(|a| {
+                                        matches!(
+                                            a.outcome.as_str(),
+                                            "unknown" | "running" | "submitting"
+                                        )
+                                    })
+                                    .map(|a| json!({"callId":a.call_id,"outcome":a.outcome,"request":a.request}))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let _ = s.journal.emit(
+                            &run,
+                            "unknown_actions.preserved",
+                            json!({"note":"运行被用户取消；以下外部动作结果未知，证据保留在 attempts，不判 NeedsReview","attempts":pending}),
+                        );
+                    }
                     run.error = Some(e.user_message());
                     log::warn!("运行 {} 以 {:?} 结束：{e}", run.id, next);
                     if let Err(storage) = s.journal.save(&mut run, next) {
@@ -1192,7 +1385,7 @@ impl Supervisor {
                     let definition = self.tasks.definition(id)?;
                     let revision = self.tasks.published_revision(id)?;
                     format!(
-                        "\n用户正在修改这项任务：{}。保存时使用 shortcut.save.id={} 更新原入口，不创建副本。当前绑定：{}。旧多步流程只用于理解原意，须重新绑定用户指定的具体任务。",
+                        "\n用户正在修改这项任务：{}。保存时使用 shortcut.save.id={} 更新原入口，不创建副本。当前绑定：{}。保留用户指定的多个动作和执行顺序，重新核对各步骤的当前契约。",
                         definition.name,
                         id,
                         serde_json::to_string(&revision.map(|r| match r.shortcut {
@@ -1214,7 +1407,7 @@ impl Supervisor {
                     String::new()
                 };
                 format!(
-                    "{system}\n\n用户正在封装一个已有项目的快捷入口。只读取并定位用户需要的已有任务／配置／资源，绝不创建、修改或运行这些项目，也不开展新任务或闲聊。目标含糊时用 user.ask 一次询问必要选择。确认当前真实运行契约后，用 shortcut.save 返回该项入口预览；此处尚未保存，用户会在表单确认后保存。只提供名称、用途、所属应用及具体目标，不展示工具、桥、接口或原始字段。不存在时说明未找到已有目标，不新建替代。{target_context}{reference_context}"
+                    "{system}\n\n用户正在封装一个已有项目的快捷入口。只读取并定位用户需要的已有任务／配置／资源，绝不创建、修改或运行这些项目，也不开展新任务或闲聊。多个动作必须合并为一个入口，不得拆分。BetterGI 配置组组合优先绑定一次 bgi.run_script_groups 批量调用：groupNames 按现场读取到的真实顺序排列，关闭游戏等收尾用 closeGameAfter 表达；默认启动即交接、不逐组等待，只有用户明确要求等结果时才 waitForCompletion=true。其他应用的多动作按用户指定顺序使用 binding.steps 逐步记录。逐步核对真实运行契约。不得要求用户拆分入口或用保存机制限制拒绝组合。只在确实缺少目标信息时用 user.ask 简短询问必要选择，不在普通回复中列问答。确认当前真实运行契约后，用 shortcut.save 返回入口预览；此处尚未保存，用户会在表单确认后保存。只提供名称、用途、所属应用及具体目标，不展示工具、桥、接口或原始字段。不存在时说明未找到已有目标，不新建替代。{target_context}{reference_context}"
                 )
             } else {
                 system
@@ -1574,7 +1767,11 @@ impl Supervisor {
                 }
                 return Ok(());
             }
+            // 含配置组启动调用的批次不并行执行：这些调用有「交接即终结」或
+            // 「先归一成一份计划」的顺序语义，并发会悄悄执行第二个组。
+            let batch_has_group_invoke = calls.iter().any(is_group_invoke);
             if calls.len() > 1
+                && !batch_has_group_invoke
                 && calls.iter().all(|call| {
                     self.definition(&call.name, &exposed)
                         .is_some_and(|definition| definition.execution.can_run_concurrently())
@@ -1619,7 +1816,97 @@ impl Supervisor {
                 self.journal.save(run, RunState::Deciding)?;
                 continue;
             }
-            for call in calls {
+            // 同批的配置组启动调用归一成一次 run_script_groups：保序合并组名，
+            // 任一要求关闭游戏或尾部有无参 exit_game 收尾就用 closeGameAfter；
+            // 任一显式要求等待则整体保持显式等待，不做后台终结。契约由运行时
+            // 读取并登记 exposed，不新增模型可见的额外工具轮次。执行仍按批次
+            // 顺序推进：前置调用先落地，到第一个成员处才发起合并调用；成员
+            // 无论如何不按原调用重跑。
+            let group_plan = self
+                .group_launch_plan(&calls, &bridge, cancel, &mut exposed)
+                .await?;
+            let mut handoff: Option<(Vec<String>, bool)> = None;
+            let mut pending_tasks = 0usize;
+            for (index, call) in calls.iter().enumerate() {
+                if let Some(plan) = &group_plan
+                    && plan.member_indexes.contains(&index)
+                {
+                    if plan.member_indexes[0] == index {
+                        run.tool_calls += 1;
+                        self.journal.save(run, RunState::Executing)?;
+                        self.journal.emit(run, "tool.started", json!(plan.merged))?;
+                        let result = self
+                            .tool(run, &plan.merged, &bridge, &policy, cancel, &mut exposed)
+                            .await;
+                        // 合并调用不在 assistant 轮里，历史配对落在原列出的调
+                        // 用上；事件流为合并调用补 completed，避免 started 悬空。
+                        let outcome = match &result {
+                            Ok(output) => {
+                                Ok(json!({"includedIn":"bgi.run_script_groups","result":output}))
+                            }
+                            Err(error) => Err(format!(
+                                "合并后的批量启动调用失败：{}",
+                                error.user_message()
+                            )),
+                        };
+                        let merged_event = match &outcome {
+                            Ok(value) => json!({"callId":plan.merged.id,"result":value}),
+                            Err(message) => json!(
+                                {"callId":plan.merged.id,"result":{"ok":false,"error":message}}
+                            ),
+                        };
+                        self.journal.emit(run, "tool.completed", merged_event)?;
+                        for member_index in &plan.member_indexes {
+                            let member = &calls[*member_index];
+                            let member_result = outcome.clone().map_err(Error::Tool);
+                            let result_limit = self
+                                .definition(&member.name, &exposed)
+                                .map(|definition| definition.execution.max_result_chars)
+                                .unwrap_or(12_000);
+                            self.record_result(
+                                run,
+                                member,
+                                member_result,
+                                result_limit,
+                                &mut history,
+                            )?;
+                        }
+                        if result.is_ok() && !plan.wait {
+                            let submitted = result
+                                .as_ref()
+                                .is_ok_and(operation::executor::launch_submitted);
+                            if submitted {
+                                handoff = Some((plan.names.clone(), plan.close));
+                            }
+                        }
+                    }
+                    continue;
+                }
+                if handoff.is_some() {
+                    // 交接已发起：本批后续调用不再执行。已规划的保存动作先执
+                    // 行完；只读守护查询静默记占位；其余业务保持未执行并在最
+                    // 终答复中说明。
+                    if matches!(call.name.as_str(), "shortcut.save" | "task.save") {
+                        // 落到下方正常执行体，保存完成后才终结。
+                    } else {
+                        let guard = self.is_readonly_call(call, &exposed);
+                        if !guard {
+                            pending_tasks += 1;
+                        }
+                        let result_limit = self
+                            .definition(&call.name, &exposed)
+                            .map(|definition| definition.execution.max_result_chars)
+                            .unwrap_or(12_000);
+                        self.record_result(
+                            run,
+                            call,
+                            Err(handoff_skipped_error(guard)),
+                            result_limit,
+                            &mut history,
+                        )?;
+                        continue;
+                    }
+                }
                 if cancel.is_cancelled() {
                     return Err(Error::Cancelled);
                 }
@@ -1631,31 +1918,77 @@ impl Supervisor {
                     .map(|definition| definition.execution.max_result_chars)
                     .unwrap_or(12_000);
                 let result = self
-                    .tool(run, &call, &bridge, &policy, cancel, &mut exposed)
+                    .tool(run, call, &bridge, &policy, cancel, &mut exposed)
                     .await;
+                let launch = result
+                    .as_ref()
+                    .ok()
+                    .and_then(|output| launch_handoff(call, run, output));
                 let proposal_ready = run.shortcut_configuration
                     && matches!(call.name.as_str(), "shortcut.save" | "task.save")
                     && result.is_ok();
-                self.record_result(run, &call, result, result_limit, &mut history)?;
+                self.record_result(run, call, result, result_limit, &mut history)?;
                 if proposal_ready {
                     run.result = Some("已找到已有任务，入口信息等待确认保存。".into());
                     self.journal.finish(run, RunState::Answered)?;
                     return Ok(());
                 }
-                remember_discovered(run, &exposed);
-                if matches!(run.state, RunState::AwaitingUser | RunState::Verifying) {
-                    self.journal.save(run, RunState::Deciding)?;
+                if let Some((names, close)) = launch {
+                    handoff = Some((names, close));
+                } else {
+                    remember_discovered(run, &exposed);
+                    if matches!(run.state, RunState::AwaitingUser | RunState::Verifying) {
+                        self.journal.save(run, RunState::Deciding)?;
+                    }
                 }
             }
             for call in &deferred {
-                let result = Err(Error::Tool(format!(
-                    "本轮工具调用已达上限（{allowed} 次），本次未执行；请分批重试"
-                )));
+                // 交接终结路径给延后调用同样记占位：守护查询静默，业务计入未
+                // 执行；正常路径维持原有的上限错误。
+                let result = if handoff.is_some() {
+                    let guard = self.is_readonly_call(call, &exposed);
+                    if !guard {
+                        pending_tasks += 1;
+                    }
+                    Err(handoff_skipped_error(guard))
+                } else {
+                    Err(Error::Tool(format!(
+                        "本轮工具调用已达上限（{allowed} 次），本次未执行；请分批重试"
+                    )))
+                };
                 let result_limit = self
                     .definition(&call.name, &exposed)
                     .map(|definition| definition.execution.max_result_chars)
                     .unwrap_or(12_000);
                 self.record_result(run, call, result, result_limit, &mut history)?;
+            }
+            if let Some((names, close)) = handoff {
+                // 未执行的模型规划业务不能伪称完整：整体 Partial 并明确「尚未
+                // 执行」；纯守护查询不计入。
+                let state = if pending_tasks > 0 {
+                    RunState::Partial
+                } else {
+                    RunState::Succeeded
+                };
+                let final_text = handoff_message(&names, close, pending_tasks);
+                run.result = Some(final_text.clone());
+                if self.journal.finish(run, state)? {
+                    // 最终答复必须进消息历史，只发事件会在会话刷新后丢失。
+                    let reply = message(Role::Assistant, &final_text);
+                    self.journal.append_message(run, &reply)?;
+                    history.push(reply);
+                    self.journal.emit(
+                        run,
+                        "assistant.completed",
+                        json!({"text":final_text,"turn":run.decisions,"handoff":true}),
+                    )?;
+                    return Ok(());
+                }
+                // finish 返回 false：并发到达了新的用户补充。不追加最终答复，
+                // 保留输入继续主循环；计划已交接，不会重复启动或重复终结。
+                run.result = None;
+                self.journal.save(run, RunState::Deciding)?;
+                continue;
             }
             remember_discovered(run, &exposed);
             self.journal.save(run, RunState::Deciding)?;
@@ -1892,6 +2225,12 @@ impl Supervisor {
         )?;
         Ok(())
     }
+    /// 只读守护查询（状态、日志、job 查询等）在交接后可以静默记占位；业务
+    /// 写入不行。工具未知时按业务处理，保守不跳过。
+    fn is_readonly_call(&self, call: &ToolCall, exposed: &HashSet<String>) -> bool {
+        self.definition(&call.name, exposed)
+            .is_some_and(|definition| definition.execution.effect == ToolEffect::ReadOnly)
+    }
     fn definition(&self, name: &str, exposed: &HashSet<String>) -> Option<ToolDefinition> {
         self.definitions(exposed)
             .into_iter()
@@ -1926,9 +2265,17 @@ impl Supervisor {
             (
                 "user.ask",
                 "询问用户",
-                "仅询问无法从本机文件、接口契约或状态取得，且不同答案会改变目标或不可逆结果的信息。一次问完；不要重复运行时审批。question 会显示为待回答卡片：用 Markdown 排版，简短说明为什么需要回答；多个问题用分行的编号列表，明确可选答案或需要填写的内容，不把问题和背景挤成一段。",
-                json!({"question":{"type":"string"}}),
-                json!(["question"]),
+                "仅询问无法从本机文件、接口契约或状态取得，且不同答案会改变目标或不可逆结果的信息；没有确实缺少的必要信息就不要问。用 questions 提供 1–3 个结构化问题：每题一个简短 id、几个字的 header 和一句话 question，需要选项时给 options（label 加一句 description）。一次问完；不要重复运行时审批；不在普通回复中重复问题或选项。",
+                json!({
+                    "questions":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"object","required":["id","header","question"],"properties":{
+                        "id":{"type":"string","description":"问题标识，答复按它回填"},
+                        "header":{"type":"string","description":"卡片标题，几个字"},
+                        "question":{"type":"string","description":"一句话问题，越短越好"},
+                        "options":{"type":"array","maxItems":8,"items":{"type":"object","required":["label"],"properties":{"label":{"type":"string"},"description":{"type":"string","description":"选项说明，一句以内"}}}}
+                    }}},
+                    "question":{"type":"string","description":"旧格式：单个 Markdown 问题文本；优先用 questions"}
+                }),
+                json!([]),
                 ToolExecution {
                     effect: ToolEffect::InternalState,
                     deferred: false,
@@ -2000,7 +2347,7 @@ impl Supervisor {
             (
                 "task.save",
                 "保存快捷任务",
-                "旧名称兼容入口。用户明确指定保存具体任务时绑定一个运行入口，不保存配置过程。",
+                "旧名称兼容入口。用户明确指定保存任务时绑定一个入口，支持多个动作按顺序执行，不保存配置过程。",
                 json!({}),
                 json!([]),
                 ToolExecution {
@@ -2013,7 +2360,7 @@ impl Supervisor {
             (
                 "shortcut.save",
                 "添加快捷任务",
-                "只有用户明确要求加入快捷任务时，保存对话中已经配置好的具体某一项任务的运行入口。绑定一个真实工具及稳定目标参数，可附加最多四个只读准备调用。不是保存整段对话、配置过程或条件循环；保存不执行目标。内部工具和参数不得出现在面向用户的说明里。",
+                "用户明确要求加入快捷任务时，保存一个或多个已配置动作的组合入口。BetterGI 配置组组合优先用 binding.action 绑定一次 bgi.run_script_groups 批量调用：groupNames 现场读取真实名称，关闭游戏等收尾用 closeGameAfter；默认启动即交接、不等待，用户明确要求等结果才 waitForCompletion=true。binding.action.arguments 按契约分层：外层 {methodId, arguments:{…}}，宿主参数只在内层；编辑已有入口只改内层参数值，不得扁平化或改变层级，保存时按契约校验。助手自拟入口名取 ≤20 字自然中文短名，用户给的名称照用。其他应用的多动作用 binding.steps 按请求顺序执行，每步绑定真实工具和稳定参数，可附加只读准备调用。不得因动作数量要求拆分入口。保存不执行目标，不保存整段对话或配置过程。内部工具和参数不得出现在面向用户的说明里。",
                 json!({}),
                 json!([]),
                 ToolExecution {
@@ -2042,7 +2389,7 @@ impl Supervisor {
         {
             definition.input_schema = operation::shortcuts::schema();
             definition.execution.always_load = false;
-            definition.description = "兼容名称：用户明确要求保存具体某项任务时，使用 binding 绑定已配置任务的运行入口；不再保存整段对话或多步流程。优先使用 shortcut.save。".into();
+            definition.description = "兼容名称：使用 binding.action 保存动作入口（BetterGI 多配置组组合也绑定一次批量调用），或 binding.steps 保存多动作按顺序执行的组合入口。优先使用 shortcut.save。".into();
         }
         if let Some(definition) = definitions
             .iter_mut()
@@ -2082,13 +2429,7 @@ impl Supervisor {
         let binding: operation::shortcuts::ShortcutBinding =
             serde_json::from_value(arguments["binding"].clone())
                 .map_err(|_| Error::Config("请指定已经存在的具体任务".into()))?;
-        if binding.target_name.trim().is_empty()
-            || binding.application_name.trim().is_empty()
-            || matches!(
-                binding.action.tool.as_str(),
-                "shortcut.save" | "task.save" | "task.schema"
-            )
-        {
+        if binding.target_name.trim().is_empty() || binding.application_name.trim().is_empty() {
             return Err(Error::Config("请确认已有任务的名称与运行入口".into()));
         }
         let name = arguments["name"]
@@ -2141,8 +2482,7 @@ impl Supervisor {
         }
         let mut candidate = events
             .into_iter()
-            .filter(|event| event.run_id == run.id && event.kind == "shortcut.proposed")
-            .last()
+            .rfind(|event| event.run_id == run.id && event.kind == "shortcut.proposed")
             .ok_or_else(|| Error::Config("尚未识别出可保存的已有任务".into()))?
             .data;
         candidate["name"] = json!(name);
@@ -2161,15 +2501,9 @@ impl Supervisor {
             task::{WorkflowDefinition, compile},
         };
         let binding: ShortcutBinding = serde_json::from_value(arguments["binding"].clone())
-            .map_err(|_| Error::Config("请先配置好具体任务，再指定要保存的那一项".into()))?;
+            .map_err(|_| Error::Config("请指定要保存的任务及其运行动作".into()))?;
         if binding.target_name.trim().is_empty() || binding.application_name.trim().is_empty() {
             return Err(Error::Config("快捷任务需要明确的任务名称与所属应用".into()));
-        }
-        if matches!(
-            binding.action.tool.as_str(),
-            "shortcut.save" | "task.save" | "task.schema"
-        ) {
-            return Err(Error::Config("不能把添加快捷任务本身作为运行目标".into()));
         }
         let catalog = self.tool_catalog();
         let task_nodes = nodes(&binding, &catalog)?;
@@ -2228,7 +2562,7 @@ impl Supervisor {
         self.tasks
             .save_shortcut_atomically(&definition, &revision)?;
         Ok(
-            json!({"taskId":id,"name":definition.name,"runnable":true,"publishedRevision":number,"note":"已加入快捷任务，尚未运行。点击运行会直接执行这一项，不再调用对话模型。"}),
+            json!({"taskId":id,"name":definition.name,"runnable":true,"publishedRevision":number,"note":"已加入快捷任务，尚未运行。点击运行会按顺序执行已保存的动作，不再调用对话模型。"}),
         )
     }
 
@@ -2281,6 +2615,53 @@ impl Supervisor {
                 }
             }
         }
+    }
+
+    /// 同批出现多个配置组启动调用时，先把它们归一成一次 run_script_groups
+    /// 后台交接：保序合并 groupNames，任一要求关闭游戏就 closeGameAfter，
+    /// 任一显式 waitForCompletion=true 则整体保持显式等待。合并目标契约由
+    /// 这里读取并登记 exposed，因此不产生模型可见的额外工具轮次；契约不支
+    /// 持批量或参数不可合并时返回 None，走原路径让原调用给出精确错误。
+    async fn group_launch_plan(
+        &self,
+        calls: &[ToolCall],
+        bridge: &host::bridge::Bridge,
+        cancel: &CancellationToken,
+        exposed: &mut HashSet<String>,
+    ) -> Result<Option<GroupLaunchPlan>> {
+        // 成员分析是纯函数：连续组启动调用 + 可选尾部无参 exit_game。
+        let Some((member_indexes, names, close, wait)) = group_launch_members(calls) else {
+            return Ok(None);
+        };
+        let contract = bridge.describe("bgi.run_script_groups", cancel).await?;
+        if contract["inputSchema"]["properties"]["groupNames"].is_null() {
+            return Ok(None);
+        }
+        let Some(version) = contract["catalogVersion"]
+            .as_str()
+            .filter(|v| !v.is_empty())
+        else {
+            return Ok(None);
+        };
+        exposed.insert(format!("bridge-api:bgi.run_script_groups:{version}"));
+        let mut arguments = json!({"groupNames":names});
+        if close {
+            arguments["closeGameAfter"] = json!(true);
+        }
+        if wait {
+            arguments["waitForCompletion"] = json!(true);
+        }
+        Ok(Some(GroupLaunchPlan {
+            merged: ToolCall {
+                id: format!("call_{}", uuid::Uuid::new_v4()),
+                name: "bgi.api.invoke".into(),
+                arguments: json!({"methodId":"bgi.run_script_groups","arguments":arguments}),
+            },
+            member_indexes,
+            names,
+            close,
+            wait,
+        }))
     }
 
     async fn tool(
@@ -2526,14 +2907,22 @@ impl Supervisor {
                             .into(),
                     ));
                 }
+                if call.name == "bgi.api.invoke"
+                    && id == "bgi.run_script_groups"
+                    && !contract["inputSchema"]["properties"]["groupNames"].is_object()
+                {
+                    return Err(Error::Tool(
+                        "当前连接不支持批量配置组启动，请重启 BetterGI 后重试。这次没有启动脚本。"
+                            .into(),
+                    ));
+                }
                 let version = contract["catalogVersion"]
                     .as_str()
                     .ok_or_else(|| Error::Tool("当前 BetterGI 连接缺少接口说明".into()))?;
-                if !exposed.contains(&format!("bridge-api:{id}:{version}")) {
-                    return Err(Error::Tool(
-                        "请先用 bgi.api.describe 阅读当前版本的完整调用说明".into(),
-                    ));
-                }
+                // 契约在本入口已实际取到：直接视为已读取，不再要求先经过
+                // bgi.api.describe——模型遗漏 describe 时按手中真实契约继续，
+                // 不产生一次可避免的失败往返。
+                exposed.insert(format!("bridge-api:{id}:{version}"));
                 if contract["callable"] != true {
                     return Err(Error::Tool(
                         contract["unavailableReason"]
@@ -2542,16 +2931,9 @@ impl Supervisor {
                             .into(),
                     ));
                 }
-                let mut effective_arguments = a["arguments"].clone();
-                if call.name == "bgi.api.invoke"
-                    && id == "bgi.run_script_group"
-                    && matches!(run.source, RunSource::SavedWorkflow { .. })
-                    && effective_arguments.is_object()
-                    && effective_arguments.get("waitForCompletion").is_none()
-                {
-                    effective_arguments["waitForCompletion"] = json!(true);
-                }
-                let arguments = &effective_arguments;
+                // 保存的运行参数是明确语义：没有 waitForCompletion 就是默认的
+                // 启动交接，不再替保存工作流补 true。
+                let arguments = &a["arguments"];
                 let issues = crate::extension::validate(arguments, &contract["inputSchema"], "$");
                 if !issues.is_empty() {
                     return Err(Error::Tool(format!(
@@ -2559,12 +2941,15 @@ impl Supervisor {
                         json!(issues)
                     )));
                 }
-                if call.name == "bgi.api.read" {
-                    if contract["effect"] != "readOnly" {
-                        return Err(Error::Tool(
-                            "只读入口拒绝写接口；请使用需要授权的 bgi.api.invoke".into(),
-                        ));
-                    }
+                // 执行入口按契约元数据分发，与调用入口名无关：readOnly 能力
+                // 一律走只读语义（含实例一致性核验），写能力必须走授权执行。
+                let read_semantics = contract["effect"] == "readOnly";
+                if call.name == "bgi.api.read" && !read_semantics {
+                    return Err(Error::Tool(
+                        "只读入口拒绝写接口；请使用需要授权的 bgi.api.invoke".into(),
+                    ));
+                }
+                if read_semantics {
                     let info = bridge.get("/bridge/v1/info", cancel).await?;
                     if info["catalogVersion"] != contract["catalogVersion"]
                         || info["instanceId"] != contract["instanceId"]
@@ -2576,9 +2961,6 @@ impl Supervisor {
                     })), cancel).await?;
                     Ok(result["result"].clone())
                 } else {
-                    if contract["effect"] == "readOnly" {
-                        return Err(Error::Tool("此接口只读，请使用 bgi.api.read".into()));
-                    }
                     if current.runtime.permission_mode
                         == operation::permissions::PermissionMode::PlanOnly
                     {
@@ -2586,24 +2968,42 @@ impl Supervisor {
                             "当前为只读规划模式，不能修改配置或执行命令".into(),
                         ));
                     }
-                    if id == "bgi.run_script_group" {
+                    if id == "bgi.run_script_group" || id == "bgi.run_script_groups" {
                         let host = bridge.get("/bridge/v1/host", cancel).await?;
                         if let Some(root) = host["userPath"].as_str() {
-                            let group = arguments["name"]
-                                .as_str()
-                                .or_else(|| arguments["groupName"].as_str())
-                                .or_else(|| arguments["scriptGroupName"].as_str())
-                                .unwrap_or("");
-                            if let Some(missing) = crate::bridge::resolve::missing_paths_for_group(
-                                Path::new(root),
-                                group,
-                            )
-                            .filter(|missing| !missing.is_empty())
-                            {
-                                return Err(Error::Tool(format!(
-                                    "配置组「{group}」引用的路径已经不在本机：{}。先更新或订阅这些路径，再执行。",
-                                    missing.join("、")
-                                )));
+                            let groups: Vec<String> = if id == "bgi.run_script_groups" {
+                                arguments["groupNames"]
+                                    .as_array()
+                                    .map(|items| {
+                                        items
+                                            .iter()
+                                            .filter_map(|value| value.as_str().map(str::to_owned))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default()
+                            } else {
+                                vec![
+                                    arguments["name"]
+                                        .as_str()
+                                        .or_else(|| arguments["groupName"].as_str())
+                                        .or_else(|| arguments["scriptGroupName"].as_str())
+                                        .unwrap_or("")
+                                        .to_owned(),
+                                ]
+                            };
+                            for group in &groups {
+                                if let Some(missing) =
+                                    crate::bridge::resolve::missing_paths_for_group(
+                                        Path::new(root),
+                                        group,
+                                    )
+                                    .filter(|missing| !missing.is_empty())
+                                {
+                                    return Err(Error::Tool(format!(
+                                        "配置组「{group}」引用的路径已经不在本机：{}。先更新或订阅这些路径，再执行。",
+                                        missing.join("、")
+                                    )));
+                                }
                             }
                         }
                     }
@@ -2708,22 +3108,54 @@ impl Supervisor {
                 }}),
             ),
             "user.ask" => {
+                let (questions, legacy) = questions::normalize(a)?;
                 self.journal.save(run, RunState::AwaitingUser)?;
-                self.journal
-                    .emit(run, "question", json!({"question":a["question"]}))?;
+                // 真实工具调用 id 作为 requestId：答复、事件与恢复按它对齐。
+                let request_id = call.id.clone();
+                let request = questions::request(&request_id, &questions);
+                // 崩溃重放：已回答保留答案，已取代交回主循环，open 幂等不重发事件。
+                match self.journal.open_question_request(
+                    run,
+                    &request_id,
+                    &request,
+                    &questions::event_data(&request, &legacy),
+                )? {
+                    store::journal::QuestionReopen::Answered(answers) => {
+                        return Ok(questions::answer_result(&request, &answers));
+                    }
+                    store::journal::QuestionReopen::Superseded => {
+                        return Ok(json!({"superseded":true}));
+                    }
+                    store::journal::QuestionReopen::Opened
+                    | store::journal::QuestionReopen::Open => {}
+                }
                 let notifier = self.journal.notifier();
                 loop {
                     if cancel.is_cancelled() {
+                        // 停止时不能把请求留在 open：结束运行的题目不得再答。
+                        self.journal.supersede_question_requests(run, "cancelled")?;
                         return Err(Error::Cancelled);
                     }
                     if unix_now() > run.deadline {
+                        self.journal.supersede_question_requests(run, "expired")?;
                         return Err(Error::Conflict("等待回复超时".into()));
                     }
-                    let input = self.journal.drain_inputs(&run.id)?;
-                    if !input.is_empty() {
-                        return Ok(json!({"answer":input.join("\n")}));
+                    // 专用答复通道：只消费这次请求的答案，不新增用户消息。
+                    if let Some((_, Some(answers))) = self
+                        .journal
+                        .question_request_state(&run.id, &request_id)?
+                        .filter(|(status, _)| status == "answered")
+                    {
+                        let answers: Value = serde_json::from_str(&answers)?;
+                        return Ok(questions::answer_result(&request, &answers));
                     }
-                    // 有新输入时唤醒。
+                    // 用户发了真实的新补充而不是答复：只作废旧请求、不在这里
+                    // 消费输入，主循环会把补充作为 Role::User 继续推进。
+                    if self.journal.has_inputs(&run.id)? {
+                        self.journal
+                            .supersede_question_requests(run, "supplemented")?;
+                        return Ok(json!({"superseded":true}));
+                    }
                     tokio::select! {
                         _ = notifier.notified() => {}
                         _ = tokio::time::sleep(Duration::from_millis(250)) => {}
@@ -3227,4 +3659,179 @@ fn observed_at(run: &Run) -> String {
         now.format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| now.unix_timestamp().to_string())
     )
+}
+
+#[cfg(test)]
+mod handoff_tests {
+    use super::*;
+    use crate::model::ToolCall as ModelToolCall;
+
+    #[test]
+    fn cancel_terminal_state_is_not_shadowed_by_unknown_attempts() {
+        let cancelled = Error::Cancelled;
+        assert_eq!(
+            Supervisor::terminal_state_on_error(&cancelled, true),
+            RunState::Cancelled
+        );
+        assert_eq!(
+            Supervisor::terminal_state_on_error(&cancelled, false),
+            RunState::Cancelled
+        );
+        // 非取消错误：有未知外部动作才 NeedsReview，否则 Failed。
+        assert_eq!(
+            Supervisor::terminal_state_on_error(&Error::Tool("x".into()), true),
+            RunState::NeedsReview
+        );
+        assert_eq!(
+            Supervisor::terminal_state_on_error(&Error::Tool("x".into()), false),
+            RunState::Failed
+        );
+    }
+
+    fn invoke(method_id: &str, arguments: Value) -> ModelToolCall {
+        ModelToolCall {
+            id: "call_t".into(),
+            name: "bgi.api.invoke".into(),
+            arguments: json!({"methodId":method_id,"arguments":arguments}),
+        }
+    }
+
+    fn run_with(source: RunSource, shortcut_configuration: bool) -> Run {
+        serde_json::from_value(json!({
+            "id":"run-1","conversationId":"c1","prompt":"跑一下","state":"executing",
+            "revision":1,"createdAt":"2026-10-02T00:00:00Z","updatedAt":"2026-10-02T00:00:00Z",
+            "deadline":2147483000,"decisions":1,"toolCalls":0,
+            "inputTokens":0,"outputTokens":0,"usageEstimated":true,
+            "result":null,"error":null,
+            "source":source,"shortcutConfiguration":shortcut_configuration,
+        }))
+        .expect("run fixture")
+    }
+
+    fn launch_output(verification: &str) -> Value {
+        json!({
+            "jobId":"job-1","outcome":"verifiedSucceeded",
+            "evidence":{
+                "verification":{"status":"succeeded"},
+                "result":{
+                    "accepted":true,"executionMode":"launch","verificationScope":"launch",
+                    "verified":true,"verification":{"status":verification},
+                },
+            },
+        })
+    }
+
+    #[test]
+    fn handoff_only_for_agent_plain_launch_success() {
+        let output = launch_output("succeeded");
+        let call = invoke("bgi.run_script_groups", json!({"groupNames":["a","b"]}));
+        let run = run_with(RunSource::Agent, false);
+        assert!(launch_handoff(&call, &run, &output).is_some());
+        // 入口封装运行不终结。
+        let shortcut = run_with(RunSource::Agent, true);
+        assert!(launch_handoff(&call, &shortcut, &output).is_none());
+        // 非 Agent 来源不终结。
+        let saved = run_with(
+            RunSource::SavedWorkflow {
+                workflow_id: "w".into(),
+                workflow_revision: 1,
+            },
+            false,
+        );
+        assert!(launch_handoff(&call, &saved, &output).is_none());
+        // 显式等待（completion）不终结。
+        let waiting = invoke(
+            "bgi.run_script_groups",
+            json!({"groupNames":["a"],"waitForCompletion":true}),
+        );
+        assert!(launch_handoff(&waiting, &run, &output).is_none());
+        // 失败与未知核验不终结。
+        for status in ["failed", "unknown"] {
+            assert!(launch_handoff(&call, &run, &launch_output(status)).is_none());
+        }
+        // 只认配置组启动方法：业务结果里恰好带 executionMode 的字段不算。
+        let other = invoke("bgi.get_status", json!({"executionMode":"launch"}));
+        assert!(launch_handoff(&other, &run, &output).is_none());
+    }
+
+    #[test]
+    fn members_merge_contiguous_groups_and_tail_exit() {
+        let groups_a = invoke(
+            "bgi.run_script_groups",
+            json!({"groupNames":["a"],"closeGameAfter":false}),
+        );
+        let groups_b = invoke("bgi.run_script_group", json!({"name":"b"}));
+        let exit = invoke("bgi.exit_game", json!({}));
+        let read = ModelToolCall {
+            id: "call_r".into(),
+            name: "bgi.api.read".into(),
+            arguments: json!({"methodId":"bgi.get_status","arguments":{}}),
+        };
+        // 连续两组 + 尾部无参 exit：全部并入，close 开启。
+        let (members, names, close, wait) = group_launch_members(&[
+            read.clone(),
+            groups_a.clone(),
+            groups_b.clone(),
+            exit.clone(),
+        ])
+        .expect("mergeable");
+        assert_eq!(members, vec![1, 2, 3]);
+        assert_eq!(names, vec!["a", "b"]);
+        assert!(close);
+        assert!(!wait);
+        // 前置只读调用不参与合并，但成员下标指向原批次。
+        // 单个组没有收尾：不归一，走单调用终结路径。
+        assert!(group_launch_members(std::slice::from_ref(&groups_a)).is_none());
+        // 中间夹着其它调用：不跨越合并。
+        assert!(
+            group_launch_members(&[groups_a.clone(), read.clone(), groups_b.clone()]).is_none()
+        );
+        // exit 不在批尾：不并入。
+        assert!(group_launch_members(&[groups_a.clone(), exit.clone(), read.clone()]).is_none());
+        // 带参数的 exit 语义不明：不并入。
+        let exit_with_args = invoke("bgi.exit_game", json!({"force":true}));
+        assert!(group_launch_members(&[groups_a.clone(), exit_with_args]).is_none());
+        // 任一显式等待：整体保持显式等待。
+        let waiting = invoke(
+            "bgi.run_script_groups",
+            json!({"groupNames":["c"],"waitForCompletion":true}),
+        );
+        let (_, _, _, wait) =
+            group_launch_members(&[groups_a, waiting]).expect("mergeable with wait");
+        assert!(wait);
+    }
+
+    #[test]
+    fn mergeable_group_call_rejects_unknown_shapes() {
+        assert!(
+            mergeable_group_call(&invoke("bgi.run_script_groups", json!({"groupNames":[]})))
+                .is_none()
+        );
+        assert!(mergeable_group_call(&invoke("bgi.run_script_groups", json!([]))).is_none());
+        let extra = invoke(
+            "bgi.run_script_group",
+            json!({"name":"a","unknownFlag":true}),
+        );
+        assert!(mergeable_group_call(&extra).is_none());
+    }
+
+    #[test]
+    fn handoff_message_states_scope_and_pending_tasks() {
+        let message = handoff_message(&["日常".into(), "挖矿".into()], true, 0);
+        assert!(message.contains("「日常」"));
+        assert!(message.contains("完成后会关闭原神"));
+        assert!(!message.contains("尚未执行"));
+        let pending = handoff_message(&["日常".into()], false, 2);
+        assert!(pending.contains("尚未执行"));
+        assert!(!pending.contains("工具结果"));
+    }
+
+    #[test]
+    fn legacy_needs_review_reads_back() {
+        let state: RunState = serde_json::from_str("\"needsReview\"").expect("legacy state");
+        assert_eq!(state, RunState::NeedsReview);
+        assert!(state.terminal());
+        // 待核对仍占互斥锁：旧记录的锁语义保持不变。
+        assert!(state.holds_lease());
+    }
 }

@@ -8,6 +8,9 @@ use serde::{Serialize, Serializer};
 
 use crate::error::{Error, Result};
 
+/// 随二进制分发的产品技能清单。
+pub const EMBEDDED_SKILLS: &[&str] = &[include_str!("skills/create-shortcut.md")];
+
 /// 技能的归属，决定谁开关它。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkillSource {
@@ -121,6 +124,43 @@ impl SkillRegistry {
                 );
             }
         }
+        Ok(())
+    }
+
+    /// 随二进制分发的产品技能，注册在配置目录技能之后；用户放同名技能时让位。
+    pub fn load_embedded(&mut self, text: &'static str) -> Result<()> {
+        let (fields, body) = frontmatter(text);
+        let name = fields
+            .get("name")
+            .cloned()
+            .ok_or_else(|| Error::Config("内置技能没有名称".into()))?;
+        if self.skills.contains_key(&name) {
+            return Ok(());
+        }
+        let description = fields
+            .get("description")
+            .cloned()
+            .unwrap_or_else(|| name.clone());
+        self.skills.insert(
+            name.clone(),
+            Skill {
+                name,
+                description,
+                source: SkillSource::Product,
+                tags: list_field(&fields, "tags"),
+                requires_plugins: list_field(&fields, "requiresPlugins"),
+                requires_capabilities: list_field(&fields, "requiresCapabilities"),
+                requires_providers: list_field(&fields, "requiresProviders"),
+                resource_kinds: list_field(&fields, "resourceKinds"),
+                platforms: list_field(&fields, "platforms"),
+                allowed_tools: list_field(&fields, "allowedTools"),
+                always_load: fields
+                    .get("alwaysLoad")
+                    .is_some_and(|value| value.eq_ignore_ascii_case("true")),
+                body,
+                path: PathBuf::new(),
+            },
+        );
         Ok(())
     }
 

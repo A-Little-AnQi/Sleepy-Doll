@@ -18,6 +18,44 @@ fn game_ready(snapshot: &Value) -> bool {
     snapshot["runtime"]["inMainUi"].as_bool().unwrap_or(true)
 }
 
+/// 提交前就绪闸门的判定，由契约元数据驱动：
+/// - 实例不一致 → 拒绝；
+/// - 不需要截图的能力（只读不进入该通道；configurationWrite/hostCommand）→ 放行；
+/// - 已就绪 → 放行；
+/// - 未就绪且契约声明 preparation=ensureGameReady → 先执行原生就绪准备；
+/// - 其余 → 按原语义拒绝（不让模型空等）。
+#[derive(Debug, PartialEq, Eq)]
+enum ReadinessGate {
+    Proceed,
+    Prepare,
+    InstanceMismatch,
+    NotReady,
+}
+
+fn readiness_gate(
+    effect: Option<&str>,
+    preparation: Option<&str>,
+    snapshot: &Value,
+    instance: &str,
+) -> ReadinessGate {
+    if snapshot["instanceId"].as_str() != Some(instance) {
+        return ReadinessGate::InstanceMismatch;
+    }
+    // 只读、配置写与宿主命令都不依赖截图就绪；防御性地一并不触发准备。
+    let requires_capture = !matches!(
+        effect,
+        Some("readOnly" | "configurationWrite" | "hostCommand")
+    );
+    if !requires_capture || game_ready(snapshot) {
+        return ReadinessGate::Proceed;
+    }
+    if preparation == Some("ensureGameReady") {
+        ReadinessGate::Prepare
+    } else {
+        ReadinessGate::NotReady
+    }
+}
+
 /// Bridge 观测可以作为执行依据的最大年龄（秒）。
 const OBSERVATION_MAX_AGE_SEC: i64 = 15;
 
@@ -27,6 +65,9 @@ pub struct Bridge {
     client: reqwest::Client,
     /// Job 事件流专用：用空闲超时，不用总超时。
     stream_client: reqwest::Client,
+    /// 生产恒为 true：每个非 info 请求前都核对对端进程来源。只有传输层协议
+    /// 静态测试（本地假服务器）经 for_transport_tests 置 false；不构成公开 API。
+    origin_preflight: bool,
 }
 pub struct Invocation<'a> {
     pub authorization: &'a std::sync::RwLock<crate::config::AppConfig>,
@@ -46,6 +87,17 @@ impl Bridge {
                 .read_timeout(idle)
                 .build()?,
             config,
+            origin_preflight: true,
+        })
+    }
+
+    /// 仅供传输层协议静态测试：跳过对端进程来源核对（本地假服务器没有官方
+    /// BetterGI 进程）。生产路径一律走 new()，预检不会被跳过。
+    #[cfg(test)]
+    pub(crate) fn for_transport_tests(config: BridgeConfig) -> Result<Self> {
+        Ok(Self {
+            origin_preflight: false,
+            ..Self::new(config)?
         })
     }
     pub async fn request(
@@ -58,7 +110,7 @@ impl Bridge {
         if !self.config.enabled {
             return Err(Error::Tool("BGI Bridge 未启用".into()));
         }
-        if path != "/bridge/v1/info" {
+        if self.origin_preflight && path != "/bridge/v1/info" {
             let config = self.config.clone();
             tokio::select! {
                 _ = cancel.cancelled() => return Err(Error::Cancelled),
@@ -115,7 +167,7 @@ impl Bridge {
                 format!("Bridge {}: {code} {detail}", status.as_u16())
             }));
         }
-        if path == "/bridge/v1/info" {
+        if self.origin_preflight && path == "/bridge/v1/info" {
             let info = value.clone();
             tokio::select! {
                 _ = cancel.cancelled() => return Err(Error::Cancelled),
@@ -335,16 +387,142 @@ impl Bridge {
             return Err(Error::Tool("资源绑定已变化".into()));
         }
         let mut snapshot = self.get("/bridge/v1/state", cancel).await?;
+        // 通用前置就绪准备：只有契约声明 preparation=ensureGameReady 的已授权
+        // 写动作才执行（只读不进入该通道，configurationWrite/hostCommand 不需要
+        // 截图）。准备本身作为被记录的动作走原生 bgi.ensure_game_ready，完成后
+        // 重取快照，原有的实例/就绪/前台核验链全部保留。
+        let preparation = descriptor["preparation"].as_str();
+        match readiness_gate(
+            descriptor["effect"].as_str(),
+            preparation,
+            &snapshot,
+            instance,
+        ) {
+            ReadinessGate::Proceed => {}
+            ReadinessGate::InstanceMismatch => {
+                return Err(Error::Tool("桥实例已变化，请重新确认操作。".into()));
+            }
+            ReadinessGate::NotReady => {
+                return Err(Error::Tool(
+                    "游戏尚未就绪（以进入主界面为准）。先调用 bgi.start_game 启动原神，用 bgi.wait_ready 阻塞等到 ready=true 再重试，不由模型轮询；截图器就绪但仍在登录或加载画面时不要提交动作。"
+                        .into(),
+                ));
+            }
+            ReadinessGate::Prepare => {
+                // 就绪准备按生产写动作通道提交：独立 Attempt（requestId/幂等键、
+                // 执行锁、Job 跟随），不内联读 result。它是已授权运行的必要组成，
+                // 不再递归触发就绪闸门；失败/取消时 Job 证据保留在 attempts。
+                let prep_call_id = format!("{call_id}#prep");
+                let prep_request = json!({
+                    "instanceId":instance,
+                    "methodId":"bgi.ensure_game_ready",
+                    "capabilityId":"bgi.ensure_game_ready",
+                    "arguments":{},
+                    "bridgeFeatures":info["features"],
+                    "catalogVersion":version,
+                });
+                journal.emit(
+                    run,
+                    "game.prepare",
+                    json!({"attemptId":prep_call_id,"methodId":"bgi.ensure_game_ready","reason":"gameNotReady"}),
+                )?;
+                let mut prep = journal.prepare(run, &prep_call_id, prep_request, instance)?;
+                while !journal.acquire(&prep)? {
+                    if cancel.is_cancelled() {
+                        prep.outcome = "cancelled".into();
+                        journal.attempt(&prep)?;
+                        return Err(Error::Cancelled);
+                    }
+                    if unix_now() > run.deadline {
+                        prep.outcome = "notSubmitted".into();
+                        journal.attempt(&prep)?;
+                        return Err(Error::Tool("等待游戏执行权超时（就绪准备）".into()));
+                    }
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                }
+                prep.request["requestId"] = json!(prep.id);
+                prep.request["execution"] = json!({
+                    "onDisconnect":"continue",
+                    "deadlineMs":(run.deadline - unix_now()).max(1) * 1000
+                });
+                prep.request_hash = hash(&prep.request);
+                prep.outcome = "submitting".into();
+                journal.attempt(&prep)?;
+                let prep_wire = json!({
+                    "requestId":prep.id,"instanceId":instance,"catalogVersion":version,
+                    "methodId":"bgi.ensure_game_ready","arguments":{},
+                    "execution":prep.request["execution"]
+                });
+                prep.request["wire"] = prep_wire.clone();
+                prep.request_hash = hash(&prep_wire);
+                journal.attempt(&prep)?;
+                let accepted = self
+                    .request("POST", "/bridge/v1/invoke", Some(&prep_wire), cancel)
+                    .await;
+                match accepted {
+                    Ok(v) => {
+                        prep.job_id = v["jobId"].as_str().map(str::to_owned);
+                        if prep.job_id.is_none() {
+                            prep.outcome = "unknown".into();
+                            prep.evidence = v;
+                            journal.attempt(&prep)?;
+                            return Err(Error::Conflict("就绪准备未返回可恢复的 Job".into()));
+                        }
+                        prep.evidence = v;
+                    }
+                    Err(Error::Tool(message)) => {
+                        prep.outcome = "failed".into();
+                        prep.evidence = json!({"reason":message});
+                        journal.attempt(&prep)?;
+                        journal.release(&prep)?;
+                        return Err(Error::Tool(format!("就绪准备被拒绝：{message}")));
+                    }
+                    Err(e) => {
+                        prep.outcome = "unknown".into();
+                        prep.evidence = json!({"reason":e.to_string()});
+                        journal.attempt(&prep)?;
+                        return Err(Error::Conflict(
+                            "就绪准备提交结果未知；证据已保留，需要对账".into(),
+                        ));
+                    }
+                }
+                prep.outcome = "running".into();
+                journal.attempt(&prep)?;
+                journal.save(run, RunState::WaitingJob)?;
+                let prepared = self.wait(journal, run, &mut prep, cancel).await?;
+                // 准备 Job 结束后 run 处于 Verifying；主动作继续前回到 Executing，
+                // 与会话循环在每个工具调用后重置运行状态的做法一致。
+                journal.save(run, RunState::Executing)?;
+                journal.emit(
+                    run,
+                    "game.prepare.result",
+                    json!({
+                        "attemptId":prep.id,"jobId":prepared["jobId"],
+                        "outcome":prepared["outcome"],
+                        "ready":prepared["evidence"]["result"]["ready"],
+                    }),
+                )?;
+                if prepared["outcome"] != "verifiedSucceeded"
+                    || prepared["evidence"]["result"]["ready"] != true
+                {
+                    return Err(Error::Tool(format!(
+                        "就绪准备未达成 ready=true（outcome={}）；按返回的具体阻碍处理后重试。",
+                        prepared["outcome"]
+                    )));
+                }
+                // 准备后重取快照：实例/就绪/时效核验继续生效，不因准备而放宽。
+                snapshot = self.get("/bridge/v1/state", cancel).await?;
+                if snapshot["instanceId"].as_str() != Some(instance) || !game_ready(&snapshot) {
+                    return Err(Error::Tool(
+                        "就绪准备完成后快照仍未就绪；以最新快照为准，不继续提交。".into(),
+                    ));
+                }
+            }
+        }
         let requires_capture = !matches!(
             descriptor["effect"].as_str(),
             Some("configurationWrite" | "hostCommand")
         );
-        if snapshot["instanceId"] != instance || (requires_capture && !game_ready(&snapshot)) {
-            return Err(Error::Tool(
-                "游戏尚未就绪（以进入主界面为准）。先调用 bgi.start_game 启动原神，用 bgi.wait_ready 阻塞等到 ready=true 再重试，不由模型轮询；截图器就绪但仍在登录或加载画面时不要提交动作。"
-                    .into(),
-            ));
-        }
         // 需要画面的动作必须让游戏前台：后台时模拟输入会被系统丢弃。这里
         // 阻塞几秒是可接受的——就绪检查本来就在提交路径上。
         let needs_foreground = !matches!(
@@ -676,6 +854,374 @@ impl Bridge {
             } else {
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod readiness_gate_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn snapshot(instance: &str, capture: bool, main_ui: bool) -> Value {
+        json!({
+            "instanceId": instance,
+            "snapshotId": "s1",
+            "observedAt": "2026-10-03T00:00:00Z",
+            "runtime": {"captureReady": capture, "inMainUi": main_ui, "gameHandle": 1}
+        })
+    }
+
+    #[test]
+    fn game_write_without_preparation_keeps_the_old_rejection() {
+        // 旧语义：未声明 preparation 的 gameWrite 未就绪时仍被拒，不静默准备。
+        assert_eq!(
+            readiness_gate(Some("gameWrite"), None, &snapshot("i", false, false), "i"),
+            ReadinessGate::NotReady
+        );
+    }
+
+    #[test]
+    fn game_write_with_preparation_routes_to_prepare_when_not_ready() {
+        // 真实故障场景：进程在跑、截图器未挂上（captureReady=false、inMainUi=false）。
+        assert_eq!(
+            readiness_gate(
+                Some("gameWrite"),
+                Some("ensureGameReady"),
+                &snapshot("i", false, false),
+                "i"
+            ),
+            ReadinessGate::Prepare
+        );
+        // 截图器就绪但仍在加载：同样走准备（等到主界面）。
+        assert_eq!(
+            readiness_gate(
+                Some("gameWrite"),
+                Some("ensureGameReady"),
+                &snapshot("i", true, false),
+                "i"
+            ),
+            ReadinessGate::Prepare
+        );
+        // 已就绪：直接提交。
+        assert_eq!(
+            readiness_gate(
+                Some("gameWrite"),
+                Some("ensureGameReady"),
+                &snapshot("i", true, true),
+                "i"
+            ),
+            ReadinessGate::Proceed
+        );
+    }
+
+    #[test]
+    fn read_only_and_configuration_paths_never_trigger_preparation() {
+        // 配置写/宿主命令不需要截图，即使声明了 preparation 也不会启动游戏。
+        for effect in ["configurationWrite", "hostCommand"] {
+            assert_eq!(
+                readiness_gate(
+                    Some(effect),
+                    Some("ensureGameReady"),
+                    &snapshot("i", false, false),
+                    "i"
+                ),
+                ReadinessGate::Proceed
+            );
+        }
+        // 只读能力本就不进入该提交通道；防御性地核对它们也不会被判 Prepare。
+        assert_eq!(
+            readiness_gate(
+                Some("readOnly"),
+                Some("ensureGameReady"),
+                &snapshot("i", false, false),
+                "i"
+            ),
+            ReadinessGate::Proceed
+        );
+    }
+
+    #[test]
+    fn instance_mismatch_is_always_rejected() {
+        assert_eq!(
+            readiness_gate(
+                Some("gameWrite"),
+                Some("ensureGameReady"),
+                &snapshot("other", true, true),
+                "i"
+            ),
+            ReadinessGate::InstanceMismatch
+        );
+    }
+}
+
+#[cfg(test)]
+mod invoke_protocol_tests {
+    use super::*;
+    use crate::config::AppConfig;
+    use crate::runtime::host::catalog::Capability;
+    use std::io::{Read as _, Write as _};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    /// 传输层协议静态测试：本地 HTTP 假服务器实现真实桥协议
+    /// （写接口强制 requestId → 返回 Job → GET Job 到终态），
+    /// 不加载 native/游戏；来源预检按测试缝跳过，生产路径不受影响。
+    #[test]
+    fn preparation_follows_the_real_write_protocol_through_invoke() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let ready = Arc::new(AtomicBool::new(false));
+            let missing_request_id = Arc::new(AtomicUsize::new(0));
+            let invokes_seen = Arc::new(AtomicUsize::new(0));
+            {
+                let ready = ready.clone();
+                let missing_request_id = missing_request_id.clone();
+                let invokes_seen = invokes_seen.clone();
+                std::thread::spawn(move || {
+                    for stream in listener.incoming() {
+                        let Ok(mut stream) = stream else { break };
+                        let mut head = Vec::new();
+                        let mut buffer = [0u8; 8192];
+                        loop {
+                            let n = stream.read(&mut buffer).unwrap_or(0);
+                            if n == 0 { break; }
+                            head.extend_from_slice(&buffer[..n]);
+                            let text = String::from_utf8_lossy(&head);
+                            if let Some(position) = text.find("\r\n\r\n") {
+                                let length = text
+                                    .lines()
+                                    .find_map(|line| {
+                                        line.to_ascii_lowercase()
+                                            .strip_prefix("content-length:")
+                                            .map(|value| value.trim().to_string())
+                                    })
+                                    .and_then(|value| value.parse::<usize>().ok())
+                                    .unwrap_or(0);
+                                if head.len() >= position + 4 + length { break; }
+                            }
+                        }
+                        let request = String::from_utf8_lossy(&head).into_owned();
+                        let (method, path, body) = parse_request(&request);
+                        let response =
+                            route(&method, &path, &body, &ready, &missing_request_id, &invokes_seen);
+                        let json = serde_json::to_string(&response.1).unwrap();
+                        let head = format!(
+                            "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            response.0, response.2, json.len()
+                        );
+                        let _ = stream.write_all(head.as_bytes());
+                        let _ = stream.write_all(json.as_bytes());
+                    }
+                });
+            }
+
+            let base_url = format!("http://127.0.0.1:{port}");
+            let bridge = Bridge::for_transport_tests(BridgeConfig {
+                enabled: true,
+                base_url: base_url.clone(),
+                token: Some("test-token".into()),
+                instance_id: None,
+                timeout_ms: 5_000,
+                host_install_path: None,
+                launch_silently: true,
+            })
+            .unwrap();
+
+            let database =
+                std::env::temp_dir().join(format!("bridge-proto-{}.db", uuid::Uuid::new_v4()));
+            let journal = Arc::new(Journal::open(&database).unwrap());
+            let mut run = journal
+                .create("跑一下兽怪暴徒", "conv-1", "key", 600, None)
+                .unwrap();
+            // 生产 invoke 在运行中的 Run 上执行；按真实状态机推进 Queued→Preflighting→Executing。
+            journal.save(&mut run, RunState::Preflighting).unwrap();
+            journal.save(&mut run, RunState::Executing).unwrap();
+
+            let capability = Capability {
+                id: "cap-run".into(),
+                description: "运行配置组".into(),
+                method_id: "bgi.run_script_groups".into(),
+                catalog_version: "v1".into(),
+                aliases: vec![],
+                resource_fields: vec![],
+                postconditions: vec![],
+            };
+            let mut catalog = crate::runtime::host::catalog::Catalog::default();
+            catalog.capabilities.insert("cap-run".into(), capability.clone());
+
+            let authorization_config: AppConfig = serde_json::from_value(serde_json::json!({
+                "version": 4, "activeModel": "", "models": [],
+                "agent": {"systemPrompt": ""},
+                "bridge": {"enabled": true, "baseUrl": base_url, "token": "test-token"},
+                "runtime": {"permissionMode": "fullAccess"},
+                "storage": {"database": "unused.db"}
+            }))
+            .unwrap();
+            let authorization = std::sync::RwLock::new(authorization_config);
+
+            let policy = crate::runtime::policy::RuntimeConfig {
+                permission_mode:
+                    crate::runtime::operation::permissions::PermissionMode::FullAccess,
+                ..Default::default()
+            };
+
+            let arguments = json!({"groupNames":["挖矿讨伐"]});
+            let (_, resources) = catalog.resolve("cap-run", &arguments).unwrap();
+            let cancel = CancellationToken::new();
+            let result = bridge
+                .invoke(
+                    &journal,
+                    &mut run,
+                    Invocation {
+                        authorization: &authorization,
+                        call_id: "call-1",
+                        binding: &capability,
+                        arguments: &arguments,
+                        resources,
+                        catalog: &catalog,
+                    },
+                    &policy,
+                    &cancel,
+                )
+                .await
+                .expect("invoke must pass the old gate via the preparation job");
+
+            assert_eq!(result["outcome"], "verifiedSucceeded");
+            assert_eq!(
+                result["evidence"]["result"]["accepted"], true,
+                "main job evidence: {result}"
+            );
+            assert!(
+                ready.load(Ordering::SeqCst),
+                "preparation job must have reached terminal state"
+            );
+            assert_eq!(
+                missing_request_id.load(Ordering::SeqCst),
+                0,
+                "every write invoke must carry requestId"
+            );
+            assert!(
+                invokes_seen.load(Ordering::SeqCst) >= 2,
+                "prep + main submissions both observed"
+            );
+            let attempts = journal.attempts(&run.id).unwrap();
+            let prep = attempts
+                .iter()
+                .find(|a| a.call_id == "call-1#prep")
+                .expect("preparation recorded as its own attempt");
+            assert_eq!(prep.outcome, "verifiedSucceeded");
+            assert_eq!(prep.job_id.as_deref(), Some("job-prep"));
+            let _ = std::fs::remove_file(&database);
+        });
+    }
+
+    fn parse_request(request: &str) -> (String, String, Value) {
+        let request_line = request.lines().next().unwrap_or_default();
+        let mut parts = request_line.split_whitespace();
+        let method = parts.next().unwrap_or_default().to_string();
+        let path = parts.next().unwrap_or_default().to_string();
+        let body = request
+            .split("\r\n\r\n")
+            .nth(1)
+            .filter(|text| !text.is_empty())
+            .and_then(|text| serde_json::from_str(text).ok())
+            .unwrap_or(Value::Null);
+        (method, path, body)
+    }
+
+    fn now_rfc3339() -> String {
+        time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap()
+    }
+
+    fn route(
+        method: &str,
+        path: &str,
+        body: &Value,
+        ready: &AtomicBool,
+        missing_request_id: &AtomicUsize,
+        invokes_seen: &AtomicUsize,
+    ) -> (u16, Value, &'static str) {
+        let state = |capture: bool| {
+            json!({
+                "instanceId": "test-instance",
+                "snapshotId": format!("s-{}", now_rfc3339()),
+                "observedAt": now_rfc3339(),
+                "runtime": {
+                    "captureReady": capture, "inMainUi": capture,
+                    "windowActive": true, "gameHandle": 1
+                }
+            })
+        };
+        match (method, path) {
+            ("GET", "/bridge/v1/info") => (
+                200,
+                json!({
+                    "protocolVersion": "1", "instanceId": "test-instance",
+                    "features": ["jobs", "idempotency"]
+                }),
+                "OK",
+            ),
+            ("GET", "/bridge/v1/catalog/bgi.run_script_groups") => (
+                200,
+                json!({
+                    "methodId": "bgi.run_script_groups", "instanceId": "test-instance",
+                    "summary": "run groups", "callable": true, "catalogVersion": "v1",
+                    "effect": "gameWrite", "preparation": "ensureGameReady",
+                    "inputSchema": {"type": "object"}
+                }),
+                "OK",
+            ),
+            ("GET", "/bridge/v1/state") => (200, state(ready.load(Ordering::SeqCst)), "OK"),
+            ("POST", "/bridge/v1/invoke") => {
+                invokes_seen.fetch_add(1, Ordering::SeqCst);
+                // 真实桥协议：写接口没有 requestId 直接拒绝。
+                if body["requestId"].as_str().is_none_or(str::is_empty) {
+                    missing_request_id.fetch_add(1, Ordering::SeqCst);
+                    return (
+                        400,
+                        json!({"code": "INVALID_ARGUMENT", "message": "requestId required"}),
+                        "Bad Request",
+                    );
+                }
+                match body["methodId"].as_str() {
+                    Some("bgi.ensure_game_ready") => (200, json!({"jobId": "job-prep"}), "OK"),
+                    _ => (200, json!({"jobId": "job-run"}), "OK"),
+                }
+            }
+            ("GET", "/bridge/v1/jobs/job-prep") => {
+                ready.store(true, Ordering::SeqCst);
+                (
+                    200,
+                    json!({
+                        "jobId": "job-prep", "state": "completed",
+                        "verification": {"status": "succeeded"},
+                        "result": {"prepared": true, "ready": true, "verificationScope": "readiness"}
+                    }),
+                    "OK",
+                )
+            }
+            ("GET", "/bridge/v1/jobs/job-run") => (
+                200,
+                json!({
+                    "jobId": "job-run", "state": "completed",
+                    "verification": {"status": "succeeded"},
+                    "result": {"accepted": true, "executionMode": "launch"}
+                }),
+                "OK",
+            ),
+            _ => (
+                404,
+                json!({"code": "NOT_FOUND", "message": path}),
+                "Not Found",
+            ),
         }
     }
 }

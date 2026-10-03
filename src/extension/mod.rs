@@ -404,7 +404,7 @@ fn valid_name(name: &str) -> bool {
         })
 }
 
-pub(crate) fn validate(value: &Value, schema: &Value, path: &str) -> Vec<Value> {
+pub fn validate(value: &Value, schema: &Value, path: &str) -> Vec<Value> {
     match jsonschema::validator_for(schema) {
         Ok(validator) => validator
             .iter_errors(value)
