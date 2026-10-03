@@ -4,7 +4,8 @@
 
 ## 地址与资源
 
-- 分发页及更新 API：`https://sleepy-doll.restless-nh3.com`
+- 官网（Vercel）：`https://sleepy-doll.restless-nh3.com`，源码 `E:\BetterGIProject\sleepy-doll-website`，公开仓库 `A-Little-AnQi/sleepy-doll-website`。
+- 更新与统计 API（Cloudflare Worker）：`https://sleepy-doll-api.restless-nh3.com`。官网通过 Vercel `/api/*` 外部重写保留旧 API 地址，兼容已发布的 0.0.1。
 - 安装包：`https://sleepy-doll-download.restless-nh3.com/releases/<版本>/Sleepy-Doll-<版本>-setup.exe`
 - R2 桶：`sleepy-doll-releases`，Standard 存储。
 - Worker：`sleepy-doll-distribution`。
@@ -43,4 +44,6 @@ Worker 校验事件白名单、字段格式、请求体大小和来源，并限�
 
 ## 验收
 
-GitHub 构建、公开下载哈希、软件更新状态和 GA4 实际事件分别核验。国内连通性需要关闭代理后实测；成功的单条线路不能代表所有地区和运营商。真实原位置覆盖更新需要两个不同版本及已登记安装目录，不能以界面模拟代替。
+GitHub 构建、公开下载哈希、软件更新状态和 GA4 实际事件分别核验。国内连通性需要关闭代理后实测；成功的单条线路不能代表所有地区和运营商。`verify-update` 工作流在 GitHub Actions 的 Windows 环境构建不发布的 0.0.0 基线，使用真实界面下载已发布的 0.0.1，执行原位置安装与重启，并校验配置、数据库、bridge 配置和标记文件保留。2026-10-04 首次验证通过，运行 ID 37136132020。
+
+官网 main 提交由 Vercel 自动构建。分发服务单独由 `deploy-service` 部署，修改官网或 API 无需重新发布安装包。正式域名使用 Vercel 提供的 DNS-only CNAME，API 和下载分别使用一级子域名，避免多级通配证书问题。
