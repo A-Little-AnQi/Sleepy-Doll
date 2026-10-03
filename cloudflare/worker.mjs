@@ -38,7 +38,7 @@ export function validateEvent(body) {
           engagement_time_msec: 1,
           ...(body.targetVersion ? { target_version: body.targetVersion } : {}),
           ...(body.platform === "web"
-            ? { page_location: SITE + "/", page_title: "Sleepy Doll" }
+            ? { page_location: SITE + ( /^\/docs(?:\/(?:guide|faq|changelog|developer))?$/.test(body.pagePath ?? "") ? "/#" + body.pagePath : "/" ), page_title: "Sleepy Doll" }
             : {}),
           ...(body.channel === "test" ? { debug_mode: true } : {}),
         },
@@ -80,7 +80,7 @@ export default {
       if (!env.GA_MEASUREMENT_ID || !env.GA_API_SECRET)
         return json({ error: "configuration" }, 503);
       const limited = await env.EVENT_LIMIT.limit({
-        key: request.headers.get("CF-Connecting-IP") ?? "unknown",
+        key: payload.client_id,
       });
       if (!limited.success) return json({ error: "rate" }, 429);
       const endpoint = new URL("https://www.google-analytics.com/mp/collect");

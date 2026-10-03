@@ -40,3 +40,9 @@ test("没有版本时返回 404", async () => {
   );
   assert.equal(response.status, 404);
 });
+
+test("官网仅记录允许的文档路由，不转发查询参数", () => {
+  const web = { ...event, platform: "web", event: "page_view" };
+  assert.equal(validateEvent({ ...web, pagePath: "/docs/guide" }).events[0].params.page_location, "https://sleepy-doll.restless-nh3.com/#/docs/guide");
+  assert.equal(validateEvent({ ...web, pagePath: "/docs/guide?secret=private" }).events[0].params.page_location, "https://sleepy-doll.restless-nh3.com/");
+});
