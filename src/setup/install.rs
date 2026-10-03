@@ -22,7 +22,29 @@ pub fn install(
     desktop_shortcut: bool,
     progress: Progress,
 ) -> Result<(), Error> {
-    progress(0.0, "正在准备安装目录…");
+    apply(archive, directory, Some(desktop_shortcut), progress)
+}
+
+/// 在原目录更新程序文件，保留用户数据、配置和已有快捷方式。
+pub fn update(archive: &Archive, directory: &Path, progress: Progress) -> Result<(), Error> {
+    apply(archive, directory, None, progress)
+}
+
+fn apply(
+    archive: &Archive,
+    directory: &Path,
+    desktop_shortcut: Option<bool>,
+    progress: Progress,
+) -> Result<(), Error> {
+    let updating = desktop_shortcut.is_none();
+    progress(
+        0.0,
+        if updating {
+            "正在准备更新…"
+        } else {
+            "正在准备安装目录…"
+        },
+    );
     let staging = Staging::create()?;
     extract(&staging.0, archive)?;
 
@@ -33,7 +55,14 @@ pub fn install(
     let outcome =
         propagate(&staging.0, directory, archive, &mut written, progress).and_then(|()| {
             pin_data_root(directory, archive)?;
-            progress(0.9, "正在创建快捷方式…");
+            progress(
+                0.9,
+                if updating {
+                    "正在更新程序登记…"
+                } else {
+                    "正在创建快捷方式…"
+                },
+            );
             integrate(directory, desktop_shortcut)
         });
     if let Err(error) = outcome {
@@ -41,7 +70,14 @@ pub fn install(
         return Err(written.describe(error));
     }
 
-    progress(1.0, "安装完成");
+    progress(
+        1.0,
+        if updating {
+            "更新完成"
+        } else {
+            "安装完成"
+        },
+    );
     Ok(())
 }
 
@@ -57,11 +93,10 @@ impl Staging {
             std::process::id(),
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
         );
-        let path = std::env::temp_dir().join(name);
+        let path = super::scratch_root().join(name);
         // 进程号会被复用，同名目录可能是上次崩溃留下的。
-        let _ = fs::remove_dir_all(&path);
-        fs::create_dir_all(&path)
-            .map_err(failed(format!("无法创建临时目录 {}", path.display())))?;
+        fs::create_dir_all(super::scratch_root()).map_err(failed("无法创建安装缓存目录"))?;
+        fs::create_dir(&path).map_err(failed(format!("无法创建临时目录 {}", path.display())))?;
         Ok(Self(path))
     }
 }
@@ -268,7 +303,7 @@ fn pin_data_root(directory: &Path, archive: &Archive) -> Result<(), Error> {
 }
 
 /// 安装目录之外的集成：卸载入口、快捷方式、注册表登记。
-fn integrate(directory: &Path, desktop_shortcut: bool) -> Result<(), Error> {
+fn integrate(directory: &Path, desktop_shortcut: Option<bool>) -> Result<(), Error> {
     let executable = directory.join(EXECUTABLE);
     let uninstaller = directory.join(UNINSTALLER);
     // 卸载入口是安装程序自己的副本。
@@ -276,11 +311,13 @@ fn integrate(directory: &Path, desktop_shortcut: bool) -> Result<(), Error> {
     fs::copy(&current, &uninstaller)
         .map_err(failed(format!("无法写入 {}", uninstaller.display())))?;
 
-    let programs = shell::programs_directory()
-        .ok_or_else(|| Error::message("找不到开始菜单目录，无法创建快捷方式"))?;
-    shell::create_shortcut(&programs.join(shortcut_name()), &executable, "")?;
-    if desktop_shortcut && let Some(desktop) = shell::desktop_directory() {
-        shell::create_shortcut(&desktop.join(shortcut_name()), &executable, "")?;
+    if let Some(desktop_shortcut) = desktop_shortcut {
+        let programs = shell::programs_directory()
+            .ok_or_else(|| Error::message("找不到开始菜单目录，无法创建快捷方式"))?;
+        shell::create_shortcut(&programs.join(shortcut_name()), &executable, "")?;
+        if desktop_shortcut && let Some(desktop) = shell::desktop_directory() {
+            shell::create_shortcut(&desktop.join(shortcut_name()), &executable, "")?;
+        }
     }
     registry::register(directory)
 }

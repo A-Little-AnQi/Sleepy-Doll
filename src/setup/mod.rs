@@ -11,7 +11,7 @@ mod shell;
 use std::path::{Path, PathBuf};
 
 pub use cleanup::{Removal, cleanup_after_exit};
-pub use install::install;
+pub use install::{install, update};
 pub use payload::Archive;
 pub use shell::{browse_for_directory, launch};
 pub use uninstall::uninstall;
@@ -275,4 +275,13 @@ fn fixed_drive() -> Option<String> {
 #[cfg(not(windows))]
 fn fixed_drive() -> Option<String> {
     None
+}
+
+pub fn scratch_root() -> PathBuf {
+    std::env::current_exe()
+        .expect("安装程序路径不可用")
+        .parent()
+        .expect("安装程序目录不可用")
+        .join(".cache")
+        .join("setup")
 }

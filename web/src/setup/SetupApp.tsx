@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, framelessWindow } from "../ipc/api";
 import { readError } from "../session";
 import { TitleBar } from "../components/shell/TitleBar";
@@ -61,8 +61,8 @@ export function SetupApp() {
   const [state, setState] = useState<SetupState>(IDLE);
   const [retry, setRetry] = useState(false);
   const [launchError, setLaunchError] = useState("");
-  /** 用户动过目录之后，迟到的 info 回复不再覆盖。 */
-  const touched = useRef(false);
+  const [ready, setReady] = useState(!window.ipc);
+  const [infoError, setInfoError] = useState("");
 
   useEffect(() => {
     window.__setupState = (next) => {
@@ -78,22 +78,30 @@ export function SetupApp() {
     void setupApi
       .info()
       .then((next) => {
-        if (touched.current) return;
         setInfo(next);
         setDirectory(presetDirectory(next));
+        setReady(true);
       })
-      .catch(() => undefined);
+      .catch((error) => {
+        if (window.ipc) setInfoError(readError(error));
+      });
   }, []);
 
   const uninstall = info.uninstallMode;
-  const action = uninstall ? t.setup.uninstall : t.setup.install;
-  const target = installedDirectory(directory);
+  const update = !uninstall && info.installed;
+  const action = uninstall
+    ? t.setup.uninstall
+    : update
+      ? t.setup.update
+      : t.setup.install;
+  const target =
+    update || uninstall ? info.directory : installedDirectory(directory);
   const view = retry || state.phase === "idle" ? "form" : state.phase;
   const busy = view === "running";
   const percent = progressPercent(state.progress);
 
   async function start() {
-    touched.current = true;
+    if (!ready || busy) return;
     setRetry(false);
     setState({
       phase: "running",
@@ -103,6 +111,7 @@ export function SetupApp() {
     });
     try {
       if (uninstall) await setupApi.uninstall(removeUserData);
+      else if (update) await setupApi.update();
       else await setupApi.install(directory.trim(), shortcut);
     } catch (error) {
       setState({
@@ -118,7 +127,6 @@ export function SetupApp() {
     try {
       const picked = await setupApi.browse();
       if (!picked.directory) return;
-      touched.current = true;
       setDirectory(picked.directory);
     } catch {
       // 对话框打不开就保持原值。
@@ -162,23 +170,31 @@ export function SetupApp() {
               <p>
                 {uninstall
                   ? t.setup.uninstallNote
-                  : t.setup.installNote}
+                  : update
+                    ? t.setup.updateNote
+                    : t.setup.installNote}
               </p>
             ) : null}
           </header>
 
           <div className="setup-body">
             {resting ? (
-              uninstall ? (
+              uninstall || update ? (
                 <dl className="setup-meta">
                   <div className="setup-meta-row">
                     <dt>{t.setup.installLocation}</dt>
                     <dd className="setup-mono">{info.directory}</dd>
                   </div>
                   <div className="setup-meta-row">
-                    <dt>{t.setup.version}</dt>
+                    <dt>{update ? t.setup.currentVersion : t.setup.version}</dt>
                     <dd>{info.installedVersion ?? t.setup.unknown}</dd>
                   </div>
+                  {update ? (
+                    <div className="setup-meta-row">
+                      <dt>{t.setup.targetVersion}</dt>
+                      <dd>{info.version}</dd>
+                    </div>
+                  ) : null}
                 </dl>
               ) : (
                 <div className="setup-field">
@@ -192,18 +208,17 @@ export function SetupApp() {
                     <input
                       id="setup-directory"
                       value={directory}
-                      disabled={busy || info.installed}
+                      disabled={busy || !ready}
                       spellCheck={false}
                       autoComplete="off"
                       onChange={(event) => {
-                        touched.current = true;
                         setDirectory(event.target.value);
                       }}
                     />
                     <button
                       type="button"
                       className="secondary-action"
-                      disabled={busy || info.installed}
+                      disabled={busy || !ready}
                       onClick={() => void browse()}
                     >
                       <FolderIcon className="button-icon" />
@@ -225,25 +240,25 @@ export function SetupApp() {
                   <input
                     type="checkbox"
                     checked={removeUserData}
-                    disabled={busy}
+                    disabled={busy || !ready}
                     onChange={(event) =>
                       setRemoveUserData(event.target.checked)
                     }
                   />
                   <span>同时删除数据（配置、模型密钥、会话记录、日志）</span>
                 </label>
-                <p className="setup-note">
-                  不勾选则保留，删除后无法恢复。
-                </p>
+                <p className="setup-note">不勾选则保留，删除后无法恢复。</p>
               </div>
             ) : null}
 
-            {resting && !uninstall ? (
+            {infoError ? <p className="setup-note">{infoError}</p> : null}
+
+            {resting && !uninstall && !update ? (
               <label className="setup-check">
                 <input
                   type="checkbox"
                   checked={shortcut}
-                  disabled={busy}
+                  disabled={busy || !ready}
                   onChange={(event) => setShortcut(event.target.checked)}
                 />
                 <span>{t.setup.createShortcut}</span>
@@ -359,7 +374,7 @@ export function SetupApp() {
                 <button
                   type="button"
                   className="primary-action"
-                  disabled={busy || (!uninstall && !target)}
+                  disabled={busy || !ready || (!uninstall && !target)}
                   onClick={() => void start()}
                 >
                   {action}

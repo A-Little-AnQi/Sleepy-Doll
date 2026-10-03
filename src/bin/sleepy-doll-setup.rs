@@ -28,6 +28,8 @@ use tao::{
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
     window::{Window, WindowBuilder},
 };
+#[cfg(target_os = "windows")]
+use wry::WebViewBuilderExtWindows;
 use wry::{
     WebContext, WebViewBuilder,
     http::{Request, Response, header::CONTENT_TYPE},
@@ -123,6 +125,17 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let arguments: Vec<String> = std::env::args().collect();
+    if arguments
+        .get(1)
+        .is_some_and(|argument| argument == "--apply-update")
+    {
+        let pid = arguments
+            .get(2)
+            .ok_or("缺少待退出的进程号")?
+            .parse::<u32>()?;
+        return apply_update_after(pid);
+    }
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     let window = WindowBuilder::new()
@@ -130,7 +143,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_background_color(desktop_startup::background(true))
         .with_title(TITLE)
         .with_inner_size(Size::Logical(LogicalSize::new(WIDTH, HEIGHT)))
-        // window_chrome::install 会加回 WS_THICKFRAME，尺寸用上下限钉死。
+        // 安装窗口保持固定尺寸。
         .with_min_inner_size(Size::Logical(LogicalSize::new(WIDTH, HEIGHT)))
         .with_max_inner_size(Size::Logical(LogicalSize::new(WIDTH, HEIGHT)))
         .with_resizable(false)
@@ -141,7 +154,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let owner = window.hwnd();
     let ipc_proxy = proxy.clone();
     let ipc_hwnd = window_chrome::hwnd_id(&window);
-    let webview = WebViewBuilder::new_with_web_context(&mut web_context)
+    let builder = WebViewBuilder::new_with_web_context(&mut web_context)
         .with_background_color(desktop_startup::background(true))
         .with_asynchronous_custom_protocol(
             "sleepy".into(),
@@ -154,7 +167,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_navigation_handler(|destination| is_application_url(&destination))
         .with_url("sleepy://localhost/setup.html")
         .with_devtools(cfg!(debug_assertions))
-        .build(&window)?;
+        .with_clipboard(true);
+    // 与主窗口一致：关掉 WebView2 原生右键菜单，由界面层自绘菜单接管。
+    #[cfg(target_os = "windows")]
+    let builder = builder.with_default_context_menus(false);
+    let webview = builder.build(&window)?;
 
     window_chrome::install(&window);
     let mut startup = desktop_startup::DesktopStartup::prime(&window, false);
@@ -229,7 +246,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 /// 安装程序的 WebView2 缓存目录，放在系统临时目录里。
 fn webview_cache() -> PathBuf {
-    std::env::temp_dir().join("sleepy-doll-setup-webview2")
+    setup::scratch_root().join("webview2")
+}
+
+fn apply_update_after(pid: u32) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::{
+            Foundation::CloseHandle,
+            System::Threading::{OpenProcess, WaitForSingleObject},
+        };
+        let process = unsafe { OpenProcess(0x00100000, 0, pid) };
+        if !process.is_null() {
+            let outcome = unsafe { WaitForSingleObject(process, 60_000) };
+            unsafe {
+                CloseHandle(process);
+            }
+            if outcome != 0 {
+                return Err("原程序未退出，更新已停止".into());
+            }
+        }
+    }
+    let installed = setup::installed().ok_or("未找到原安装目录")?;
+    let archive = open_archive()?;
+    setup::update(&archive, &installed.directory, &mut |_, _| {})?;
+    setup::launch(&installed.directory.join(setup::EXECUTABLE))?;
+    Ok(())
 }
 
 /// 关窗口，退出前安排好清理。
@@ -259,6 +301,12 @@ fn dispatch_ipc(request: Request<String>, proxy: EventLoopProxy<UserEvent>, hwnd
             window_chrome::begin_system_drag(hwnd);
             return;
         }
+        "window.resize" => {
+            if let Some(direction) = request.params["direction"].as_str() {
+                window_chrome::begin_system_resize(hwnd, direction);
+            }
+            return;
+        }
         "window.setDragStrip" => {
             window_chrome::set_drag_strip(
                 request.params["height"].as_f64().unwrap_or(0.0),
@@ -285,6 +333,12 @@ fn dispatch_ipc(request: Request<String>, proxy: EventLoopProxy<UserEvent>, hwnd
             let _ = proxy.send_event(UserEvent::Browse { id });
         }
         "setup.install" => {
+            // 已登记的安装始终原地更新，不能由界面另选位置再装一份。
+            if let Some(installed) = setup::installed() {
+                reply(&proxy, &id, json!({}));
+                start_update(proxy.clone(), installed.directory);
+                return;
+            }
             let requested = request
                 .params
                 .get("directory")
@@ -309,6 +363,16 @@ fn dispatch_ipc(request: Request<String>, proxy: EventLoopProxy<UserEvent>, hwnd
                 });
             } else {
                 start(proxy.clone(), directory, desktop_shortcut);
+            }
+        }
+        "setup.update" => {
+            reply(&proxy, &id, json!({}));
+            match setup::installed() {
+                Some(installed) => start_update(proxy.clone(), installed.directory),
+                None => state(
+                    &proxy,
+                    State::failed("找不到已有安装，请重新打开安装程序后安装"),
+                ),
             }
         }
         // 位置以注册表为准，不用界面送来的路径。
@@ -358,6 +422,30 @@ fn reply(proxy: &EventLoopProxy<UserEvent>, id: &str, result: Value) {
 
 /// 起工作线程执行安装。
 fn start(proxy: EventLoopProxy<UserEvent>, directory: PathBuf, desktop_shortcut: bool) {
+    // 确认目录期间也可能有另一个安装器完成安装。
+    if let Some(installed) = setup::installed() {
+        start_update(proxy, installed.directory);
+        return;
+    }
+    start_apply(proxy, directory, Some(desktop_shortcut));
+}
+
+fn start_update(proxy: EventLoopProxy<UserEvent>, directory: PathBuf) {
+    // 使用登记的完整路径，不再追加产品目录名。
+    let resolved = setup::normalize(&directory.to_string_lossy());
+    if let Err(error) = setup::validate_directory(&resolved) {
+        state(&proxy, State::failed(error));
+        return;
+    }
+    start_apply(proxy, PathBuf::from(resolved), None);
+}
+
+/// 首次安装才设置快捷方式；更新只替换原目录里的程序文件与登记。
+fn start_apply(
+    proxy: EventLoopProxy<UserEvent>,
+    directory: PathBuf,
+    desktop_shortcut: Option<bool>,
+) {
     if setup::is_uninstall_mode() {
         state(&proxy, State::failed("这是卸载程序，不能用来安装"));
         return;
@@ -370,7 +458,10 @@ fn start(proxy: EventLoopProxy<UserEvent>, directory: PathBuf, desktop_shortcut:
             let mut report = |progress: f64, message: &str| {
                 state(&proxy, State::new("running", progress, message));
             };
-            setup::install(&archive, &directory, desktop_shortcut, &mut report)
+            match desktop_shortcut {
+                Some(shortcut) => setup::install(&archive, &directory, shortcut, &mut report),
+                None => setup::update(&archive, &directory, &mut report),
+            }
         });
         BUSY.store(false, Ordering::SeqCst);
         finish(&proxy, outcome);

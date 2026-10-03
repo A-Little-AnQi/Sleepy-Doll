@@ -50,7 +50,9 @@ window.__setupReceive = (reply) => {
   window.clearTimeout(entry.timer);
   pending.delete(reply.id);
   if (reply.error)
-    entry.reject(new Error(reply.error.message ?? dictOf(readLocale()).setup.bridgeFailed));
+    entry.reject(
+      new Error(reply.error.message ?? dictOf(readLocale()).setup.bridgeFailed),
+    );
   else entry.resolve(reply.result);
 };
 
@@ -60,7 +62,10 @@ function invoke<T>(
   timeoutMs: number,
 ): Promise<T> {
   const ipc = window.ipc;
-  if (!ipc) return Promise.reject(new Error(dictOf(readLocale()).setup.bridgeUnreachable));
+  if (!ipc)
+    return Promise.reject(
+      new Error(dictOf(readLocale()).setup.bridgeUnreachable),
+    );
   const id = crypto.randomUUID();
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
@@ -78,6 +83,7 @@ export const setupApi = {
     invoke<{ directory: string | null }>("setup.browse", {}, DIALOG_TIMEOUT),
   install: (directory: string, desktopShortcut: boolean) =>
     invoke("setup.install", { directory, desktopShortcut }, DIALOG_TIMEOUT),
+  update: () => invoke("setup.update", {}, DIALOG_TIMEOUT),
   uninstall: (removeUserData: boolean) =>
     invoke("setup.uninstall", { removeUserData }, DIALOG_TIMEOUT),
   launch: () =>

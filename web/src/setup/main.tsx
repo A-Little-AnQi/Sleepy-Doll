@@ -1,6 +1,7 @@
 import { Component, StrictMode, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { SetupApp } from "./SetupApp";
+import { ContextMenu } from "../components/shell/ContextMenu";
 import { DesktopReady } from "../components/shell/DesktopReady";
 import "../product.css";
 import "../motion.css";
@@ -39,6 +40,7 @@ createRoot(document.getElementById("root")!).render(
     <ErrorBoundary>
       <SetupApp />
     </ErrorBoundary>
+    <ContextMenu />
     <DesktopReady />
   </StrictMode>,
 );
