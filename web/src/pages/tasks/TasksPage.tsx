@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
 import { api } from "../../ipc/api";
-import { HistoryIcon, PlusIcon, SearchIcon } from "../../components/icons";
+import { HistoryIcon, SearchIcon } from "../../components/icons";
 import { TaskCard, type TaskActions } from "../../components/tasks/TaskCard";
-import { ShortcutConfigurator } from "../../components/tasks/ShortcutConfigurator";
 import { taskRun, taskError } from "../../components/tasks/task-display";
 import { isRunning, readError, taskLabels } from "../../session";
 import { Toast } from "../../components/overlay/Toast";
@@ -16,22 +15,18 @@ export function TasksPage({
   reload,
   onOpenTask,
   onConnectTools,
-  referenceConversationId,
 }: {
   bootstrap: Bootstrap;
   reload(): Promise<void>;
   onOpenConversation(id: string): void;
   onOpenTask?: (task: TaskSummary) => void;
   onConnectTools?: () => void;
-  referenceConversationId?: string | undefined;
 }) {
   const [tab, setTab] = useState<"tasks" | "runs">("tasks");
   const [query, setQuery] = useState("");
   const [archived, setArchived] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [configuring, setConfiguring] = useState(false);
-  const [target, setTarget] = useState<TaskSummary>();
   const [removing, setRemoving] = useState<TaskSummary | null>(null);
   const [renaming, setRenaming] = useState<TaskSummary | null>(null);
   const [newName, setNewName] = useState("");
@@ -74,10 +69,6 @@ export function TasksPage({
       setBusy("");
     }
   };
-  const configure = (task?: TaskSummary) => {
-    setTarget(task);
-    setConfiguring(true);
-  };
   const actions: TaskActions = {
     run: (task) =>
       void act(task.id, () =>
@@ -96,7 +87,6 @@ export function TasksPage({
     archive: (task, value) =>
       void act(task.id, () => api.archiveWorkflow(task.id, value)),
     remove: (task) => setRemoving(task),
-    askAi: (task) => configure(task),
     connect: () => onConnectTools?.(),
     open: (task) => onOpenTask?.(task),
   };
@@ -106,13 +96,9 @@ export function TasksPage({
         <div>
           <h2>快捷任务</h2>
           <p className="tasks-intro">
-            把你指定的任务放在这里，之后点击即可运行。
+            在对话里输入「创建快捷任务」并描述目标，保存后在这里一键运行。
           </p>
         </div>
-        <button className="primary-action" onClick={() => configure()}>
-          <PlusIcon className="button-icon" />
-          添加快捷任务
-        </button>
       </div>
       <div className="list-toolbar">
         <SlidingTabs
@@ -192,9 +178,9 @@ export function TasksPage({
                   ? "换个名称或清除筛选。"
                   : archived
                     ? "暂时不用的入口可以归档，随时恢复。"
-                    : "在原对话中指定一个已有项加入快捷任务。也可以在这里让 AI 识别并封装已有项。"}
+                    : "在对话里输入「创建快捷任务」，描述要加入的已有项，也可以点输入框左下角的 + 选择它。"}
               </p>
-              {needle ? (
+              {needle && (
                 <button
                   className="secondary-action"
                   onClick={() => {
@@ -204,15 +190,6 @@ export function TasksPage({
                 >
                   清除筛选
                 </button>
-              ) : (
-                !archived && (
-                  <button
-                    className="secondary-action"
-                    onClick={() => configure()}
-                  >
-                    封装已有项
-                  </button>
-                )
               )}
             </div>
           )}
@@ -220,17 +197,11 @@ export function TasksPage({
             <details className="tasks-legacy">
               <summary>旧版流程 · {legacy.length} 项</summary>
               <p>
-                原有内容已保留。指定其中的一项任务，让 AI 改为可直接运行的入口。
+                原有内容已保留。在对话里说要转换哪一项，让 AI 把它改成可直接运行的入口。
               </p>
               {legacy.map((task) => (
                 <div key={task.id}>
                   <span>{task.name}</span>
-                  <button
-                    className="subtle-action"
-                    onClick={() => configure(task)}
-                  >
-                    封装其中一项
-                  </button>
                   <button
                     className="subtle-action"
                     onClick={() => setRemoving(task)}
@@ -297,14 +268,6 @@ export function TasksPage({
           <p>快捷任务的运行结果会显示在这里。</p>
         </div>
       )}
-      <ShortcutConfigurator
-        bootstrap={bootstrap}
-        open={configuring}
-        target={target}
-        referenceConversationId={referenceConversationId}
-        onClose={() => setConfiguring(false)}
-        reload={reload}
-      />
       <ConfirmDialog
         open={removing != null}
         title="删除快捷任务"

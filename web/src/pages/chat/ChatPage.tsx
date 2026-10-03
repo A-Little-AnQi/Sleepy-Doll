@@ -16,6 +16,7 @@ import {
   SettingsIcon,
   StopIcon,
 } from "../../components/icons";
+import { SkillMenu } from "../../components/chat/SkillMenu";
 import { Select } from "../../components/controls/Select";
 import {
   isRunning,
@@ -26,14 +27,14 @@ import {
   useSession,
 } from "../../session";
 import { Toast } from "../../components/overlay/Toast";
-import type { Bootstrap } from "../../ipc/types";
+import type { Bootstrap, QuestionAnswers, QuestionRequestInfo, RunApproval } from "../../ipc/types";
 import { MotionSwitch } from "../../components/controls/MotionSwitch";
 import { DisclosureChevron } from "../../components/controls/DisclosureChevron";
 import { resolveConversationModel } from "../../models";
 import { ContextMeter } from "../../components/chat/ContextMeter";
 import { ComposerDeck } from "../../components/chat/ComposerDeck";
 import { ComposerField } from "../../components/chat/ComposerField";
-import { QuestionCard } from "../../components/chat/QuestionCard";
+import { PendingRequestLayer } from "../../components/chat/QuestionCard";
 import { estimateMessagesTokens } from "../../session/context-usage";
 import { useT } from "../../i18n";
 import type { Plan } from "../../session";
@@ -110,6 +111,7 @@ export function ChatPage({
     stream,
     contextActivities,
     question,
+    questionRequests,
     approval,
     plan,
     loading,
@@ -124,16 +126,9 @@ export function ChatPage({
     setPromptKey(draftKey);
     setPrompt(localStorage.getItem(draftKey) ?? "");
   }
-  const [notice, setNotice] = useState("");
   const [unread, setUnread] = useState(false);
   const [sending, setSending] = useState(false);
-  const [submittedQuestion, setSubmittedQuestion] = useState("");
-  const questionKey = question ? `${task?.id}:${question}` : "";
-  const replySubmitted = Boolean(
-    questionKey && submittedQuestion === questionKey,
-  );
   const inputId = useId();
-  const questionId = useId();
   const [stopping, setStopping] = useState(false);
   const interrupting = stopping || task?.state === "cancelling";
   // 工具名取自工具定义里的 label，没有 label 的不进表。
@@ -149,8 +144,10 @@ export function ChatPage({
     [bootstrap.tools, bootstrap.runtimeToolLabels],
   );
   const [error, setError] = useState("");
-  const [confirming, setConfirming] = useState(false);
   const [now, setNow] = useState(Date.now());
+  // 浮层可用高度跟随 composer 实际几何：短窗口/大输入框时不会越出顶部。
+  const [layerMax, setLayerMax] = useState<number | undefined>(undefined);
+  const [layerCenter, setLayerCenter] = useState<number | undefined>(undefined);
   const [pendingModel, setPendingModel] = useState<string | null>(null);
   const conversation = bootstrap.conversations.find(
     (entry) => entry.id === conversationId,
@@ -172,6 +169,8 @@ export function ChatPage({
   const alive = useRef(true);
   const scroll = useRef<HTMLDivElement>(null);
   const flow = useRef<HTMLDivElement>(null);
+  const dock = useRef<HTMLDivElement>(null);
+  const workspace = useRef<HTMLElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const follow = useRef(true);
   useEffect(() => {
@@ -182,7 +181,6 @@ export function ChatPage({
   }, []);
   useLayoutEffect(() => {
     setError("");
-    setNotice("");
     setSending(false);
     setPendingModel(null);
     follow.current = true;
@@ -194,19 +192,38 @@ export function ChatPage({
     return () => onComposerDraft?.(false);
   }, [onComposerDraft]);
   useEffect(() => {
-    setConfirming(false);
-  }, [approval?.id]);
-  useEffect(() => {
     setStopping(false);
   }, [task?.id, busy]);
   useEffect(() => {
-    if (!question) setSubmittedQuestion("");
-  }, [question]);
-  useEffect(() => {
-    if (!busy && !approval) return;
+    if (!busy && !approval && !questionRequests.length) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [busy, approval]);
+  }, [busy, approval, questionRequests]);
+  useLayoutEffect(() => {
+    const node = dock.current;
+    if (!node) return;
+    const update = () => {
+      // 浮层锚在 dock 上方 10px；可用高度是 dock 上沿到 workspace 顶部的
+      // 实际空间（再留 12px 上边距），没有下限撑出，tiny 空间靠内部滚动。
+      const dockTop = node.getBoundingClientRect().top;
+      const workspaceTop =
+        workspace.current?.getBoundingClientRect().top ?? 0;
+      const space = dockTop - workspaceTop;
+      setLayerMax(Math.max(0, Math.floor(space - 24)));
+      // 浮层垂直中心落在可用区中点 (workspace.top+dock.top)/2：
+      // dock 内坐标即 -space/2（0 是有效值）。
+      setLayerCenter(-Math.floor(space) / 2);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    if (workspace.current) observer.observe(workspace.current);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, []);
   useLayoutEffect(() => {
     if (!flow.current) return;
     const observer = new ResizeObserver(() => {
@@ -224,12 +241,37 @@ export function ChatPage({
     setPrompt(value);
     localStorage.setItem(draftKey, value);
   };
+  const invocableSkills = useMemo(
+    () =>
+      bootstrap.skills.filter(
+        (skill) => skill.enabled !== false && skill.available !== false,
+      ),
+    [bootstrap.skills],
+  );
+  // 技能菜单把 `$技能名` 插到光标处；运行时按这个前缀显式装载该技能。
+  const insertSkill = (name: string) => {
+    const marker = `$${name} `;
+    const node = textarea.current;
+    if (!node) {
+      setDraft(marker + prompt);
+      return;
+    }
+    const at = node.selectionStart ?? prompt.length;
+    setDraft(prompt.slice(0, at) + marker + prompt.slice(at));
+    requestAnimationFrame(() => {
+      node.focus();
+      const caret = at + marker.length;
+      node.setSelectionRange(caret, caret);
+    });
+  };
+  // 主消息只负责发起新请求；运行中的补充由独立问答面板或后台交接处理，
+  // 输入框在运行期间禁用但保留草稿，交接结束自动恢复。
   const send = async () => {
     const value = prompt.trim();
     if (
       !value ||
       sending ||
-      replySubmitted ||
+      busy ||
       stopping ||
       task?.state === "cancelling" ||
       !bootstrap.models.length
@@ -237,7 +279,7 @@ export function ChatPage({
       return;
     const origin = conversationId;
     const retryKey = `${draftKey}:pending`;
-    let pending: { key: string; prompt: string; runId?: string } | undefined;
+    let pending: { key: string; prompt: string } | undefined;
     try {
       pending =
         JSON.parse(sessionStorage.getItem(retryKey) ?? "null") ?? undefined;
@@ -246,39 +288,21 @@ export function ChatPage({
     }
     const clientKey =
       pending?.prompt === value ? pending.key : crypto.randomUUID();
-    const supplementRun =
-      pending?.prompt === value
-        ? pending.runId
-        : busy && task
-          ? task.id
-          : undefined;
-    sessionStorage.setItem(
-      retryKey,
-      JSON.stringify({ key: clientKey, prompt: value, runId: supplementRun }),
-    );
+    sessionStorage.setItem(retryKey, JSON.stringify({ key: clientKey, prompt: value }));
     setSending(true);
     follow.current = true;
     setError("");
-    setNotice("");
     setDraft("");
     try {
-      if (supplementRun) {
-        await api.supplement(supplementRun, value, clientKey);
-        if (alive.current && current.current === origin) {
-          if (questionKey) setSubmittedQuestion(questionKey);
-          else setNotice(t.chat.queuedStep);
-        }
-      } else {
-        const run = await api.submitTask(
-          value,
-          origin,
-          clientKey,
-          origin ? undefined : selectedModel,
-        );
-        session(run.conversationId).start();
-        if (alive.current && current.current === origin)
-          onConversation(run.conversationId);
-      }
+      const run = await api.submitTask(
+        value,
+        origin,
+        clientKey,
+        origin ? undefined : selectedModel,
+      );
+      session(run.conversationId).start();
+      if (alive.current && current.current === origin)
+        onConversation(run.conversationId);
       sessionStorage.removeItem(retryKey);
       // The server has accepted this prompt. A shell refresh failure must not
       // restore the draft and invite the same message to be sent a second time.
@@ -311,11 +335,41 @@ export function ChatPage({
     : 0;
   const phase = interrupting
     ? "正在停止"
-    : question || approval
+    : question || questionRequests.length || approval
       ? undefined
       : phaseLabel(task);
+  // 结构化答复走专用 RPC；旧事件（无 journal 记录）保持 run.input 兼容。
+  const answerQuestion = async (
+    request: QuestionRequestInfo,
+    answers: QuestionAnswers,
+    clientKey: string,
+  ) => {
+    const origin = conversationId;
+    if (request.legacy) {
+      const text = answers.answer?.answers[0] ?? "";
+      if (!text) throw new Error(t.chat.writeReply);
+      await api.supplement(request.runId, text, clientKey);
+    } else {
+      await api.answerQuestion(request.runId, request.requestId, answers, clientKey);
+    }
+    // ACK 成功：在发起答复的那个会话里立即终结该请求，迟到的事件/快照
+    // 都不能复活它；回调按 origin 归属，不写当前恰好打开的别的聊天。
+    if (origin) session(origin).resolveQuestionRequest(request.runId, request.requestId);
+  };
+  const decideApproval = async (target: RunApproval, approved: boolean) => {
+    setError("");
+    try {
+      await api.approve(target.id, approved);
+      await reload();
+    } catch (reason) {
+      setError(readError(reason));
+    }
+  };
   return (
-    <section className={`chat-workspace${welcome ? " is-welcome" : ""}`}>
+    <section
+      ref={workspace}
+      className={`chat-workspace${welcome ? " is-welcome" : ""}`}
+    >
       <MotionSwitch
         viewKey={conversationId ?? "new"}
         className="chat-scene-switch"
@@ -385,66 +439,7 @@ export function ChatPage({
                   contextActivities={contextActivities}
                 />
                 {plan && <RunPlanCard plan={plan} />}
-                {question && (
-                  <QuestionCard
-                    id={questionId}
-                    question={question}
-                    submitted={replySubmitted}
-                    inputId={inputId}
-                    onReply={() =>
-                      textarea.current?.focus({ preventScroll: true })
-                    }
-                  />
-                )}
-                {approval && (
-                  <section className="run-approval">
-                    <h3>{t.chat.confirmExec}</h3>
-                    <p>
-                      {approval.request.binding?.description ??
-                        approval.request.methodId}
-                    </p>
-                    <details>
-                      <summary>{t.chat.opParams}</summary>
-                      <pre>
-                        {JSON.stringify(approval.request.arguments, null, 2)}
-                      </pre>
-                    </details>
-                    <div className="detail-actions">
-                      <button
-                        className="primary-action"
-                        disabled={
-                          confirming || now >= approval.expiresAt * 1000
-                        }
-                        onClick={() => {
-                          setConfirming(true);
-                          void act(() =>
-                            api.approve(approval.id, true),
-                          ).finally(() => setConfirming(false));
-                        }}
-                      >
-                        允许执行
-                      </button>
-                      <button
-                        className="secondary-action"
-                        disabled={
-                          confirming || now >= approval.expiresAt * 1000
-                        }
-                        onClick={() => {
-                          setConfirming(true);
-                          void act(() =>
-                            api.approve(approval.id, false),
-                          ).finally(() => setConfirming(false));
-                        }}
-                      >
-                        拒绝执行
-                      </button>
-                    </div>
-                    {now >= approval.expiresAt * 1000 && (
-                      <p className="muted">{t.chat.approvalExpired}</p>
-                    )}
-                  </section>
-                )}
-                {/* 取消与待核对分别由对话记录标注。 */}
+                {/* 取消与失败分别由对话记录标注。 */}
                 {task &&
                   !busy &&
                   ["failed", "partial", "blocked"].includes(task.state) && (
@@ -492,8 +487,17 @@ export function ChatPage({
           </button>
         </div>
       )}
-      <div className="composer-dock">
-        {notice && <Toast message={notice} onDismiss={() => setNotice("")} />}
+      <div className="composer-dock" ref={dock}>
+        <PendingRequestLayer
+          requests={questionRequests}
+          approval={approval}
+          now={now}
+          conversationId={conversationId}
+          {...(layerMax != null ? { maxHeight: layerMax } : {})}
+          {...(layerCenter != null ? { centerTop: layerCenter } : {})}
+          onAnswer={answerQuestion}
+          onDecide={decideApproval}
+        />
         {(error || data.error) && (
           <Toast
             message={error || data.error}
@@ -502,37 +506,14 @@ export function ChatPage({
             onDismiss={() => setError("")}
           />
         )}
-        <ComposerDeck className={question ? "is-awaiting-reply" : undefined}>
-          {question && (
-            <div className="composer-reply-context">
-              <span aria-live="polite">
-                {replySubmitted ? t.chat.replySent : t.chat.answeringQuestion}
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  document
-                    .getElementById(questionId)
-                    ?.scrollIntoView({ block: "nearest" })
-                }
-              >
-                {t.chat.viewQuestion}
-              </button>
-            </div>
-          )}
+        <ComposerDeck>
           <ComposerField
             id={inputId}
             ref={textarea}
             aria-label={t.chat.message}
-            placeholder={
-              question
-                ? t.chat.composerPlaceholderReply
-                : busy
-                  ? t.chat.composerPlaceholderBusy
-                  : t.chat.composerPlaceholderNew
-            }
+            placeholder={t.chat.composerPlaceholderNew}
             value={prompt}
-            disabled={sending}
+            disabled={sending || busy}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return;
@@ -551,6 +532,11 @@ export function ChatPage({
             }}
           />
           <div className="composer-actions">
+            <SkillMenu
+              skills={invocableSkills}
+              disabled={sending || busy}
+              onPick={insertSkill}
+            />
             <div className="composer-menu composer-approval">
               <Select
                 label={t.chat.approvalLevel}
@@ -605,6 +591,7 @@ export function ChatPage({
                   }}
                 />
               </div>
+              {/* 运行期间只有停止；发送按钮仅用于发起新请求。 */}
               {busy && (
                 <button
                   type="button"
@@ -639,29 +626,18 @@ export function ChatPage({
                   )}
                 </button>
               )}
-              {(!busy || question || prompt.trim()) && (
+              {!busy && (
                 <button
                   type="button"
-                  className={`send-action${question ? " send-reply-action" : ""}`}
-                  aria-label={
-                    question
-                      ? t.chat.sendReply
-                      : busy
-                        ? t.chat.sendFollowUp
-                        : t.chat.send
-                  }
+                  className="send-action"
+                  aria-label={t.chat.send}
                   title={
                     !bootstrap.models.length
                       ? t.chat.addModelFirst
-                      : question
-                        ? t.chat.sendReply
-                        : busy
-                          ? t.chat.sendFollowUp
-                          : t.chat.send
+                      : t.chat.send
                   }
                   disabled={
                     sending ||
-                    replySubmitted ||
                     stopping ||
                     task?.state === "cancelling" ||
                     !prompt.trim() ||
@@ -670,11 +646,6 @@ export function ChatPage({
                   onClick={() => void send()}
                 >
                   <SendIcon className="button-icon" />
-                  {question && (
-                    <span>
-                      {sending ? t.chat.sendingReply : t.chat.sendReply}
-                    </span>
-                  )}
                 </button>
               )}
             </div>

@@ -1,121 +1,262 @@
-.question-card {
-  width: 100%;
-  padding: 18px 20px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--layout-radius);
-  background: var(--subtle);
+/* 待处理请求浮层：absolute 覆盖绘制，不占消息流与输入框布局。
+   锚在 composer-dock 上沿之上，随 composer 扩高自动上移。 */
+.pending-request-layer {
+  position: absolute;
+  right: 16px;
+  bottom: calc(100% + 10px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(420px, calc(100% - 32px));
+  /* maxHeight 由宿主按 composer 上沿到视口顶部的实际空间给出（内联样式），
+     这里只兜底极端情况；溢出在容器内滚动。 */
+  max-height: 60dvh;
+  overflow-y: auto;
+  z-index: 30;
+  pointer-events: none;
 }
 
-.question-card-header {
+.pending-request-card,
+.pending-request-chip {
+  pointer-events: auto;
+}
+
+.pending-request-card {
+  padding: 14px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--layout-radius);
+  background: var(--surface, var(--subtle));
+  box-shadow: 0 12px 32px rgb(0 0 0 / 22%);
+}
+
+.pending-request-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
-.question-card-header > svg {
-  width: 18px;
-  height: 18px;
+.pending-request-header > svg {
+  width: 16px;
+  height: 16px;
   color: var(--gold);
   flex-shrink: 0;
 }
 
-.question-card-header h3 {
+.pending-request-header h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.question-card-badge {
+.pending-request-progress {
+  flex-shrink: 0;
+  color: var(--secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.pending-request-badge {
   margin-left: auto;
   border-radius: 6px;
-  padding: 4px 8px;
+  padding: 2px 8px;
   color: var(--gold);
   background: color-mix(in srgb, var(--gold) 12%, transparent);
   font-size: 12px;
   white-space: nowrap;
 }
 
-.question-card-body {
-  color: var(--text);
-}
-
-.question-card-footer {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-}
-
-.question-card-footer p {
-  flex: 1;
-  margin: 0;
+.pending-request-collapse {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: var(--secondary);
-  font-size: 12px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.pending-request-collapse:hover {
+  background: var(--subtle);
+}
+
+.pending-request-body {
+  min-height: 0;
+}
+
+.pending-request-text {
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: 13px;
   line-height: 1.6;
 }
 
-.question-card-footer button {
-  flex-shrink: 0;
+/* MarkdownText 渲染块级 p/ol/ul，容器是 div，收敛它们的默认外边距。 */
+.pending-request-text > :first-child {
+  margin-top: 0;
 }
 
-.sd-composer-deck.is-awaiting-reply,
-.sd-composer-deck.is-awaiting-reply:focus-within {
+.pending-request-text > :last-child {
+  margin-bottom: 0;
+}
+
+.pending-request-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pending-request-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "radio label" "radio description";
+  column-gap: 8px;
+  align-items: start;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.pending-request-option:hover {
+  border-color: var(--border-strong);
+}
+
+.pending-request-option[data-checked="true"] {
   border-color: color-mix(in srgb, var(--gold) 65%, var(--border));
+  background: color-mix(in srgb, var(--gold) 8%, transparent);
 }
 
-.composer-reply-context {
+.pending-request-option input {
+  grid-area: radio;
+  width: 16px;
+  height: 16px;
+  /* product.css 的 :where(input:not([type=checkbox])) 控件规则会给 radio
+     抬高 32px 行高并加边框/padding，这里必须一并复位。 */
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  align-self: start;
+  /* 首行 line-height 20px 的行盒中心在 10px；radio 中心 8px，下移 2px 对齐。 */
+  margin-top: 2px;
+  accent-color: var(--gold);
+}
+
+.pending-request-option-label {
+  grid-area: label;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.pending-request-option-description {
+  grid-area: description;
+  margin-top: 2px;
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.pending-request-freeform {
+  width: 100%;
+  min-height: 64px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--subtle);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.pending-request-freeform:focus {
+  border-color: var(--border-strong);
+  outline: none;
+}
+
+.pending-request-error {
+  margin: 8px 0 0;
+  color: var(--danger, #c0392b);
+  font-size: 12px;
+}
+
+.pending-request-footer {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--gold);
-  font-size: 12px;
-  font-weight: 500;
+  margin-top: 12px;
 }
 
-.composer-reply-context button {
+.pending-request-footer .muted {
+  margin: 0;
+  font-size: 12px;
+}
+
+.pending-request-submit {
   margin-left: auto;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--secondary);
+}
+
+.pending-approval-card details {
+  margin-top: 4px;
+}
+
+.pending-approval-card pre {
+  max-height: 160px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--subtle);
   font-size: 12px;
 }
 
-.composer-submit .send-reply-action {
+/* 收起/已答复状态的窄条入口。 */
+.pending-request-chip {
   display: inline-flex;
+  align-items: center;
   gap: 6px;
-  width: auto;
-  border-radius: var(--radius);
-  padding: 0 12px;
-  white-space: nowrap;
+  align-self: flex-end;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface, var(--subtle));
+  color: var(--text);
+  font-size: 12px;
+  box-shadow: 0 8px 20px rgb(0 0 0 / 18%);
+}
+
+.pending-request-chip > svg {
+  width: 14px;
+  height: 14px;
+  color: var(--gold);
 }
 
 @media (max-width: 600px) {
-  .sd-composer-deck.is-awaiting-reply .composer-actions {
+  .pending-request-layer {
+    right: 12px;
+    width: calc(100% - 24px);
+  }
+  .pending-request-card {
+    padding: 12px;
+  }
+  .pending-request-header {
     flex-wrap: wrap;
   }
-  .sd-composer-deck.is-awaiting-reply .composer-submit {
-    max-width: 100%;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-  .sd-composer-deck.is-awaiting-reply .composer-model {
-    max-width: 112px;
-  }
-  .question-card {
-    padding: 16px;
-  }
-  .question-card-header {
+  .pending-request-footer {
     flex-wrap: wrap;
   }
-  .question-card-footer {
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-  .question-card-footer p {
-    flex-basis: 100%;
+  .pending-request-submit {
+    flex: 1;
   }
 }

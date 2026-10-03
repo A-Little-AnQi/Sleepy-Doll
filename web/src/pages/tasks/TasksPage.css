@@ -1,3 +1,8 @@
+/* 固定四行（标题 / 工具行 / 过滤行 / 内容），内容行吃满剩余高度：
+   空状态作为 grid item 默认拉伸，其 align-content: center 才真正生效。 */
+.tasks-page {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
 .tasks-page .filter-row {
   display: flex;
   gap: 6px;

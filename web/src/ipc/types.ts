@@ -12,6 +12,7 @@ export interface ModelInfo {
   maxOutputTokens?: number;
   auth?: "auto" | "apiKey" | "bearer";
   promptCache?: boolean;
+  apiKey?: string | null;
 }
 
 export interface SkillInfo {
@@ -168,7 +169,12 @@ export interface ShortcutProposal {
 }
 
 export interface ShortcutBinding {
-  action: { tool: string; arguments: Record<string, unknown> };
+  action?: { tool: string; arguments: Record<string, unknown> };
+  steps?: Array<{
+    title: string;
+    prepare?: Array<{ tool: string; arguments: Record<string, unknown> }>;
+    action: { tool: string; arguments: Record<string, unknown> };
+  }>;
   prepare?: Array<{ tool: string; arguments: Record<string, unknown> }>;
   targetName: string;
   applicationName: string;
@@ -291,6 +297,30 @@ export interface RunEvent {
   kind: string;
   data: Record<string, unknown>;
 }
+/** 结构化问答的选项，与 runtime `questions::QuestionOption` 对齐。 */
+export interface QuestionOptionInfo {
+  label: string;
+  description?: string;
+}
+/** 单个问题：id 用于答复回填，header/question 是给人看的文案。 */
+export interface QuestionInfo {
+  id: string;
+  header: string;
+  question: string;
+  options?: QuestionOptionInfo[];
+}
+/** 一次 open 的问答请求。旧版事件只有 question:string，没有这个形状。 */
+export interface QuestionRequestInfo {
+  requestId: string;
+  runId: string;
+  questions: QuestionInfo[];
+  createdAt?: string;
+  /** 旧事件回放（只有 question:string）合成的请求：没有 journal 记录，答复走 run.input。 */
+  legacy?: boolean;
+}
+/** 答复载荷：题目 id → 字符串数组，与 `run.question.answer` 契约一致。 */
+export type QuestionAnswers = Record<string, { answers: string[] }>;
+
 export interface RunApproval {
   id: string;
   runId: string;

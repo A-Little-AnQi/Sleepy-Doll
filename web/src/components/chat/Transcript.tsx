@@ -754,11 +754,9 @@ export const Transcript = memo(function Transcript({
             {turn.role === "assistant" &&
               !active &&
               isRunLast[index] &&
-              ["cancelled", "needsReview"].includes(task?.state ?? "") && (
+              task?.state === "cancelled" && (
                 <div className="turn-outcome-note">
-                  {task?.state === "cancelled"
-                    ? t.transcript.stopped
-                    : t.transcript.needsReview}
+                  {t.transcript.stopped}
                 </div>
               )}
             <div

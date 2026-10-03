@@ -13,6 +13,7 @@ import type {
   TaskSummary,
   TaskValidation,
   WorkflowDetail,
+  QuestionAnswers,
 } from "./types";
 import type { GroupLayout } from "../session/conversation-groups";
 import { withPermission } from "./types";
@@ -158,11 +159,15 @@ function invoke<T>(
 ): Promise<T> {
   const id = crypto.randomUUID();
   const timeoutMs =
-    method === "bridge.setEnabled"
-      ? 100_000
-      : method === "events.read" || method === "model.list"
-        ? 30_000
-        : 15_000;
+    method === "release.download"
+      ? 200_000
+      : method === "release.check"
+        ? 20_000
+        : method === "bridge.setEnabled"
+          ? 100_000
+          : method === "events.read" || method === "model.list"
+            ? 30_000
+            : 15_000;
   const ipc = window.ipc;
   if (!ipc) return invokeHttp<T>(id, method, params, timeoutMs);
   return new Promise((resolve, reject) => {
@@ -189,6 +194,12 @@ function sendWindow(method: string) {
 }
 
 export const api = {
+  releaseState: () => invoke<ReleaseState>("release.state"),
+  releaseCheck: () => invoke<ReleaseState>("release.check"),
+  releaseConfigure: (analyticsEnabled: boolean, channel: string) =>
+    invoke<ReleaseState>("release.configure", { analyticsEnabled, channel }),
+  releaseDownload: () => invoke<ReleaseState>("release.download"),
+  releaseInstall: () => invoke<{ installing: boolean }>("release.install"),
   bootstrap: () => invoke<Bootstrap>("bootstrap").then(withPermission),
   submitTask: (
     prompt: string,
@@ -212,6 +223,19 @@ export const api = {
   ) => invoke("run.input", { id, content, clientKey }),
   approve: (id: string, approved: boolean) =>
     invoke("approval.respond", { id, approved }),
+  /** 结构化问答的专用答复通道，不产生用户聊天消息。 */
+  answerQuestion: (
+    id: string,
+    requestId: string,
+    answers: QuestionAnswers,
+    clientKey: string = crypto.randomUUID(),
+  ) =>
+    invoke<{ accepted: boolean; recorded: boolean }>("run.question.answer", {
+      id,
+      requestId,
+      answers,
+      clientKey,
+    }),
   events: (conversationId: string, after: number) =>
     invoke<{ events: RunEvent[]; snapshotRequired?: boolean }>(
       "events.read",
@@ -226,6 +250,7 @@ export const api = {
       runs?: TaskInfo[];
       contextActivities?: import("./types").ContextActivity[];
       contextActivityBoundary?: number;
+      questionRequests?: import("./types").QuestionRequestInfo[];
     }>("conversation.get", { id }),
   useModel: (id: string) =>
     invoke<{ activeModel: string }>("model.use", { id }),
@@ -386,24 +411,6 @@ export const api = {
       clientKey: crypto.randomUUID(),
       ...(expectedPublishedRevision ? { expectedPublishedRevision } : {}),
     }),
-  configureShortcut: (
-    prompt: string,
-    conversationId?: string,
-    clientKey: string = crypto.randomUUID(),
-    modelId?: string,
-    shortcutId?: string,
-    referenceConversationId?: string,
-  ) =>
-    invoke<TaskInfo>("shortcut.configure", {
-      prompt,
-      clientKey,
-      ...(conversationId ? { conversationId } : {}),
-      ...(modelId ? { modelId } : {}),
-      ...(shortcutId ? { shortcutId } : {}),
-      ...(referenceConversationId ? { referenceConversationId } : {}),
-    }),
-  acceptShortcut: (runId: string, name: string, description: string) =>
-    invoke<{ taskId: string }>("shortcut.accept", { runId, name, description }),
   renameWorkflow: (id: string, name: string) =>
     invoke("workflow.rename", { id, name }),
   pinWorkflow: (id: string, pinned: boolean) =>
@@ -427,3 +434,19 @@ export const api = {
   traySetEnabled: (enabled: boolean) =>
     invoke<{ saved: boolean }>("tray.setEnabled", { enabled }),
 };
+
+export interface ReleaseState {
+  currentVersion: string;
+  channel: "test" | "stable";
+  analyticsEnabled: boolean;
+  downloaded: boolean;
+  release: null | {
+    version: string;
+    channel: string;
+    url: string;
+    size: number;
+    sha256: string;
+    notes: string;
+    publishedAt: string;
+  };
+}

@@ -21,6 +21,14 @@ const zh = {
     stop: "停止",
   },
 
+  contextMenu: {
+    cut: "剪切",
+    copy: "复制",
+    paste: "粘贴",
+    selectAll: "全选",
+    copyLink: "复制链接",
+  },
+
   nav: {
     tasks: "快捷任务",
     extensions: "工具与扩展",
@@ -92,12 +100,19 @@ const zh = {
     waitingForReply: "等待你的回复",
     replySent: "回复已发送",
     continuing: "正在继续",
-    replyInstructions: "在下方输入框回答，再点击“发送回复”。多个问题可以一次回答。",
+    replyInstructions:
+      "在下方输入框回答，再点击“发送回复”。多个问题可以一次回答。",
     writeReply: "填写回复",
     answeringQuestion: "正在回答上方问题",
     viewQuestion: "查看问题",
     sendReply: "发送回复",
     sendingReply: "正在发送…",
+    questionProgress: (total: number, current?: number) =>
+      current == null ? `${total} 个问题` : `第 ${current}/${total} 题`,
+    otherAnswer: "其他",
+    prevQuestion: "上一题",
+    nextQuestion: "下一题",
+    collapsePanel: "收起面板",
     message: "消息",
     send: "发送",
     sendFollowUp: "发送补充",
@@ -125,7 +140,6 @@ const zh = {
 
   transcript: {
     stopped: "已停止",
-    needsReview: "结果待核对",
     process: "执行过程",
     callFailed: "调用失败",
     code: "代码",
@@ -255,7 +269,7 @@ const zh = {
     themeDark: "黑夜",
     themeLight: "白昼",
     sponsorNote: "如果这个工具对你有帮助，欢迎扫码支持。",
-    qrLabel: "收款二维码",
+    qrLabel: "赞赏二维码",
     dialogHeading: "对话",
     configHeading: "配置",
   },
@@ -408,10 +422,14 @@ const zh = {
   setup: {
     uninstall: "卸载",
     install: "安装",
+    update: "更新",
     preparing: "正在准备…",
     notStarted: "启动失败。请从安装目录运行 sleepy-doll.exe。",
     uninstallNote: "卸载会删除程序文件，数据默认保留。",
     installNote: "程序与数据都装在所选目录下。",
+    updateNote: "在原安装位置更新程序，保留配置、会话数据和已有快捷方式。",
+    currentVersion: "当前版本",
+    targetVersion: "目标版本",
     unknown: "未知",
     dataDeleted: "数据已删除。",
     dataKept: "数据已保留。",
@@ -483,6 +501,14 @@ const en: Dict = {
     loading: "Loading…",
     search: "Search",
     stop: "Stop",
+  },
+
+  contextMenu: {
+    cut: "Cut",
+    copy: "Copy",
+    paste: "Paste",
+    selectAll: "Select all",
+    copyLink: "Copy link",
   },
 
   nav: {
@@ -557,12 +583,19 @@ const en: Dict = {
     waitingForReply: "Waiting for your reply",
     replySent: "Reply sent",
     continuing: "Continuing",
-    replyInstructions: "Answer in the input below, then select Send reply. You can answer all questions at once.",
+    replyInstructions:
+      "Answer in the input below, then select Send reply. You can answer all questions at once.",
     writeReply: "Write reply",
     answeringQuestion: "Answering the question above",
     viewQuestion: "View question",
     sendReply: "Send reply",
     sendingReply: "Sending…",
+    questionProgress: (total: number, current?: number) =>
+      current == null ? `${total} questions` : `Question ${current}/${total}`,
+    otherAnswer: "Other",
+    prevQuestion: "Previous",
+    nextQuestion: "Next",
+    collapsePanel: "Collapse panel",
     message: "Message",
     send: "Send",
     sendFollowUp: "Send follow-up",
@@ -590,7 +623,6 @@ const en: Dict = {
 
   transcript: {
     stopped: "Stopped",
-    needsReview: "Needs review",
     process: "Activity",
     callFailed: "Call failed",
     code: "Code",
@@ -724,7 +756,7 @@ const en: Dict = {
     themeDark: "Dark",
     themeLight: "Light",
     sponsorNote: "If this tool helps you, scan to support the author.",
-    qrLabel: "QR code",
+    qrLabel: "Tip QR code",
     dialogHeading: "Chat",
     configHeading: "Config",
   },
@@ -878,12 +910,17 @@ const en: Dict = {
   setup: {
     uninstall: "Uninstall",
     install: "Install",
+    update: "Update",
     preparing: "Preparing…",
     notStarted:
       "Launch failed. Run sleepy-doll.exe from the install directory.",
     uninstallNote:
       "Uninstalling removes program files; your data is kept by default.",
     installNote: "Program and data both live in the chosen directory.",
+    updateNote:
+      "Update in the existing location, keeping settings, sessions, and shortcuts.",
+    currentVersion: "Current version",
+    targetVersion: "Target version",
     unknown: "Unknown",
     dataDeleted: "Data was deleted.",
     dataKept: "Data was kept.",

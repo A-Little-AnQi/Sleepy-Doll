@@ -1,7 +1,9 @@
 .sd-composer-deck {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  /* 文字行的垂直间距全在这一层：上 padding 16、下 gap 14，接近对称。
+     内层 textarea 自身无 padding，避免双重边距。 */
+  gap: 14px;
   padding: 16px;
   border: 1px solid var(--border);
   border-radius: var(--layout-radius);

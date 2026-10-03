@@ -4,6 +4,7 @@ import type {
   ContextActivity,
   ShortcutProposal,
   MessageInfo,
+  QuestionRequestInfo,
   RunApproval,
   TaskInfo,
 } from "../ipc/types";
@@ -92,6 +93,8 @@ export interface Snapshot {
   stream: string;
   contextActivities: ContextActivity[];
   question: string;
+  /** 当前 open 的结构化问答请求；旧 question 字符串继续保留给旧消费者。 */
+  questionRequests: QuestionRequestInfo[];
   approval: RunApproval | undefined;
   plan: Plan | undefined;
   loading: boolean;
@@ -104,6 +107,7 @@ const empty: Snapshot = {
   stream: "",
   contextActivities: [],
   question: "",
+  questionRequests: [],
   approval: undefined,
   plan: undefined,
   loading: false,
@@ -123,6 +127,13 @@ class Session {
   >();
   private streamBoundaries = new Map<string, number>();
   private questions = new Map<string, string>();
+  /** key = `${runId}:${requestId}`，只存 open 请求。 */
+  private questionRequests = new Map<string, QuestionRequestInfo>();
+  /** 本会话里已答复（ACK）的请求：旧 question 事件与迟到快照都不得复活它。 */
+  private resolvedQuestions = new Set<string>();
+  /** 已请求取消的运行：cancel.requested 先于权威 run.changed 到达，
+   *  迟到的同 revision awaitingUser 快照不得重开这些运行的题目。 */
+  private cancelledRuns = new Set<string>();
   private approvals = new Map<string, RunApproval>();
   private plans = new Map<string, Plan>();
   private shortcutProposals = new Map<string, ShortcutProposal>();
@@ -153,13 +164,26 @@ class Session {
     if (previous && (previous.revision ?? 0) > (run.revision ?? 0)) return;
     this.runs.set(run.id, run);
     this.pendingRuns.set(run.id, run);
+    // 只有取消语义进 cancelledRuns；blocked/failed 等终态允许后续重试，
+    // 重试后重新 awaitingUser 时题目要能再次出现。
+    if (run.state === "cancelling" || run.state === "cancelled")
+      this.cancelledRuns.add(run.id);
     if (!isRunning(run)) {
       this.approvals.delete(run.id);
       this.questions.delete(run.id);
+      for (const key of [...this.questionRequests.keys()])
+        if (key.startsWith(`${run.id}:`)) this.questionRequests.delete(key);
       for (const activity of this.contextActivities.values())
         if (activity.runId === run.id && activity.state === "running")
           activity.state = "failed";
     }
+  }
+  /** 已知运行不在等待回答（取消中或已结束）：它的题目不得再被事件/快照恢复。
+   *  运行状态未到的按保守放行，实际 question 事件前会有 run.changed(awaitingUser)。 */
+  private runAcceptsQuestions(runId: string) {
+    if (this.cancelledRuns.has(runId)) return false;
+    const run = this.runs.get(runId);
+    return !run || run.state === "awaitingUser";
   }
   private acceptRunSnapshot(history: { runs?: TaskInfo[] }) {
     for (const run of history.runs ?? []) this.acceptRun(run);
@@ -172,6 +196,79 @@ class Session {
       runs.at(-1)
     );
   }
+  /** 快照是 open 请求的权威集合：整体重建，已答复的自然不会回来。
+   *  ACK 之后才返回的过期快照由 resolved 集合过滤，不能复活已答问题。 */
+  private acceptQuestionRequests(history: {
+    questionRequests?: QuestionRequestInfo[];
+  }) {
+    if (history.questionRequests == null) return;
+    this.questionRequests = new Map(
+      history.questionRequests
+        .filter(
+          (request) =>
+            request &&
+            typeof request.requestId === "string" &&
+            typeof request.runId === "string" &&
+            Array.isArray(request.questions) &&
+            this.runAcceptsQuestions(request.runId),
+        )
+        .map(
+          (request): [string, QuestionRequestInfo] => [
+            `${request.runId}:${request.requestId}`,
+            request,
+          ],
+        )
+        .filter(([key]) => !this.resolvedQuestions.has(key)),
+    );
+  }
+  private acceptQuestionEvent(event: { runId: string; data: Record<string, unknown> }) {
+    const request = event.data.request as QuestionRequestInfo | undefined;
+    const key = `${event.runId}:${request?.requestId ?? "legacy"}`;
+    if (this.resolvedQuestions.has(key)) return;
+    if (!this.runAcceptsQuestions(event.runId)) return;
+    if (
+      request &&
+      typeof request === "object" &&
+      typeof request.requestId === "string" &&
+      Array.isArray(request.questions)
+    ) {
+      // 事件 data.request 只带 requestId/questions；runId 以事件归属为权威。
+      this.questionRequests.set(key, { ...request, runId: event.runId });
+    } else {
+      // 旧事件只有 question:string：合成 legacy 请求，答复仍走 run.input。
+      const text = String(event.data.question ?? "");
+      if (text)
+        this.questionRequests.set(`${event.runId}:legacy`, {
+          requestId: "legacy",
+          runId: event.runId,
+          legacy: true,
+          questions: [
+            { id: "answer", header: "", question: text, options: [] },
+          ],
+        });
+    }
+  }
+  /** ACK 成功后由界面调用：终结该请求并清掉该 run 的旧 question 文本，
+   *  其它 open 请求不受影响。 */
+  resolveQuestionRequest = (runId: string, requestId: string) => {
+    const key = `${runId}:${requestId}`;
+    this.resolvedQuestions.add(key);
+    this.questions.delete(runId);
+    const removed = this.questionRequests.delete(key);
+    // 该 run 已无其它 open 请求时同步清掉旧提示文本，不等下一次事件刷新。
+    const task = this.currentTask();
+    const staleHint =
+      this.snapshot.question !== "" &&
+      task?.id === runId &&
+      ![...this.questionRequests.keys()].some((k) =>
+        k.startsWith(`${runId}:`),
+      );
+    if (removed || staleHint)
+      this.publish({
+        questionRequests: [...this.questionRequests.values()],
+        ...(staleHint ? { question: "" } : {}),
+      });
+  };
   private acceptHistory(messages: MessageInfo[]) {
     for (const message of messages) {
       if (
@@ -226,6 +323,8 @@ class Session {
     this.streams.clear();
     this.streamBoundaries.clear();
     this.questions.clear();
+    this.questionRequests.clear();
+    this.cancelledRuns.clear();
     this.approvals.clear();
     this.plans.clear();
     this.contextActivities.clear();
@@ -246,11 +345,13 @@ class Session {
             this.acceptHistory(history.messages);
             this.acceptContext(history);
             this.acceptRunSnapshot(history);
+            this.acceptQuestionRequests(history);
             const task = this.currentTask();
             this.publish({
               task,
               messages: history.messages,
               stream: this.streamFor(task?.id),
+              questionRequests: [...this.questionRequests.values()],
               contextActivities: [...this.contextActivities.values()].map(
                 (activity) => ({ ...activity }),
               ),
@@ -332,9 +433,20 @@ class Session {
               );
             }
             if (event.kind === "cancel.requested") {
+              // 立即记住取消并清掉该 run 的问题/旧提示，不等权威 run.changed；
+              // 走 acceptRun 让审批、问题与上下文活动一起收尾。
+              this.cancelledRuns.add(event.runId);
               const run = this.runs.get(event.runId);
+              const hadHint = this.questions.has(event.runId);
               if (run && isRunning(run))
-                this.runs.set(run.id, { ...run, state: "cancelling" });
+                this.acceptRun({ ...run, state: "cancelling" });
+              const task = this.currentTask();
+              this.publish({
+                questionRequests: [...this.questionRequests.values()],
+                ...(task?.id === event.runId && hadHint
+                  ? { question: "" }
+                  : {}),
+              });
             }
             if (["input.received", "tool.completed"].includes(event.kind))
               refresh = true;
@@ -343,11 +455,24 @@ class Session {
                 event.runId,
                 event.data as unknown as RunApproval,
               );
-            if (event.kind === "question")
+            if (event.kind === "question") {
               this.questions.set(
                 event.runId,
                 String(event.data.question ?? ""),
               );
+              this.acceptQuestionEvent(event);
+            }
+            if (
+              event.kind === "question.answered" ||
+              event.kind === "question.superseded"
+            ) {
+              // 终态事件都带 requestId；缺它就不是本协议的事件，不动状态。
+              const requestId = String(event.data.requestId ?? "");
+              if (requestId) {
+                this.resolvedQuestions.add(`${event.runId}:${requestId}`);
+                this.questionRequests.delete(`${event.runId}:${requestId}`);
+              }
+            }
             if (event.kind === "plan.changed")
               this.plans.set(event.runId, event.data as unknown as Plan);
             if (["step.started", "step.finished"].includes(event.kind)) {
@@ -379,6 +504,8 @@ class Session {
             this.acceptHistory(history.messages);
             this.acceptContext(history);
             this.acceptRunSnapshot(history);
+            // refresh 分支同样吸收权威 open 快照，中途产生/终结的问题不漏。
+            this.acceptQuestionRequests(history);
           }
           const task = this.currentTask();
           if (batch.events.length || history || this.snapshot.error)
@@ -393,6 +520,7 @@ class Session {
                 task?.state === "awaitingUser"
                   ? (this.questions.get(task.id) ?? "")
                   : "",
+              questionRequests: [...this.questionRequests.values()],
               approval:
                 task?.state === "awaitingApproval"
                   ? this.approvals.get(task.id)

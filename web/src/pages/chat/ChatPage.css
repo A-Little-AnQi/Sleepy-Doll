@@ -207,6 +207,7 @@
 }
 
 .composer-dock {
+  position: relative;
   width: 100%;
   max-width: var(--chat-prose-width);
   align-self: center;
@@ -214,6 +215,12 @@
   display: grid;
   gap: 10px;
   flex: 0 0 auto;
+}
+
+/* 网格列默认 min-width:auto，会把 composer 行的 min-content 撑破窄窗口；
+   释放后操作行才能按上面的收缩规则截断，而不是把 dock 横向撑出滚动。 */
+.composer-dock > * {
+  min-width: 0;
 }
 
 .composer-actions {
@@ -228,6 +235,12 @@
   align-items: center;
   gap: 8px;
   margin-left: auto;
+  /* 窄窗口整行允许收缩，定宽子项靠菜单内省略号兜底，避免横向溢出。 */
+  min-width: 0;
+}
+
+.composer-actions > * {
+  min-width: 0;
 }
 
 .send-action {
@@ -308,7 +321,9 @@
 .composer-menu {
   width: auto;
   max-width: 200px;
-  flex-shrink: 0;
+  /* 窄窗口允许收缩，菜单内的触发器文字自带省略号，避免 composer 横向溢出。 */
+  flex-shrink: 1;
+  min-width: 0;
 }
 .composer-model {
   max-width: 168px;
