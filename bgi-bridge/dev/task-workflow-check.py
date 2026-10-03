@@ -1,15 +1,17 @@
 """通用快捷任务验收：真实 AppController，BGI 停用，仅使用本地模拟模型，不调用真实用户工具。"""
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
-import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[2]
-TEMP = Path(tempfile.gettempdir()) / "sleepy-doll-task-workflow-validation"
+# 本任务已登记的任务根目录；所有子进程 TEMP/TMP 都重定向到这里。
+TASK_TEMP = ROOT / "target/.tmp/shortcut-runtime"
+TEMP = TASK_TEMP / "workflow-fixture"
 process = None
 server = None
 server_thread = None
@@ -31,14 +33,15 @@ class FixtureModel(BaseHTTPRequestHandler):
             message = {"role": "assistant", "content": "Unexpected additional model request"}
         body = json.dumps({"choices": [{"message": message, "finish_reason": "tool_calls" if message.get("tool_calls") else "stop"}], "usage": {"prompt_tokens": 100, "completion_tokens": 20}}).encode()
         self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+TASK_TEMP.mkdir(parents=True, exist_ok=True)
 if TEMP.exists():
     raise RuntimeError("夹具目录已存在，不覆盖未知数据")
 TEMP.mkdir()
+stderr_tail = []
 try:
     config = json.loads((ROOT / "dist/Sleepy-Doll/user/config.json").read_text(encoding="utf-8-sig"))
     server = ThreadingHTTPServer(("127.0.0.1", 0), FixtureModel)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True); server_thread.start()
-    print(json.dumps({"modelFixturePort": server.server_port, "cleanup": "finally closes server and isolated driver"}), flush=True)
     config["version"] = 5
     config["hooks"] = []
     for model in config["models"]:
@@ -52,14 +55,20 @@ try:
     config["runtime"].update(catalogDirectory=str(TEMP), permissionMode="fullAccess", grants=[], trustGrants=[])
     path = TEMP / "config.json"
     path.write_text(json.dumps(config), encoding="utf-8")
-    process = subprocess.Popen([str(ROOT / "target/debug/bgi-agent-check.exe"), str(path)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
+    env = dict(os.environ)
+    env["TEMP"] = str(TASK_TEMP)
+    env["TMP"] = str(TASK_TEMP)
+    process = subprocess.Popen([str(ROOT / "target/debug/bgi-agent-check.exe"), str(path)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", env=env)
+    # 后台持续排空 stderr，避免管道写满死锁；尾部留作失败诊断。
+    threading.Thread(target=lambda: [stderr_tail.append(line) for line in process.stderr], daemon=True).start()
+    print(json.dumps({"modelFixturePort": server.server_port, "driverPid": process.pid, "taskTemp": str(TASK_TEMP), "cleanup": "finally closes server and isolated driver, removes verified fixture dir"}), flush=True)
 
     def rpc(method, params):
         process.stdin.write(json.dumps({"method": method, "params": params}) + "\n")
         process.stdin.flush()
         raw = process.stdout.readline()
         if not raw:
-            raise RuntimeError("驱动器退出：" + process.stderr.read()[:1000])
+            raise RuntimeError("驱动器退出：" + "".join(stderr_tail)[-1500:])
         value = json.loads(raw)
         assert value["ok"], value
         return value["result"]
@@ -114,6 +123,9 @@ try:
     update.join()
     assert "READY" in waited, waited
     assert all(item["zeroToken"] and item["runnable"] for item in rpc("workflow.list", {}))
+    skills = rpc("bootstrap", {})["skills"]
+    embedded = next((item for item in skills if item["name"] == "create-shortcut"), None)
+    assert embedded and embedded["source"] == "product" and embedded["available"], skills
     binding = {"applicationName": "Fixture application", "targetName": "Chosen file", "prepare": [{"tool": "workspace.read", "arguments": {"path": "input.txt"}}], "action": {"tool": "workspace.read", "arguments": {"path": "first.txt"}}}
     shortcut = rpc("shortcut.save", {"name": "Only the chosen item", "binding": binding})
     shortcut_id = shortcut["taskId"]
@@ -135,6 +147,37 @@ try:
     run(shortcut_id)
     assert run.last["toolCalls"] == 2, run.last
     assert sum(item["id"] == shortcut_id for item in rpc("workflow.list", {})) == 1
+    # 三步快捷任务：第二步读缺失文件失败后，第三步不得执行（真实驱动停链验证）。
+    chain_binding = {"applicationName": "Fixture application", "targetName": "Three-step chain", "steps": [
+        {"title": "写入第一个标记", "action": {"tool": "workspace.write", "arguments": {"path": "shortcut-marker-1.txt", "content": "ONE"}}},
+        {"title": "读取缺失文件", "action": {"tool": "workspace.read", "arguments": {"path": "shortcut-missing.txt"}}},
+        {"title": "写入第三个标记", "action": {"tool": "workspace.write", "arguments": {"path": "shortcut-marker-3.txt", "content": "THREE"}}},
+    ]}
+    chain = rpc("shortcut.save", {"name": "Three-step chain", "binding": chain_binding})
+    chain_id = chain["taskId"]
+    assert not (TEMP / "shortcut-marker-1.txt").exists() and not (TEMP / "shortcut-marker-3.txt").exists(), "Saving steps must not execute"
+    run(chain_id, "failed")
+    assert run.last["error"], run.last
+    assert (TEMP / "shortcut-marker-1.txt").exists() and not (TEMP / "shortcut-marker-3.txt").exists(), run.last
+    chain_events = rpc("events.read", {"conversationId": run.last["conversationId"], "after": 0})["events"]
+    assert any(event["kind"] == "step.finished" and event["data"].get("id") == "step-1" and event["data"].get("outcome") == "verifiedFailed" for event in chain_events), chain_events
+    assert any(event["kind"] == "step.finished" and event["data"].get("id") == "step-2" and event["data"].get("outcome") == "skipped" for event in chain_events), chain_events
+    assert not any(event["kind"] == "tool.started" and "step-2" in json.dumps(event["data"]) for event in chain_events), "第三步不得启动任何工具调用"
+    # 全部有效的组合：更新同入口（不建副本），连续两次运行都零 token、零模型调用。
+    chain_binding["steps"][1]["action"]["arguments"]["path"] = "input.txt"
+    updated_chain = rpc("shortcut.save", {"id": chain_id, "name": "Three-step chain", "binding": chain_binding})
+    assert updated_chain["taskId"] == chain_id, updated_chain
+    # workspace.write 对已存在目标要求 expectedSha256；每轮运行前清场保证可重复。
+    (TEMP / "shortcut-marker-1.txt").unlink()
+    (TEMP / "shortcut-marker-3.txt").unlink(missing_ok=True)
+    run(chain_id)
+    assert (TEMP / "shortcut-marker-1.txt").exists() and (TEMP / "shortcut-marker-3.txt").exists(), run.last
+    (TEMP / "shortcut-marker-1.txt").unlink()
+    (TEMP / "shortcut-marker-3.txt").unlink()
+    run(chain_id)
+    assert run.last["toolCalls"] == 3, run.last
+    assert (TEMP / "shortcut-marker-1.txt").exists() and (TEMP / "shortcut-marker-3.txt").exists(), run.last
+    assert sum(item["id"] == chain_id for item in rpc("workflow.list", {})) == 1, "Updating the chain must not create a duplicate"
     assert not model_requests, "Direct executions must never call the model"
     reference_mode = True
     source_run = rpc("task.submit", {"prompt": "只确认已有项目，不修改", "clientKey": "reference-fixture"})
@@ -195,5 +238,8 @@ finally:
         server.shutdown(); server.server_close()
     if server_thread is not None:
         server_thread.join(timeout=10)
-    if TEMP.resolve().parent == Path(tempfile.gettempdir()).resolve():
-        shutil.rmtree(TEMP)
+    resolved = TEMP.resolve()
+    if resolved.parent == TASK_TEMP.resolve() and resolved != TASK_TEMP.resolve():
+        shutil.rmtree(resolved)
+    else:
+        print(json.dumps({"cleanupSkipped": str(resolved), "reason": "夹具目录不在登记的任务根目录下，需人工核对"}), flush=True)

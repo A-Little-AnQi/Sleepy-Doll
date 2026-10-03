@@ -16,11 +16,22 @@
 
 `schedule` 是 BetterGI 的调度周期。脚本内部还可能按星期、账号状态或运行记录自行跳过，因此组名和 `schedule` 都不能单独证明任务何时实际执行。
 
+## 路线运行参数在哪一层
+
+| 层 | 位置 | 适用 |
+|---|---|---|
+| 配置组 | 组 JSON 的 `config.pathingConfig`（`enabled`、`partyName`、autoFightConfig、拾取／恢复等） | 原生路线及允许继承组设置的 JS |
+| 单 JS 任务 | `projects[].jsScriptSettingsObject` | 该 JS 自己的自定义参数 |
+| 全局 | `User/config.json` | 全局默认，修改走设置事务，不用它替代组配置 |
+| 路线内容 | 路线 JSON 的 `info`／`positions` | 路点与路径本身，不是组运行设置，不改叶子路线 |
+
+现成路线要换队伍或赶路角色时：复用已有组或 `bgi.prepare_pathing_group` 建包装组，用 `bgi.set_pathing_party` 写入（partyName 自动联动 enabled，角色俗称由接口做数据映射），回读核验。运行前用 `bgi.inspect_group_effective` 读当前有效战斗策略与原文要求，按已明确配队适配组配置；`bgi.sync_group_effective_config` 只恢复确需继承的字段，不覆盖用户有意自定义。战斗／拾取／恢复等其余运行参数：读取该组真实完整 `config` 后按需改点名字段，写后回读证明已保存、下次运行生效。不创建切队 JS，不改全局，不改叶子路线。不同任务不同队伍保留各自独立配置组；一个快捷入口仍可组合多组，不因独立组配置要求拆入口。
+
 
 ## 查询现有配置
 
-1. 用一次 `bgi.user.list` 找到目标目录。只要名称时不传 `jsonKeys`；需要梳理 JSON 内容时，在同一次调用传 `jsonKeys`。配置组通常投影 `name,index,projects`，只有分析运行参数时才读取 `config`。
-2. 仅当某个文件没有返回 `data`、内容被截断或需要完整写回时，再对该文件调用 `bgi.user.read`。多个独立文件在同一轮并行读取。
+1. 用一次 `bgi.user.list` 找到目标目录。只有本轮只需要名字或任务清单时才能省略 `config`（如投影 `name,index,projects`）；一旦涉及运行参数（队伍、战斗、拾取、恢复等 `config.pathingConfig` 或脚本参数），必须在同一次调用包含 `config`，不能先省略再补读。已经知道精确文件路径时直接 `bgi.user.read`，不重复 list 定位。
+2. 仅当某个文件没有返回 `data`、内容被截断或需要完整写回时，再对该文件调用 `bgi.user.read`。多个独立文件在同一轮并行读取。`droppedKeys` 显示 `config` 被投影掉、`truncated` 或分页时，字段只是未返回，不能当作不存在；要修改运行参数时 read 必须包含 `config` 或完整文件。
 3. 汇总磁盘事实，不再调用 `bgi.api.search`、`plugins.list` 或重复列目录。
 4. 区分启用状态、调度周期、任务类型和脚本内部参数；不要把文件名或组名当作结论。
 
@@ -32,7 +43,7 @@
 3. `folderName` 已被现有配置组引用时，仍须确认对应目录或文件还在；缺失则更新/订阅，不得视为已安装。
 4. JS 任务必须核对脚本参数定义；没有可靠默认值的必填参数才构成用户缺项。
 5. 计算顺序字段时复用目录投影里的 `index`；不要再逐文件读取文件头。
-6. 调用 `bgi.user.write` 提交完整文件。替换已有文件时传 `expectedSha256`；新建时省略。运行时按实际改动范围决定要不要确认一次：改几个字段、新建一个对象都直接执行；删除文件或大范围改配置（同一意图内累计 10 个以上配置叶字段、3 个以上对象，或整份替换）才弹一次范围确认。不在对话里重复索要许可。
+6. 调用 `bgi.user.write` 提交完整文件。写前必须完整读取目标文件，保留所有未知字段及其它 project、索引、周期与权限；SHA 取同一次完整读取的结果，不能用投影重建大 JSON。替换已有文件时传 `expectedSha256`；新建时省略。运行时按实际改动范围决定要不要确认一次：改几个字段、新建一个对象都直接执行；删除文件或大范围改配置（同一意图内累计 10 个以上配置叶字段、3 个以上对象，或整份替换）才弹一次范围确认。不在对话里重复索要许可。
 7. 写后重新读取目标文件，核对名称、任务数、引用和关键参数。保留返回的 `backup`；需要撤销时调用 `bgi.user.restore`，并传当前文件的 `sha256`，不要手工覆盖。
 
 
@@ -53,5 +64,4 @@
 2. 用户同时要求删配置组和路线，先按名称与 SHA 删除目标配置组，再 inspect 路线目录，避免自己刚删的组被当作仍存在的引用。
 3. describe/invoke `bgi.delete_local_resource`，path 与 expectedVersion 使用本次检查结果。若其他组仍引用，按用户授权范围处理这些组；不能默认 allowBrokenReferences=true。
 4. result.deleted=true、result.verified=true 即文件删除核验完成；保留 backupId。其他资源、组和订阅保留。coveringSubscriptions 非空时明确说明后续订阅更新可能重新导入，不擅自扩大为取消父目录订阅。
-5. 恢复用 `bgi.restore_local_resource` 的 backupId，原位置有新内容时拒绝覆盖。当前桥缺少稳定入口时说明需要更新桥，不连续试页面、绑定、树节点或选项。只有用户目标本身要求界面操作时才走原生 UI。
-5. 撤销时读取 backup，通过 user.write 在原 path 新建完整原始内容；目标路径已有其他文件时不能覆盖。
+5. 恢复只走 `bgi.restore_local_resource` 的 backupId，原位置有新内容时拒绝覆盖，不与配置组文件备份混用。当前桥缺少稳定入口时说明需要更新桥，不连续试页面、绑定、树节点或选项。只有用户目标本身要求界面操作时才走原生 UI。

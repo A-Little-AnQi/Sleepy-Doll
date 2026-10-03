@@ -7,6 +7,8 @@ description: 编写、修改和解释 BetterGI JavaScript，查询实际注入�
 
 用户要求新建／编写／修改功能脚本，或询问 OCR／图像／宿主 API 时，先读取 [writing.md](references/writing.md)，通过 bgi.js_api.search/read 取得当前真实契约。解释已有脚本则按下面流程读取实际版本，不先加载全部 API。
 
+引擎 API 只在三种情况读取：确需 JS 行为、用户请求开发脚本、或解释已有 JS 的参数与源码。现成路线的队伍等运行参数先走原生配置组 `config.pathingConfig`（读 bgi-operator 的 resources.md），不为此读引擎 API 或默认造小脚本。遇到接口未暴露时，先检查对象层级和完整 group config，不把“目录／索引没搜到”等同于 Native 不支持。
+
 ## 定位资料
 
 - 用户给出脚本名、README 内容、JS 字段、脚本自定义设置或报错位置时，先确定脚本对象，不把它归为宿主全局设置。名称含“一条龙、委托、秘境”不表示它是本体任务。

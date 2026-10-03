@@ -10,10 +10,10 @@
 3c. `create` 的 candidates 明确区分 `Pathing` 与 `Javascript`。JS 先 inspect_script，settings 来源是 manifest 的 settingsUi；读取参数、README 与必要源码后，用 `bgi.prepare_js_group` 的 folderName/settings 建组，随后运行返回的 groupName。本机自建 JS 可以执行，不要求中央仓库同名条目。地图追踪不能套 JS 设置流程。
 4. 只有准备提交执行时才调用一次 `bgi.state.get`，检查截图器、游戏句柄、任务锁和窗口状态。纯查询或文件编辑不需要状态快照。`ready` 以**进入游戏主界面**为准：截图器就绪但仍在登录或加载画面时调用会被拒绝，等 `bgi.get_status` 的 `ready=true` 再提交。`gameResolution.sixteenToNine=false` 时先把游戏或远程桌面会话调到 16:9（如 1920x1080），启动参数 `-screen-width` 对已初始化过的原神不生效。
 4b. 未就绪时直接 describe/invoke `bgi.start_game`，再 `bgi.wait_ready` 一次阻塞等待（默认 120 秒，超时后报告，不由模型轮询）；不要先搜索截图器 ViewModel 命令，更不能明知未就绪仍试跑。游戏已就绪直接 describe/invoke `bgi.run_script_group`，不用另找运行命令。
-4a. 目标是每日/清体力/周常一条龙时用 `bgi.run_one_dragon`（宿主原生任务链，`configName` 可选），不要为它建调度器配置组；它收尾可能自动退出游戏。用户要求退出原神或任务链收尾时用 `bgi.exit_game`（正常关闭，超时强结束），核验 `gameHandle` 回落后即完成。
+4a. 目标是每日/清体力/周常一条龙时用 `bgi.run_one_dragon`（宿主原生任务链，`configName` 可选），不要为它建调度器配置组；它收尾可能自动退出游戏。用户要求退出原神或任务链收尾时用 `bgi.exit_game`（正常关闭，超时强结束）；长任务结束与退出证据按当前契约 verification 和真实进程核对，不能只看缓存的 gameHandle。
 5. 其他动作若已知道精确 `methodId`，直接 `bgi.api.describe`；否则只在 `command` 组按一个动作词搜索一次。
-6. 契约必须同时满足：`callable=true`、参数可提供、接口确实作用于目标对象。其他低层命令仍依赖界面当前选择时，不得声称能按名称执行。
-7. 配置组普通运行使用 `waitForCompletion=false`（默认），只等宿主接受启动交接，立即总结并结束对话，不等整组脚本跑完，不查询 Job、状态、日志、截图或睡眠轮询。只有用户明确要等结果、后续步骤或跟踪时才用 true。调用由运行时阻塞，期间不调用模型。返回的 verified/verificationScope=launch 只核验交接，不代表业务成功；accepted=true 写“已提交运行”，不能写“全部完成”。快捷入口用 true 跟踪运行／停止，确定性执行器不调用模型。
+6. 契约必须同时满足：`callable=true`、参数可提供、接口确实作用于目标对象。readOnly 契约走 `bgi.api.read`，写和游戏动作才 invoke；`bgi.js_api` 的 search/read 同理必须用 read。其他低层命令仍依赖界面当前选择时，不得声称能按名称执行。
+7. 普通对话和快捷入口的配置组运行默认 `waitForCompletion=false`，只等宿主接受启动交接，立即总结并结束对话，不等整组脚本跑完，不查询 Job、状态、日志、截图或睡眠轮询。多组运行及关闭游戏收尾统一计划一次 `bgi.run_script_groups`（groupNames 按计划顺序、收尾用 closeGameAfter），仍默认后台交接。用户说“A 然后 B、跑完关游戏”是宿主计划顺序与 closeGameAfter，不是授权模型等待或监控；仅用户明确要监控、等结果或汇报完成时才用 true。普通请求直接规划并运行，不额外问是否守护。调用由运行时阻塞，期间不调用模型。返回的 verified/verificationScope=launch 只核验交接，不代表业务成功；accepted=true 写“已提交运行”，不能写“全部完成”。不继承此前助手错误的等待说明或旧工具 wait=true 作为用户意图。
 8. 接口不可调用时直接说明唯一阻塞项。不要继续换中英文、查插件、搜生命周期接口或让用户重复提供已经查到的信息。
 
 
@@ -28,4 +28,4 @@
 - 独立任务的目标参数先走 settings 读取与事务，例如首领名称、指定次数模式和次数。联动字段在 preview 的 differences 中一并核对，不能只写 runCount 却遗漏 specifyRunCount。
 - 设置的 writable=false 是直接事务限制；当前可见字段可走 ui.read/write 的真实控件绑定、原生校验和保存。不通过 workspace 或磁盘全局配置绕过。
 - 打开页面是明确 UI 目标；使用 bgi.list_pages/open_page。对采集、运行、删除请求，页面导航不能代替操作结果。
-- 普通停止优先取消已关联的 Job；没有 Job ID 时用 bgi.stop_current_task。结果为 timeout 就仍在停止，不能回答“已停止”；音乐播放、录制与外部绑定还要核对各自的停止命令。
+- 停止：只有仍未完成、还在等待的 Job 才用 job.cancel；默认启动已交接的 Job 即使有 ID 也已终态，停止当前运行用 `bgi.stop_current_task` 并核对停的原目标——旧 Job 已停止不证明新任务已停。结果为 timeout 就仍在停止，不能回答“已停止”；音乐播放、录制与外部绑定还要核对各自的停止命令。

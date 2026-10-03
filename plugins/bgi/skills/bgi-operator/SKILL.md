@@ -10,6 +10,8 @@ tags: BGI操作
 
 直接资源、设置和领域数据接口优先；界面命令、页面上下文和 ui.* 是最低优先级。先 describe 当前直接接口；read/invoke 按本次契约 effect 选择。删除路线无需先选中路线、打开页面或建立上下文。
 
+路线／配置组文件的关键层：组 JSON 的运行参数在 config.pathingConfig（enabled、partyName、hurryOnAvatar、autoFightConfig、collectTimeout 等），projects 是任务清单不改内容；队伍与赶路角色用 `bgi.set_pathing_party` 原生写入，其余参数=全文读→只改点名的 pathingConfig 字段→保留其余字段与完整 SHA 写回→回读。
+
 | 当前目标 | skills.reference 的 path |
 |---|---|
 | 查询、创建、修改或删除配置组／用户资源 | [references/resources.md](references/resources.md) |

@@ -1,0 +1,3288 @@
+{
+ "format": 1,
+ "purpose": "普通用户口语场景回归数据：验证助手把口语目标路由到正确工作流、不伪造能力、不扩大消耗性范围。静态检索用 normalizedQuery，不把测试期望喂给模型后再声称其理解。",
+ "sources": {
+  "scriptRepo": {
+   "name": "bettergi-scripts-list",
+   "revision": "6528dceb3a2d44e08ae6b17ab483fee9b9879c1d"
+  },
+  "nativeRepo": {
+   "name": "better-genshin-impact",
+   "revision": "7e02dc8cee57f264aa8d5f3efe4f18a956c39611"
+  },
+  "coverage": {
+   "file": "docs/bgi/feature-coverage.json",
+   "note": "与 Native HEAD 对齐的静态覆盖，静态存在不等于游戏实测成功"
+  },
+  "anchorRepos": {
+   "scripts": "bettergi-scripts-list 仓库根相对路径（repo/js/…）",
+   "native": "better-genshin-impact 仓库根相对路径的真实源码文件",
+   "coverage": "Sleepy-Doll docs/bgi/feature-coverage.json（静态覆盖清单，不作为原生实现证据）",
+   "bridge": "Sleepy-Doll bgi-bridge 托管源码相对路径（桥特有工具，不代表原生自带）",
+   "plugin": "Sleepy-Doll 仓库内相对 plugins/bgi 的路径（流程指引，不作为功能存在证据）"
+  },
+  "verified": "native 与 scripts 锚点文件均实际存在且核心 symbol 经读取核对；ObservableProperty 生成属性必要时注明对应 _private 字段"
+ },
+ "domains": [
+  "game-startup",
+  "realtime-assist",
+  "keybinding-macro",
+  "scheduler-groups",
+  "party-switch",
+  "js-params",
+  "kbm-record",
+  "one-dragon",
+  "combat-resin",
+  "gather-life",
+  "artifact-manage",
+  "tcg-music",
+  "repo-subscribe",
+  "inventory-cd",
+  "teapot-shop-redeem",
+  "character-development",
+  "logs-stop-recovery",
+  "notification-windup",
+  "remote-power",
+  "story-chest",
+  "version-boundary"
+ ],
+ "scenarios": [
+  {
+   "id": "game-startup-01",
+   "domain": "game-startup",
+   "utterance": "把原神打开，等我回来直接开跑",
+   "context": "",
+   "normalizedQuery": "启动原神并连接游戏窗口",
+   "expectedWorkflow": "workflow.game-ready",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Config/GenshinStartConfig.cs",
+     "symbol": "GenshinStartConfig",
+     "note": "GenshinStartConfig 启动/截图配置"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "启动与运行环境"
+    },
+    {
+     "repo": "coverage",
+     "file": "docs/bgi/feature-coverage.json",
+     "symbol": "bgi.start_game"
+    }
+   ],
+   "scope": "启动与连接；不含后续任务执行承诺",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "宣称已进入游戏而未核验窗口与主界面"
+   ],
+   "expectedOutcome": "游戏进程与窗口连接核验后交接，如实报告启动结果",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "启动游戏",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "game-startup-02",
+   "domain": "game-startup",
+   "utterance": "截个图，我看看现在什么画面",
+   "context": "",
+   "normalizedQuery": "截取当前游戏画面",
+   "expectedWorkflow": "workflow.game-ready",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/ViewModel/Pages/HomePageViewModel.cs",
+     "symbol": "HomePageViewModel",
+     "note": "主页启动/截图器控制"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "启动与运行环境"
+    }
+   ],
+   "scope": "只读截图",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "为截图改动截图方式或分辨率设置"
+   ],
+   "expectedOutcome": "返回当前画面截图，不改任何设置",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "截图",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "game-startup-03",
+   "domain": "game-startup",
+   "utterance": "为什么点了没反应，一个功能都不动",
+   "context": "",
+   "normalizedQuery": "排查启动与截图链路无响应",
+   "expectedWorkflow": "workflow.logs",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Config/GenshinStartConfig.cs",
+     "symbol": "GenshinStartConfig",
+     "note": "截图方式配置"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "启动与运行环境"
+    }
+   ],
+   "scope": "诊断指导",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "未定位前乱改全局设置"
+   ],
+   "expectedOutcome": "按启动页/截图方式/管理员权限顺序排查并给出结论",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "日志",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "game-startup-04",
+   "domain": "game-startup",
+   "utterance": "后台挂着就行，别弹到前台",
+   "context": "",
+   "normalizedQuery": "后台运行与截图方式设置",
+   "expectedWorkflow": "workflow.settings",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Config/GenshinStartConfig.cs",
+     "symbol": "GenshinStartConfig",
+     "note": "截图方式配置"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "启动与运行环境"
+    }
+   ],
+   "scope": "截图方式设置，属全局设置",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "承诺所有脚本后台可用"
+   ],
+   "expectedOutcome": "说明当前截图方式与后台能力边界，按用户确认再改",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "截图",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "realtime-assist-01",
+   "domain": "realtime-assist",
+   "utterance": "帮我开着自动捡东西",
+   "context": "",
+   "normalizedQuery": "开启自动拾取实时任务",
+   "expectedWorkflow": "workflow.settings",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoPick/AutoPickTrigger.cs",
+     "symbol": "AutoPickTrigger"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "实时任务"
+    }
+   ],
+   "scope": "实时任务开关，全局设置作用域",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "为拾取写新 JS"
+   ],
+   "expectedOutcome": "开启自动拾取并回读开关状态",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "自动拾取",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "realtime-assist-02",
+   "domain": "realtime-assist",
+   "utterance": "刷本的时候怎么不帮我捡了",
+   "context": "用户刚跑了独立任务",
+   "normalizedQuery": "独立任务运行期间实时任务暂停的机制解释",
+   "expectedWorkflow": "guidance",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/TaskTriggerDispatcher.cs",
+     "symbol": "TaskTriggerDispatcher",
+     "note": "独立任务运行期间实时触发暂停的调度锚"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "实时任务"
+    }
+   ],
+   "scope": "机制解释，不改配置；暂停行为为源码机制锚，非实测",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "擅自改实时任务开关来绕过"
+   ],
+   "expectedOutcome": "解释独立任务运行时实时触发暂停，属正常现象",
+   "discoverySurface": {
+    "entry": "guidance"
+   }
+  },
+  {
+   "id": "realtime-assist-03",
+   "domain": "realtime-assist",
+   "utterance": "对话让我自己点太麻烦，自动点掉",
+   "context": "",
+   "normalizedQuery": "开启自动剧情点击",
+   "expectedWorkflow": "workflow.settings",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoSkip/AutoSkipTrigger.cs",
+     "symbol": "AutoSkipTrigger"
+    },
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoSkip/AutoSkipConfig.cs",
+     "symbol": "AutoSkip",
+     "note": "AutoSkip 配置"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "实时任务"
+    }
+   ],
+   "scope": "实时自动剧情开关与选项优先级",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "宣称能替用户完成整个任务剧情"
+   ],
+   "expectedOutcome": "开启自动剧情并说明只覆盖当前播放的点击跳过",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "自动剧情",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "realtime-assist-04",
+   "domain": "realtime-assist",
+   "utterance": "剧情那个不算吧，我要的是把主线剧情整个过完",
+   "context": "刚开启了自动剧情",
+   "normalizedQuery": "仓库里有没有主线剧情流程可订阅安装",
+   "expectedWorkflow": "workflow.repository",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoStoryLoader/README.md",
+     "section": "自动剧情加载器 - 使用说明"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoStoryLoader/main.js",
+     "symbol": "dispatcher.AddTrigger/RealtimeTimer"
+    }
+   ],
+   "scope": "按仓库现有剧情加载器与任务脚本支持范围",
+   "requiredClarification": [
+    "目标剧情是否在现有任务脚本支持列表内"
+   ],
+   "forbiddenActions": [
+    "断言主线任何时候都不能自动做",
+    "宣称任意主线可全自动"
+   ],
+   "expectedOutcome": "核实剧情加载器与支持脚本后如实给出可做范围与免责要求",
+   "discoverySurface": {
+    "entry": "repo.search",
+    "kind": "resource"
+   }
+  },
+  {
+   "id": "realtime-assist-05",
+   "domain": "realtime-assist",
+   "utterance": "角色老躺着，让他自己吃药回血",
+   "context": "",
+   "normalizedQuery": "开启自动吃药回血",
+   "expectedWorkflow": "workflow.settings",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoEat/AutoEatTask.cs",
+     "symbol": "AutoEatTask"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "实时任务"
+    }
+   ],
+   "scope": "实时任务配置",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "擅自消耗珍贵料理或药品"
+   ],
+   "expectedOutcome": "配置自动吃药并说明消耗品来源",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "自动吃药",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "keybinding-macro-01",
+   "domain": "keybinding-macro",
+   "utterance": "游戏里按 E 没反应",
+   "context": "",
+   "normalizedQuery": "游戏内按键绑定问题排查",
+   "expectedWorkflow": "guidance",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Config/HotKeyConfig.cs",
+     "symbol": "HotKeyConfig",
+     "note": "HotKeyConfig BGI热键"
+    },
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Config/KeyBindingsConfig.cs",
+     "symbol": "KeyBindingsConfig",
+     "note": "KeyBindingsConfig 游戏按键绑定"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "操控辅助与快捷键"
+    }
+   ],
+   "scope": "区分游戏键位、BGI 热键、输入权限三层",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "直接改游戏键位文件"
+   ],
+   "expectedOutcome": "先定位是键位冲突还是输入权限，再给对应改法",
+   "discoverySurface": {
+    "entry": "reference"
+   }
+  },
+  {
+   "id": "keybinding-macro-02",
+   "domain": "keybinding-macro",
+   "utterance": "把连招绑到一个键上",
+   "context": "",
+   "normalizedQuery": "配置宏或连指热键",
+   "expectedWorkflow": "workflow.settings",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Config/MacroConfig.cs",
+     "symbol": "MacroConfig",
+     "note": "MacroConfig 宏配置"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "操控辅助与快捷键"
+    }
+   ],
+   "scope": "宏配置与热键绑定",
+   "requiredClarification": [
+    "目标连招内容",
+    "触发热键"
+   ],
+   "forbiddenActions": [
+    "与现有热键冲突时不提示直接覆盖"
+   ],
+   "expectedOutcome": "按用户给的连招配置宏并回读",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "宏",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "keybinding-macro-03",
+   "domain": "keybinding-macro",
+   "utterance": "启动脚本的快捷键跟别的软件打架了",
+   "context": "",
+   "normalizedQuery": "修改 BGI 全局热键避免冲突",
+   "expectedWorkflow": "workflow.settings",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Config/HotKeyConfig.cs",
+     "symbol": "HotKeyConfig"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "全局设置"
+    }
+   ],
+   "scope": "BGI 热键设置",
+   "requiredClarification": [
+    "想换成哪个键"
+   ],
+   "forbiddenActions": [],
+   "expectedOutcome": "改热键并回读，说明冲突来源",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "热键",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "keybinding-macro-04",
+   "domain": "keybinding-macro",
+   "utterance": "键位全乱了，恢复默认",
+   "context": "",
+   "normalizedQuery": "恢复默认键位设置",
+   "expectedWorkflow": "workflow.settings",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Config/KeyBindingsConfig.cs",
+     "symbol": "KeyBindingsConfig"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/恢复默认键位设置/manifest.json",
+     "note": "仓库存在同名脚本，未逐行读源码"
+    },
+    {
+     "repo": "coverage",
+     "file": "docs/bgi/feature-coverage.json",
+     "symbol": "bgi.preview_setting_restore"
+    }
+   ],
+   "scope": "键位设置恢复，需预览可回退",
+   "requiredClarification": [
+    "恢复范围：游戏键位还是 BGI 热键"
+   ],
+   "forbiddenActions": [
+    "不可逆覆盖且无回退记录"
+   ],
+   "expectedOutcome": "预览差异后恢复，保留回退记录",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "键位",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "scheduler-groups-01",
+   "domain": "scheduler-groups",
+   "utterance": "把锄地和挖矿这两个组串起来，先锄地",
+   "context": "本机已有两个配置组",
+   "normalizedQuery": "按顺序运行两个已有配置组",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Script/Group/ScriptGroup.cs",
+     "symbol": "ScriptGroup",
+     "note": "ScriptGroup 配置组结构"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/action-policy.md",
+     "section": "多组后台批量与收尾"
+    }
+   ],
+   "scope": "一次 run_script_groups 编排，不改组内容",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "为顺序编排重写组或写 JS"
+   ],
+   "expectedOutcome": "报告已提交宿主的顺序计划与后台交接；两组实际完成以计划结果为准",
+   "discoverySurface": {
+    "entry": "user.read",
+    "note": "读现有组后编排"
+   }
+  },
+  {
+   "id": "scheduler-groups-02",
+   "domain": "scheduler-groups",
+   "utterance": "后面那个挖矿的别动，只跑第一个",
+   "context": "刚编排了两个组",
+   "normalizedQuery": "按上下文指代只运行指定组",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Script/Group/ScriptGroup.cs",
+     "symbol": "ScriptGroup.Name",
+     "note": "ScriptGroup.Name 定位"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/action-policy.md",
+     "section": "多组后台批量与收尾"
+    }
+   ],
+   "scope": "只用历史已证实的组名/path 定位",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "把指代归一到错误对象",
+    "运行后误停另一个组"
+   ],
+   "expectedOutcome": "只提交用户指的组，另一组不动；交接结果即时汇报，完成以计划结果为准",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "按指代定位组"
+   }
+  },
+  {
+   "id": "scheduler-groups-03",
+   "domain": "scheduler-groups",
+   "utterance": "我那组里加个收尾，跑完自动关游戏",
+   "context": "",
+   "normalizedQuery": "一次计划多组运行并关闭游戏收尾",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "bridge",
+     "file": "bgi-bridge/managed/Tools/ScriptGroupTools.cs",
+     "symbol": "run_script_groups closeGameAfter 收尾计划"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/action-policy.md",
+     "section": "closeGameAfter 收尾"
+    }
+   ],
+   "scope": "组编辑或批量收尾参数",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "用电源脚本关电脑代替关游戏"
+   ],
+   "expectedOutcome": "收尾目标限定为关闭原神，编辑后回读组",
+   "discoverySurface": {
+    "entry": "user.read",
+    "note": "现有组+批量收尾计划"
+   }
+  },
+  {
+   "id": "scheduler-groups-04",
+   "domain": "scheduler-groups",
+   "utterance": "把组里采集那步挪到最后",
+   "context": "",
+   "normalizedQuery": "调整配置组内任务顺序",
+   "expectedWorkflow": "workflow.group.edit",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Script/Group/ScriptGroup.cs",
+     "symbol": "ScriptGroup",
+     "note": "ScriptGroup 项目顺序"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "调度器、配置组与任务进度"
+    }
+   ],
+   "scope": "组内排序，不执行",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "顺序调整后顺手启动运行"
+   ],
+   "expectedOutcome": "回读新顺序，明确未运行",
+   "discoverySurface": {
+    "entry": "user.read"
+   }
+  },
+  {
+   "id": "scheduler-groups-05",
+   "domain": "scheduler-groups",
+   "utterance": "这个路线组换个队，用我的 farming 队",
+   "context": "本机已保存名为 farming 的配队",
+   "normalizedQuery": "修改路线组运行参数中的切队配置",
+   "expectedWorkflow": "workflow.group.edit",
+   "sourceAnchors": [
+    {
+     "repo": "bridge",
+     "file": "bgi-bridge/managed/Tools/PathingPreparationTools.cs",
+     "symbol": "prepare_pathing_group 组包装"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/tool-workflow.md",
+     "section": "prepare_pathing_group"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-operator/references/resources.md",
+     "section": "config.pathingConfig"
+    }
+   ],
+   "scope": "组 config.pathingConfig，不写切队 JS，不改全局设置",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "写等价的切队 JS 脚本",
+    "查改全局设置"
+   ],
+   "expectedOutcome": "组内切队参数改为 farming 并回读",
+   "discoverySurface": {
+    "entry": "user.read",
+    "note": "组 pathingConfig"
+   }
+  },
+  {
+   "id": "party-switch-01",
+   "domain": "party-switch",
+   "utterance": "换个队",
+   "context": "用户看着一个待跑路线这么说",
+   "normalizedQuery": "为本次路线运行切换到用户指定配队",
+   "expectedWorkflow": "workflow.group.edit",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/Common/Job/SwitchPartyTask.cs",
+     "symbol": "SwitchPartyTask",
+     "note": "SwitchPartyTask Name=切换队伍"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/SKILL.md",
+     "section": "缺用户意图值早问"
+    }
+   ],
+   "scope": "切换已保存配队",
+   "requiredClarification": [
+    "目标队名（不可推断，早问一次）"
+   ],
+   "forbiddenActions": [
+    "擅自选一个本机存在的队",
+    "穷举接口后乱切"
+   ],
+   "expectedOutcome": "用 user.ask 问清目标队后再配置",
+   "discoverySurface": {
+    "entry": "user.read",
+    "note": "历史/已配置定位目标队"
+   }
+  },
+  {
+   "id": "party-switch-02",
+   "domain": "party-switch",
+   "utterance": "队伍里那个位置换成纳西妲，其他不动",
+   "context": "",
+   "normalizedQuery": "配对界面按位置替换单个角色",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoSwitchRoles/settings.json",
+     "symbol": "position1-4/switchPartyName"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoSwitchRoles/main.js",
+     "symbol": "genshin.switchParty"
+    }
+   ],
+   "scope": "配对界面逐位换角色；联机时切换会失败",
+   "requiredClarification": [
+    "哪个位置"
+   ],
+   "forbiddenActions": [
+    "把整个队伍都重配"
+   ],
+   "expectedOutcome": "指定位置替换为纳西妲并核验队内成员",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "AutoSwitchRoles 脚本"
+   }
+  },
+  {
+   "id": "party-switch-03",
+   "domain": "party-switch",
+   "utterance": "战斗的时候认一下我这几个队",
+   "context": "用户配置战斗策略",
+   "normalizedQuery": "战斗策略按队伍名单识别",
+   "expectedWorkflow": "workflow.group.edit",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/角色养成一条龙/README.md",
+     "section": "战斗策略选择根据队伍自动选择"
+    }
+   ],
+   "scope": "战斗策略 teamNames 类识别名单，不是切队动作",
+   "requiredClarification": [
+    "队名列表"
+   ],
+   "forbiddenActions": [
+    "把识别名单配置说成已经切换了队伍"
+   ],
+   "expectedOutcome": "名单写入战斗策略配置并回读，明确未执行切换",
+   "discoverySurface": {
+    "entry": "user.read",
+    "note": "战斗策略配置"
+   }
+  },
+  {
+   "id": "party-switch-04",
+   "domain": "party-switch",
+   "utterance": "现在游戏里那个队帮我存一下换个新队",
+   "context": "",
+   "normalizedQuery": "OCR读取当前队伍并切换到指定已保存配队",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/Common/Job/SwitchPartyTask.cs",
+     "symbol": "SwitchPartyTask"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/OCR读取主界面队伍/main.js",
+     "symbol": "captureGameRegion 队伍识别"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoSwitchRoles/main.js",
+     "symbol": "genshin.ClearPartyCache"
+    }
+   ],
+   "scope": "OCR 读取当前队为事实依据；切换目标队需已保存",
+   "requiredClarification": [
+    "新队名（若无法从上下文定位）"
+   ],
+   "forbiddenActions": [
+    "宣称保存了游戏内不存在的配队"
+   ],
+   "expectedOutcome": "报告当前队伍成员，切换到指定已保存队并核验",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "OCR读取主界面队伍/AutoSwitchRoles"
+   }
+  },
+  {
+   "id": "party-switch-05",
+   "domain": "party-switch",
+   "utterance": "联机的时候帮我切个队",
+   "context": "用户在朋友世界",
+   "normalizedQuery": "联机状态下切换配队的可行性",
+   "expectedWorkflow": "guidance",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoSwitchRoles/main.js",
+     "symbol": "notification.error 队伍切换失败，可能处于联机模式"
+    }
+   ],
+   "scope": "能力边界说明",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "明知联机仍反复尝试切换"
+   ],
+   "expectedOutcome": "说明联机模式下切队会失败，建议回到自己世界再切",
+   "discoverySurface": {
+    "entry": "guidance"
+   }
+  },
+  {
+   "id": "js-params-01",
+   "domain": "js-params",
+   "utterance": "那个钓鱼脚本里 CD 统计是干嘛的",
+   "context": "",
+   "normalizedQuery": "解释脚本参数含义",
+   "expectedWorkflow": "workflow.javascript",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoFishingTeyvat/settings.json",
+     "symbol": "fishing_cd"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoFishingTeyvat/main.js",
+     "symbol": "CD 记录通知"
+    }
+   ],
+   "scope": "只解释，不改配置不运行",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "顺手开启该参数"
+   ],
+   "expectedOutcome": "解释垂钓点冷却记录用于跳过冷却中的点位，仅自己世界生效",
+   "discoverySurface": {
+    "entry": "repo.search",
+    "kind": "code",
+    "query": "AutoFishingTeyvat"
+   }
+  },
+  {
+   "id": "js-params-02",
+   "domain": "js-params",
+   "utterance": "把次数改成 5 次再跑",
+   "context": "刚讨论过秘境增强脚本",
+   "normalizedQuery": "修改脚本参数后运行",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoDomain/AutoDomainTask.cs",
+     "symbol": "AutoDomainTask"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoDomainCustomizable/settings.json",
+     "symbol": "DomainRoundNum"
+    }
+   ],
+   "scope": "写脚本 settings 后运行，不改源码",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "重编等价 JS",
+    "改源码常量"
+   ],
+   "expectedOutcome": "参数回读为 5 并启动，报告交接结果",
+   "discoverySurface": {
+    "entry": "repo.search",
+    "kind": "resource",
+    "query": "自动秘境 增强"
+   }
+  },
+  {
+   "id": "js-params-03",
+   "domain": "js-params",
+   "utterance": "这个脚本要哪些前提，我这套配置能用吗",
+   "context": "",
+   "normalizedQuery": "脚本运行前提与兼容性核对",
+   "expectedWorkflow": "workflow.javascript",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoLeyLineOutcrop/README.md",
+     "section": "使用手册注意事项"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AEscoffier_chef/README.md",
+     "section": "分辨率限制"
+    }
+   ],
+   "scope": "只读核对版本/截图方式/OCR/分辨率要求",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "未核对就承诺可用"
+   ],
+   "expectedOutcome": "列出该脚本实际前提并对照用户环境给结论",
+   "discoverySurface": {
+    "entry": "repo.search",
+    "kind": "code",
+    "query": "脚本 README"
+   }
+  },
+  {
+   "id": "js-params-04",
+   "domain": "js-params",
+   "utterance": "两个脚本能一起用吗，会不会打架",
+   "context": "",
+   "normalizedQuery": "多脚本组合运行的冲突分析",
+   "expectedWorkflow": "guidance",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoPick/AutoPickTrigger.cs",
+     "symbol": "AutoPickTrigger",
+     "note": "实时触发器与独立任务互斥"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "调度器、配置组与任务进度"
+    }
+   ],
+   "scope": "基于实时任务互斥与组编排解释",
+   "requiredClarification": [
+    "指哪两个脚本"
+   ],
+   "forbiddenActions": [
+    "凭空断言兼容或不兼容"
+   ],
+   "expectedOutcome": "按两者类型（实时/独立/组内）给出组合方式与注意事项",
+   "discoverySurface": {
+    "entry": "guidance"
+   }
+  },
+  {
+   "id": "kbm-record-01",
+   "domain": "kbm-record",
+   "utterance": "录一下我手动走到 boss 面前这段操作",
+   "context": "",
+   "normalizedQuery": "录制键鼠脚本",
+   "expectedWorkflow": "workflow.editor",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/ViewModel/Pages/KeyMouseRecordPageViewModel.cs",
+     "symbol": "KeyMouseRecordPageViewModel",
+     "note": "键鼠录制页"
+    },
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Recorder/KeyMouseRecorder.cs",
+     "symbol": "KeyMouseRecorder"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "遮罩、地图、音乐与通知"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/WeeklyBoss/README.md",
+     "section": "世界树博士必须自己录制键鼠脚本"
+    }
+   ],
+   "scope": "键鼠脚本录制产物归用户资源",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "替用户编造等价 JS 路径"
+   ],
+   "expectedOutcome": "录制完成并保存，用户可放入配置组",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "录制",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "kbm-record-02",
+   "domain": "kbm-record",
+   "utterance": "回放放慢一点，老是抢拍",
+   "context": "已有键鼠脚本",
+   "normalizedQuery": "编辑键鼠脚本时序",
+   "expectedWorkflow": "workflow.editor",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Recorder/Model/KeyMouseScript.cs",
+     "symbol": "KeyMouseScript",
+     "note": "KeyMouseScript 时序数据"
+    },
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Recorder/KeyMouseMacroPlayer.cs",
+     "symbol": "KeyMouseMacroPlayer",
+     "note": "KeyMouseMacroPlayer 回放"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "遮罩、地图、音乐与通知"
+    }
+   ],
+   "scope": "编辑器调整时序参数",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "重录整段丢弃原脚本"
+   ],
+   "expectedOutcome": "调整后回放验证通过",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "键鼠",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "kbm-record-03",
+   "domain": "kbm-record",
+   "utterance": "刚才那段操作删了吧",
+   "context": "指刚录的键鼠脚本",
+   "normalizedQuery": "删除指定键鼠脚本资源",
+   "expectedWorkflow": "workflow.resource.delete",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Recorder/Model/KeyMouseScriptInfo.cs",
+     "symbol": "KeyMouseScriptInfo",
+     "note": "KeyMouseScriptInfo 脚本文件"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/SKILL.md",
+     "section": "删除路线／JS／键鼠资源"
+    }
+   ],
+   "scope": "inspect 后精确删除该文件",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "误删其他键鼠资源或路线"
+   ],
+   "expectedOutcome": "deleted=true 且 verified=true，报告 backupId",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "inspect 后删除"
+   }
+  },
+  {
+   "id": "one-dragon-01",
+   "domain": "one-dragon",
+   "utterance": "每天的日常帮我自动做了",
+   "context": "",
+   "normalizedQuery": "执行或配置一条龙日常流程",
+   "expectedWorkflow": "workflow.one-dragon",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/ViewModel/Pages/OneDragonFlowViewModel.cs",
+     "symbol": "_scriptGroupsdefault",
+     "note": "_scriptGroupsdefault 八项默认：领取邮件/合成树脂/自动秘境/自动首领讨伐/自动幽境危战/自动地脉花/领取每日奖励/领取尘歌壶奖励"
+    },
+    {
+     "repo": "coverage",
+     "file": "docs/bgi/feature-coverage.json",
+     "symbol": "cmd.one_dragon_flow.one_key_execute"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "一条龙"
+    }
+   ],
+   "scope": "先读现有一条龙配置与任务列表再执行；委托等扩展通过配置组加入社区 JS",
+   "requiredClarification": [
+    "树脂与完成后操作等高影响项是否沿用现有配置"
+   ],
+   "forbiddenActions": [
+    "不读现有配置直接开跑",
+    "擅自勾选脆弱树脂消耗",
+    "把每日委托说成原生默认任务"
+   ],
+   "expectedOutcome": "按现有配置执行一条龙并逐项报告任务状态",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "一条龙",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "one-dragon-02",
+   "domain": "one-dragon",
+   "utterance": "一条龙是不是把每日委托都做完了？",
+   "context": "",
+   "normalizedQuery": "一条龙中领取每日奖励与每日委托的区分",
+   "expectedWorkflow": "guidance",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Model/OneDragonTaskItem.cs",
+     "symbol": "case",
+     "note": "case 领取每日奖励: GoToAdventurersGuildTask + ClaimBattlePassRewardsTask"
+    },
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/Common/Job/GoToAdventurersGuildTask.cs",
+     "symbol": "GoToAdventurersGuildTask",
+     "note": "Name=前往冒险家协会领取奖励"
+    },
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/Common/Job/ClaimBattlePassRewardsTask.cs",
+     "symbol": "ClaimBattlePassRewardsTask",
+     "note": "ClaimBattlePassRewardsTask 纪行奖励"
+    },
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/Common/Job/ClaimMailRewardsTask.cs",
+     "symbol": "ClaimMailRewardsTask",
+     "note": "Name=领取邮件奖励（独立任务）"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoCommission/README.md",
+     "section": "每日委托自动化说明"
+    }
+   ],
+   "scope": "事实澄清：领取每日奖励=前往冒险家协会（历练点奖励/每日委托领奖/继续派遣）+领取纪行；领取邮件是另一独立任务；每日委托完成不在原生八项内",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "宣称领取每日奖励等于完成四个委托"
+   ],
+   "expectedOutcome": "说明八项默认任务、领取每日奖励的真实组成，以及委托需另用脚本且有地区限制",
+   "discoverySurface": {
+    "entry": "guidance"
+   }
+  },
+  {
+   "id": "one-dragon-03",
+   "domain": "one-dragon",
+   "utterance": "委托那步用哪个脚本，我这里能不能用",
+   "context": "用户在世界招待地区",
+   "normalizedQuery": "自动委托脚本的地区支持范围",
+   "expectedWorkflow": "workflow.repository",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoCommission/manifest.json",
+     "symbol": "manifest.name:",
+     "note": "全自动蒙德地区每日委托"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoCommissionNova/README.md",
+     "section": "地区支持情况"
+    }
+   ],
+   "scope": "按仓库现状：蒙德版成熟、Nova 挪德卡莱稳定其他地区待完善",
+   "requiredClarification": [
+    "用户当前承接委托的地区"
+   ],
+   "forbiddenActions": [
+    "承诺任意地区四个委托全完成"
+   ],
+   "expectedOutcome": "按地区给出可用脚本与实际支持范围",
+   "discoverySurface": {
+    "entry": "repo.search",
+    "kind": "resource"
+   }
+  },
+  {
+   "id": "one-dragon-04",
+   "domain": "one-dragon",
+   "utterance": "一条龙从卡住的那个继续",
+   "context": "上次一条龙中断",
+   "normalizedQuery": "一条龙从指定任务继续执行",
+   "expectedWorkflow": "workflow.one-dragon",
+   "sourceAnchors": [
+    {
+     "repo": "coverage",
+     "file": "docs/bgi/feature-coverage.json",
+     "symbol": "cmd.one_dragon_flow.set_task_as_next"
+    }
+   ],
+   "scope": "从指定项继续，不重头跑完",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "重跑已完成任务"
+   ],
+   "expectedOutcome": "从用户指的任务继续并报告后续完成情况",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "一条龙",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "one-dragon-05",
+   "domain": "one-dragon",
+   "utterance": "一条龙跑完自动关机",
+   "context": "",
+   "normalizedQuery": "一条龙完成后执行计算机关机",
+   "expectedWorkflow": "workflow.one-dragon",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/计算机电源操作/main.js",
+     "symbol": "PowerOptions 注销/睡眠/休眠/关机/重启"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/计算机电源操作/settings.json",
+     "symbol": "PowerOptions 默认注销"
+    }
+   ],
+   "scope": "高影响电源动作，须用户明确关机并确认方式",
+   "requiredClarification": [
+    "确认是关机而非注销/睡眠"
+   ],
+   "forbiddenActions": [
+    "默认用注销或睡眠代替",
+    "只说关游戏却配成关电脑"
+   ],
+   "expectedOutcome": "完成后操作明确配置为关机，配置回读供确认",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "一条龙",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "combat-resin-01",
+   "domain": "combat-resin",
+   "utterance": "体力帮我清了",
+   "context": "",
+   "normalizedQuery": "清空树脂刷体力本",
+   "expectedWorkflow": "workflow.task.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoDomainCustomizable/settings.json",
+     "symbol": "RunUntilResinDepleted/ResinUsageOrder"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/action-policy.md",
+     "section": "树脂与消耗品"
+    }
+   ],
+   "scope": "树脂种类与顺序是消耗性选择",
+   "requiredClarification": [
+    "用哪些树脂（浓缩/原粹/须臾/脆弱）",
+    "刷哪个本"
+   ],
+   "forbiddenActions": [
+    "默认启用脆弱树脂",
+    "替用户选副本"
+   ],
+   "expectedOutcome": "按确认的树脂顺序清体力并报告次数",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "自动秘境",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "combat-resin-02",
+   "domain": "combat-resin",
+   "utterance": "刷三次数秘境，用原粹就行",
+   "context": "",
+   "normalizedQuery": "指定副本次数与树脂类型运行自动秘境",
+   "expectedWorkflow": "workflow.task.run",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoDomain/AutoDomainTask.cs",
+     "symbol": "AutoDomainTask",
+     "note": "AutoDomainTask 参数"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoDomainCustomizable/settings.json",
+     "symbol": "OriginalResinAmount/DomainRoundNum"
+    },
+    {
+     "repo": "coverage",
+     "file": "docs/bgi/feature-coverage.json",
+     "symbol": "自动秘境独立任务"
+    }
+   ],
+   "scope": "次数与树脂明确，无需再问",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "树脂不足时擅自用脆弱补"
+   ],
+   "expectedOutcome": "运行三次并逐次报告结果与树脂消耗",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "自动秘境",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "combat-resin-03",
+   "domain": "combat-resin",
+   "utterance": "今天的周本打了",
+   "context": "",
+   "normalizedQuery": "执行周本讨伐",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/WeeklyBoss/README.md",
+     "section": "各周本注意事项"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/WeeklyBoss/manifest.json",
+     "symbol": "manifest.name:",
+     "note": "周本一条龙"
+    }
+   ],
+   "scope": "部分周本需自录键鼠、注意料理与复活检测限制",
+   "requiredClarification": [
+    "哪个周本",
+    "周本特殊要求（如博士键鼠路线）是否具备"
+   ],
+   "forbiddenActions": [
+    "宣称所有周本全自动无忧"
+   ],
+   "expectedOutcome": "按支持范围运行目标周本，特殊机制周本先说明前提",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "首领讨伐",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "combat-resin-04",
+   "domain": "combat-resin",
+   "utterance": "地脉花全刷了，树脂不够就停",
+   "context": "",
+   "normalizedQuery": "地脉花刷取且树脂不足时停止",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoLeyLineOutcrop/settings.json",
+     "symbol": "isResinExhaustionMode/leyLineOutcropType/country/useFragileResin"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoLeyLineOutcrop/README.md",
+     "section": "树脂不足时自动停止"
+    }
+   ],
+   "scope": "不启用脆弱/须臾，需配置组内使用且七天神像设置配合",
+   "requiredClarification": [
+    "地脉花类型与国家（璃月须弥路线不完整）"
+   ],
+   "forbiddenActions": [
+    "默认勾选脆弱树脂",
+    "宣称全地区路线完整"
+   ],
+   "expectedOutcome": "按设置运行，树脂不足即停并报告",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "地脉花",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "combat-resin-05",
+   "domain": "combat-resin",
+   "utterance": "BOSS 材料刷 5 次，别用树脂",
+   "context": "",
+   "normalizedQuery": "首领讨伐指定次数且不消耗树脂",
+   "expectedWorkflow": "workflow.task.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/首领讨伐一条龙/settings.json",
+     "symbol": "challengeName/challengeNum/resinNum"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/首领讨伐一条龙/README.md",
+     "section": "调度器与行走位要求"
+    }
+   ],
+   "scope": "原生自动首领讨伐独立任务或社区脚本均可；不消耗树脂为硬约束（resinNum=0）；键鼠路线依赖钟离行走位与无加速队伍",
+   "requiredClarification": [
+    "哪个首领"
+   ],
+   "forbiddenActions": [
+    "树脂参数默认给非零值"
+   ],
+   "expectedOutcome": "不耗树脂跑 5 次并报告；路线前提不满足时先说明",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "首领讨伐",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "combat-resin-06",
+   "domain": "combat-resin",
+   "utterance": "浓缩树脂先帮我合成一下",
+   "context": "",
+   "normalizedQuery": "前往合成台合成浓缩树脂",
+   "expectedWorkflow": "workflow.task.run",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/Common/Job/GoToCraftingBenchTask.cs",
+     "symbol": "GoToCraftingBenchTask",
+     "note": "Name=前往合成台"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "一条龙（合成浓缩树脂）"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoLeyLineOutcrop/settings.json",
+     "symbol": "isGoToSynthesizer（开发中标注）"
+    }
+   ],
+   "scope": "独立合成动作或一条龙组成部分",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "夸大开发中功能的效果"
+   ],
+   "expectedOutcome": "通过可用入口合成并报告数量",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "合成台",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "gather-life-01",
+   "domain": "gather-life",
+   "utterance": "把鱼都钓了，明天刷新的就算了",
+   "context": "",
+   "normalizedQuery": "钓鱼并跳过冷却中的垂钓点",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoFishing/AutoFishingTask.cs",
+     "symbol": "AutoFishingTask",
+     "note": "AutoFishingTask 当前点位垂钓"
+    },
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoFishing/AutoFishingTrigger.cs",
+     "symbol": "AutoFishingTrigger",
+     "note": "AutoFishingTrigger 实时触发"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoFishingTeyvat/settings.json",
+     "symbol": "fishing_cd/path_sort_area 默认全选"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoFishingTeyvat/README.md",
+     "section": "使用注意事项"
+    }
+   ],
+   "scope": "原生钓鱼任务是当前点位执行；跨地图逐点流程用社区脚本。筛选有默认值（全部）不追问；CD 仅自己世界；鹤观点位需奇特羽毛",
+   "requiredClarification": [
+    "筛选范围（全部还是指定地区/鱼）"
+   ],
+   "forbiddenActions": [
+    "跨天承诺明天自动继续"
+   ],
+   "expectedOutcome": "本次钓完可用点位并记录 CD，不承诺自动续跑",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "gather-life-02",
+   "domain": "gather-life",
+   "utterance": "木头砍到 2000",
+   "context": "",
+   "normalizedQuery": "伐木至指定数量上限",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoWood/AutoWoodTask.cs",
+     "symbol": "AutoWoodTask",
+     "note": "AutoWoodTask 伐木任务"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoWoodcutting-Pathing/manifest.json",
+     "symbol": "manifest.description",
+     "note": "默认砍伐至2000上限"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoWoodcutting-Pathing/settings.json",
+     "symbol": "woodInventory/woodInventoryNumber/hasItto"
+    }
+   ],
+   "scope": "原生伐木任务是当前点位执行，跨地图用社区脚本。默认全部支持木材；一斗保底按 20% 换算；王树瑞佑需装备",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "未装备王树瑞佑仍声称可砍满"
+   ],
+   "expectedOutcome": "砍到目标数量或说明受限原因",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "gather-life-03",
+   "domain": "gather-life",
+   "utterance": "做 20 份回血料理，再把我食材加工了",
+   "context": "",
+   "normalizedQuery": "自动烹饪指定料理与食材加工",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AEscoffier_chef/settings.json",
+     "symbol": "foodNum/selectRecovery/ingredientSelect/waitForFinish"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AEscoffier_chef/README.md",
+     "section": "分辨率限制与时延调整"
+    }
+   ],
+   "scope": "料理与数量按指定；食材不足策略需选择；需先调时延",
+   "requiredClarification": [
+    "具体料理名（可给类别）",
+    "食材不足时跳过还是等待"
+   ],
+   "forbiddenActions": [
+    "擅自用矿石加速消耗库存"
+   ],
+   "expectedOutcome": "按数量完成烹饪与加工并报告异常处理",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "gather-life-04",
+   "domain": "gather-life",
+   "utterance": "矿挖完今天的额度，半小时以内",
+   "context": "",
+   "normalizedQuery": "限时挖矿并按数量终止",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AbundantOre/settings.json",
+     "symbol": "target_amount/target_running_minutes"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AbundantOre/README.md",
+     "section": "队伍要求莉奈娅或诺艾尔"
+    }
+   ],
+   "scope": "地面矿需对应角色；可按区域矿种排除",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "队伍无对应角色仍硬跑地面矿"
+   ],
+   "expectedOutcome": "按时长/数量终止并汇总产量",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "gather-life-05",
+   "domain": "gather-life",
+   "utterance": "用莉奈娅把矿全清一遍",
+   "context": "队伍含莉奈娅",
+   "normalizedQuery": "莉奈娅挖矿一条龙",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/LinneaMining/README.md",
+     "section": "支持地区 挪德卡莱"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/LinneaMining/settings.json",
+     "symbol": "excludeRegions/partyName/targetRunningMinutes"
+    }
+   ],
+   "scope": "仅挪德卡莱；不建议带哥伦比娅",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "宣称全地区支持"
+   ],
+   "expectedOutcome": "在支持地区内清矿并报告",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "artifact-manage-01",
+   "domain": "artifact-manage",
+   "utterance": "背包里一到三星的垃圾圣遗物处理掉",
+   "context": "",
+   "normalizedQuery": "分解或销毁指定星级圣遗物",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoArtifactSalvage/AutoArtifactSalvageTask.cs",
+     "symbol": "AutoArtifactSalvageTask"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoArtifactsSalvageOrDestroy（1-4star）/settings.json",
+     "symbol": "operationType/includeOneStar~includeFourStar"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoArtifactsSalvageOrDestroy（1-4star）/manifest.json",
+     "symbol": "description"
+    }
+   ],
+   "scope": "不可逆消耗：分解与摧毁二选一，星级范围仅用户指定的",
+   "requiredClarification": [
+    "分解还是摧毁（销毁换摩拉不可恢复）"
+   ],
+   "forbiddenActions": [
+    "默认全选四星以下",
+    "把四星也带上"
+   ],
+   "expectedOutcome": "只处理确认的星级并报告数量",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "artifact-manage-02",
+   "domain": "artifact-manage",
+   "utterance": "这些狗粮全强化到 20",
+   "context": "用户已筛选背包",
+   "normalizedQuery": "批量强化圣遗物至满级",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/HolyRelicsUp/settings.json",
+     "symbol": "enableBatchUp/upMax/upMaxCount"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/HolyRelicsUp/README.md",
+     "section": "注意事项"
+    }
+   ],
+   "scope": "需背包已筛选未满级；语言识别敏感；素材消耗大",
+   "requiredClarification": [
+    "强化个数上限"
+   ],
+   "forbiddenActions": [
+    "未确认素材存量就无限强化"
+   ],
+   "expectedOutcome": "按个数与等级强化并报告完成数",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "artifact-manage-03",
+   "domain": "artifact-manage",
+   "utterance": "秘境刷完顺手把垃圾圣遗物分了",
+   "context": "",
+   "normalizedQuery": "秘境结束后自动分解圣遗物",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoDomainCustomizable/settings.json",
+     "symbol": "AutoArtifactSalvage/MaxArtifactStar"
+    }
+   ],
+   "scope": "挂在指定秘境任务上的收尾分解，星级上限需确认",
+   "requiredClarification": [
+    "分解星级上限"
+   ],
+   "forbiddenActions": [
+    "默认最高星级分解"
+   ],
+   "expectedOutcome": "任务链内完成刷取与分解，分别报告",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "artifact-manage-04",
+   "domain": "artifact-manage",
+   "utterance": "仓库材料爆了，帮我删到 999 以内，苹果别动",
+   "context": "",
+   "normalizedQuery": "爆仓材料清理并保留指定物品",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoBackpackCleaner/settings.json",
+     "symbol": "targetNumber/startNumber/endNumber/whiteNumbers/executingTypes"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoBackpackCleaner/README.md",
+     "section": "只支持删除材料和养成道具页的0-2星材料"
+    }
+   ],
+   "scope": "仅 0-2 星材料与养成道具页；白名单数量保护；1080p 适配限制",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "扩大到其他页签或更高星级",
+    "删除苹果等白名单物品"
+   ],
+   "expectedOutcome": "按起删/终止/白名单清理并报告删除项",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "artifact-manage-05",
+   "domain": "artifact-manage",
+   "utterance": "垃圾圣遗物摧毁换点摩拉",
+   "context": "",
+   "normalizedQuery": "摧毁圣遗物换取摩拉并统计差额",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/DestroyArtifactsForMora/settings.json",
+     "symbol": "number/oneStar~fourStar/moraDiff"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/DestroyArtifactsForMora/main.js",
+     "symbol": "notification.send 分解获得摩拉数量"
+    }
+   ],
+   "scope": "不可逆；星级范围与数量按用户指定",
+   "requiredClarification": [
+    "星级范围与摧毁数量"
+   ],
+   "forbiddenActions": [
+    "代选星级",
+    "夸大摩拉收益"
+   ],
+   "expectedOutcome": "摧毁后报告摩拉差额",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "tcg-music-01",
+   "domain": "tcg-music",
+   "utterance": "每周打牌的活帮我干了",
+   "context": "",
+   "normalizedQuery": "七圣召唤七日历练周常",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/七圣召唤七日历练全自动/settings.json",
+     "symbol": "defaultPartyName/overwritePartyName/passWord"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/七圣召唤七日历练全自动/main.js",
+     "symbol": "AutoGeniusInvokation"
+    },
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoGeniusInvokation/AutoGeniusInvokationTask.cs",
+     "symbol": "AutoGeniusInvokationTask",
+     "note": "AutoGeniusInvokationTask 对局自动化"
+    }
+   ],
+   "scope": "原生 AutoGeniusInvokationTask 打当前牌局；七日历练跨地图找对手用社区脚本。需两个指定牌组名、启动密码；无专用策略时用默认牌组",
+   "requiredClarification": [
+    "默认牌组名与临时牌组名",
+    "启动密码"
+   ],
+   "forbiddenActions": [
+    "编造牌组名",
+    "隐瞒云端统计上传行为"
+   ],
+   "expectedOutcome": "完成本周来客挑战并报告剩余次数",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "tcg-music-02",
+   "domain": "tcg-music",
+   "utterance": "邀约打牌那个帮我刷了",
+   "context": "",
+   "normalizedQuery": "七圣召唤角色邀约挑战",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoGeniusInvokation/AutoGeniusInvokationTask.cs",
+     "symbol": "AutoGeniusInvokationTask"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/七圣召唤角色邀约全自动/settings.json",
+     "symbol": "challengeNumber/letterNumber"
+    }
+   ],
+   "scope": "需持有邀请函或 1000 牌币，卡组需提前选好",
+   "requiredClarification": [
+    "挑战人数与持有邀请函数量"
+   ],
+   "forbiddenActions": [
+    "资源不足仍启动"
+   ],
+   "expectedOutcome": "按数量完成邀约对战并报告",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "tcg-music-03",
+   "domain": "tcg-music",
+   "utterance": "牌组熟练度有没有快点的刷法",
+   "context": "",
+   "normalizedQuery": "联机投降刷卡牌熟练度方案说明",
+   "expectedWorkflow": "guidance",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/TCGQuickProficiency/README.md",
+     "section": "使用说明（双账号投降）"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/TCGQuickProficiency/settings.json",
+     "symbol": "runMode/targetProficiency"
+    }
+   ],
+   "scope": "需要两个账号配合；存在连续投降的账号风险须告知",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "隐瞒账号风险直接开跑"
+   ],
+   "expectedOutcome": "说明方案、前提与风险，用户确认后再执行",
+   "discoverySurface": {
+    "entry": "guidance"
+   }
+  },
+  {
+   "id": "tcg-music-04",
+   "domain": "tcg-music",
+   "utterance": "放一下我那首.favorite 的曲子",
+   "context": "",
+   "normalizedQuery": "播放指定曲谱",
+   "expectedWorkflow": "workflow.music",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Config/MusicConfig.cs",
+     "symbol": "MusicConfig"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "遮罩、地图、音乐与通知"
+    }
+   ],
+   "scope": "音乐页曲谱播放",
+   "requiredClarification": [],
+   "forbiddenActions": [],
+   "expectedOutcome": "开始播放并支持暂停停止",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "音乐",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "tcg-music-05",
+   "domain": "tcg-music",
+   "utterance": "音游自动打一下",
+   "context": "",
+   "normalizedQuery": "自动音游任务",
+   "expectedWorkflow": "workflow.task.run",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoMusicGame/AutoMusicGameTask.cs",
+     "symbol": "AutoMusicGameTask"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "独立任务"
+    }
+   ],
+   "scope": "原生独立任务，当前版本实际提供为准",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "承诺全曲目满分"
+   ],
+   "expectedOutcome": "运行自动音游并报告结果",
+   "discoverySurface": {
+    "entry": "reference"
+   }
+  },
+  {
+   "id": "repo-subscribe-01",
+   "domain": "repo-subscribe",
+   "utterance": "把那个圣遗物强化脚本装上",
+   "context": "",
+   "normalizedQuery": "从仓库订阅安装指定脚本",
+   "expectedWorkflow": "workflow.repository",
+   "sourceAnchors": [
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "JavaScript、键鼠脚本与脚本仓库"
+    },
+    {
+     "repo": "coverage",
+     "file": "docs/bgi/feature-coverage.json",
+     "symbol": "bgi.subscribe_script_resources"
+    }
+   ],
+   "scope": "只订阅用户目标脚本，最小集合",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "顺手订阅整个分类",
+    "本机没有就说不存在"
+   ],
+   "expectedOutcome": "订阅落盘并回读 manifest 验证版本",
+   "discoverySurface": {
+    "entry": "repo.search",
+    "kind": "resource",
+    "query": "圣遗物批量强化"
+   }
+  },
+  {
+   "id": "repo-subscribe-02",
+   "domain": "repo-subscribe",
+   "utterance": "我订阅的路线怎么没更新",
+   "context": "",
+   "normalizedQuery": "已订阅资源自动更新设置",
+   "expectedWorkflow": "workflow.settings",
+   "sourceAnchors": [
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/guide-workflow.md",
+     "section": "AutoUpdateSubscribedScripts 示例"
+    }
+   ],
+   "scope": "脚本仓库设置项",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "手动改订阅文件冒充更新"
+   ],
+   "expectedOutcome": "开启启动时自动更新已订阅脚本并说明生效时机",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "自动更新",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "repo-subscribe-03",
+   "domain": "repo-subscribe",
+   "utterance": "你说没有的宝箱脚本，仓库里真没有吗",
+   "context": "之前未找到",
+   "normalizedQuery": "重新检索仓库宝箱类脚本候选",
+   "expectedWorkflow": "workflow.repository",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AIPC珍贵宝箱无限刷/manifest.json",
+     "symbol": "manifest.name:",
+     "note": "AutoInfinitePreciousChest"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AIPC珍贵宝箱无限刷/settings.json",
+     "symbol": "runTimes 默认50轮约250个宝箱"
+    }
+   ],
+   "scope": "按关键词再检索全仓候选，如实列出现有实现",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "凭'已知不存在'跳过检索",
+    "从一个脚本宣称全地图自主探索"
+   ],
+   "expectedOutcome": "列出仓库实际存在的宝箱类脚本与其点位范围",
+   "discoverySurface": {
+    "entry": "repo.search",
+    "kind": "resource",
+    "query": "宝箱"
+   }
+  },
+  {
+   "id": "repo-subscribe-04",
+   "domain": "repo-subscribe",
+   "utterance": "这个脚本升级了没，给我看下版本",
+   "context": "",
+   "normalizedQuery": "查询已安装脚本与仓库版本差异",
+   "expectedWorkflow": "workflow.repository",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoLeyLineOutcrop/main.js",
+     "symbol": "notification.send 发现新的脚本版本"
+    }
+   ],
+   "scope": "只读对比",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "未对比就断言已是最新"
+   ],
+   "expectedOutcome": "报告本机与仓库版本及是否需要更新",
+   "discoverySurface": {
+    "entry": "repo.search",
+    "kind": "resource",
+    "query": "脚本版本"
+   }
+  },
+  {
+   "id": "inventory-cd-01",
+   "domain": "inventory-cd",
+   "utterance": "看看我还缺多少甜甜花",
+   "context": "",
+   "normalizedQuery": "统计背包目标材料数量",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/背包材料统计/manifest.json",
+     "symbol": "manifest.description",
+     "note": "可统计背包养成道具素材数量"
+    }
+   ],
+   "scope": "只读统计",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "顺路开始采集"
+   ],
+   "expectedOutcome": "报告当前数量与目标差额",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "inventory-cd-02",
+   "domain": "inventory-cd",
+   "utterance": "缺的这些帮我采够",
+   "context": "刚统计完缺口",
+   "normalizedQuery": "按目标数量执行采集路径",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/背包材料统计/settings.json",
+     "symbol": "TargetCount/TargetresourceName/Pathing"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/背包材料统计/README.md",
+     "section": "脚本不自带路径文件需手动准备pathing"
+    }
+   ],
+   "scope": "需要用户自备 pathing 路径目录；队伍分组管理",
+   "requiredClarification": [
+    "目标数量",
+    "可用路径是否已备好"
+   ],
+   "forbiddenActions": [
+    "无路径时编造路线",
+    "临时现写采集 JS"
+   ],
+   "expectedOutcome": "采够目标或报告路径缺口",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "inventory-cd-03",
+   "domain": "inventory-cd",
+   "utterance": "CD 好了的材料自动跑一遍",
+   "context": "",
+   "normalizedQuery": "按材料刷新CD筛选采集",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/采集cd管理/README.md",
+     "section": "采集CD管理工具说明"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/CD-Aware-AutoGather/manifest.json",
+     "symbol": "manifest.description",
+     "note": "自动同步订阅任务并管理CD"
+    }
+   ],
+   "scope": "CD 是运行时筛选与记录，不是跨天计划",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "宣称明天会自动唤醒继续"
+   ],
+   "expectedOutcome": "本次跑完未在 CD 的路线并更新记录",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "inventory-cd-04",
+   "domain": "inventory-cd",
+   "utterance": "以后每天早上八点自动采一次",
+   "context": "",
+   "normalizedQuery": "跨天定时自动运行的可行性",
+   "expectedWorkflow": "guidance",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/采集cd管理/README.md",
+     "section": "按路径组顺序依次运行直到指定时间"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "一条龙"
+    }
+   ],
+   "scope": "BGI 无自带跨天唤醒；需电脑开着并用一条龙/配置组+外部触发",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "硬承诺跨天自动唤醒",
+    "不建新 JS 假装实现调度"
+   ],
+   "expectedOutcome": "说明现有能力边界与可行的组合方式",
+   "discoverySurface": {
+    "entry": "guidance"
+   }
+  },
+  {
+   "id": "inventory-cd-05",
+   "domain": "inventory-cd",
+   "utterance": "把订阅的特产路线同步过来采一遍，我两个号都算上",
+   "context": "",
+   "normalizedQuery": "同步订阅路线并多账号记录采集",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/CD-Aware-AutoGather/README.md",
+     "section": "使用前准备 订阅地图追踪"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/CD-Aware-AutoGather/settings.json",
+     "symbol": "selectByCategory/manualSetAccountName/partyName"
+    }
+   ],
+   "scope": "依赖已订阅的地图追踪；联机识别世界归属",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "未订阅就宣称已同步"
+   ],
+   "expectedOutcome": "按账号分别记录采集结果",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "inventory-cd-06",
+   "domain": "inventory-cd",
+   "utterance": "材料采集那个队自动换着用",
+   "context": "",
+   "normalizedQuery": "采集过程按材料自动切换合适队伍",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/CD-Aware-AutoGather/settings.json",
+     "symbol": "partyName/partyName2nd"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/CD-Aware-AutoGather/README.md",
+     "section": "采集过程自动切换合适的队伍"
+    }
+   ],
+   "scope": "脚本内首选+备选队伍机制",
+   "requiredClarification": [
+    "首选与备选队名"
+   ],
+   "forbiddenActions": [
+    "为自动换队新写 JS"
+   ],
+   "expectedOutcome": "配置两队后运行，按材料匹配切换",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "teapot-shop-redeem-01",
+   "domain": "teapot-shop-redeem",
+   "utterance": "洞天宝钱和好感领一下",
+   "context": "",
+   "normalizedQuery": "尘歌壶领取宝钱与好感奖励",
+   "expectedWorkflow": "workflow.task.run",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/Common/Job/GoToSereniteaPotTask.cs",
+     "symbol": "GoToSereniteaPotTask",
+     "note": "Name=领取尘歌壶奖励"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/尘歌壶一条龙/settings.json",
+     "symbol": "route/skipCharacterReward/skipTreasureReward"
+    }
+   ],
+   "scope": "需进入尘歌壶路线配置（方向+时长），可跳过项按需勾",
+   "requiredClarification": [
+    "阿圆路线是否已配置"
+   ],
+   "forbiddenActions": [],
+   "expectedOutcome": "领取完成并报告；路线未配置时先说明",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "尘歌壶",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "teapot-shop-redeem-02",
+   "domain": "teapot-shop-redeem",
+   "utterance": "商店的树脂和祝圣精华买了",
+   "context": "",
+   "normalizedQuery": "购买指定商品",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/自动购买商品/settings.json",
+     "symbol": "foodsToBuy/userName"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/自动购买商品/README.md",
+     "section": "商人与商品支持表"
+    }
+   ],
+   "scope": "只买指定商品；刷新周期与背包上限处理按脚本机制",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "按脚本默认清单扩大购买",
+    "买用户没点名的商品"
+   ],
+   "expectedOutcome": "购买指定商品并报告失败项",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "teapot-shop-redeem-03",
+   "domain": "teapot-shop-redeem",
+   "utterance": "去铁匠铺把矿锻了",
+   "context": "",
+   "normalizedQuery": "自动锻造魔矿",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/铁匠铺/main.js",
+     "symbol": "notification 今日已无法锻造"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/铁匠铺/README.md",
+     "section": "矿石配置说明"
+    }
+   ],
+   "scope": "受每日锻造限额与材料存量限制",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "超出限额反复尝试"
+   ],
+   "expectedOutcome": "锻造至限额或材料不足即停并报告",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "teapot-shop-redeem-04",
+   "domain": "teapot-shop-redeem",
+   "utterance": "新的兑换码用一下",
+   "context": "",
+   "normalizedQuery": "自动使用兑换码",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoCode/manifest.json",
+     "symbol": "manifest.description",
+     "note": "仅支持国服"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoCode/README.md",
+     "section": "使用BGI提供的兑换码列表"
+    }
+   ],
+   "scope": "仅国服；公共码走 BGI 列表，专属码需用户提供",
+   "requiredClarification": [
+    "账号所在服务器"
+   ],
+   "forbiddenActions": [
+    "国际服仍尝试",
+    "编造兑换码"
+   ],
+   "expectedOutcome": "兑换可用码并报告结果与截止情况",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "teapot-shop-redeem-05",
+   "domain": "teapot-shop-redeem",
+   "utterance": "月卡和邮件都领了",
+   "context": "",
+   "normalizedQuery": "领取月卡与邮件奖励",
+   "expectedWorkflow": "workflow.task.run",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/Common/Job/BlessingOfTheWelkinMoonTask.cs",
+     "symbol": "BlessingOfTheWelkinMoonTask",
+     "note": "Name=自动点击空月祝福"
+    },
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/Common/Job/ClaimMailRewardsTask.cs",
+     "symbol": "ClaimMailRewardsTask",
+     "note": "Name=领取邮件奖励"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/SkipMonthlyCard/main.js",
+     "symbol": "等待点击月卡弹窗"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "一条龙（邮件）"
+    }
+   ],
+   "scope": "弹窗领取类轻量任务",
+   "requiredClarification": [],
+   "forbiddenActions": [],
+   "expectedOutcome": "领取完成并确认无残留弹窗",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "领取邮件",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "teapot-shop-redeem-06",
+   "domain": "teapot-shop-redeem",
+   "utterance": "尘歌壶里顺手把饭做了再买点东西",
+   "context": "",
+   "normalizedQuery": "尘歌壶组合流程：烹饪加购买",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/尘歌壶一条龙/settings.json",
+     "symbol": "cookingRoute/itemsToBuy/execute_Week/exchange_Week"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/尘歌壶一条龙/manifest.json",
+     "symbol": "description"
+    }
+   ],
+   "scope": "组合流程一次运行；星期可选",
+   "requiredClarification": [
+    "烹饪与购买路线是否已配置"
+   ],
+   "forbiddenActions": [
+    "路线缺失时盲跑"
+   ],
+   "expectedOutcome": "壶内完成做饭与购买并报告",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "character-development-01",
+   "domain": "character-development",
+   "utterance": "把新抽的角色练起来",
+   "context": "",
+   "normalizedQuery": "角色养成材料刷取",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/角色养成一条龙/README.md",
+     "section": "使用方法（米游社养成计算器总量）"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/角色养成一条龙/main.js",
+     "symbol": "AutoDomain/AutoFight/switchParty"
+    }
+   ],
+   "scope": "需用户给目标材料总量（米游社方案）；中途打断会失真",
+   "requiredClarification": [
+    "目标材料总量清单",
+    "战斗队伍与副本配置"
+   ],
+   "forbiddenActions": [
+    "替用户估算培养方案",
+    "数量未知就开跑"
+   ],
+   "expectedOutcome": "按清单刷到指定数量并逐项报告",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "character-development-02",
+   "domain": "character-development",
+   "utterance": "天赋书还差六个，帮我刷够",
+   "context": "",
+   "normalizedQuery": "按数量刷取天赋材料",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/角色养成一条龙/main.js",
+     "symbol": "notification 天赋书刷取失败"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoDomainCustomizable/settings.json",
+     "symbol": "TargetTalentMaterialName 互斥限制"
+    }
+   ],
+   "scope": "素材本按星期开放；三类素材选项互斥",
+   "requiredClarification": [
+    "哪个天赋书",
+    "战斗队伍"
+   ],
+   "forbiddenActions": [
+    "未开放日硬刷"
+   ],
+   "expectedOutcome": "刷够数量并报告树脂消耗",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "character-development-03",
+   "domain": "character-development",
+   "utterance": "按我排的计划把体力都安排上",
+   "context": "",
+   "normalizedQuery": "按计划表自动分配体力刷本",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoPlan/README.md",
+     "section": "功能说明与配置项"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoPlan/settings.json",
+     "symbol": "run_config/loop_plan/retry_count"
+    }
+   ],
+   "scope": "计划语法为 队伍|秘境|轮数|星期|树脂顺序；循环到体力尽可选",
+   "requiredClarification": [
+    "计划内容或配置来源"
+   ],
+   "forbiddenActions": [
+    "替用户编造计划表"
+   ],
+   "expectedOutcome": "按计划逐项执行并汇总异常",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "character-development-04",
+   "domain": "character-development",
+   "utterance": "周本材料那个角色突破的都刷一遍",
+   "context": "",
+   "normalizedQuery": "批量讨伐养成材料首领",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/批量讨伐角色养成材料BOSS/manifest.json",
+     "note": "目录存在；本轮未逐行读源码"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/首领讨伐一条龙/settings.json",
+     "symbol": "challengeName/challengeNum"
+    }
+   ],
+   "scope": "按首领列表循环；树脂使用按指定",
+   "requiredClarification": [
+    "首领范围与树脂策略"
+   ],
+   "forbiddenActions": [
+    "默认消耗树脂"
+   ],
+   "expectedOutcome": "按列表讨伐并汇总材料",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机优先，未命中转 repo.search 按脚本名检索"
+   }
+  },
+  {
+   "id": "logs-stop-recovery-01",
+   "domain": "logs-stop-recovery",
+   "utterance": "刚才那个脚本卡住了，停掉",
+   "context": "有正在运行的任务",
+   "normalizedQuery": "停止当前运行任务",
+   "expectedWorkflow": "workflow.task.stop",
+   "sourceAnchors": [
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/SKILL.md",
+     "section": "停止任务"
+    }
+   ],
+   "scope": "等待中 Job 用 cancel；已交接的启动 Job 用 stop_current_task 并核对原目标",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "停错目标或全停其他任务"
+   ],
+   "expectedOutcome": "目标任务停止并确认游戏内状态",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "停止任务",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "logs-stop-recovery-02",
+   "domain": "logs-stop-recovery",
+   "utterance": "为什么又失败了，看看日志",
+   "context": "",
+   "normalizedQuery": "读取任务日志定位失败原因",
+   "expectedWorkflow": "workflow.logs",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/Common/Job/ClaimMailRewardsTask.cs",
+     "symbol": "Logger.LogError",
+     "note": "Logger.LogError 领取邮件奖励异常"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/troubleshooting.md",
+     "section": "日志排查"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "调度器（日志分析）"
+    }
+   ],
+   "scope": "按需读日志诊断",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "读原始错误前就重试"
+   ],
+   "expectedOutcome": "给出失败原因与对应修正建议",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "日志",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "logs-stop-recovery-03",
+   "domain": "logs-stop-recovery",
+   "utterance": "把刚才改的那些设置撤回去",
+   "context": "",
+   "normalizedQuery": "恢复历史设置到之前版本",
+   "expectedWorkflow": "workflow.settings.recovery",
+   "sourceAnchors": [
+    {
+     "repo": "bridge",
+     "file": "bgi-bridge/managed/Tools/CatalogTools.cs",
+     "symbol": "bgi.preview_setting_restore 预览恢复"
+    },
+    {
+     "repo": "coverage",
+     "file": "docs/bgi/feature-coverage.json",
+     "symbol": "bgi.preview_setting_restore"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "全局设置"
+    }
+   ],
+   "scope": "预览差异后提交恢复，保留无关后改",
+   "requiredClarification": [
+    "恢复范围（哪些字段）"
+   ],
+   "forbiddenActions": [
+    "不预览直接整体覆盖"
+   ],
+   "expectedOutcome": "按所选字段恢复并保留回退记录",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "恢复",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "logs-stop-recovery-04",
+   "domain": "logs-stop-recovery",
+   "utterance": "组里跑一半停了，接着来",
+   "context": "",
+   "normalizedQuery": "配置组从指定位置继续运行",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Core/Script/Group/ScriptGroup.cs",
+     "symbol": "ScriptGroup",
+     "note": "ScriptGroup 配置组"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "调度器、配置组与任务进度（从指定位置继续）"
+    }
+   ],
+   "scope": "从断点任务继续，不重头跑",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "重跑已完成步骤"
+   ],
+   "expectedOutcome": "从断点继续并报告剩余完成情况",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "本机组定位后续跑"
+   }
+  },
+  {
+   "id": "notification-windup-01",
+   "domain": "notification-windup",
+   "utterance": "跑完在我 QQ 上说一声",
+   "context": "",
+   "normalizedQuery": "配置任务完成通知到QQ渠道",
+   "expectedWorkflow": "workflow.notifications",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Service/Notification/NotificationEventSubscriptionHelper.cs",
+     "symbol": "ShouldSendNotification",
+     "note": "空订阅=所有事件放行；订阅为全局，ScriptGroupConfig 无 per-group 通知字段"
+    },
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/Service/Notification/NotificationConfig.cs",
+     "symbol": "NotificationConfig",
+     "note": "NotificationConfig 渠道配置"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "遮罩、地图、音乐与通知"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoLeyLineOutcrop/settings.json",
+     "symbol": "isNotification 通过BGI通知系统发送"
+    }
+   ],
+   "scope": "通知订阅是全局作用域；已绑定渠道自读不重复问；空订阅=全部事件",
+   "requiredClarification": [
+    "渠道绑定信息"
+   ],
+   "forbiddenActions": [
+    "擅自增加无关渠道",
+    "擅自把订阅扩成全部事件",
+    "截图或自动测试内容外发",
+    "把内容发到未指定的渠道"
+   ],
+   "expectedOutcome": "渠道配置并测试发送成功",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "通知",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "notification-windup-02",
+   "domain": "notification-windup",
+   "utterance": "跑完了，把游戏关了吧",
+   "context": "任务刚结束",
+   "normalizedQuery": "退出原神游戏",
+   "expectedWorkflow": "workflow.game-ready",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/ExitGameMultipleMode/settings.json",
+     "symbol": "Modes: Alt+F4/完全退出游戏/完全退出游戏到桌面"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/ExitGameMultipleMode/main.js",
+     "symbol": "QuitGame/ExitGame"
+    }
+   ],
+   "scope": "只退原神，不碰电脑电源",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "用电源脚本注销或关电脑",
+    "未确认就强制杀进程丢进度"
+   ],
+   "expectedOutcome": "游戏正常退出并确认",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "退出游戏",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "notification-windup-03",
+   "domain": "notification-windup",
+   "utterance": "都跑完了，电脑关了吧",
+   "context": "",
+   "normalizedQuery": "执行计算机关机",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/计算机电源操作/main.js",
+     "symbol": "PowerOptions 关机分支"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/计算机电源操作/settings.json",
+     "symbol": "PowerOptions 默认注销"
+    }
+   ],
+   "scope": "明确关机后执行；默认值是注销不可沿用",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "把'关游戏'理解成关电脑",
+    "脚本默认注销直接跑"
+   ],
+   "expectedOutcome": "电脑按关机执行，与用户确认过方式",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "计算机电源操作脚本"
+   }
+  },
+  {
+   "id": "notification-windup-04",
+   "domain": "notification-windup",
+   "utterance": "两个都跑完就收尾关掉",
+   "context": "刚编排两组后台运行",
+   "normalizedQuery": "批量运行完成后关闭游戏收尾",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "bridge",
+     "file": "bgi-bridge/managed/Tools/ScriptGroupTools.cs",
+     "symbol": "run_script_groups closeGameAfter"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/action-policy.md",
+     "section": "closeGameAfter"
+    }
+   ],
+   "scope": "收尾=关原神；一次 run_script_groups(closeGameAfter) 统一编排",
+   "requiredClarification": [
+    "用户若语境含糊：关游戏还是关电脑"
+   ],
+   "forbiddenActions": [
+    "默认追加电源动作"
+   ],
+   "expectedOutcome": "已提交含 closeGameAfter 的宿主计划；游戏关闭以计划结果为准",
+   "discoverySurface": {
+    "entry": "user.read",
+    "note": "读现有组后编排收尾"
+   }
+  },
+  {
+   "id": "notification-windup-05",
+   "domain": "notification-windup",
+   "utterance": "跑完领个奖再停",
+   "context": "",
+   "normalizedQuery": "编辑配置组把领奖添加到末尾",
+   "expectedWorkflow": "workflow.group.edit",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/Common/Job/GoToAdventurersGuildTask.cs",
+     "symbol": "GoToAdventurersGuildTask",
+     "note": "Name=前往冒险家协会领取奖励"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/一条龙领奖无树脂(用于周本、首领刷取)+尘歌壶/manifest.json",
+     "symbol": "manifest.description",
+     "note": "凯瑟琳领奖派遣纪行尘歌壶"
+    }
+   ],
+   "scope": "先组编辑把领奖脚本排到流程尾部，不造新 JS",
+   "requiredClarification": [
+    "领奖范围（凯瑟琳/派遣/纪行）"
+   ],
+   "forbiddenActions": [
+    "把领奖扩大成完成委托"
+   ],
+   "expectedOutcome": "流程尾部执行领奖并报告",
+   "discoverySurface": {
+    "entry": "user.read",
+    "note": "读现有组后编辑"
+   }
+  },
+  {
+   "id": "remote-power-01",
+   "domain": "remote-power",
+   "utterance": "我在外面，想看看电脑上跑得怎么样",
+   "context": "",
+   "normalizedQuery": "远程查看运行状态（桌面分身）",
+   "expectedWorkflow": "workflow.child-session",
+   "sourceAnchors": [
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "命令行、桌面分身与开发能力"
+    }
+   ],
+   "scope": "桌面分身/子会话能力",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "承诺任意网络环境可连"
+   ],
+   "expectedOutcome": "建立或连接分身会话供远程查看",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "分身",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "remote-power-02",
+   "domain": "remote-power",
+   "utterance": "挂完机让电脑睡一会儿",
+   "context": "",
+   "normalizedQuery": "任务完成后使电脑睡眠",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/计算机电源操作/settings.json",
+     "symbol": "PowerOptions 睡眠"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/计算机电源操作/main.js",
+     "symbol": "keyPress S 睡眠分支"
+    }
+   ],
+   "scope": "明确睡眠意图后配置",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "用注销代替睡眠",
+    "默认值直接跑"
+   ],
+   "expectedOutcome": "完成后电脑进入睡眠",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "计算机电源操作脚本"
+   }
+  },
+  {
+   "id": "remote-power-03",
+   "domain": "remote-power",
+   "utterance": "帮我切到小号",
+   "context": "",
+   "normalizedQuery": "切换游戏账号",
+   "expectedWorkflow": "workflow.resource.run",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/SwitchAccountMultipleMode/README.md",
+     "section": "使用前准备与使用方式"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/SwitchAccountMultipleMode/main.js",
+     "symbol": "notification 触发人机验证请手动登录"
+    }
+   ],
+   "scope": "账号密码本地保存；B服/国际服支持不完整；可能触发人机验证",
+   "requiredClarification": [
+    "目标账号与登录方式",
+    "服务器"
+   ],
+   "forbiddenActions": [
+    "索要或外传账号密码",
+    "验证失败时反复重试"
+   ],
+   "expectedOutcome": "切换成功或明确报出人工介入原因",
+   "discoverySurface": {
+    "entry": "user.resolve",
+    "note": "切换账号脚本"
+   }
+  },
+  {
+   "id": "remote-power-04",
+   "domain": "remote-power",
+   "utterance": "防止挂机时电脑休眠",
+   "context": "",
+   "normalizedQuery": "检查并设置挂机期间阻止休眠",
+   "expectedWorkflow": "workflow.settings",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/KeepAwakeCountdown/manifest.json",
+     "note": "目录存在，本轮未逐行读"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "启动与运行环境"
+    }
+   ],
+   "scope": "先核原生当前任务的执行状态/阻止休眠相关设置，再考虑现成 KeepAwake 类脚本；不默认加守护进程",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "不核设置就装守护脚本",
+    "改系统电源计划不留恢复说明"
+   ],
+   "expectedOutcome": "配置保持唤醒并在结束后恢复原策略",
+   "discoverySurface": {
+    "entry": "reference"
+   }
+  },
+  {
+   "id": "story-chest-01",
+   "domain": "story-chest",
+   "utterance": "剧情帮我全自动过一下，这个任务有脚本支持",
+   "context": "用户确认目标剧情在支持列表",
+   "normalizedQuery": "在仓库检索并订阅主线剧情流程",
+   "expectedWorkflow": "workflow.repository",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoStoryLoader/settings.json",
+     "symbol": "process_selector/disclaimer_accepted/team"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoStoryLoader/main.js",
+     "symbol": "RealtimeTimer AutoSkip/AutoPick/AutoFight"
+    }
+   ],
+   "scope": "Loader 只加载已有流程文件，先 repo.search 目标剧情是否有现成流程/资料；有再谈加载执行，没有如实说明缺口",
+   "requiredClarification": [
+    "目标剧情",
+    "战斗队伍名"
+   ],
+   "forbiddenActions": [
+    "无现成流程时宣称支持",
+    "自编流程内容",
+    "把README条款当产品授权门槛",
+    "未检索就断言不存在"
+   ],
+   "expectedOutcome": "按支持的剧情流程执行并报告完成段",
+   "discoverySurface": {
+    "entry": "repo.search",
+    "kind": "resource"
+   }
+  },
+  {
+   "id": "story-chest-02",
+   "domain": "story-chest",
+   "utterance": "邀约任务能不能也自动",
+   "context": "",
+   "normalizedQuery": "邀约事件自动化支持范围",
+   "expectedWorkflow": "guidance",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoSkip/AutoSkipConfig.cs",
+     "symbol": "AutoSkipConfig",
+     "note": "自动剧情实时配置"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "实时任务（自动邀约）"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoStoryLoader/README.md",
+     "section": "工具仅提供技术框架"
+    }
+   ],
+   "scope": "实时邀约辅助与剧情加载器分开评估",
+   "requiredClarification": [
+    "指实时辅助还是完整邀约流程"
+   ],
+   "forbiddenActions": [
+    "一刀切说邀约完全不能自动"
+   ],
+   "expectedOutcome": "分别说明实时邀约设置与加载器支持范围",
+   "discoverySurface": {
+    "entry": "guidance"
+   }
+  },
+  {
+   "id": "story-chest-03",
+   "domain": "story-chest",
+   "utterance": "帮我刷宝箱，找个能无限刷的",
+   "context": "",
+   "normalizedQuery": "在脚本仓库检索并导入宝箱脚本候选",
+   "expectedWorkflow": "workflow.repository",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AIPC珍贵宝箱无限刷/settings.json",
+     "symbol": "runTimes/disableHealHP/mora"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/AIPC珍贵宝箱无限刷/main.js",
+     "symbol": "RealtimeTimer AutoPick forceInteraction"
+    }
+   ],
+   "scope": "限仓库现有特定点位循环脚本的范围",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "宣称全地图自主探索宝箱",
+    "未检索仓库就断言不存在"
+   ],
+   "expectedOutcome": "列出实际候选脚本与其点位/轮数范围，用户选择后再跑",
+   "discoverySurface": {
+    "entry": "repo.search",
+    "kind": "resource"
+   }
+  },
+  {
+   "id": "story-chest-04",
+   "domain": "story-chest",
+   "utterance": "主线自动做会不会封号",
+   "context": "",
+   "normalizedQuery": "自动化使用风险说明",
+   "expectedWorkflow": "guidance",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/AutoStoryLoader/README.md",
+     "section": "使用风险与责任限制"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/TCGQuickProficiency/README.md",
+     "section": "账号风险提示"
+    }
+   ],
+   "scope": "如实转述仓库声明，不打包票",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "承诺零风险",
+    "夸大封号概率吓退用户"
+   ],
+   "expectedOutcome": "客观说明风险声明与社区共识，用户自行决定",
+   "discoverySurface": {
+    "entry": "guidance"
+   }
+  },
+  {
+   "id": "version-boundary-01",
+   "domain": "version-boundary",
+   "utterance": "我这个版本支持自动钓鱼吗",
+   "context": "",
+   "normalizedQuery": "当前版本功能可用性核对",
+   "expectedWorkflow": "guidance",
+   "sourceAnchors": [
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoFishing/AutoFishingTaskParam.cs",
+     "symbol": "AutoFishingTaskParam"
+    },
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/ViewModel/Pages/TaskSettingsPageViewModel.cs",
+     "symbol": "TaskSettingsPageViewModel",
+     "note": "独立任务页"
+    },
+    {
+     "repo": "native",
+     "file": "BetterGenshinImpact/GameTask/AutoFishing/AutoFishingTask.cs",
+     "symbol": "AutoFishingTask"
+    },
+    {
+     "repo": "coverage",
+     "file": "docs/bgi/feature-coverage.json",
+     "section": "counts"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/feature-map.md",
+     "section": "独立任务"
+    }
+   ],
+   "scope": "按当前契约与版本核对，不按数量宣传",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "拿静态覆盖数当实测承诺"
+   ],
+   "expectedOutcome": "说明当前版本提供的钓鱼能力与入口",
+   "discoverySurface": {
+    "entry": "guidance"
+   }
+  },
+  {
+   "id": "version-boundary-02",
+   "domain": "version-boundary",
+   "utterance": "你说能用，是真跑过还是看代码猜的",
+   "context": "",
+   "normalizedQuery": "结论来源与验证程度说明",
+   "expectedWorkflow": "guidance",
+   "sourceAnchors": [
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/guide-workflow.md",
+     "section": "知识查询顺序"
+    },
+    {
+     "repo": "coverage",
+     "file": "docs/bgi/feature-coverage.json",
+     "section": "sourceRevision"
+    }
+   ],
+   "scope": "如实区分静态证据与实机运行",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "把资料检查说成游戏验证"
+   ],
+   "expectedOutcome": "说明证据类型（源码/文档/实跑）与未验证部分",
+   "discoverySurface": {
+    "entry": "guidance"
+   }
+  },
+  {
+   "id": "version-boundary-03",
+   "domain": "version-boundary",
+   "utterance": "这脚本是英文的看不懂，支持中文吗",
+   "context": "",
+   "normalizedQuery": "脚本界面语言支持情况",
+   "expectedWorkflow": "workflow.javascript",
+   "sourceAnchors": [
+    {
+     "repo": "scripts",
+     "file": "repo/js/HolyRelicsUp/settings.json",
+     "symbol": "refreshSettingsByLanguage/language"
+    },
+    {
+     "repo": "scripts",
+     "file": "repo/js/HolyRelicsUp/README.md",
+     "section": "多语言说明"
+    }
+   ],
+   "scope": "按具体脚本核实语言支持",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "未核实就承诺支持"
+   ],
+   "expectedOutcome": "说明该脚本实际语言支持与切换方式",
+   "discoverySurface": {
+    "entry": "repo.search",
+    "kind": "code"
+   }
+  },
+  {
+   "id": "cross-01",
+   "domain": "one-dragon",
+   "utterance": "日常全套来一遍，跑完关游戏，有情况QQ找我",
+   "context": "",
+   "normalizedQuery": "一条龙执行加关闭游戏收尾加QQ通知",
+   "expectedWorkflow": "workflow.one-dragon",
+   "sourceAnchors": [
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/action-policy.md",
+     "section": "closeGameAfter 与通知"
+    },
+    {
+     "repo": "coverage",
+     "file": "docs/bgi/feature-coverage.json",
+     "symbol": "bgi.run_one_dragon"
+    }
+   ],
+   "scope": "一条龙+收尾关游戏+通知，一次编排",
+   "requiredClarification": [
+    "QQ 渠道是否已绑定",
+    "完成后操作确认"
+   ],
+   "forbiddenActions": [
+    "收尾升级成关电脑",
+    "通知外发无关内容"
+   ],
+   "expectedOutcome": "已提交含关闭游戏收尾与通知的一条龙计划；三项结果按计划回执与通知渠道回报，不承诺即时完成",
+   "discoverySurface": {
+    "entry": "feature.search",
+    "query": "一条龙",
+    "kind": "workflow"
+   }
+  },
+  {
+   "id": "cross-02",
+   "domain": "combat-resin",
+   "utterance": "秘境、周本、地脉按这个顺序跑，完了把体力 Reports 发我",
+   "context": "用户消息里 Reports 为口误",
+   "normalizedQuery": "多任务顺序编排与结果通知",
+   "expectedWorkflow": "workflow.group.edit",
+   "sourceAnchors": [
+    {
+     "repo": "bridge",
+     "file": "bgi-bridge/managed/Tools/ScriptGroupTools.cs",
+     "symbol": "run_script_groups 顺序编排"
+    },
+    {
+     "repo": "plugin",
+     "file": "skills/bgi-assistant/references/action-policy.md",
+     "section": "多组后台批量"
+    }
+   ],
+   "scope": "先 group.edit 建立顺序计划（或确认已有组顺序），再 resource.run 一次 run_script_groups 后台交接",
+   "requiredClarification": [],
+   "forbiddenActions": [
+    "向用户索要字段格式",
+    "暴露英文实现名"
+   ],
+   "expectedOutcome": "报告已提交宿主的顺序计划与后台交接；实际完成以计划结果为准",
+   "discoverySurface": {
+    "entry": "user.read",
+    "note": "读现有配置组后编辑"
+   }
+  }
+ ]
+}

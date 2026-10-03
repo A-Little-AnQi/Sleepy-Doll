@@ -42,10 +42,10 @@
 | 内容 | 优先路径 |
 | --- | --- |
 | 仓库树、节点、描述和更新时间 | `repo.json` |
-| 地图追踪 | `repo/pathing/<分类>/<目标>/` |
-| JavaScript 脚本 | `repo/js/<脚本>/manifest.json`、`settings.json`、`README.md`、`main.js` 与引用模块 |
-| 战斗策略 | `repo/combat/` |
-| 七圣召唤策略 | `repo/tcg/` |
+| 地图追踪 | `pathing/<分类>/<目标>/` |
+| JavaScript 脚本 | `js/<脚本>/manifest.json`、`settings.json`、`README.md`、`main.js` 与引用模块 |
+| 战斗策略 | `combat/` |
+| 七圣召唤策略 | `tcg/` |
 | BetterGI JS 可用 API | `bettergi.d.ts` |
 
 地图追踪选择先看 `bgi.user.resolve` 返回的父节点与直接子目录名。不要读取完整候选父节点下的全部叶子元数据。只有 `verdict=create` 且必须区分互斥作者包时，才读取该父节点的一份 README。

@@ -11,7 +11,7 @@
 
 ## 知识查询顺序
 
-具体脚本或 JS 字段的问题优先搜索脚本标题，读该脚本的 settings、README 和必要源码，不先查本体设置与用户的一条龙配置。其他问题类别不清楚时用 [feature-map.md](feature-map.md) 确定功能域，并按 [source-routing.md](source-routing.md) 定位路径。feature-map 只供定位，不复述给用户。与现场无关的讲解不要走第 1 步。按问题所属对象选择以下来源：
+具体脚本或 JS 字段的问题优先搜索脚本标题，读该脚本的 settings、README 和必要源码，不先查本体设置与用户的一条龙配置。用户用口语描述日常目标（"清体力""垃圾圣遗物处理了""收尾关掉"）时，先用 [user-goals.md](user-goals.md) 选域并对齐取舍，再回本流程取来源。其他问题类别不清楚时用 [feature-map.md](feature-map.md) 确定功能域，并按 [source-routing.md](source-routing.md) 定位路径。feature-map 只供定位，不复述给用户。与现场无关的讲解不要走第 1 步。按问题所属对象选择以下来源：
 
 1. 当前 BGI 状态、配置和 `bgi.api.describe`：判断当前版本真实可用的操作、当前值和参数；仅当答案取决于现场值时使用；
 2. `bettergi-docs/src` 官方用户文档：回答界面路径、使用前提、选项含义和常见问题；

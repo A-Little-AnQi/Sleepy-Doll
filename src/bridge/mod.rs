@@ -1,7 +1,7 @@
 //! 与 BetterGI 的接触面：桥的客户端、工具，以及桥进程的生命周期。
 
 pub mod control;
-pub(crate) mod features;
+pub mod features;
 pub(crate) mod origin;
 pub mod recovery;
 pub(crate) mod resolve;
@@ -493,7 +493,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ("bgi.api.read", "读取 BetterGI 状态", "调用刚通过 api.describe 确认的只读接口。用于读取宿主当前设置或诊断；不用于读取 User 文件。arguments 必须满足该接口 inputSchema。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"无参数接口传空对象"}},"required":["methodId","arguments"],"additionalProperties":false}), {
             Arc::new(move |_: &Value| Err(Error::Tool("该接口必须通过运行时的契约检查调用".into()))) as BridgeToolFn
         }),
-        ("bgi.api.invoke", "执行 BetterGI 操作", "只调用本次运行已经 api.describe 的写接口。直接改资源／设置／领域数据优先，界面操作优先级最低。删除路线或脚本先 inspect_local_resource，再调用 delete_local_resource；不先选中、右键、导航或展开树。配置组 run_script_group 默认 waitForCompletion=false，只等启动交接，不等待整组；仅用户明确要等结果或后续步骤才 true。游戏启动后的加载用 wait_ready 阻塞等待，不让模型循环查状态。运行时等待期间不调用模型，取得交接证据后给最终总结并结束，不再 job.get、查状态或日志，也不重跑；明确要求等待／后续步骤／排错时才继续。completed 不自动表示业务成功。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"严格满足本次已读取的 inputSchema"}},"required":["methodId","arguments"],"additionalProperties":false}), {
+        ("bgi.api.invoke", "执行 BetterGI 操作", "只调用本次运行已经 api.describe 的写接口。直接改资源／设置／领域数据优先，界面操作优先级最低。删除路线或脚本先 inspect_local_resource，再调用 delete_local_resource；不先选中、右键、导航或展开树。多组运行及关闭游戏收尾先统一计划一次 bgi.run_script_groups，默认 waitForCompletion=false 后台交接；同计划的后续步骤不是用户要求等待。仅明确要求监控、等结果或汇报完成才 true；普通请求直接规划并运行，不额外问是否守护，游戏运行期间不查 Job、日志或状态。游戏启动后的加载用 wait_ready 阻塞等待，不让模型循环查状态。运行时等待期间不调用模型，取得交接证据后给最终总结并结束，不再 job.get、查状态或日志，也不重跑；明确要求等待／后续步骤／排错时才继续。completed 不自动表示业务成功。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"严格满足本次已读取的 inputSchema"}},"required":["methodId","arguments"],"additionalProperties":false}), {
             Arc::new(move |_: &Value| Err(Error::Tool("该接口必须通过运行时的授权与 Job 跟踪调用".into()))) as BridgeToolFn
         }),
         (
@@ -551,10 +551,10 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         (
             "bgi.user.read",
             "读取配置文件",
-            "读取 BetterGI User 目录中的一个文本文件。JSON 可用 keys 投影所需顶层字段；查询配置组通常读取 name、index、projects，只有修改整个文件时才读取全文。多个独立文件应在同一轮并行读取。",
+            "读取 BetterGI User 目录中的一个文本文件。JSON 顶层字段按名字用 keys 投影：配置组的 name、index、projects，以及队伍、策略、拾取、恢复等设置的 config，都按名投影所需字段即可，不必读全文。已有确切 path 的独立文件直接读取。droppedKeys 只是本轮未请求的字段，不代表它们不存在。修改文件前必须先读过完整文件内容并在写回时保留其中的未知字段，提交写入前完整 SHA256。多个独立文件应在同一轮并行读取。",
             json!({"type":"object","properties":{
                 "path":{"type":"string","description":"由 user.list 或已读文件得到的相对 User 路径"},
-                "keys":{"type":"array","items":{"type":"string"},"description":"JSON 顶层字段投影；修改文件时省略以读取全文"}
+                "keys":{"type":"array","items":{"type":"string"},"description":"JSON 顶层字段按名投影；查询或修改队伍/策略等都在 config 字段内按名取，如 config、name、index、projects；写回前须先读过含未知字段的完整内容以取得完整 SHA"}
             },"required":["path"],"additionalProperties":false}),
             {
                 let client = client.clone();
@@ -654,7 +654,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         (
             "bgi.user.resolve",
             "查找可运行任务",
-            "查找用户要求运行的实际资源：先匹配本机配置组、核验引用和地图追踪父目录；未命中自动搜索当前中央仓库全部分类。不要扫描路线 JSON 或先刷新仓库。run 直接运行；repair 补 missing；create 准备本地父目录；resourceFound 按 repository 候选订阅、配置并继续运行；lookupFailed 是查询失败，不能称资源不存在；notFound 才是本机和当前全仓索引均未命中。",
+            "查找用户要求运行的实际资源：先匹配本机配置组、核验引用和地图追踪父目录；未命中自动搜索当前中央仓库全部分类。不要扫描路线 JSON 或先刷新仓库。run 表示组完整可运行，仍需比对返回的 config 槽位与用户目标，目标含队伍/赶路/参数变更时先写入再运行；repair 补 missing；create 准备本地父目录；resourceFound 按 repository 候选订阅、配置并继续运行；lookupFailed 是查询失败，不能称资源不存在；notFound 才是本机和当前全仓索引均未命中。",
             json!({"type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":200,"description":"用户原话或材料/脚本/配置组名称，例如帮我跑下血斛"}},"required":["query"],"additionalProperties":false}),
             {
                 let client = client.clone();

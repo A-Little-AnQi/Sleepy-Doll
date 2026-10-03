@@ -120,6 +120,10 @@ impl FeatureIndex {
                     } else if item["id"] == "workflow.resource.run" && hit("actions") {
                         // 材料或自建脚本名称不要求预先出现在源码功能索引中。
                         score += 80;
+                    } else if tokens.is_empty() && (hit("nouns") || hit("actions")) {
+                        // 单字等无法分词的查询：名词或动作单侧命中也计分，
+                        // 否则这类口语词永远检索不到。
+                        score += 200;
                     }
                 }
                 if score <= 0 {
@@ -327,6 +331,234 @@ mod tests {
                 .map(|skill| skill.body.chars().count())
                 .sum::<usize>();
             assert!(body_chars < 5500, "{query}: {body_chars}");
+        }
+    }
+
+    /// 从 Markdown 中提取全部 ```json 围栏代码块。
+    fn json_blocks(text: &str) -> Vec<Value> {
+        let mut blocks = Vec::new();
+        let mut rest = text;
+        while let Some(start) = rest.find("```json") {
+            let body = &rest[start + 7..];
+            let Some(end) = body.find("```") else { break };
+            if let Ok(value) = serde_json::from_str::<Value>(body[..end].trim()) {
+                blocks.push(value);
+            }
+            rest = &body[end + 3..];
+        }
+        blocks
+    }
+
+    /// 生产工具目录：全部契约来自 BgiClient::register_tools 的实际登记，不手写镜像。
+    fn production_catalog() -> (
+        crate::extension::ToolRegistry,
+        crate::runtime::operation::task::ToolCatalog,
+    ) {
+        use crate::runtime::operation::task::{ToolCatalog, ToolContract};
+        let mut registry = crate::extension::ToolRegistry::default();
+        let client = crate::bridge::BgiClient::new(crate::config::BridgeConfig {
+            enabled: false,
+            base_url: "http://127.0.0.1:0".into(),
+            token: None,
+            instance_id: None,
+            timeout_ms: 1000,
+            host_install_path: None,
+            launch_silently: false,
+        });
+        crate::bridge::register_tools(&mut registry, std::sync::Arc::new(client)).unwrap();
+        let mut catalog = ToolCatalog::new();
+        for definition in registry.definitions() {
+            catalog.insert(
+                &definition.name,
+                ToolContract {
+                    execution: definition.execution.clone(),
+                    provider_version: definition.provider_version.clone(),
+                    input_schema: definition.input_schema.clone(),
+                },
+            );
+        }
+        (registry, catalog)
+    }
+
+    #[test]
+    fn embedded_create_shortcut_is_registered_with_real_registry() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut skills = crate::extension::skills::SkillRegistry::default();
+        skills
+            .load(&[(
+                root.join("plugins/bgi/skills"),
+                crate::extension::skills::SkillSource::Plugin("bgi".into()),
+            )])
+            .unwrap();
+        for text in crate::extension::skills::EMBEDDED_SKILLS {
+            skills.load_embedded(text).unwrap();
+        }
+        // create-shortcut 不是常驻 Skill，预算约束只适用常驻头；这里只验证它
+        // 连同插件入口一起真实装载、可检索。
+        let shortcut = skills.get("create-shortcut").unwrap();
+        assert!(!shortcut.body.trim().is_empty());
+        assert!(!skills.search("创建快捷任务", 4).is_empty());
+    }
+
+    #[test]
+    fn shortcut_examples_compile_through_production_metadata() {
+        use crate::runtime::operation::shortcuts::{ShortcutBinding, nodes};
+        let (_registry, catalog) = production_catalog();
+        let quick_tasks =
+            include_str!("../../plugins/bgi/skills/bgi-assistant/references/quick-tasks.md");
+        let mut examples: Vec<(String, Value)> = crate::extension::skills::EMBEDDED_SKILLS
+            .iter()
+            .map(|text| ("embedded create-shortcut".into(), json_blocks(text)))
+            .flat_map(|(source, blocks): (String, Vec<Value>)| {
+                blocks.into_iter().map(move |b| (source.clone(), b))
+            })
+            .collect();
+        examples.extend(
+            json_blocks(quick_tasks)
+                .into_iter()
+                .map(|b| ("quick-tasks".into(), b)),
+        );
+        assert!(!examples.is_empty(), "没有从手册中解析到 JSON 示例");
+        for (source, example) in &examples {
+            let binding: ShortcutBinding = serde_json::from_value(example["binding"].clone())
+                .unwrap_or_else(|e| panic!("{source}: 示例绑定不符合生产 binding 结构：{e}"));
+            let action = binding.action.as_ref().unwrap_or_else(|| {
+                panic!("{source}: 组合入口示例必须用单动作 binding.action");
+            });
+            // canonical 动作：工具名、批量 methodId、后台交接都在 arguments.arguments 层。
+            assert_eq!(
+                action.tool, "bgi.api.invoke",
+                "{source}: canonical 动作工具名"
+            );
+            let method_id = action.arguments["methodId"].as_str().unwrap_or("");
+            assert_eq!(
+                method_id, "bgi.run_script_groups",
+                "{source}: 批量 methodId"
+            );
+            assert_eq!(
+                action.arguments["arguments"]["waitForCompletion"],
+                json!(false),
+                "{source}: 默认后台交接 waitForCompletion=false"
+            );
+            // prepare 必须非空，且每一条都核对同一目标 methodId。
+            assert!(!binding.prepare.is_empty(), "{source}: prepare 不能为空");
+            for call in &binding.prepare {
+                assert_eq!(call.tool, "bgi.api.describe", "{source}: 准备读取契约");
+                assert_eq!(
+                    call.arguments["methodId"].as_str().unwrap_or(""),
+                    method_id,
+                    "{source}: prepare 与 action 使用同一 methodId"
+                );
+            }
+            let compiled = nodes(&binding, &catalog)
+                .unwrap_or_else(|e| panic!("{source}: 生产目录编译失败：{e}"));
+            assert!(!compiled.is_empty(), "{source}: 编译后应有节点");
+        }
+    }
+
+    /// 真实用户场景对功能索引的路由回归：feature.search 入口的场景必须用
+    /// 该 query+kind 在真实索引前 5 命中 expectedWorkflow；guidance 等其他
+    /// 入口不冒充索引命中，只核 expectedWorkflow 存在、id 唯一、domain 属于
+    ///声明域、skill 引用真实可读。
+    #[test]
+    fn user_scenarios_route_through_the_real_feature_index() {
+        let scenarios: Value =
+            serde_json::from_str(include_str!("../../docs/bgi/user-scenarios.json")).unwrap();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut skills = crate::extension::skills::SkillRegistry::default();
+        skills
+            .load(&[(
+                root.join("plugins/bgi/skills"),
+                crate::extension::skills::SkillSource::Plugin("bgi".into()),
+            )])
+            .unwrap();
+        let index = FeatureIndex::bundled().unwrap();
+        let domains: Vec<&str> = scenarios["domains"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        let mut ids = std::collections::HashSet::new();
+        let cases = scenarios["scenarios"].as_array().unwrap();
+        assert_eq!(cases.len(), 98, "场景数量应为 98");
+        let mut searched = 0usize;
+        let mut misses: Vec<String> = vec![];
+        for case in cases {
+            let id = case["id"].as_str().unwrap();
+            assert!(ids.insert(id.to_owned()), "场景 id 重复：{id}");
+            let domain = case["domain"].as_str().unwrap();
+            assert!(
+                domains.contains(&domain),
+                "{id} 声明了未列出的 domain：{domain}"
+            );
+            let expected = case["expectedWorkflow"].as_str().unwrap();
+            // guidance 场景不指向具体链路，不冒充索引命中。
+            if expected != "guidance" {
+                assert!(
+                    index.read(expected).is_ok(),
+                    "{id} 的 expectedWorkflow 不在索引：{expected}"
+                );
+            }
+            let surface = &case["discoverySurface"];
+            if surface["entry"] == "feature.search" {
+                searched += 1;
+                let found = index
+                    .search(
+                        surface["query"].as_str().unwrap(),
+                        surface["kind"].as_str(),
+                        0,
+                        5,
+                    )
+                    .unwrap();
+                let items = found["items"].as_array().unwrap();
+                if !items.iter().any(|item| item["id"] == expected) {
+                    misses.push(format!(
+                        "{id}：query「{}」期望 {expected}，实际 {:?}",
+                        surface["query"].as_str().unwrap(),
+                        items
+                            .iter()
+                            .filter_map(|item| item["id"].as_str())
+                            .collect::<Vec<_>>()
+                    ));
+                }
+            }
+        }
+        assert!(searched >= 30, "feature.search 场景数量异常：{searched}");
+        assert!(
+            misses.is_empty(),
+            "{} 个场景未命中索引前 5：
+{}",
+            misses.len(),
+            misses.join(
+                "
+"
+            )
+        );
+    }
+
+    #[test]
+    fn route_native_config_intents_resolve_to_existing_entries() {
+        let index = FeatureIndex::bundled().unwrap();
+        for (query, expected) in [
+            ("地图追踪 队伍切换", "workflow.group.edit"),
+            ("路线换队", "workflow.group.edit"),
+            ("全局设置恢复", "workflow.settings.recovery"),
+        ] {
+            let found = index.search(query, None, 0, 5).unwrap();
+            let ids: Vec<String> = found["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|item| item["id"].as_str().map(str::to_owned))
+                .collect();
+            assert!(
+                ids.iter().any(|id| id == expected),
+                "{query}: 未命中 {expected}，实际 {ids:?}"
+            );
+            // 检索到语义条目后必须能读到完整链路，不存在悬空摘要。
+            let card = index.read(expected).unwrap();
+            assert!(!card["item"]["steps"].as_array().unwrap().is_empty());
         }
     }
 }

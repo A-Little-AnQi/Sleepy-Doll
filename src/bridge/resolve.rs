@@ -6,6 +6,29 @@ use std::{
 
 use crate::error::{Error, Result};
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
+
+/// 明确的战斗动作：出现即认为路线含战斗，运行前需要配队确认。
+const BATTLE_ACTIONS: [&str; 2] = ["fight", "combat_script"];
+/// 已知绑定特定角色的特殊机制动作。
+const SPECIAL_ACTIONS: [&str; 2] = ["up_down_grab_leaf", "linnea_mining"];
+/// 机制中性的普通动作/位移类型（本机 131 份真实路线的词汇表核对过）：
+/// 不构成角色前提。
+const BENIGN_ACTIONS: [&str; 11] = [
+    "stop_flying",
+    "mining",
+    "path",
+    "teleport",
+    "target",
+    "orientation",
+    "pick_around",
+    "force_tp",
+    "log_output",
+    "四叶印",
+    "hydrogranum",
+];
+/// 单组/单目录最多深读的路线文件数：程序侧聚合用，聚合结果才给模型。
+const MAX_REQUIREMENT_FILES: usize = 60;
 
 /// 本地未命中后继续查当前全仓索引；查询失败不能被解释成资源不存在。
 pub fn resolve_target(
@@ -74,36 +97,267 @@ pub fn resolve_local(root: &Path, query: &str) -> Value {
             .collect::<Vec<_>>();
         if runnable.len() == 1 {
             let group = runnable[0];
-            return report(
+            // 需求聚合按组内已启用项目真实引用的文件计算（JS 项目指向其目录，
+            // 不拿中文 manifest 名当文件名）。
+            let files = project_requirement_files(root, group);
+            let requirements = scan_requirements(root, &files);
+            return report_requirements(
                 query,
                 "run",
                 Some(&group.name),
                 &[],
                 &candidates,
                 &matched_groups,
+                requirements,
             );
         }
         if runnable.len() > 1 {
-            return report(query, "ambiguous", None, &[], &candidates, &matched_groups);
+            return report_requirements(
+                query,
+                "ambiguous",
+                None,
+                &[],
+                &candidates,
+                &matched_groups,
+                Value::Null,
+            );
         }
         let missing = matched_groups
             .iter()
             .flat_map(|group| group.missing.iter().cloned())
             .collect::<Vec<_>>();
-        return report(
+        return report_requirements(
             query,
             "repair",
             matched_groups.first().map(|group| group.name.as_str()),
             &missing,
             &candidates,
             &matched_groups,
+            Value::Null,
         );
     }
 
     if !candidates.is_empty() {
-        return report(query, "create", None, &[], &candidates, &[]);
+        // create 候选同样聚合需求（最多取前两个 pathing 父目录深读）。
+        let mut files = Vec::new();
+        for candidate in candidates.iter().filter(|c| c.kind == "Pathing").take(2) {
+            collect_json_files(
+                &root.join(&candidate.path),
+                &mut files,
+                MAX_REQUIREMENT_FILES,
+            );
+        }
+        let requirements = scan_requirements(root, &files);
+        return report_requirements(query, "create", None, &[], &candidates, &[], requirements);
     }
-    report(query, "notFound", None, &[], &[], &[])
+    report_requirements(query, "notFound", None, &[], &[], &[], Value::Null)
+}
+
+/// 组内已启用项目的需求文件清单：Pathing 指向路线 JSON；Javascript 指向
+/// 脚本目录（manifest 在目录里），不把项目显示名当文件名。
+fn project_requirement_files(root: &Path, group: &Group) -> Vec<PathBuf> {
+    group
+        .projects
+        .iter()
+        .filter(|project| project.enabled)
+        .map(|project| {
+            let base = root.join(resource_path(&project.kind, &project.folder_name));
+            if project.kind.eq_ignore_ascii_case("Pathing") {
+                base.join(&project.name)
+            } else {
+                base
+            }
+        })
+        .collect()
+}
+
+/// 递归收集目录下的 JSON 文件（带上限），供候选目录的需求聚合。
+fn collect_json_files(directory: &Path, out: &mut Vec<PathBuf>, limit: usize) {
+    if out.len() >= limit {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_json_files(&path, out, limit);
+        } else if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+        {
+            out.push(path);
+            if out.len() >= limit {
+                return;
+            }
+        }
+    }
+}
+
+/// 深读路线文件聚合战斗/特殊机制前提。三态结论：preconditionsFound /
+/// noPreconditions / unknown——文件读不了、超上限或出现未登记动作时是
+/// unknown，不拿 false 冒充无战斗；unknown 同样要求配队确认（fail closed）。
+fn scan_requirements(root: &Path, files: &[PathBuf]) -> Value {
+    let mut actions: BTreeMap<String, usize> = BTreeMap::new();
+    let mut scanned = 0usize;
+    let mut unreadable = 0usize;
+    let mut sources: Vec<String> = Vec::new();
+    let mut truncated = false;
+    for file in files.iter().take(MAX_REQUIREMENT_FILES) {
+        let Ok(text) = fs::read_to_string(file) else {
+            unreadable += 1;
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&text) else {
+            unreadable += 1;
+            continue;
+        };
+        scanned += 1;
+        if sources.len() < 8 {
+            sources.push(
+                file.strip_prefix(root)
+                    .unwrap_or(file)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            );
+        }
+        for key in ["positions", "waypoints"] {
+            for point in value[key].as_array().into_iter().flatten() {
+                for field in ["action", "type"] {
+                    if let Some(name) = point[field].as_str()
+                        && !name.is_empty()
+                    {
+                        *actions.entry(name.to_string()).or_default() += 1;
+                    }
+                }
+            }
+        }
+    }
+    if files.len() > MAX_REQUIREMENT_FILES {
+        truncated = true;
+    }
+    let verdict = classify_actions(&actions, unreadable > 0 || truncated);
+    let required = verdict.party_confirmation_required;
+    json!({
+        "status": verdict.status,
+        "battle": verdict.battle,
+        "specialActions": verdict.special.iter().map(|(name, count)| json!({"action":name,"count":count})).collect::<Vec<_>>(),
+        "unrecognizedActions": verdict.unrecognized.iter().map(|(name, count)| json!({"action":name,"count":count})).collect::<Vec<_>>(),
+        "partyConfirmationRequired": required,
+        "scannedFiles": scanned,
+        "unreadableFiles": unreadable,
+        "truncated": truncated,
+        "sources": sources,
+        "note": if required {
+            "由路线文件动作聚合的程序侧事实；battle/special/unknown 任一成立都要求运行前用 user.ask 问清缺的配队信息（用户已给的队名/队员不重复问），未答复不得启动。"
+        } else {
+            "由路线文件动作聚合的程序侧事实；全部文件已读且未出现战斗/特殊/未识别动作。"
+        },
+    })
+}
+
+/// 纯分类：battle 命中即战斗；已知特殊机制单列；未登记动作不冒充良性，
+/// 与读取不全一起归入 unknown，同样要求配队确认。
+fn classify_actions(actions: &BTreeMap<String, usize>, incomplete: bool) -> ActionVerdict {
+    let battle = actions
+        .keys()
+        .any(|name| BATTLE_ACTIONS.contains(&name.as_str()));
+    let special = actions
+        .iter()
+        .filter(|(name, _)| SPECIAL_ACTIONS.contains(&name.as_str()))
+        .map(|(name, count)| (name.clone(), *count))
+        .collect::<Vec<_>>();
+    let unrecognized = actions
+        .iter()
+        .filter(|(name, _)| {
+            !BATTLE_ACTIONS.contains(&name.as_str())
+                && !SPECIAL_ACTIONS.contains(&name.as_str())
+                && !BENIGN_ACTIONS.contains(&name.as_str())
+        })
+        .map(|(name, count)| (name.clone(), *count))
+        .collect::<Vec<_>>();
+    let required = battle || !special.is_empty() || !unrecognized.is_empty() || incomplete;
+    let status = if battle || !special.is_empty() {
+        "preconditionsFound"
+    } else if required {
+        "unknown"
+    } else {
+        "noPreconditions"
+    };
+    ActionVerdict {
+        status: status.to_string(),
+        battle,
+        special,
+        unrecognized,
+        party_confirmation_required: required,
+    }
+}
+
+struct ActionVerdict {
+    status: String,
+    battle: bool,
+    special: Vec<(String, usize)>,
+    unrecognized: Vec<(String, usize)>,
+    party_confirmation_required: bool,
+}
+
+#[derive(Clone)]
+struct Group {
+    name: String,
+    file: PathBuf,
+    projects: Vec<Project>,
+    missing: Vec<String>,
+    /// 组配置里可原生改写的运行槽位（set_pathing_party 管理的字段）。
+    config_slots: Value,
+}
+
+#[derive(Clone)]
+struct Project {
+    name: String,
+    kind: String,
+    folder_name: String,
+    exists: bool,
+    /// 只统计会执行的项目：status 缺省视为启用，显式 Disabled 不算执行前提。
+    enabled: bool,
+}
+
+struct Candidate {
+    path: PathBuf,
+    children: Vec<String>,
+    kind: &'static str,
+}
+
+/// 由组 JSON 构造 Group（含运行槽位快照）；纯函数，验收直接测真实解析逻辑。
+fn group_from_value(root: &Path, path: PathBuf, name: String, value: &Value) -> Group {
+    let projects = value["projects"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|project| parse_project(root, project))
+        .collect::<Vec<_>>();
+    let missing = projects
+        .iter()
+        .filter(|project| !project.exists)
+        .map(|project| resource_display(&project.kind, &project.folder_name))
+        .collect();
+    let pathing = value["config"]["pathingConfig"].clone();
+    let config_slots = if pathing.is_object() {
+        json!({
+            "partyName": pathing["partyName"],
+            "enabled": pathing["enabled"],
+            "hurryOnAvatar": pathing["hurryOnAvatar"],
+        })
+    } else {
+        Value::Null
+    };
+    Group {
+        name,
+        file: path,
+        projects,
+        missing,
+        config_slots,
+    }
 }
 
 pub fn missing_paths_for_group(root: &Path, group_name: &str) -> Option<Vec<String>> {
@@ -114,19 +368,29 @@ pub fn missing_paths_for_group(root: &Path, group_name: &str) -> Option<Vec<Stri
         .map(|group| group.missing)
 }
 
-fn report(
+#[allow(clippy::too_many_arguments)]
+fn report_requirements(
     query: &str,
     verdict: &str,
     group_name: Option<&str>,
     missing: &[String],
     candidates: &[Candidate],
     groups: &[Group],
+    requirements: Value,
 ) -> Value {
+    let party_required = requirements["partyConfirmationRequired"] == true;
+    let mut next = next_action(verdict).to_string();
+    if party_required && matches!(verdict, "run" | "create") {
+        next.push_str(
+            " 该目标含战斗/特殊机制前提，按序执行：缺配队信息先用 user.ask 问清（已给的队名/队员不重复问，未答复不启动）；配队已明确后用 bgi.inspect_group_effective 读实际生效配置来源与策略（file 策略读原文要求，auto 策略按该队确认可用策略），按角色与策略要求适配现成组并回读核验；以上完成才 bgi.run_script_group。普通采集路线不额外发问。",
+        );
+    }
     json!({
         "query": query,
         "verdict": verdict,
         "groupName": group_name,
         "missing": missing,
+        "requirements": requirements,
         "candidates": candidates.iter().map(|candidate| json!({
             "path": path_display(&candidate.path),
             "children": candidate.children,
@@ -136,6 +400,7 @@ fn report(
             "name": group.name,
             "file": path_display(&group.file),
             "missing": group.missing,
+            "config": group.config_slots,
             "projects": group.projects.iter().map(|project| json!({
                 "name": project.name,
                 "type": project.kind,
@@ -143,13 +408,15 @@ fn report(
                 "exists": project.exists,
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
-        "next": next_action(verdict),
+        "next": next,
     })
 }
 
 fn next_action(verdict: &str) -> &'static str {
     match verdict {
-        "run" => "直接运行该配置组，不要再搜索或读取路线文件",
+        "run" => {
+            "组引用完整；先比对用户目标与返回的 config 槽位（目标含队伍/赶路/参数变更时先用 bgi.set_pathing_party 写入回读）。不重复搜索或读取路线叶子文件。"
+        }
         "repair" => "只补 missing 里的路径（更新/订阅），不要重写无关配置，补完后再 resolve",
         "create" => {
             "本机已有资源；Pathing 用完整父目录准备配置组，不读取叶子 JSON；Javascript 先 inspect_script 读取 manifest 指定的设置定义，再用 bgi.prepare_js_group，使用返回的 groupName 运行。"
@@ -159,28 +426,6 @@ fn next_action(verdict: &str) -> &'static str {
             "仅本机未安装，不代表仓库不存在。采集/地图追踪用 bgi.repo.search category=pathing（或 all）查询完整父节点；已有索引先查询，不先反复刷新。选择作者包后直接 describe/invoke bgi.subscribe_script_resources、bgi.prepare_pathing_group；游戏就绪再 bgi.run_script_group。不要扫描软件目录或桥程序集。"
         }
     }
-}
-
-#[derive(Clone)]
-struct Group {
-    name: String,
-    file: PathBuf,
-    projects: Vec<Project>,
-    missing: Vec<String>,
-}
-
-#[derive(Clone)]
-struct Project {
-    name: String,
-    kind: String,
-    folder_name: String,
-    exists: bool,
-}
-
-struct Candidate {
-    path: PathBuf,
-    children: Vec<String>,
-    kind: &'static str,
 }
 
 fn scan_javascript(root: &Path, query: &str) -> Vec<Candidate> {
@@ -239,23 +484,7 @@ fn scan_groups(root: &Path) -> Vec<Group> {
                     .to_string_lossy()
                     .into_owned()
             });
-        let projects = value["projects"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|project| parse_project(root, project))
-            .collect::<Vec<_>>();
-        let missing = projects
-            .iter()
-            .filter(|project| !project.exists)
-            .map(|project| resource_display(&project.kind, &project.folder_name))
-            .collect();
-        groups.push(Group {
-            name,
-            file: path,
-            projects,
-            missing,
-        });
+        groups.push(group_from_value(root, path, name, &value));
     }
     groups.sort_by(|left, right| left.name.cmp(&right.name));
     groups
@@ -274,11 +503,13 @@ fn parse_project(root: &Path, value: &Value) -> Option<Project> {
         relative = relative.join(file_name);
     }
     let exists = root.join(&relative).exists();
+    let status = value["status"].as_str().unwrap_or("Enabled");
     Some(Project {
         name: value["name"].as_str().unwrap_or(&folder_name).to_owned(),
         kind,
         folder_name,
         exists,
+        enabled: status.eq_ignore_ascii_case("Enabled"),
     })
 }
 
@@ -390,6 +621,109 @@ mod tests {
                 .any(|candidate| candidate["kind"] == "Javascript"
                     && candidate["path"] == "JsScript/custom-only")
         );
+    }
+
+    #[test]
+    fn group_parsing_surfaces_config_slots_purely() {
+        // 纯解析测试：不落盘、不删除；group_from_value 是 resolve_local 的真实解析路径。
+        let root = Path::new("X:/no-such-user-root");
+        let group = group_from_value(
+            root,
+            PathBuf::from("X:/no-such-user-root/ScriptGroup/g.json"),
+            "兽怪暴徒".into(),
+            &json!({
+                "name": "兽怪暴徒",
+                "config": {"pathingConfig": {
+                    "enabled": false, "partyName": "蒸发", "hurryOnAvatar": "",
+                    "autoFightEnabled": true,
+                    "autoFightConfig": {"strategyName": "根据队伍自动选择", "pickDropsAfterFightEnabled": true},
+                    "autoFightConfig_default_marker": null
+                }},
+                "projects": [{"name": "路线A.json", "type": "Pathing", "folderName": "兽怪暴徒"}]
+            }),
+        );
+        assert_eq!(group.config_slots["partyName"], "蒸发");
+        assert_eq!(group.config_slots["enabled"], false);
+        assert_eq!(group.config_slots["hurryOnAvatar"], "");
+        // run 只是"组完整可运行"；next 必须要求先比对目标与配置，不能跳回"直接运行"。
+        let next = next_action("run");
+        assert!(
+            next.contains("比对"),
+            "next must ask for goal/config comparison: {next}"
+        );
+        assert!(
+            !next.starts_with("直接运行"),
+            "next must not tell the model to run directly"
+        );
+        // 未安装的引用（root 不存在）如实进入 missing，不猜测存在。
+        assert_eq!(group.missing.len(), 1);
+        assert_eq!(group.missing[0], "AutoPathing/兽怪暴徒");
+    }
+
+    #[test]
+    fn action_classification_separates_battle_special_and_benign() {
+        let mut actions = BTreeMap::new();
+        for name in [
+            "teleport",
+            "path",
+            "fight",
+            "stop_flying",
+            "mining",
+            "pick_around",
+            "force_tp",
+        ] {
+            actions.insert(name.to_string(), 3);
+        }
+        let verdict = classify_actions(&actions, false);
+        assert!(verdict.battle, "fight action must be classified as battle");
+        assert!(
+            verdict.special.is_empty(),
+            "benign actions must not be special"
+        );
+        assert!(
+            verdict.unrecognized.is_empty(),
+            "known benign tokens must not be unrecognized"
+        );
+        assert_eq!(verdict.status, "preconditionsFound");
+        assert!(verdict.party_confirmation_required);
+        actions.insert("linnea_mining".to_string(), 2);
+        let verdict = classify_actions(&actions, false);
+        assert!(verdict.battle);
+        assert_eq!(verdict.special, vec![("linnea_mining".to_string(), 2)]);
+        // 只有采集/位移动作的普通路线：不要求配队确认。
+        let plain = [
+            "teleport",
+            "path",
+            "mining",
+            "stop_flying",
+            "四叶印",
+            "log_output",
+        ]
+        .into_iter()
+        .map(|name| (name.to_string(), 5))
+        .collect();
+        let verdict = classify_actions(&plain, false);
+        assert!(!verdict.battle && verdict.special.is_empty());
+        assert_eq!(verdict.status, "noPreconditions");
+        assert!(!verdict.party_confirmation_required);
+        // 未登记动作不冒充良性：unknown 且同样要求确认。
+        let odd = {
+            let mut map = BTreeMap::new();
+            map.insert("some_new_mechanic".to_string(), 1);
+            map
+        };
+        let verdict = classify_actions(&odd, false);
+        assert_eq!(verdict.status, "unknown");
+        assert!(
+            verdict.party_confirmation_required,
+            "unrecognized action must require confirmation"
+        );
+        assert!(!verdict.unrecognized.is_empty());
+        // 读取不全（文件缺失/超上限）同样不拿 false 冒充无战斗。
+        let empty = BTreeMap::new();
+        let verdict = classify_actions(&empty, true);
+        assert_eq!(verdict.status, "unknown");
+        assert!(verdict.party_confirmation_required);
     }
 
     #[test]
