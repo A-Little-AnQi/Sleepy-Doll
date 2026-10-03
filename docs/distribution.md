@@ -62,3 +62,5 @@ GitHub 构建、公开下载哈希、软件更新状态和 GA4 实际事件分�
 可在 Workers 的 Metrics 查看请求和错误，在 R2 统计页查看读取操作与存储。预算邮件有延迟，不参与请求放行决策。免费请求额度耗尽或受到攻击时，下载和更新检查可能暂时不可用，官网仍提供 GitHub Releases 备用下载。
 
 保护范围是本发布链路的公网读取与受控 CI 上传；不保证整个账号零账单。升级 Workers Paid、启用付费产品、上传到其他桶或泄露管理凭据会改变这个边界。
+
+下载域名另有免费 WAF 自定义规则 `Sleepy Doll - canonical download requests`：在 Worker 前阻断查询参数、GET/HEAD 以外的方法和非 `/releases/` 路径，减少明显异常请求消耗 Worker 免费额度。该规则由控制台管理，记录在 `docs/distribution-security.json`；现有部署 token 不包含 WAF 编辑权限。规则不使用验证码，避免阻断软件内下载。

@@ -1,0 +1,8 @@
+{
+  "name": "Sleepy Doll - canonical download requests",
+  "ruleId": "a29a902fe4764925910d14ff00184cbb",
+  "action": "block",
+  "enabled": true,
+  "expression": "(http.host eq \"sleepy-doll-download.restless-nh3.com\" and (not http.request.method in {\"GET\" \"HEAD\"} or http.request.uri.query ne \"\" or not starts_with(http.request.uri.path, \"/releases/\")))",
+  "managedVia": "Cloudflare dashboard; current deploy token does not have WAF write permissions"
+}
