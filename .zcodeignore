@@ -39,12 +39,39 @@ coverage/
 .DS_Store
 Thumbs.db
 
-# 旧版检查脚本产物（已由 target/ 内新路径取代，仅忽略不删除）
-bgi-bridge/target-check/
-
 # 发布片产物
 video/out/
 video/dist/
 video/audio/*.wav
 video/output/
 .video-build.lock
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+bower_components/
+jspm_packages/
+__pycache__/
+site-packages/
+venv/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

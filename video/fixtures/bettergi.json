@@ -1,0 +1,62 @@
+{
+  "windowTitle": "更好的原神",
+  "navGroups": [
+    {
+      "items": [
+        { "id": "home", "label": "启动", "icon": "play" },
+        { "id": "trigger", "label": "实时触发", "icon": "timer" },
+        { "id": "task", "label": "独立任务", "icon": "list" },
+        { "id": "dragon", "label": "一条龙", "icon": "turtle" }
+      ]
+    },
+    {
+      "label": "全自动",
+      "expanded": true,
+      "items": [
+        { "id": "scheduler", "label": "调度器", "icon": "board", "selected": true },
+        { "id": "js", "label": "JS 脚本", "icon": "js" },
+        { "id": "pathing", "label": "地图追踪", "icon": "map" },
+        { "id": "record", "label": "录制回放", "icon": "record" }
+      ]
+    },
+    {
+      "items": [
+        { "id": "macro", "label": "辅助操控", "icon": "pad" },
+        { "id": "music", "label": "自动演奏", "icon": "music" },
+        { "id": "hotkey", "label": "快捷键", "icon": "flash" },
+        { "id": "notify", "label": "通知", "icon": "alert" }
+      ]
+    }
+  ],
+  "navFooter": [{ "id": "settings", "label": "设置", "icon": "gear" }],
+  "scheduler": {
+    "groupLabel": "配置组",
+    "groups": ["每日任务", "周常任务", "周本挑战"],
+    "activeGroup": "每日任务",
+    "addTaskLabel": "新增任务",
+    "groupSettingsLabel": "脚本组设置",
+    "startLabel": "启动",
+    "stopLabel": "停止",
+    "columns": ["#", "任务名称", "类型", "状态", "上次运行"],
+    "rows": [
+      { "name": "每日委托路线", "type": "地图追踪", "lastRun": "昨天 19:30" },
+      { "name": "领取每日奖励", "type": "内置任务", "lastRun": "昨天 19:42" },
+      { "name": "尘歌壶·领取好感", "type": "JS 脚本", "lastRun": "3 天前" }
+    ],
+    "idleLog": ["19:29:58 [信息] 已连接原神窗口（BitBlt）"],
+    "runningLog": [
+      "19:30:16 [信息] 开始执行配置组「每日任务」",
+      "19:30:17 [信息] 游戏状态检查通过",
+      "19:30:18 [信息] 地图追踪：每日委托路线",
+      "19:30:41 [信息] 传送：蒙德城",
+      "19:31:02 [信息] 委托 1/4 完成",
+      "19:31:14 [信息] 委托 2/4 完成",
+      "19:31:25 [信息] 委托 3/4 完成",
+      "19:31:38 [信息] 委托 4/4 完成",
+      "19:31:40 [信息] 配置组执行完成"
+    ],
+    "statusIdle": "就绪",
+    "statusRunningPrefix": "运行中：每日任务 · 委托 ",
+    "statusDone": "配置组执行完成"
+  }
+}

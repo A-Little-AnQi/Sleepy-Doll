@@ -1,0 +1,81 @@
+/* 影片内快捷入口预览对话框的样式。
+ * 产品侧 ShortcutConfigurator 及其样式已删除；影片预览只需要这份等价的最小规则，
+ * 类名沿用 FilmShortcutPreview 的 DOM，颜色与间距取产品 CSS 变量。 */
+
+.film-shortcut .shortcut-configuration-dialog {
+  width: min(560px, 100%);
+  height: auto;
+  max-height: 82vh;
+}
+
+.film-shortcut .shortcut-form-field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.film-shortcut .shortcut-form-field > span {
+  color: var(--muted);
+  font: var(--font-label)/1.4 "Cascadia Code", Consolas, monospace;
+}
+
+.film-shortcut .shortcut-form-field textarea,
+.film-shortcut .shortcut-form-field input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--layout-radius) - 4px);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  resize: none;
+}
+
+.film-shortcut .shortcut-preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--layout-radius);
+  background: color-mix(in srgb, var(--surface) 92%, #f0d36a);
+}
+
+.film-shortcut .shortcut-preview-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.film-shortcut .shortcut-preview-heading h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.film-shortcut .shortcut-preview-heading span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.film-shortcut .shortcut-preview dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.film-shortcut .shortcut-preview dt {
+  color: var(--muted);
+}
+
+.film-shortcut .shortcut-preview dd {
+  margin: 0;
+}
+
+.film-shortcut .shortcut-config-state {
+  margin-right: auto;
+  align-self: center;
+  color: var(--muted);
+  font-size: 12px;
+}

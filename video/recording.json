@@ -1,0 +1,543 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "fps": 60,
+  "storyDurationMs": 36000,
+  "ui": {
+    "width": 1440,
+    "height": 900
+  },
+  "sourceTime": [
+    [0, 7000],
+    [1000, 7000],
+    [3300, 9400],
+    [3799, 10000],
+    [3800, 10100],
+    [5000, 12000],
+    [9000, 16600],
+    [9600, 18800],
+    [10800, 21000],
+    [11900, 22400],
+    [12600, 23300],
+    [13800, 25000],
+    [15800, 28000],
+    [18300, 32200],
+    [19800, 35000],
+    [21000, 39200],
+    [22200, 41600],
+    [23400, 44500],
+    [24400, 45100],
+    [25100, 46200],
+    [27000, 49300],
+    [27800, 50100],
+    [29700, 52200],
+    [31300, 53000],
+    [33500, 54300],
+    [36000, 58000]
+  ],
+  "anchors": {
+    "input": ".composer-dock textarea",
+    "send": "[data-video-anchor='sd-send']",
+    "message": ".user-message",
+    "plan": ".run-plan-summary",
+    "flow": ".conversation-flow",
+    "approval": ".run-approval",
+    "allow": "[data-video-anchor='sd-allow']",
+    "save": "[data-video-anchor='sd-save']",
+    "task": ".task-card",
+    "run": ".task-card .primary-action",
+    "bgiRow": "[data-video-anchor='bgi-route1']",
+    "bgiLog": ".bgi-log",
+    "steps": ".run-plan-motion li"
+  },
+  "checks": [
+    {
+      "at": 3200,
+      "name": "输入目标",
+      "anchors": ["input", "send"]
+    },
+    {
+      "at": 6500,
+      "name": "生成计划",
+      "anchors": ["message", "plan", "steps"]
+    },
+    {
+      "at": 11000,
+      "name": "请求审批",
+      "anchors": ["approval", "allow"]
+    },
+    {
+      "at": 15700,
+      "name": "BetterGI 执行",
+      "anchors": ["bgiRow", "bgiLog"]
+    },
+    {
+      "at": 23000,
+      "name": "保存流程",
+      "anchors": ["save"]
+    },
+    {
+      "at": 26400,
+      "name": "快捷任务",
+      "anchors": ["task", "run"]
+    },
+    {
+      "at": 29100,
+      "name": "再次执行",
+      "anchors": ["task", "run"]
+    },
+    {
+      "at": 30700,
+      "name": "再次完成",
+      "anchors": ["task", "run"]
+    }
+  ],
+  "clicks": [
+    [3800, "send"],
+    [11900, "allow"],
+    [23400, "save"],
+    [27000, "run"]
+  ],
+  "audioEvents": [
+    ["send", 380],
+    ["plan-check", 740],
+    ["plan-route", 830],
+    ["plan-verify", 990],
+    ["allow", 520],
+    ["verified", 990],
+    ["save", 740],
+    ["run-again", 520],
+    ["reused", 1174]
+  ],
+  "cuts": [
+    {
+      "name": "窗口入场",
+      "from": 0,
+      "to": 700,
+      "duration": 5000
+    },
+    {
+      "name": "输入目标",
+      "from": 700,
+      "to": 3300,
+      "duration": 4400
+    },
+    {
+      "name": "读清目标",
+      "from": 3300,
+      "to": 3450,
+      "duration": 1200
+    },
+    {
+      "name": "发送",
+      "from": 3450,
+      "to": 3800,
+      "duration": 350
+    },
+    {
+      "name": "消息落位",
+      "from": 3800,
+      "to": 5000,
+      "duration": 1050
+    },
+    {
+      "name": "展开计划",
+      "from": 5000,
+      "to": 6500,
+      "duration": 1400
+    },
+    {
+      "name": "读清步骤",
+      "from": 6500,
+      "to": 9000,
+      "duration": 3000
+    },
+    {
+      "name": "进入审批",
+      "from": 9000,
+      "to": 10800,
+      "duration": 900
+    },
+    {
+      "name": "确认操作",
+      "from": 10800,
+      "to": 11600,
+      "duration": 2400
+    },
+    {
+      "name": "点击允许",
+      "from": 11600,
+      "to": 12600,
+      "duration": 500
+    },
+    {
+      "name": "展示联动",
+      "from": 12600,
+      "to": 14500,
+      "duration": 1800
+    },
+    {
+      "name": "执行路线",
+      "from": 14500,
+      "to": 16900,
+      "duration": 3500
+    },
+    {
+      "name": "状态变化",
+      "from": 16900,
+      "to": 19800,
+      "duration": 3200
+    },
+    {
+      "name": "返回结果",
+      "from": 19800,
+      "to": 21100,
+      "duration": 850
+    },
+    {
+      "name": "读清结果",
+      "from": 21100,
+      "to": 23000,
+      "duration": 2800
+    },
+    {
+      "name": "保存流程",
+      "from": 23000,
+      "to": 25100,
+      "duration": 1300
+    },
+    {
+      "name": "进入快捷任务",
+      "from": 25100,
+      "to": 26600,
+      "duration": 1900
+    },
+    {
+      "name": "再次运行",
+      "from": 26600,
+      "to": 27800,
+      "duration": 500
+    },
+    {
+      "name": "复用执行",
+      "from": 27800,
+      "to": 29700,
+      "duration": 2200
+    },
+    {
+      "name": "任务完成",
+      "from": 29700,
+      "to": 31600,
+      "duration": 1700
+    },
+    {
+      "name": "窗口回落",
+      "from": 31600,
+      "to": 33700,
+      "duration": 2000
+    },
+    {
+      "name": "模型、插件与连接",
+      "from": 33700,
+      "to": 33700,
+      "duration": 14500
+    },
+    {
+      "name": "品牌入场",
+      "from": 33700,
+      "to": 34400,
+      "duration": 850
+    },
+    {
+      "name": "品牌停留",
+      "from": 34400,
+      "to": 35300,
+      "duration": 2200
+    },
+    {
+      "name": "结束",
+      "from": 35300,
+      "to": 36000,
+      "duration": 500
+    }
+  ],
+  "narration": {
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "rate": "+8%",
+    "segments": [
+      {
+        "start": 350,
+        "end": 4650,
+        "text": "用一句话，安排 Better GI 的日常任务。"
+      },
+      {
+        "start": 5150,
+        "end": 11800,
+        "text": "输入目标。完成今天的委托，再检查结果。点击发送。"
+      },
+      {
+        "start": 11900,
+        "end": 16400,
+        "text": "先整理步骤，再检查状态、运行路线、核对结果。"
+      },
+      {
+        "start": 16550,
+        "end": 20000,
+        "text": "关键操作先确认，允许之后再执行。"
+      },
+      {
+        "start": 20500,
+        "end": 28300,
+        "text": "任务交给 Better GI。窗口联动，执行状态和日志持续更新。每一步，都能看到进展。"
+      },
+      {
+        "start": 29100,
+        "end": 32300,
+        "text": "执行结束，回到对话核对结果。"
+      },
+      {
+        "start": 32900,
+        "end": 39700,
+        "text": "把已有的今日路线，保存为快捷任务。下次直接运行，不再调用模型。"
+      },
+      {
+        "start": 42150,
+        "end": 48800,
+        "text": "支持多种模型协议。云端服务，或本地模型，都可以按需配置。"
+      },
+      {
+        "start": 49400,
+        "end": 53000,
+        "text": "技能和插件，让工具能力按需扩展。"
+      },
+      {
+        "start": 53300,
+        "end": 56400,
+        "text": "通过本地桥，连接原版 Better GI。"
+      },
+      {
+        "start": 56700,
+        "end": 59800,
+        "text": "Sleepy Doll，你的 Better GI 本地助手。"
+      }
+    ]
+  },
+  "features": [
+    {
+      "start": 41950,
+      "end": 49200,
+      "page": "models",
+      "caption": "选择你的模型"
+    },
+    {
+      "start": 49200,
+      "end": 53300,
+      "page": "extensions",
+      "caption": "按需扩展工具"
+    },
+    {
+      "start": 53300,
+      "end": 56450,
+      "page": "bridge",
+      "caption": "连接原版 BetterGI"
+    }
+  ],
+  "transitions": [
+    {
+      "start": 0,
+      "end": 5000,
+      "kind": "intro",
+      "title": "用一句话",
+      "detail": "运行 BetterGI"
+    },
+    {
+      "start": 12000,
+      "end": 13300,
+      "kind": "type",
+      "title": "目标，变成计划",
+      "detail": "检查状态  /  执行路线  /  核验结果"
+    },
+    {
+      "start": 16350,
+      "end": 17600,
+      "kind": "split",
+      "title": "关键操作，由你确认",
+      "detail": ""
+    },
+    {
+      "start": 20200,
+      "end": 21900,
+      "kind": "wipe",
+      "title": "开始执行",
+      "detail": "Sleepy Doll × BetterGI"
+    },
+    {
+      "start": 32350,
+      "end": 33850,
+      "kind": "save",
+      "title": "这次完成，下次复用",
+      "detail": "保存为快捷任务"
+    },
+    {
+      "start": 41750,
+      "end": 42950,
+      "kind": "slats",
+      "title": "选择你的模型",
+      "detail": "按需配置"
+    },
+    {
+      "start": 56450,
+      "end": 60000,
+      "kind": "brand",
+      "title": "Sleepy Doll",
+      "detail": "BetterGI 本地助手"
+    }
+  ],
+  "expectedDurationMs": 60000,
+  "cueBindings": [
+    {
+      "id": "intro",
+      "segment": 0,
+      "phrase": "一句话"
+    },
+    {
+      "id": "intro-product",
+      "segment": 0,
+      "phrase": "Better GI"
+    },
+    {
+      "id": "focus-input",
+      "segment": 1,
+      "phrase": "输入目标",
+      "story": 700,
+      "leadMs": -100
+    },
+    {
+      "id": "type-start",
+      "segment": 1,
+      "phrase": "完成今天",
+      "story": 1000,
+      "leadMs": -150
+    },
+    {
+      "id": "type-end",
+      "segment": 1,
+      "phrase": "结果",
+      "story": 3300,
+      "leadMs": -150
+    },
+    {
+      "id": "send",
+      "segment": 1,
+      "phrase": "发送",
+      "story": 3800
+    },
+    {
+      "id": "plan-title",
+      "segment": 2,
+      "phrase": "整理步骤",
+      "story": 5000,
+      "leadMs": -60
+    },
+    {
+      "id": "plan-check",
+      "segment": 2,
+      "phrase": "检查状态",
+      "story": 5350,
+      "leadMs": -60
+    },
+    {
+      "id": "plan-route",
+      "segment": 2,
+      "phrase": "运行路线",
+      "story": 5690,
+      "leadMs": -60
+    },
+    {
+      "id": "plan-verify",
+      "segment": 2,
+      "phrase": "核对结果",
+      "story": 6030,
+      "leadMs": -60
+    },
+    {
+      "id": "approval",
+      "segment": 3,
+      "phrase": "先确认",
+      "story": 9700,
+      "leadMs": -60
+    },
+    {
+      "id": "allow",
+      "segment": 3,
+      "phrase": "允许",
+      "story": 11900
+    },
+    {
+      "id": "host",
+      "segment": 4,
+      "phrase": "交给",
+      "story": 13700,
+      "leadMs": -100
+    },
+    {
+      "id": "logs",
+      "segment": 4,
+      "phrase": "日志",
+      "story": 15700,
+      "leadMs": -60
+    },
+    {
+      "id": "verified",
+      "segment": 5,
+      "phrase": "回到对话",
+      "story": 21000,
+      "leadMs": -60
+    },
+    {
+      "id": "save",
+      "segment": 6,
+      "phrase": "保存",
+      "story": 23400
+    },
+    {
+      "id": "saved-task",
+      "segment": 6,
+      "phrase": "快捷任务",
+      "story": 25100,
+      "leadMs": -50
+    },
+    {
+      "id": "run-again",
+      "segment": 6,
+      "phrase": "直接运行",
+      "story": 27000
+    },
+    {
+      "id": "reused",
+      "segment": 6,
+      "phrase": "不再调用模型",
+      "story": 29700
+    },
+    {
+      "id": "models",
+      "segment": 7,
+      "phrase": "多种模型"
+    },
+    {
+      "id": "plugins",
+      "segment": 8,
+      "phrase": "技能和插件"
+    },
+    {
+      "id": "bridge",
+      "segment": 9,
+      "phrase": "本地桥"
+    },
+    {
+      "id": "brand",
+      "segment": 10,
+      "phrase": "Sleepy Doll"
+    }
+  ]
+}

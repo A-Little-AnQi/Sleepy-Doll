@@ -1,0 +1,238 @@
+/* 导演段「木偶的牵引线」舞台。A 墨蓝夜色 / B·C 暖灰 + 白色真实 UI；金色唯一强调色。 */
+
+.director-stage {
+  position: relative;
+  overflow: hidden;
+  background: #101719;
+  font-family: "Microsoft YaHei UI", "Segoe UI", "PingFang SC", system-ui,
+    sans-serif;
+  cursor: none;
+  user-select: none;
+}
+
+/* 只作用于舞台自身的 under/over 画板，不能波及真实 UI 内部的 svg。 */
+.director-stage > svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.director-stage .director-under {
+  z-index: 1;
+}
+
+/* 真实 UI 画板：必须自身占满 1920×1080，否则 absolute 子级把高度塌成 0，
+   clipPath 会把全部产品 UI 裁空。 */
+.director-stage .director-ui {
+  position: absolute;
+  inset: 0;
+  width: 1920px;
+  height: 1080px;
+  z-index: 2;
+  will-change: clip-path, opacity, transform;
+}
+
+/* stage.css 可能随旧影片移除，导演段自足维护产品窗口的必要基础样式。 */
+.director-stage .video-window {
+  position: absolute;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow:
+    0 48px 130px #04060bcc,
+    0 0 0 1px #ffffff17;
+  will-change: transform, opacity, filter;
+}
+
+.director-stage .director-over {
+  z-index: 3;
+}
+
+/* A 底色：中心 #192224 → 边缘 #0E1315 的浅亮度差，无霓虹无粒子。 */
+.director-bg-a {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(
+    1150px 950px at 44% 44%,
+    #192224 0%,
+    #131b1d 55%,
+    #0e1315 100%
+  );
+}
+
+/* 左侧宣言：整行遮罩显露，两行 78px。 */
+.director-title {
+  position: absolute;
+  z-index: 4;
+  left: 120px;
+  top: 370px;
+  width: 820px;
+  font-size: 78px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+  color: #f1eadb;
+  pointer-events: none;
+}
+
+.director-title .dt-line {
+  overflow: hidden;
+}
+
+.director-title .dt-line span {
+  display: inline-block;
+  will-change: transform, opacity;
+}
+
+.director-title .dt-gold {
+  color: #c6a567;
+}
+
+.director-brand-label {
+  position: absolute;
+  z-index: 4;
+  left: 124px;
+  top: 185px;
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  color: rgba(241, 234, 219, 0.82);
+  pointer-events: none;
+}
+
+/* C 标题：message 与 plan 之间的真实留白，单行，不压 UI 正文。 */
+.director-c-title {
+  position: absolute;
+  z-index: 4;
+  left: 650px;
+  top: 285px;
+  font-size: 40px;
+  font-weight: 600;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  color: #2a2f3a;
+  pointer-events: none;
+}
+
+.director-strip-text {
+  font-family: "Microsoft YaHei UI", "Segoe UI", "PingFang SC", system-ui,
+    sans-serif;
+}
+
+/* 真实计划卡在导演段始终展开（探测层也要测到行矩形）。 */
+.director-stage .run-plan-cluster[data-expanded="false"] .run-plan-motion {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+}
+
+.director-stage .run-plan-summary .sd-chevron {
+  transform: rotate(90deg);
+}
+
+/* 按压反馈：指针压下的那一下。 */
+.director-stage [data-video-press] {
+  transform: scale(0.968);
+}
+
+/* 全部运动由 seek(t) 驱动，禁用 CSS 过渡与动画保证确定性。 */
+.director-ui *,
+.director-ui *::before,
+.director-ui *::after {
+  transition-duration: 0s !important;
+  animation-duration: 0s !important;
+  animation-iteration-count: 1 !important;
+}
+
+/* C 镜：原生 RunPlanCard 的导演段阅读版式（舞台像素 ÷1.39 = 视口像素）：
+   容器 600px 宽 @ x650，行 22px 字、行距 70px、单行最小高 60px，占 y370-690。 */
+.director-stage .director-plan-layer {
+  position: absolute;
+  left: 21px;
+  top: 136px;
+  width: 432px !important;
+  z-index: 5;
+}
+
+.director-stage .director-plan-layer .run-plan-summary {
+  font-size: 15.8px;
+  min-height: 43.2px;
+}
+
+.director-stage .director-plan-layer .run-plan ol {
+  margin: 8.6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 15.8px;
+  line-height: 1.2;
+}
+
+/* 展开中行是白纸面：材质只随 --lp 存在，10.6s 归位后回到原生 plan。 */
+.director-stage .director-plan-layer .run-plan-motion li {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 43.2px;
+  padding: 0 8.6px 0 12px;
+  background: rgba(255, 255, 255, var(--lp, 0));
+  will-change: transform, opacity;
+}
+
+.director-stage .director-plan-layer .run-plan-motion li + li {
+  margin-top: 7.2px;
+}
+
+.director-stage .director-plan-layer .run-plan-motion li .muted {
+  margin-left: 8.6px;
+}
+
+/* 2px 暖灰厚底 + 柔影：只在解折过程中可见。 */
+.director-stage .director-plan-layer .run-plan-motion li::before,
+.director-stage .director-plan-layer .run-plan-motion li::after {
+  content: "";
+  position: absolute;
+  opacity: var(--lp, 0);
+}
+
+.director-stage .director-plan-layer .run-plan-motion li::before {
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 2px;
+  background: #c9bca0;
+}
+
+.director-stage .director-plan-layer .run-plan-motion li::after {
+  left: 6px;
+  right: 6px;
+  top: 100%;
+  height: 26px;
+  background: rgba(10, 18, 14, 0.16);
+  filter: blur(12px);
+}
+
+.director-stage .director-plan-layer .run-plan-motion-inner {
+  overflow: visible;
+}
+
+/* 每行独立解折：perspective(1000px) rotateX(-10°→0) translateZ(0/55/110) translateX(0/24/48)。 */
+.director-stage .director-plan-layer .run-plan-motion li:nth-child(1) {
+  opacity: var(--p1-o, 1);
+  transform: perspective(1000px) rotateX(var(--p1-rx, 0deg))
+    translateZ(var(--p1-z, 0px)) translateX(var(--p1-x, 0px));
+}
+
+.director-stage .director-plan-layer .run-plan-motion li:nth-child(2) {
+  opacity: var(--p2-o, 1);
+  transform: perspective(1000px) rotateX(var(--p2-rx, 0deg))
+    translateZ(var(--p2-z, 0px)) translateX(var(--p2-x, 0px));
+}
+
+.director-stage .director-plan-layer .run-plan-motion li:nth-child(3) {
+  opacity: var(--p3-o, 1);
+  transform: perspective(1000px) rotateX(var(--p3-rx, 0deg))
+    translateZ(var(--p3-z, 0px)) translateX(var(--p3-x, 0px));
+}

@@ -1,0 +1,71 @@
+{
+  "userPrompt": "完成今天的委托，结束后检查结果。",
+  "typingGroups": ["完成今天的委托", "，", "结束后检查结果", "。"],
+  "conversation": {
+    "id": "conv-daily",
+    "title": "每日委托",
+    "createdAt": "2026-09-21T19:30:10",
+    "updatedAt": "2026-09-21T19:31:20"
+  },
+  "historyConversation": {
+    "id": "conv-teapot",
+    "title": "尘歌壶收纳整理",
+    "createdAt": "2026-09-18T20:02:00",
+    "updatedAt": "2026-09-18T20:11:40"
+  },
+  "plan": {
+    "goal": "每日委托",
+    "steps": [
+      { "id": "s1", "title": "检查游戏状态", "tool": "bgi.gameStatus" },
+      { "id": "s2", "title": "运行今日路线", "tool": "bgi.runRoute" },
+      { "id": "s3", "title": "检查完成结果", "tool": "bgi.verifyResult" }
+    ]
+  },
+  "approval": {
+    "id": "appr-1",
+    "request": {
+      "binding": { "description": "启动 BetterGI 今日路线" },
+      "arguments": {}
+    }
+  },
+  "assistantSummary": "今日委托已完成。\n\n路线运行完成，结果已确认。",
+  "assistantSummaryShort": "今日委托已完成。",
+  "toolLabels": {
+    "bgi.gameStatus": "检查游戏状态",
+    "bgi.runRoute": "运行今日路线",
+    "bgi.verifyResult": "检查完成结果"
+  },
+  "tools": [
+    { "name": "bgi.gameStatus", "label": "检查游戏状态", "description": "检查游戏与宿主状态", "source": "bettergi" },
+    { "name": "bgi.runRoute", "label": "运行今日路线", "description": "运行 BetterGI 地图追踪路线", "source": "bettergi" },
+    { "name": "bgi.verifyResult", "label": "检查完成结果", "description": "核对路线运行结果", "source": "bettergi" }
+  ],
+  "model": {
+    "id": "model-glm",
+    "name": "GLM-4.7",
+    "model": "glm-4.7",
+    "contextWindow": 128000
+  },
+  "workflow": {
+    "id": "wf-daily",
+    "name": "每日委托",
+    "description": "检查状态、运行路线、确认结果",
+    "stateLabelReady": "可以运行",
+    "stateLabelRunning": "运行中",
+    "stateLabelDone": "已完成",
+    "actionLabel": "运行",
+    "updatedAt": "2026-09-21T19:31:20"
+  },
+  "bootstrap": {
+    "configPath": "",
+    "plugins": [
+      {
+        "manifest": { "id": "bgi-host", "name": "BetterGI 连接", "version": "1.0.0" },
+        "status": "ok",
+        "configuredEnabled": true,
+        "host": true
+      }
+    ],
+    "bridge": { "enabled": true, "connected": true, "baseUrl": "" }
+  }
+}

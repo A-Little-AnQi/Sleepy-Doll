@@ -1,0 +1,422 @@
+/* BetterGI 主窗口复刻（WPF-UI Fluent 暗色）。配色对齐 better-genshinImpact 实机：深灰面板 + 系统蓝强调。 */
+
+.bgi-window {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #1f1f1f;
+  color: #f2f3f5;
+  font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  box-shadow:
+    0 48px 130px #04060ccc,
+    0 0 0 1px #ffffff12;
+  will-change: filter, opacity;
+}
+
+.bgi-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 0 0 14px;
+  background: #232323;
+  border-bottom: 1px solid #ffffff0d;
+  flex: 0 0 auto;
+}
+
+.bgi-logo {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background:
+    radial-gradient(circle at 30% 25%, #9fd8ff 0%, #3a8dde 45%, #1e5fb0 100%);
+  box-shadow: inset 0 0 0 1px #ffffff30;
+}
+
+.bgi-title {
+  font-size: 13px;
+  color: #d8dade;
+}
+
+.bgi-titlebar-actions {
+  margin-left: auto;
+  display: flex;
+  height: 100%;
+}
+
+.bgi-titlebar-actions button {
+  width: 46px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.bgi-titlebar-actions svg {
+  width: 11px;
+  height: 11px;
+  fill: #cfd2d6;
+  stroke: #cfd2d6;
+}
+
+.bgi-titlebar-actions .bgi-close:hover {
+  background: #c42b1c;
+}
+
+.bgi-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* ---- 左侧导航（NavigationView） ---- */
+
+.bgi-nav {
+  width: 200px;
+  flex: 0 0 auto;
+  padding: 10px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: #1c1c1c;
+  border-right: 1px solid #ffffff0a;
+  overflow: hidden;
+}
+
+.bgi-nav-group {
+  display: grid;
+  gap: 2px;
+}
+
+.bgi-nav-group-label {
+  padding: 10px 12px 4px;
+  font-size: 12px;
+  color: #9a9da3;
+}
+
+.bgi-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  color: #d9dbdf;
+  white-space: nowrap;
+}
+
+.bgi-nav-item.is-child {
+  padding-left: 44px;
+  height: 34px;
+  font-size: 13px;
+}
+
+.bgi-nav-item.is-selected {
+  background: #ffffff10;
+  color: #fff;
+  position: relative;
+}
+
+.bgi-nav-item.is-selected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 2px;
+  background: #4cc2ff;
+}
+
+.bgi-nav-icon {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+  stroke: currentColor;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.bgi-nav-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4cc2ff;
+}
+
+.bgi-nav-spacer {
+  flex: 1;
+}
+
+/* ---- 调度器页 ---- */
+
+.bgi-main {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+
+.bgi-groups {
+  width: 190px;
+  flex: 0 0 auto;
+  padding: 14px 10px;
+  border-right: 1px solid #ffffff0a;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bgi-groups-label {
+  font-size: 12px;
+  color: #9a9da3;
+  padding: 0 8px 6px;
+}
+
+.bgi-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  color: #d9dbdf;
+}
+
+.bgi-group.is-active {
+  background: #2d5f8f40;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px #4cc2ff33;
+}
+
+.bgi-group-grip {
+  width: 8px;
+  height: 14px;
+  background:
+    radial-gradient(circle, #ffffff40 1px, transparent 1.4px) 0 0 / 4px 5px;
+  opacity: 0.5;
+}
+
+.bgi-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 22px 12px;
+}
+
+.bgi-content-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.bgi-content-head h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  color: #f5f6f8;
+  white-space: nowrap;
+}
+
+.bgi-accent-text {
+  color: #4cc2ff;
+}
+
+.bgi-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bgi-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 6px;
+  border: 1px solid #ffffff1c;
+  background: #2b2b2b;
+  color: #eceef0;
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+
+.bgi-tool-btn.is-dropdown svg {
+  width: 10px;
+  height: 10px;
+}
+
+.bgi-run-btn {
+  background: #4cc2ff;
+  border-color: #4cc2ff;
+  color: #08131c;
+  font-weight: 600;
+  padding: 0 22px;
+}
+
+.bgi-run-btn.is-running {
+  background: #c42b1c;
+  border-color: #c42b1c;
+  color: #fff;
+}
+
+.bgi-run-icon {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+/* 任务表 */
+
+.bgi-table {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid #ffffff12;
+  border-radius: 8px;
+  background: #232323;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.bgi-table-head,
+.bgi-table-row {
+  display: flex;
+  align-items: center;
+}
+
+.bgi-table-head {
+  height: 42px;
+  background: #ffffff08;
+  font-size: 12.5px;
+  color: #a6a9af;
+  border-bottom: 1px solid #ffffff10;
+}
+
+.bgi-table-row {
+  height: 52px;
+  font-size: 14px;
+  color: #e3e5e8;
+  border-bottom: 1px solid #ffffff08;
+  padding-right: 0;
+}
+
+.bgi-table-head span,
+.bgi-table-row span {
+  padding: 0 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bgi-table-row.is-selected {
+  background: #4cc2ff14;
+  box-shadow: inset 3px 0 0 #4cc2ff;
+}
+
+.bgi-cell-name {
+  font-weight: 600;
+}
+
+.bgi-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: #a6a9af;
+}
+
+.bgi-status-chip svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: #6ccb5f;
+}
+
+.bgi-status-chip.is-running {
+  color: #4cc2ff;
+}
+
+.bgi-status-chip.is-done {
+  color: #6ccb5f;
+}
+
+.bgi-mini-spin {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #4cc2ff40;
+  border-top-color: #4cc2ff;
+  /* 舞台内动画全部禁用，旋转由时钟变量驱动（继承自 .video-stage）。 */
+  animation: none !important;
+  transform: rotate(var(--video-spin, 0turn));
+}
+
+/* 底部日志 */
+
+.bgi-log {
+  height: 128px;
+  margin-top: 12px;
+  border-radius: 8px;
+  border: 1px solid #ffffff10;
+  background: #1a1a1a;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 5px;
+  overflow: hidden;
+  font-family: Consolas, "Microsoft YaHei UI", monospace;
+  font-size: 12.5px;
+  color: #b9bcc2;
+}
+
+.bgi-log-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bgi-log-line:first-child {
+  color: #8f9298;
+}
+
+/* 状态栏 */
+
+.bgi-status {
+  flex: 0 0 auto;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 16px;
+  background: #232323;
+  border-top: 1px solid #ffffff0d;
+  font-size: 12.5px;
+  color: #a6a9af;
+}
+
+.bgi-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #6ccb5f;
+}
+
+.bgi-status-dot.is-running {
+  background: #4cc2ff;
+}
+
+.bgi-status-right {
+  margin-left: auto;
+  color: #74777d;
+}

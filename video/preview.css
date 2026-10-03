@@ -1,0 +1,60 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #192018;
+}
+* {
+  box-sizing: border-box;
+}
+.preview-shell {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #192018;
+}
+.preview-scaler {
+  position: relative;
+}
+.preview-controls {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  padding: 12px 20px;
+  border-radius: 14px;
+  background: #20261eea;
+  color: #e9eddf;
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  font:
+    13px "Segoe UI",
+    sans-serif;
+  box-shadow: 0 8px 25px #0003;
+}
+.preview-controls button {
+  background: #e1c582;
+  border: 0;
+  border-radius: 7px;
+  color: #27301f;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.preview-controls input {
+  width: 300px;
+  accent-color: #d7bd7d;
+}
+
+/* 截帧作用域：仅在 capture 模式给根节点加 .film-capture，关闭业务过渡/动画与输入
+   光标闪烁，保证帧画面只由时钟 t 决定；不影响正常业务界面与非截帧预览。 */
+.film-capture *,
+.film-capture *::before,
+.film-capture *::after {
+  transition: none !important;
+  animation: none !important;
+  caret-color: transparent !important;
+}

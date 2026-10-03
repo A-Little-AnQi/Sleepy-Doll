@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "purpose": "导演解说旁白（0-60s 成片，12 段）。合成走笔记本 SSH -> 127.0.0.1:9880/synth（Qwen3-TTS），由 video/audio/qwen-narrate.mjs 驱动；暂不接入制作主入口。",
+  "provider": "qwen-ssh",
+  "language": "chinese",
+  "voice": "Kirara",
+  "seed": 1234,
+  "ssh": {
+    "host": "31931@10.11.45.183",
+    "python": "D:\\home-server\\tts\\.venv\\Scripts\\python.exe",
+    "synth_url": "http://127.0.0.1:9880/synth"
+  },
+  "cache_dir": "target/video-build/audio/voice",
+  "notes": [
+    "窗口为暂定时序；clip 实际时长超出窗口只报告，由用户改文案或时序，不裁剪、不变速。",
+    "响应不含逐词边界，只有能量 VAD 的段落级声学起止，不构成词对齐。"
+  ],
+  "segments": [
+    { "id": "n01", "start": 0,  "end": 4,  "text": "让已有工具，听你的指挥。" },
+    { "id": "n02", "start": 4.5,  "end": 8,  "text": "输入目标。" },
+    { "id": "n03", "start": 8,  "end": 12, "text": "先确认你指定的项目。" },
+    { "id": "n04", "start": 12, "end": 17, "text": "关键操作，确认之后再执行。" },
+    { "id": "n05", "start": 17, "end": 23, "text": "任务交给原版 BetterGI。" },
+    { "id": "n06", "start": 23, "end": 28, "text": "运行已经提交。继续安排下一件事。" },
+    { "id": "n07", "start": 28, "end": 34, "text": "把指定的已有项目，保存为快捷任务。" },
+    { "id": "n08", "start": 34, "end": 40, "text": "下次点一下运行，省去重复配置。" },
+    { "id": "n09", "start": 40, "end": 45, "text": "模型由你选择。云端，或者本地。" },
+    { "id": "n10", "start": 45, "end": 50, "text": "技能和插件，按需扩展工具。" },
+    { "id": "n11", "start": 50, "end": 55, "text": "通过本地桥，连接原版 BetterGI。" },
+    { "id": "n12", "start": 55, "end": 60, "text": "Sleepy Doll。你的本地桌面助手。" }
+  ]
+}

@@ -1,0 +1,346 @@
+/* 发布片舞台：深色舞台、窗口外框、场外字幕、光标与品牌收束。 */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #0b0d12;
+}
+
+.video-stage {
+  position: relative;
+  overflow: hidden;
+  /* 舞台光：顶部微光的深蓝黑，不再是平的黑场。 */
+  background:
+    radial-gradient(130% 90% at 50% -6%, #1a2030 0%, #10141d 48%, #0a0c11 100%),
+    #0a0c11;
+  font-family:
+    Inter, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  cursor: none;
+  user-select: none;
+}
+
+/* 窗口背后的环境光：产品=暖金，BetterGI=冷蓝。屏幕空间，跟随窗口中心。 */
+.video-ambient {
+  position: absolute;
+  width: 2300px;
+  height: 2300px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.video-ambient.is-warm {
+  background: radial-gradient(
+    circle,
+    rgba(240, 211, 106, 0.085) 0%,
+    rgba(214, 178, 94, 0.05) 34%,
+    rgba(120, 96, 44, 0.022) 62%,
+    transparent 78%
+  );
+}
+
+.video-ambient.is-cool {
+  background: radial-gradient(
+    circle,
+    rgba(76, 194, 255, 0.075) 0%,
+    rgba(58, 141, 222, 0.045) 34%,
+    rgba(30, 66, 110, 0.02) 62%,
+    transparent 78%
+  );
+}
+
+/* 品牌收束时的月光：更紧、更暖。 */
+.video-ambient.is-moon {
+  width: 1700px;
+  height: 1700px;
+  background: radial-gradient(
+    circle,
+    rgba(246, 225, 154, 0.16) 0%,
+    rgba(240, 211, 106, 0.085) 30%,
+    rgba(150, 120, 55, 0.03) 58%,
+    transparent 76%
+  );
+}
+
+/* 暗角与颗粒：电影感与防色带。 */
+.video-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: radial-gradient(
+    115% 100% at 50% 46%,
+    transparent 55%,
+    rgba(4, 6, 10, 0.42) 100%
+  );
+}
+
+/* 颗粒在 ffmpeg 编码时统一加（noise 滤镜），渲染层保持零成本。 */
+
+/* 确定性：舞台内禁用一切 CSS 动画与过渡，运动全部由 seek(t) 内联驱动。 */
+.video-stage *,
+.video-stage *::before,
+.video-stage *::after {
+  animation: none !important;
+  transition: none !important;
+  caret-color: transparent !important;
+}
+
+/* 产品里唯一的持续动画是加载指示，改由时钟变量驱动旋转。 */
+.video-stage .activity-spinner {
+  animation: none !important;
+  transform: rotate(var(--video-spin, 0turn));
+}
+
+/* 计划卡在片里始终展开（镜头 03/05 的三步状态）。 */
+.video-stage .run-plan-cluster[data-expanded="false"] .run-plan-motion {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+}
+.video-stage .run-plan-cluster[data-expanded="false"] .activity-expand,
+.video-stage .run-plan-summary .sd-chevron {
+  transform: rotate(90deg);
+}
+
+/* 片里对话只留用户消息与三步计划：折叠的「思考与工具调用」组收起不显示。 */
+.video-stage .process-group {
+  display: none;
+}
+
+/* 按压反馈：光标压下的那一下。 */
+.video-stage [data-video-press] {
+  transform: scale(0.968);
+}
+
+.video-scene {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  will-change: transform;
+}
+
+.video-window {
+  position: absolute;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow:
+    0 48px 130px #04060bcc,
+    0 0 0 1px #ffffff17;
+  will-change: transform, opacity, filter;
+}
+
+/* ---- 场外字幕 ---- */
+
+.video-caption {
+  position: absolute;
+  color: #f4f2ec;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.video-caption span {
+  display: inline-block;
+}
+
+.video-caption.is-right {
+  left: 2070px;
+  top: 640px;
+  transform: translateY(-50%);
+}
+
+/* 右侧字幕带一枚金色小竖标：黑白舞台上唯一的品牌色提示。 */
+.video-caption.is-right::before {
+  content: "";
+  position: absolute;
+  left: -34px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 5px;
+  height: 0.62em;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #f0d36a, #c9a227);
+}
+
+.video-caption.is-left-bottom {
+  left: 120px;
+  bottom: 110px;
+  color: #ece9e1;
+}
+
+.video-caption.is-top {
+  left: 50%;
+  top: 74px;
+  transform: translateX(-50%);
+  color: #e6e3da;
+}
+
+/* ---- 光标 ---- */
+
+.video-cursor {
+  position: absolute;
+  width: 44px;
+  height: 54px;
+  margin: -2px 0 0 -2px;
+  z-index: 60;
+  pointer-events: none;
+  filter: drop-shadow(0 3px 6px #00000066);
+}
+
+.video-cursor svg {
+  width: 100%;
+  height: 100%;
+  fill: #ffffff;
+  stroke: #1c1e24;
+  stroke-width: 1.1;
+  stroke-linejoin: round;
+}
+
+/* ---- 镜头 07 的保存确认卡 ---- */
+
+.film-saved-card {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--subtle);
+  box-shadow: var(--shadow);
+}
+
+.film-saved-card .button-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--gold, #c9a227);
+  flex-shrink: 0;
+}
+
+.film-saved-card strong {
+  display: block;
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.film-saved-card span {
+  display: block;
+  font-size: 12px;
+  color: var(--secondary);
+  margin-top: 2px;
+}
+
+/* ---- 镜头 08 品牌收束：窗口沉入夜色，月牙是唯一的光源。 ---- */
+
+.video-brand {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.video-brand-icon {
+  width: 224px;
+  height: 224px;
+  color: #f6e9c4;
+  filter: drop-shadow(0 0 46px rgba(240, 211, 106, 0.32));
+}
+
+.video-brand-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.video-brand-name {
+  margin: 0;
+  font-size: 92px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: #f7f8fa;
+  line-height: 1.1;
+}
+
+.video-brand-slogan {
+  margin: 4px 0 0;
+  font-size: 62px;
+  font-weight: 600;
+  color: #f0d36a;
+  letter-spacing: 0.01em;
+  line-height: 1.3;
+}
+
+.video-blackout {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  z-index: 80;
+  pointer-events: none;
+}
+
+/* 字幕固定在画面底部，避免取景放大后出界。 */
+.video-caption.is-right,
+.video-caption.is-top,
+.video-caption.is-left-bottom {
+  left: 50%;
+  right: auto;
+  top: auto;
+  bottom: 40px;
+  max-width: 2280px;
+  transform: translateX(-50%);
+  padding: 16px 30px;
+  background: #141619e8;
+  border-radius: 6px;
+  text-align: center;
+  white-space: normal;
+  font-weight: 400;
+  line-height: 1.4;
+}
+.video-caption.is-right::before {
+  display: none;
+}
+.video-stage {
+  background: #14171b;
+}
+.video-ambient,
+.video-vignette {
+  display: none;
+}
+.video-click-ring {
+  position: absolute;
+  width: 54px;
+  height: 54px;
+  left: 5px;
+  top: 5px;
+  border: 2px solid #bca455;
+  border-radius: 50%;
+}
+.video-stage .run-plan-motion li:nth-child(1) {
+  opacity: var(--plan-step-1);
+  transform: translateX(calc((1 - var(--plan-step-1)) * 22px));
+}
+.video-stage .run-plan-motion li:nth-child(2) {
+  opacity: var(--plan-step-2);
+  transform: translateX(calc((1 - var(--plan-step-2)) * 22px));
+}
+.video-stage .run-plan-motion li:nth-child(3) {
+  opacity: var(--plan-step-3);
+  transform: translateX(calc((1 - var(--plan-step-3)) * 22px));
+}
+.video-stage .task-card {
+  opacity: var(--task-enter);
+  transform: translateY(calc((1 - var(--task-enter)) * 30px));
+}

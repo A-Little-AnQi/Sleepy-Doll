@@ -1,6 +1,6 @@
 [package]
 name = "sleepy-doll"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 description = "General desktop agent for game scripting tools, with a BetterGI plugin"
 license = "MIT"
@@ -21,7 +21,7 @@ uuid = { version = "1.18.1", features = ["v4", "serde"] }
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "process", "io-util"] }
 tokio-util = { version = "0.7", features = ["rt"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "blocking", "rustls-tls"] }
 sha2 = "0.10"
 url = "2.5"
 base64 = "0.22"
@@ -61,6 +61,12 @@ windows-sys = { version = "0.61", features = [
   "Win32_Graphics_Gdi",
 ] }
 
+[profile.dev]
+# Keep backtrace symbols without full type/variable debug info. Tests inherit this profile.
+debug = 1
+# Repeated feature combinations otherwise retain large incremental object caches.
+incremental = false
+
 [profile.release]
 # 交付体积优先：panic = "abort" 去掉展开清理路径，opt-level = "s" 以少量速度换体积。
 lto = "fat"
@@ -82,6 +88,12 @@ required-features = ["dev-ipc"]
 [[bin]]
 name = "bgi-agent-check"
 path = "src/bin/bgi-agent-check.rs"
+required-features = ["dev-ipc"]
+
+# 测试工具：技能规划隔离验收，不进发布包。
+[[bin]]
+name = "bgi-skill-plan-check"
+path = "src/bin/bgi-skill-plan-check.rs"
 required-features = ["dev-ipc"]
 
 # 只在显式 --features setup 时编译：它 include_bytes! 构建期生成的载荷，

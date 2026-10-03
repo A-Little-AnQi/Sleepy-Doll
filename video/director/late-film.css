@@ -1,0 +1,575 @@
+/* 宣传片 12-60 秒（LateFilm）作用域样式。
+   只作用于 .late-film；实体件用静态阴影/边框表达材质，动画全部由 React 内联
+   transform 驱动，本文件不写 transition / animation。 */
+
+.late-film {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+
+/* 视频域内自足的产品窗口基础样式（main 移除 ProductFilm 后不再有 stage.css 兜底）。
+   只作用于 .late-film 下的 .video-window，不改业务全局。 */
+.late-film .video-window {
+  position: absolute;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow:
+    0 48px 130px rgba(4, 6, 12, 0.66),
+    0 0 0 1px rgba(255, 255, 255, 0.09);
+}
+
+/* seek(t) 纯函数要求：视频域内禁掉业务组件的 CSS 过渡/动画与输入光标，
+   不依赖录制端 finish() 凑数。 */
+.late-film *,
+.late-film *::before,
+.late-film *::after {
+  transition: none !important;
+  animation: none !important;
+  caret-color: transparent;
+}
+.late-film input,
+.late-film textarea {
+  caret-color: transparent;
+}
+
+.lf-shot {
+  position: absolute;
+  inset: 0;
+}
+
+/* ---- 缩放卡片 / 裁切容器 ---- */
+
+.lf-card {
+  position: absolute;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow:
+    0 40px 110px rgba(4, 6, 12, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.lf-card.lf-window {
+  background: var(--surface, #fbfaf6);
+}
+
+.lf-crop {
+  position: absolute;
+  overflow: hidden;
+  border-radius: 14px;
+  box-shadow:
+    0 40px 110px rgba(4, 6, 12, 0.32),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+  background: #fff;
+}
+
+/* 聊天适配：内容自然铺开，不做滚动定位（保证 seek 确定性） */
+.late-film .lf-pane .chat-scroll {
+  overflow: visible;
+}
+.late-film .lf-pane {
+  display: flex;
+  flex-direction: column;
+}
+.late-film .lf-pane .conversation-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.late-film .lf-approval-slot {
+  margin-top: 26px;
+  width: 100%;
+  max-width: 680px;
+}
+
+/* D 镜审批特写卡：内部 padding 32，k=1.5 下 heading≈24px、正文≈21px、按钮≈21px 屏显 */
+.lf-approval-card {
+  margin-top: 0;
+  padding: 32px;
+}
+
+.lf-transcript-crop {
+  padding: 14px 18px;
+}
+
+/* ---- 标题 / 副句 ---- */
+
+.lf-title {
+  position: absolute;
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.18;
+  letter-spacing: 0.01em;
+  color: #f1eadb;
+  z-index: 6;
+}
+.lf-title.is-dark {
+  color: #26312f;
+}
+
+.lf-sub {
+  position: absolute;
+  margin: 0;
+  font-size: 32px;
+  color: #26312f;
+  opacity: 0.82;
+  z-index: 6;
+}
+
+/* ---- 指针 ---- */
+
+.lf-pointer {
+  position: absolute;
+  z-index: 40;
+  filter: drop-shadow(0 10px 14px rgba(4, 6, 12, 0.45));
+}
+.lf-pointer-body {
+  fill: #f4efe2;
+}
+.lf-pointer-edge {
+  stroke: #26312f;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+/* ---- 纸条 / 折纸 / 纸夹 ---- */
+
+.lf-strip {
+  position: absolute;
+  background: linear-gradient(160deg, #f6f0df 0%, #ece4cd 100%);
+  border-radius: 6px;
+  box-shadow:
+    0 16px 34px rgba(4, 6, 12, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  display: flex;
+  align-items: center;
+  padding: 0 26px;
+  z-index: 12;
+}
+.lf-strip::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  background: linear-gradient(180deg, #d8bc7c, #c6a567);
+  border-radius: 6px 0 0 6px;
+}
+.lf-strip-text {
+  font-size: 32px;
+  font-weight: 600;
+  color: #26312f;
+  letter-spacing: 0.04em;
+}
+.lf-strip-fold {
+  position: absolute;
+  right: -14px;
+  top: 0;
+  width: 14px;
+  height: 50%;
+  background: #ddd3b8;
+  clip-path: polygon(0 0, 100% 100%, 0 100%);
+  box-shadow: -2px 2px 6px rgba(4, 6, 12, 0.18);
+}
+
+.lf-foldpaper {
+  position: absolute;
+  width: 480px;
+  height: 84px;
+  z-index: 14;
+  perspective: 700px;
+}
+.lf-foldpaper-a,
+.lf-foldpaper-b {
+  position: absolute;
+  top: 0;
+  height: 84px;
+  display: flex;
+  align-items: center;
+  padding: 0 22px;
+  font-size: 28px;
+  font-weight: 600;
+  color: #26312f;
+  background: linear-gradient(160deg, #f6f0df, #ece4cd);
+  transform-origin: bottom center;
+  box-shadow: 0 14px 30px rgba(4, 6, 12, 0.32);
+}
+.lf-foldpaper-a {
+  left: 0;
+  width: 50%;
+}
+.lf-foldpaper-b {
+  right: 0;
+  width: 50%;
+  background: linear-gradient(200deg, #efe8d4, #e2d8bd);
+}
+
+.lf-clip {
+  position: absolute;
+  width: 150px;
+  height: 34px;
+  background: linear-gradient(180deg, #c9b98e, #a89a72);
+  border-radius: 8px;
+  box-shadow:
+    0 10px 22px rgba(4, 6, 12, 0.35),
+    inset 0 2px 0 rgba(255, 255, 255, 0.5);
+  z-index: 15;
+}
+.lf-clip::after {
+  content: "";
+  position: absolute;
+  inset: 7px 14px;
+  border-radius: 4px;
+  background: rgba(38, 49, 47, 0.35);
+}
+
+.lf-trifold {
+  position: absolute;
+  height: 76px;
+  display: flex;
+  perspective: 800px;
+  z-index: 14;
+  transform-origin: 50% 40%;
+}
+.lf-trifold-seg {
+  height: 76px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  font-size: 30px;
+  font-weight: 600;
+  color: #26312f;
+  background: linear-gradient(160deg, #f6f0df, #ece4cd);
+  border-right: 1px solid rgba(38, 49, 47, 0.18);
+  box-shadow: 0 16px 32px rgba(4, 6, 12, 0.3);
+  white-space: nowrap;
+  transform-style: preserve-3d;
+}
+.lf-trifold-seg.is-b {
+  background: linear-gradient(200deg, #efe8d4, #e2d8bd);
+  transform-origin: left center;
+}
+.lf-trifold-seg.is-c {
+  background: #ddd3b8;
+  transform-origin: left center;
+}
+
+/* ---- 金件 ---- */
+
+.lf-goldline {
+  position: absolute;
+  background: linear-gradient(90deg, #b18e4e, #c6a567 40%, #e2c88b);
+  border-radius: 3px;
+  box-shadow: 0 6px 16px rgba(198, 165, 103, 0.35);
+  z-index: 10;
+}
+
+.lf-latch {
+  position: absolute;
+  background: linear-gradient(90deg, #a98a4e, #c6a567 45%, #d9be82);
+  border-radius: 6px;
+  box-shadow:
+    0 10px 24px rgba(4, 6, 12, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  z-index: 11;
+}
+
+.lf-gold-frame {
+  position: absolute;
+  border: 4px solid #c6a567;
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px rgba(198, 165, 103, 0.4),
+    0 18px 40px rgba(198, 165, 103, 0.25);
+  pointer-events: none;
+  z-index: 9;
+}
+
+.lf-stamp {
+  position: absolute;
+  width: 92px;
+  height: 92px;
+  border-radius: 18px;
+  background: radial-gradient(circle at 34% 30%, #e6cf96, #c6a567 62%, #a9863f);
+  box-shadow:
+    0 18px 36px rgba(4, 6, 12, 0.38),
+    inset 0 2px 2px rgba(255, 255, 255, 0.55),
+    inset 0 -3px 6px rgba(90, 66, 20, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+.lf-stamp span {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff7e4;
+  letter-spacing: 0.1em;
+}
+
+.lf-seal-strip {
+  position: absolute;
+  width: 132px;
+  height: 26px;
+  background: linear-gradient(90deg, #b18e4e, #d9be82);
+  border-radius: 4px;
+  box-shadow:
+    0 8px 18px rgba(4, 6, 12, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  z-index: 20;
+}
+
+.lf-spark {
+  position: absolute;
+  width: 26px;
+  height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffe9ae, rgba(255, 233, 174, 0));
+  z-index: 16;
+}
+
+.lf-dot {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #c6a567;
+  box-shadow: 0 0 18px 6px rgba(198, 165, 103, 0.45);
+  z-index: 16;
+}
+
+/* ---- E 镜：牌 / 槽 ---- */
+
+.lf-plate {
+  position: absolute;
+  height: 156px;
+  border-radius: 12px;
+  background: linear-gradient(175deg, #fdfbf4, #ece7d6);
+  border: 1px solid rgba(38, 49, 47, 0.12);
+  box-shadow:
+    0 8px 0 #d9d2ba,
+    0 30px 60px rgba(4, 6, 12, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font-size: 34px;
+  font-weight: 600;
+  color: #26312f;
+  letter-spacing: 0.06em;
+  z-index: 12;
+}
+.lf-plate.is-host {
+  font-size: 40px;
+  letter-spacing: 0.1em;
+  background: linear-gradient(175deg, #fdfbf4, #e6e0cc);
+}
+.lf-plate-icon {
+  width: 44px;
+  height: 44px;
+  color: #26312f;
+}
+
+.lf-slot {
+  position: absolute;
+  width: 68px;
+  height: 132px;
+  background: linear-gradient(90deg, #22302d, #31413c 45%, #22302d);
+  border-radius: 8px;
+  box-shadow:
+    0 18px 36px rgba(4, 6, 12, 0.5),
+    inset 0 0 0 1px rgba(198, 165, 103, 0.25);
+  z-index: 11;
+}
+
+/* ---- I 镜：左列概念滑轨（不穿模型字段） ---- */
+
+.lf-rail-labels {
+  position: absolute;
+  left: 120px;
+  top: 460px;
+  width: 370px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 34px;
+  font-weight: 600;
+  color: #f1eadb;
+  letter-spacing: 0.14em;
+  z-index: 8;
+}
+.lf-rail {
+  position: absolute;
+  left: 140px;
+  top: 550px;
+  width: 370px;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #a98a4e, #c6a567 40%, #e2c88b);
+  box-shadow: 0 8px 20px rgba(198, 165, 103, 0.4);
+  z-index: 8;
+}
+.lf-selector {
+  position: absolute;
+  width: 90px;
+  height: 60px;
+  border-radius: 10px;
+  background: linear-gradient(175deg, #fdfbf4, #e9e2cc);
+  box-shadow:
+    0 5px 0 #cfc6a9,
+    0 16px 30px rgba(4, 6, 12, 0.45);
+  z-index: 9;
+}
+.lf-list-spine {
+  position: absolute;
+  width: 220px;
+  height: 560px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #efe8d4, #d8cdae);
+  box-shadow:
+    0 24px 50px rgba(4, 6, 12, 0.45),
+    inset 6px 0 10px rgba(255, 255, 255, 0.4);
+  transform-origin: left center;
+  z-index: 18;
+}
+
+/* ---- J 镜：书脊 ---- */
+
+.lf-spine {
+  position: absolute;
+  width: 74px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #efe8d4, #d9cfae 70%, #c4b78e);
+  box-shadow:
+    0 4px 0 #c9bd93,
+    0 22px 44px rgba(4, 6, 12, 0.38);
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  color: #26312f;
+  z-index: 14;
+}
+.lf-spine.is-short {
+  width: 62px;
+  background: linear-gradient(90deg, #e9e2cc, #d0c5a0 70%, #bcAE88);
+}
+
+/* ---- K 镜：插头与连接器 ---- */
+
+.lf-plug {
+  position: absolute;
+  width: 220px;
+  height: 140px;
+  border-radius: 14px;
+  background: linear-gradient(175deg, #fdfbf4, #e8e2ce);
+  border: 1px solid rgba(38, 49, 47, 0.14);
+  box-shadow:
+    0 8px 0 #d6cfb4,
+    0 34px 64px rgba(4, 6, 12, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-size: 28px;
+  font-weight: 600;
+  color: #26312f;
+  z-index: 14;
+}
+.lf-plug.is-host {
+  font-size: 32px;
+  letter-spacing: 0.08em;
+}
+.lf-plug-pin {
+  position: absolute;
+  right: -26px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 44px;
+  background: linear-gradient(90deg, #b9a672, #d9be82);
+  border-radius: 0 6px 6px 0;
+  box-shadow: 0 6px 14px rgba(4, 6, 12, 0.4);
+}
+.lf-plug-socket {
+  position: absolute;
+  left: -24px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 52px;
+  background: #1c2624;
+  border-radius: 6px 0 0 6px;
+  box-shadow: inset 3px 0 6px rgba(0, 0, 0, 0.6);
+}
+
+.lf-connector {
+  position: absolute;
+  width: 480px;
+  height: 92px;
+  border-radius: 12px;
+  background: linear-gradient(175deg, #39463f, #232e2a);
+  box-shadow:
+    0 8px 0 #141b18,
+    0 30px 60px rgba(4, 6, 12, 0.55);
+  z-index: 13;
+}
+.lf-connector-seam {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 50%;
+  height: 8px;
+  transform: translateY(-50%);
+  border-radius: 4px;
+  background: linear-gradient(90deg, #101719, #3a2f14 50%, #101719);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+/* ---- L 镜：收束 ---- */
+
+.lf-crescent {
+  position: absolute;
+  width: 260px;
+  height: 260px;
+  filter: drop-shadow(0 34px 60px rgba(4, 6, 12, 0.6));
+  z-index: 8;
+}
+
+.lf-endname {
+  position: absolute;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 84px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #f1eadb;
+  z-index: 8;
+}
+.lf-endtag {
+  position: absolute;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 30px;
+  color: rgba(241, 234, 219, 0.72);
+  letter-spacing: 0.22em;
+  z-index: 8;
+}
+
+.lf-dim {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  pointer-events: none;
+  z-index: 60;
+}

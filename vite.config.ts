@@ -114,7 +114,7 @@ export default defineConfig({
   build: {
     outDir: "../target/ui",
     emptyOutDir: true,
-    rollupOptions: {
+    rolldownOptions: {
       // 主窗口、安装程序和主题一致的托盘菜单使用各自入口。
       input: {
         index: fileURLToPath(new URL("./web/index.html", import.meta.url)),
