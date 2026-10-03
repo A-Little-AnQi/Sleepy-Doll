@@ -1,0 +1,44 @@
+name: verify-update
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-update:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      TEMP: ${{ github.workspace }}\target\update-validation\tmp
+      TMP: ${{ github.workspace }}\target\update-validation\tmp
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare validation directory
+        shell: pwsh
+        run: New-Item -ItemType Directory -Path $env:TEMP -Force | Out-Null
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - name: Prepare unpublished baseline
+        shell: pwsh
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; const path="Cargo.toml"; fs.writeFileSync(path,fs.readFileSync(path,"utf8").replace(/^version = "[^"]+"/m,"version = \"0.0.0\"")); for(const path of ["package.json","package-lock.json"]){const value=JSON.parse(fs.readFileSync(path,"utf8"));value.version="0.0.0";if(value.packages)value.packages[""].version="0.0.0";fs.writeFileSync(path,JSON.stringify(value,null,2));}'
+      - run: npm run build
+      - run: cargo build --release --bin sleepy-doll
+      - name: Verify actual desktop update
+        run: node installer/verify-update.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sleepy-doll-update-verification
+          path: |
+            target/update-validation/result.json
+            target/update-validation/before-update.png
+            target/update-validation/after-update.png
+            target/update-validation/application.stderr
+          retention-days: 3
