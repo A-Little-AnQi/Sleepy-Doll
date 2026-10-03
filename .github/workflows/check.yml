@@ -10,9 +10,15 @@ on:
 
 jobs:
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
+    env:
+      TEMP: ${{ github.workspace }}\target\ci\tmp
+      TMP: ${{ github.workspace }}\target\ci\tmp
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare build cache
+        shell: pwsh
+        run: New-Item -ItemType Directory -Path $env:TEMP -Force | Out-Null
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -25,6 +31,7 @@ jobs:
           dotnet-version: 8.0.x
       - run: npm ci
       - run: npm run build
+      - run: node --test cloudflare/worker.test.mjs
       - run: cargo fmt --all -- --check
       - run: cargo check
       - run: cargo check --no-default-features

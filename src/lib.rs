@@ -1,6 +1,7 @@
 pub mod app;
 pub mod bridge;
 pub mod config;
+pub mod distribution;
 pub mod error;
 pub mod extension;
 pub mod logging;

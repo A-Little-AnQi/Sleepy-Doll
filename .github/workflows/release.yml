@@ -3,28 +3,36 @@ name: release
 on:
   push:
     tags: ["v*"]
-  # 手动发布当前分支：版本号取 Cargo.toml，tag 由本流程创建。
   workflow_dispatch:
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: sleepy-doll-release
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  # 发布必须建立在通过的检查之上，所以这里复用 check.yml 而不是重抄一遍。
   check:
     uses: ./.github/workflows/check.yml
-
   release:
     needs: check
-    runs-on: windows-latest
+    runs-on: windows-2022
     permissions:
       contents: write
+    env:
+      TEMP: ${{ github.workspace }}\target\ci\tmp
+      TMP: ${{ github.workspace }}\target\ci\tmp
+      npm_config_cache: ${{ github.workspace }}\target\ci\npm-cache
+      WRANGLER_LOG_PATH: ${{ github.workspace }}\target\ci\wrangler
+      WRANGLER_SEND_METRICS: "false"
+      CLOUDFLARE_ACCOUNT_ID: "31b280af27ff4bf0d338ecd49cf27902"
+      R2_BUCKET: sleepy-doll-releases
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare build cache
+        shell: pwsh
+        run: New-Item -ItemType Directory -Path $env:TEMP -Force | Out-Null
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -33,79 +41,58 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-
       - name: Resolve version
         shell: pwsh
         run: |
-          $cargo = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' |
-            Select-Object -First 1).Matches[0].Groups[1].Value
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $tag = "${{ github.ref_name }}"
-            $version = $tag -replace '^v', ''
-            # 安装程序按这个版本号判新旧，和二进制对不上会让升级识别出错。
-            if ($version -ne $cargo) {
-              throw "tag $tag 的版本号是 $version，Cargo.toml 里是 $cargo，两者必须一致。"
-            }
-          } else {
-            $version = $cargo
-            $tag = "v$cargo"
-          }
-          "VERSION=$version" >> $env:GITHUB_ENV
+          $cargo = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $frontend = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($cargo -ne $frontend) { throw "Cargo 和前端版本不一致" }
+          $tag = "v$cargo"
+          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}" -ne $tag) { throw "标签与源码版本不一致" }
+          "VERSION=$cargo" >> $env:GITHUB_ENV
           "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
-
       - run: npm ci
-
       - name: Build product
         shell: cmd
         run: build-desktop.cmd
-
-      - name: Package portable archive
-        shell: pwsh
-        run: |
-          # user\ 是用户数据，只可能由构建机上执行过的主程序产生；它出现在交付目录
-          # 里说明模型密钥和桥 token 会被一起发出去。bridge\user\ 同样不该有——桥的
-          # 运行期数据与主程序共用安装根下的 user\。
-          foreach ($dirty in @("dist\Sleepy-Doll\user", "dist\Sleepy-Doll\bridge\user")) {
-            if (Test-Path $dirty) { throw "$dirty 存在，交付目录不干净。" }
-          }
-          Compress-Archive -Path "dist\Sleepy-Doll" `
-            -DestinationPath "dist\Sleepy-Doll-$env:VERSION-portable.zip"
-
-      - name: Publish release
+      - name: Upload and verify R2 files
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: node installer/publish-r2.mjs
+      - name: Deploy distribution service
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
+          GA_API_SECRET: ${{ secrets.GA_API_SECRET }}
+        run: node installer/deploy-cloudflare.mjs
+      - name: Publish GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # 安装程序由 build-desktop.cmd 一并产出；缺了说明构建没走完，不要发一个半成品。
-          if (-not (Test-Path "dist\Sleepy-Doll-$env:VERSION-setup.exe")) {
-            throw "没有产出 dist\Sleepy-Doll-$env:VERSION-setup.exe。"
+          $assets = @("dist/Sleepy-Doll-$env:VERSION-setup.exe", "dist/Sleepy-Doll-$env:VERSION-setup.exe.sha256", "dist/Sleepy-Doll-$env:VERSION-release.json")
+          $notes = "web/src/app/release-notes/changelog-$env:VERSION.md"
+          gh release view $env:RELEASE_TAG --json isDraft 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG @assets --clobber
+            if ($LASTEXITCODE -ne 0) { throw "上传 Release 文件失败" }
+          } else {
+            gh release create $env:RELEASE_TAG @assets --target "${{ github.sha }}" --draft --title "Sleepy Doll $env:VERSION" --notes-file $notes
+            if ($LASTEXITCODE -ne 0) { throw "创建 Release 失败" }
           }
-          $assets = @(
-            "dist\Sleepy-Doll-$env:VERSION-setup.exe",
-            "dist\Sleepy-Doll-$env:VERSION-portable.zip"
-          )
-          # tag 推送时 tag 已经指向本次提交；手动触发时要在这里建。
-          $target = @()
-          if ("${{ github.ref_type }}" -ne "tag") {
-            $target = @("--target", "${{ github.sha }}")
-          }
-          gh release create $env:RELEASE_TAG @assets @target `
-            --title "Sleepy Doll $env:VERSION" --generate-notes
-
-          # 自动生成的变化列表只有提交标题，前面补一段该下载哪个文件。
-          $preamble = @'
-          两个文件，按需要选一个：
-
-          - `Sleepy-Doll-{0}-setup.exe` —— 安装程序。默认装到 `D:\Sleepy Doll`，没有 D 盘时
-            装到 `%LOCALAPPDATA%\Programs\Sleepy Doll`；自动创建开始菜单快捷方式。
-            安装不会覆盖 `user\` 目录，卸载默认也保留。
-          - `Sleepy-Doll-{0}-portable.zip` —— 解压即用，不写注册表。
-
-          首次运行会请求管理员权限：要注入的是提权运行的 BetterGI。配置、模型密钥、
-          会话数据库和日志都在安装目录的 `user\` 下。
-          '@ -f $env:VERSION
-
-          $body = gh release view $env:RELEASE_TAG --json body -q .body
-          $file = Join-Path $env:RUNNER_TEMP "release-notes.md"
-          Set-Content -Path $file -Value ($preamble.Trim() + "`n`n" + $body) -Encoding utf8
-          gh release edit $env:RELEASE_TAG --notes-file $file
+          $prerelease = if ($env:VERSION -like '0.0.*') { "--prerelease=true" } else { "--prerelease=false" }
+          gh release edit $env:RELEASE_TAG --draft=false $prerelease --notes-file $notes
+          if ($LASTEXITCODE -ne 0) { throw "发布 Release 失败" }
+      - name: Promote update channel
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: node installer/publish-r2.mjs --promote
+      - name: Verify published manifest
+        shell: pwsh
+        run: |
+          $channel = if ($env:VERSION -like '0.0.*') { 'test' } else { 'stable' }
+          $manifest = Invoke-RestMethod "https://sleepy-doll.restless-nh3.com/api/releases/$channel"
+          if ($manifest.version -ne $env:VERSION) { throw "线上更新清单版本错误" }
+          "已验证 $channel 通道：$($manifest.version)" >> $env:GITHUB_STEP_SUMMARY

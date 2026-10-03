@@ -26,6 +26,8 @@ import {
   type LocaleId,
 } from "../../appearance/locale";
 import { useT } from "../../i18n";
+import sponsorQr from "../../brand/sponsor-qr.jpg";
+import { ReleaseSettings } from "../../app/ReleaseSettings";
 
 type Section = "settings" | "models" | "bridge" | "sponsor";
 
@@ -195,6 +197,7 @@ export function SettingsPage({
                 Sleepy Doll <span className="muted">{__APP_VERSION__}</span>
               </span>
             </button>
+            <ReleaseSettings />
           </div>
         )}
       </div>
@@ -215,10 +218,12 @@ function SponsorNote() {
     <aside className="settings-sponsor">
       <h2>{t.settings.sponsor}</h2>
       <p>{t.settings.sponsorNote}</p>
-      <div
+      <img
         className="settings-sponsor-qr"
-        role="img"
-        aria-label={t.settings.qrLabel}
+        src={sponsorQr}
+        alt={t.settings.qrLabel}
+        width={168}
+        height={162}
       />
     </aside>
   );

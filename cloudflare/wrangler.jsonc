@@ -1,0 +1,11 @@
+{
+  "name": "sleepy-doll-distribution",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-03",
+  "account_id": "31b280af27ff4bf0d338ecd49cf27902",
+  "workers_dev": false,
+  "routes": [{ "pattern": "sleepy-doll.restless-nh3.com", "custom_domain": true }],
+  "r2_buckets": [{ "binding": "RELEASES", "bucket_name": "sleepy-doll-releases" }],
+  "ratelimits": [{ "name": "EVENT_LIMIT", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } }],
+  "observability": { "enabled": false }
+}

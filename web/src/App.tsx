@@ -11,6 +11,7 @@ import { ExtensionsPage } from "./pages/extensions/ExtensionsPage";
 import { SettingsPage } from "./pages/settings/SettingsPage";
 import { TasksPage } from "./pages/tasks/TasksPage";
 import { UpdateDialog } from "./app/UpdateDialog";
+import { ReleaseNotifications } from "./app/ReleaseSettings";
 import { restoreTheme } from "./appearance";
 import { restoreLocale } from "./appearance/locale";
 import { isRunning, readError, subscribeRuns, watchTasks } from "./session";
@@ -38,12 +39,8 @@ export default function App() {
   const [conversation, setConversation] = useState<string | undefined>();
   const [bootstrap, setBootstrap] = useState<Bootstrap>();
   const bootstrapGeneration = useRef(0);
-  const [detailsOpen, setDetailsOpen] = useState(
-    () =>
-      localStorage.getItem("sleepy-doll-details-open") === "true" ||
-      (localStorage.getItem("sleepy-doll-details-open") == null &&
-        window.innerWidth >= 1200),
-  );
+  // 快捷任务侧栏只在用户点开时出现，启动一律收起，也不记忆开关状态。
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<string>();
   const [error, setError] = useState("");
   const [panicNotice, setPanicNotice] = useState<number | null>(null);
@@ -59,10 +56,6 @@ export default function App() {
     if (!releaseNotesOpen) return;
     localStorage.setItem("sleepy-doll-version", __APP_VERSION__);
   }, [releaseNotesOpen]);
-
-  useEffect(() => {
-    localStorage.setItem("sleepy-doll-details-open", String(detailsOpen));
-  }, [detailsOpen]);
 
   const reload = useCallback(async () => {
     const generation = ++bootstrapGeneration.current;
@@ -222,14 +215,12 @@ export default function App() {
       details={
         <DetailsPanel
           bootstrap={bootstrap}
-          conversationId={conversation}
           selectedTask={selectedTask}
           onSelectTask={setSelectedTask}
           onOpenConversation={openConversation}
           onConnectTools={openConnect}
           reload={reload}
           onClose={() => setDetailsOpen(false)}
-          onOpenTasks={() => setPage("tasks")}
         />
       }
       onPage={(next) => {
@@ -268,7 +259,6 @@ export default function App() {
         ) : visiblePage === "tasks" ? (
           <TasksPage
             bootstrap={bootstrap}
-            referenceConversationId={conversation}
             reload={reload}
             onOpenConversation={openConversation}
             onOpenTask={(task: TaskSummary) => {
@@ -325,6 +315,7 @@ export default function App() {
         initialTab={releaseNotesTab}
         onClose={() => setReleaseNotesOpen(false)}
       />
+      <ReleaseNotifications />
     </AppShell>
   );
 }

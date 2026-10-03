@@ -29,6 +29,8 @@ use tao::{
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
     window::{Window, WindowBuilder},
 };
+#[cfg(target_os = "windows")]
+use wry::WebViewBuilderExtWindows;
 use wry::{
     WebContext, WebView, WebViewBuilder,
     http::{Request, Response, header::CONTENT_TYPE},
@@ -213,6 +215,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         config_path.display()
     );
     let controller = Arc::new(AppController::load(&config_path)?);
+    {
+        let distribution = controller.distribution.clone();
+        thread::spawn(move || distribution.startup());
+    }
     let startup_config = sleepy_doll::AppConfig::load(&config_path)?;
     if startup_config.host_plugin_enabled() && startup_config.bridge.enabled {
         let startup = controller.clone();
@@ -340,7 +346,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let ipc_proxy = proxy.clone();
     let ipc_config_path = config_path.clone();
     let ipc_hwnd = window_chrome::hwnd_id(&window);
-    let webview = WebViewBuilder::new_with_web_context(&mut web_context)
+    let builder = WebViewBuilder::new_with_web_context(&mut web_context)
         .with_background_color(desktop_startup::background(startup_dark))
         .with_asynchronous_custom_protocol(
             "sleepy".into(),
@@ -381,9 +387,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         })
         .with_url("sleepy://localhost/")
         .with_devtools(cfg!(debug_assertions))
-        .build(&window)?;
+        .with_clipboard(true);
+    // WebView2 自带的右键菜单（刷新、检查、另存为）会把网页壳直接暴露给用户；
+    // 原生菜单关闭后由界面层的自绘菜单提供复制、剪切与粘贴。
+    #[cfg(target_os = "windows")]
+    let builder = builder.with_default_context_menus(false);
+    let webview = builder.build(&window)?;
 
-    // 子窗口在 WebView2 建好后才存在，边缘命中测试要交给它。
+    // 安装原窗口的无边框命中测试。
     window_chrome::install(&window);
     let mut maximized = window.is_maximized();
     let mut normal_position = placement
@@ -1253,6 +1264,42 @@ fn dispatch_ipc(
     let parsed = serde_json::from_str::<IpcRequest>(request.body());
     if let Ok(request) = &parsed {
         match request.method.as_str() {
+            #[cfg(target_os = "windows")]
+            "release.install" => {
+                let outcome = (|| -> Result<(), Box<dyn std::error::Error>> {
+                    if controller.has_active_runs() {
+                        return Err("请先结束正在运行的任务，再安装更新".into());
+                    }
+                    let installed = sleepy_doll::setup::installed()
+                        .ok_or("当前程序没有安装登记，请通过安装程序更新")?;
+                    let executable = std::env::current_exe()?;
+                    if executable
+                        .parent()
+                        .ok_or("程序目录不存在")?
+                        .canonicalize()?
+                        != installed.directory.canonicalize()?
+                    {
+                        return Err("当前程序不在已登记的安装目录，请通过安装程序更新".into());
+                    }
+                    let installer = controller.distribution.installer()?;
+                    std::process::Command::new(installer)
+                        .arg("--apply-update")
+                        .arg(std::process::id().to_string())
+                        .spawn()?;
+                    Ok(())
+                })();
+                let response = match outcome {
+                    Ok(()) => {
+                        let _ = proxy.send_event(UserEvent::Quit);
+                        json!({"kind":"response","id":request.id,"ok":true,"result":{"installing":true}})
+                    }
+                    Err(error) => {
+                        json!({"kind":"response","id":request.id,"ok":false,"error":{"code":"UPDATE_ERROR","message":error.to_string()}})
+                    }
+                };
+                let _ = proxy.send_event(UserEvent::ToWeb(response));
+                return;
+            }
             "window.ready" => {
                 let _ = proxy.send_event(UserEvent::FrontendReady(
                     request.params["dark"].as_bool().unwrap_or(false),
@@ -1273,6 +1320,12 @@ fn dispatch_ipc(
                 // 拖动要在指针还按着的时候进入系统移动循环，绕行事件循环会慢半拍。
                 #[cfg(target_os = "windows")]
                 window_chrome::begin_system_drag(hwnd);
+                return;
+            }
+            "window.resize" => {
+                if let Some(direction) = request.params["direction"].as_str() {
+                    window_chrome::begin_system_resize(hwnd, direction);
+                }
                 return;
             }
             "window.setDragStrip" => {

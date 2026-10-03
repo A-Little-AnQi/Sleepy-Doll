@@ -121,11 +121,10 @@
 }
 
 .settings-sponsor-qr {
-  width: 128px;
-  height: 128px;
-  border: 1px dashed var(--border-strong);
+  width: 168px;
+  height: auto;
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  background: var(--subtle);
 }
 
 @media (max-width: 700px) {

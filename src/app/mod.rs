@@ -32,6 +32,7 @@ struct ModelView<'a> {
     max_output_tokens: Option<u64>,
     auth: crate::config::ModelAuth,
     prompt_cache: bool,
+    api_key: &'a Option<String>,
 }
 
 struct Extensions {
@@ -41,6 +42,7 @@ struct Extensions {
 }
 
 pub struct AppController {
+    pub distribution: Arc<crate::distribution::Distribution>,
     _process_lock: std::fs::File,
     config_edit: Mutex<()>,
     config_path: PathBuf,
@@ -71,7 +73,11 @@ impl AppController {
             .map_err(|_| Error::Conflict("该数据目录已有运行中的 Sleepy Doll".into()))?;
         let mut skills = SkillRegistry::default();
         let config_dir = config_directory(&config_path);
+        let distribution = Arc::new(crate::distribution::Distribution::load(&config_dir)?);
         skills.load(&skill_directories(&config, &config_dir))?;
+        for text in crate::extension::skills::EMBEDDED_SKILLS {
+            skills.load_embedded(text)?;
+        }
         let mut tools = ToolRegistry::default();
         let mut plugins = PluginManager::default();
         plugins.load(
@@ -121,6 +127,7 @@ impl AppController {
         Ok(Self {
             _process_lock: process_lock,
             config_edit: Mutex::new(()),
+            distribution,
             config_path,
             config: Mutex::new(config),
             extensions: RwLock::new(Extensions {
@@ -161,6 +168,7 @@ impl AppController {
                 | "conversation.delete"
                 | "task.submit"
                 | "run.input"
+                | "run.question.answer"
                 | "workflow.extract"
                 | "permission.set"
                 | "config.write"
@@ -170,6 +178,48 @@ impl AppController {
             None
         };
         match method {
+            "release.state" => Ok(self.distribution.state()),
+            "release.check" => {
+                let result = self.distribution.check();
+                let distribution = self.distribution.clone();
+                let target = result
+                    .as_ref()
+                    .ok()
+                    .and_then(|value| value["release"]["version"].as_str())
+                    .map(str::to_owned);
+                let failed = result.is_err();
+                std::thread::spawn(move || {
+                    distribution.record("update_check", target.as_deref());
+                    if failed {
+                        distribution.record("update_failed", None);
+                    } else if target.is_some() {
+                        distribution.record("update_available", target.as_deref());
+                    }
+                });
+                result
+            }
+            "release.configure" => self.distribution.configure(
+                params["analyticsEnabled"]
+                    .as_bool()
+                    .ok_or_else(|| Error::Config("analyticsEnabled 必须是布尔值".into()))?,
+                required(&params, "channel")?,
+            ),
+            "release.download" => {
+                let result = self.distribution.download();
+                let distribution = self.distribution.clone();
+                let success = result.is_ok();
+                std::thread::spawn(move || {
+                    distribution.record(
+                        if success {
+                            "update_download_complete"
+                        } else {
+                            "update_failed"
+                        },
+                        None,
+                    )
+                });
+                result
+            }
             "plugin.install" => {
                 let config = self.config.lock().unwrap().clone();
                 let id = crate::runtime::host::installation::install(
@@ -259,6 +309,17 @@ impl AppController {
                 )?;
                 Ok(json!({"accepted":true}))
             }
+            "run.question.answer" => {
+                // 结构化问题的专用答复通道：校验归属、状态与内容都在 journal
+                // 的同一事务里完成，这里不落任何用户聊天消息。
+                let recorded = self.supervisor.journal.answer_question_request(
+                    required(&params, "id")?,
+                    required(&params, "requestId")?,
+                    &params["answers"],
+                    params["clientKey"].as_str(),
+                )?;
+                Ok(json!({"accepted":true,"recorded":recorded}))
+            }
             "approval.respond" => Ok(serde_json::to_value(
                 self.supervisor.journal.decide(
                     required(&params, "id")?,
@@ -306,8 +367,11 @@ impl AppController {
                     .iter()
                     .map(crate::runtime::types::public_run)
                     .collect::<Vec<_>>();
+                // 当前真正 open 的问题请求：前端清理已回答/已取代卡片靠事件，
+                // 首次快照不能依赖可能被裁剪的旧事件重放。
+                let question_requests = self.supervisor.journal.open_question_requests(id)?;
                 Ok(
-                    json!({"id":id,"messages":messages,"contextActivities":activities,"contextActivityBoundary":boundary,"runs":runs}),
+                    json!({"id":id,"messages":messages,"contextActivities":activities,"contextActivityBoundary":boundary,"runs":runs,"questionRequests":question_requests}),
                 )
             }
             "conversation.list" => Ok(json!(self.supervisor.conversations(
@@ -1227,6 +1291,7 @@ impl AppController {
                 max_output_tokens: model.options.max_output_tokens,
                 auth: model.auth,
                 prompt_cache: model.options.prompt_cache,
+                api_key: &model.api_key,
             })
             .collect::<Vec<_>>();
         let permission = {
@@ -1304,6 +1369,9 @@ impl AppController {
         let config_dir = config_directory(&self.config_path);
         let mut skills = SkillRegistry::default();
         skills.load(&skill_directories(&config, &config_dir))?;
+        for text in crate::extension::skills::EMBEDDED_SKILLS {
+            skills.load_embedded(text)?;
+        }
         let mut tools = ToolRegistry::default();
         let mut plugins = PluginManager::default();
         plugins.load(
@@ -1489,4 +1557,98 @@ fn register_builtin_tools(
     )?;
     crate::runtime::workspace::register_tools(registry, workspace)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod question_rpc_tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    #[test]
+    fn conversation_snapshot_and_answer_rpc_roundtrip() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/.tmp/shortcut-runtime/app-question-rpc");
+        let config_path = root.join("config.json");
+        // 每次全新开始：client_key 唯一，残留库会让 create 冲突。
+        let _ = std::fs::remove_dir_all(&root);
+        crate::config::seed(&config_path).unwrap();
+        let controller = Arc::new(AppController::load(&config_path).unwrap());
+        // 直接经真实 Journal 造一个等待回答的运行，再走 RPC 全链路。
+        let mut run = controller
+            .supervisor
+            .journal
+            .create("测试目标", "c-rpc", "key-rpc", 3600, None)
+            .unwrap();
+        for next in [
+            crate::runtime::types::RunState::Preflighting,
+            crate::runtime::types::RunState::Deciding,
+            crate::runtime::types::RunState::AwaitingUser,
+        ] {
+            controller.supervisor.journal.save(&mut run, next).unwrap();
+        }
+        let request = json!({"requestId":"call-rpc","questions":[
+            {"id":"mode","header":"运行方式","question":"怎么跑？"}
+        ]});
+        controller
+            .supervisor
+            .journal
+            .open_question_request(
+                &run,
+                "call-rpc",
+                &request,
+                &json!({"question":"怎么跑？","request":request}),
+            )
+            .unwrap();
+
+        // 快照 RPC：questionRequests 含 open 请求。
+        let snapshot = controller
+            .handle(
+                "conversation.get",
+                json!({"id":"c-rpc"}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        let open = snapshot["questionRequests"].as_array().unwrap();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0]["requestId"], json!("call-rpc"));
+        assert_eq!(open[0]["runId"], json!(run.id));
+        assert_eq!(open[0]["questions"][0]["id"], json!("mode"));
+
+        // 答复 RPC：接收、幂等重放、换答案拒绝、内容非法拒绝。
+        let answer = json!({"id":run.id,"requestId":"call-rpc","answers":{"mode":{"answers":[" 启动 "]}},"clientKey":"client-rpc"});
+        let first = controller
+            .handle("run.question.answer", answer.clone(), Arc::new(|_, _| {}))
+            .unwrap();
+        assert_eq!(first["recorded"], json!(true));
+        let retry = controller.handle("run.question.answer", json!({"id":run.id,"requestId":"call-rpc","answers":{"mode":{"answers":["启动"]}},"clientKey":"client-rpc"}), Arc::new(|_, _| {})).unwrap();
+        assert_eq!(retry["recorded"], json!(false));
+        assert!(controller
+            .handle("run.question.answer", json!({"id":run.id,"requestId":"call-rpc","answers":{"mode":{"answers":["检查"]}},"clientKey":"client-rpc"}), Arc::new(|_, _| {}))
+            .is_err());
+        assert!(controller
+            .handle("run.question.answer", json!({"id":run.id,"requestId":"call-rpc","answers":{"mode":{"answers":[" "]},"x":{"answers":["y"]}}}), Arc::new(|_, _| {}))
+            .is_err());
+        // 答复后快照清空；普通补充仍可照常提交并消费。
+        let snapshot = controller
+            .handle(
+                "conversation.get",
+                json!({"id":"c-rpc"}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        assert!(snapshot["questionRequests"].as_array().unwrap().is_empty());
+        controller
+            .handle(
+                "run.input",
+                json!({"id":run.id,"content":"补充说明","clientKey":"s-rpc"}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        assert_eq!(
+            controller.supervisor.journal.drain_inputs(&run.id).unwrap(),
+            vec!["补充说明".to_string()]
+        );
+        controller.shutdown();
+        let _ = Value::Null;
+    }
 }

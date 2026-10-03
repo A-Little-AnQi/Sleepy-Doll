@@ -11,7 +11,7 @@ import remarkGfm from "remark-gfm";
 import { Dialog } from "../components/overlay/Dialog";
 import { useT, type Text } from "../i18n";
 import "./UpdateDialog.css";
-import changelogSource from "./release-notes/changelog-0.1.0.md?raw";
+import changelogSource from "./release-notes/changelog-0.0.1.md?raw";
 import guideSource from "./release-notes/guide.md?raw";
 import faqSource from "./release-notes/faq.md?raw";
 
