@@ -11,7 +11,7 @@ use std::{
 };
 
 const SERVICE: &str = "https://sleepy-doll.restless-nh3.com";
-const DOWNLOAD_HOST: &str = "download.sleepy-doll.restless-nh3.com";
+const DOWNLOAD_HOST: &str = "sleepy-doll-download.restless-nh3.com";
 const MAX_INSTALLER: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

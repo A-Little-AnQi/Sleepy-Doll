@@ -5,7 +5,7 @@
 ## 地址与资源
 
 - 分发页及更新 API：`https://sleepy-doll.restless-nh3.com`
-- 安装包：`https://download.sleepy-doll.restless-nh3.com/releases/<版本>/Sleepy-Doll-<版本>-setup.exe`
+- 安装包：`https://sleepy-doll-download.restless-nh3.com/releases/<版本>/Sleepy-Doll-<版本>-setup.exe`
 - R2 桶：`sleepy-doll-releases`，Standard 存储。
 - Worker：`sleepy-doll-distribution`。
 - GA4：独立的 Sleepy Doll 媒体资源，衡量 ID `G-PBWX0V3ESR`。

@@ -75,7 +75,7 @@ const notes = await readFile(
 const manifest = {
   version,
   channel,
-  url: `https://download.sleepy-doll.restless-nh3.com/${key}`,
+  url: `https://sleepy-doll-download.restless-nh3.com/${key}`,
   size,
   sha256: digest,
   notes,
