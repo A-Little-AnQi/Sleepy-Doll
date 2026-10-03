@@ -1,3 +1,4 @@
+﻿using System.Diagnostics;
 using System.Text.Json;
 using BgiBridge.Bgi;
 using BgiBridge.Catalog;
@@ -26,12 +27,12 @@ public static class OneDragonTools
             "运行一条龙",
             "运行 BetterGI 的「一条龙」日常流程（领邮件、合成树脂、自动秘境、首领讨伐、幽境危战、地脉花、每日奖励、尘歌壶等，按该配置启用的任务执行）。执行完按配置可能自动退出游戏。",
             ["用户要求做每日/一条龙/清体力，且 BetterGI 的 User/OneDragon 里已有对应配置时。", "与 run_script_group 的区别：一条龙是宿主原生任务链，带自己的等待、领奖与收尾逻辑。"],
-            ["截图器就绪且已进入游戏主界面。", "窗口分辨率为 16:9。", "没有其他独立任务持锁。"],
+            ["游戏未就绪时接口会按真实状态自动准备：启动游戏或挂上截图器并阻塞等待至主界面（至多 120 秒）；非 16:9 或超时如实失败。", "窗口分辨率为 16:9。", "没有其他独立任务持锁。"],
             ["按所选一条龙配置串行执行启用的日常任务；过程中会自动传送、领取与点击游戏界面；配置开启时收尾自动退出游戏。"],
-            "started=true 表示已调用一条龙入口；本接口等待宿主方法返回，但不保证每项业务成功。Job 等待由运行时处理。",
-            "普通运行请求用返回证据给一次最终总结并结束。不继续 job.get、查任务状态、日志或截图，不重跑；仅用户明确要求等待结果、后续步骤、进度或排错时继续。",
+            "默认 waitForCompletion=false：accepted=true 表示宿主入口已派发且任务锁已被占用，交接后立即返回，不守护整条一条龙。只有用户明确要求等结果才设 true（等待宿主方法返回并核验任务锁释放）。",
+            "普通运行请求用返回证据给一次最终总结并结束。不继续 job.get、查任务状态、日志或截图，不重跑；仅用户明确要求监控等结果才继续，查看当前状态与排障只是当前请求的一次读取。",
             "一条龙只做日常任务范围内的操作；已消耗的体力与已领取的奖励不可回退。需要中途停止时用任务停止操作。",
-            [JsonSerializer.SerializeToElement(new { configName = "配置名，省略时用当前选中配置" })],
+            [JsonSerializer.SerializeToElement(new { configName = "配置名，省略时用当前选中配置", waitForCompletion = false })],
             "bridge-stable-operation");
         registry.Register(
             id,
@@ -42,7 +43,8 @@ public static class OneDragonTools
             destructive: false,
             inputSchema: OneDragonSchema(),
             guide: guide,
-            requiresGameReady: true);
+            requiresGameReady: true,
+            preparation: "ensureGameReady");
     }
 
     private static void RegisterExitGame(MethodRegistry registry)
@@ -78,7 +80,8 @@ public static class OneDragonTools
             type = "object",
             properties = new
             {
-                configName = new { type = "string", description = "User/OneDragon 里的配置名；省略用当前选中配置" },
+                configName = new { type = "string", description = "User/OneDragon 里的配置名；省略用当前选中的配置" },
+                waitForCompletion = new { type = "boolean", @default = false, description = "默认 false：入口派发并核验任务锁被占用后即交接返回，不守护整条一条龙；true 时等宿主方法返回并核验任务锁释放。只有用户明确要求等结果才设 true。" },
             },
             additionalProperties = false,
         });
@@ -87,11 +90,10 @@ public static class OneDragonTools
         JsonElement arguments,
         CancellationToken cancellation)
     {
-        if (!Host.CaptureReady)
-            throw BridgeException.GameNotReady("截图器或游戏窗口尚未就绪。");
-        if (!Host.InMainUi())
-            throw BridgeException.GameNotReady(
-                "游戏还没进入主界面（登录或加载画面）。用 bgi.get_status 等到 ready=true 后再运行一条龙。");
+        // 就绪准备由工具执行层按真实状态处理（与配置组运行入口同一状态机）：
+        // 无进程→宿主命令启动；有进程无截图→挂截图器；加载→阻塞等主界面；
+        // 非 16:9/超时→如实失败。
+        await StatusTools.EnsureGameReady(cancellation).ConfigureAwait(false);
         if (!Host.GameSixteenToNine())
             throw BridgeException.GameNotReady(
                 Host.GameClientSize() is { } size
@@ -104,21 +106,68 @@ public static class OneDragonTools
         {
             cancellation.ThrowIfCancellationRequested();
             var services = Host.Services()
-                ?? throw BridgeException.Missing("拿不到 BetterGI 服务容器。");
+                ?? throw BridgeException.Missing("拿不到 BetterGI 的服务容器。");
             var type = Reflect.FindType(ViewModelType)
                 ?? throw BridgeException.Missing("当前 BetterGI 没有公开的一条龙 ViewModel。");
             var viewModel = services.GetService(type)
                 ?? throw BridgeException.Missing("一条龙 ViewModel 未注册。");
             var requested = arguments.TryGetProperty("configName", out var named) ? named.GetString() : null;
+            var waitForCompletion = arguments.TryGetProperty("waitForCompletion", out var wait) && wait.GetBoolean();
             var selected = BindConfiguration(viewModel, requested);
             cancellation.ThrowIfCancellationRequested();
-            await (Reflect.Call(viewModel, "OnOneKeyExecute")
-                as Task ?? throw BridgeException.Missing("一条龙执行入口不可调用。"));
-            return new
+            var execution = Reflect.Call(viewModel, "OnOneKeyExecute")
+                as Task ?? throw BridgeException.Missing("一条龙执行入口不可调用。");
+            var configName = Reflect.Get(selected, "Name") as string;
+            if (!waitForCompletion)
+            {
+                // 启动交接：不守护整条一条龙。挂一个只观察异常的续接防止未观察异常，
+                // 不向宿主传递取消。派发后等待"空闲→占用"的换锁沿或宿主方法已返回：
+                // 正在占锁时不等，尚未占锁才等；立即故障如实透出，不把晚启动报成没启动。
+                _ = execution.ContinueWith(static task => _ = task.Exception,
+                    TaskScheduler.Default);
+                if (execution.IsFaulted) await execution.ConfigureAwait(false);
+                var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+                while (Host.TaskSemaphoreCount() is not 0 && !execution.IsCompleted && DateTimeOffset.UtcNow < deadline)
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    await Task.Delay(100, cancellation).ConfigureAwait(false);
+                }
+                var engaged = Host.TaskSemaphoreCount() is 0;
+                var returned = execution.IsCompleted;
+                var started = engaged || (returned && !execution.IsFaulted && !execution.IsCanceled);
+                object launchResult = new
+                {
+                    started,
+                    accepted = started,
+                    configName,
+                    executionMode = "launch",
+                    lockEngaged = engaged,
+                    hostReturned = returned,
+                    verified = started,
+                    verificationScope = "launch",
+                    verificationReason = engaged
+                        ? "只核验入口已派发且宿主任务锁被占用；不是一条龙业务完成的证据。"
+                        : returned
+                            ? "入口已派发且宿主方法已同步返回（快速完成路径）；未观察到锁占用，按宿主返回为准。"
+                            : "入口已调用但 5 秒内未观察到任务锁被占用且宿主方法未返回；按未启动处理，请核对宿主状态。",
+                };
+                return launchResult;
+            }
+            await execution.ConfigureAwait(false);
+            var released = Host.TaskSemaphoreCount() is > 0;
+            object completionResult = new
             {
                 started = true,
-                configName = Reflect.Get(selected, "Name") as string,
+                accepted = true,
+                configName,
+                executionMode = "completion",
+                verified = released,
+                verificationScope = "executionReturn",
+                verificationReason = released
+                    ? "宿主方法已返回且任务锁已释放；这是执行链返回的证据，不代表每项业务成功。"
+                    : "宿主方法已返回但任务锁仍被占用或状态未知；不能据此宣称一条龙完成。",
             };
+            return completionResult;
         });
     }
 
@@ -142,7 +191,7 @@ public static class OneDragonTools
         return selected;
     }
 
-    private static Task<object?> ExitInvoke(
+    private static async Task<object?> ExitInvoke(
         JsonElement arguments,
         CancellationToken cancellation)
     {
@@ -151,8 +200,75 @@ public static class OneDragonTools
             throw BridgeException.GameNotReady("原神没有在运行，无需退出。");
         var systemControl = Reflect.FindType(SystemControlType)
             ?? throw BridgeException.Missing("当前 BetterGI 没有公开的 SystemControl。");
-        // CloseGame 内部已处理等待与超时强杀，同步执行。
-        Reflect.CallStatic(systemControl, "CloseGame");
-        return Task.FromResult<object?>(new { closed = true, captureReady = Host.CaptureReady });
+        // 关闭前先锁定本会话的原神进程身份，关闭后按 PID 复核进程确实消失；
+        // closed/verified 只以进程消失为准，不盲信 CloseGame 返回。
+        var before = SessionGenshinProcesses();
+        // CloseGame 内部已处理等待与超时强杀，只能在 UI 线程同步执行。
+        await Ui.InvokeAsync(() => Reflect.CallStatic(systemControl, "CloseGame")).ConfigureAwait(false);
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        while (before.Count > 0 && DateTimeOffset.UtcNow < deadline)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            before.RemoveAll(pid => !ProcessIsAlive(pid));
+            if (before.Count == 0) break;
+            await Task.Delay(200, cancellation).ConfigureAwait(false);
+        }
+        // 权威证据是本会话关闭前锁定的进程全部消失；Host.GameProcessRunning()
+        // 不分会话，别让其它会话的原神挡住本次核验。
+        var gone = before.Count == 0;
+        return new
+        {
+            closed = gone,
+            verified = gone,
+            outcome = gone ? "closed" : "timeout",
+            remainingProcessIds = gone ? [] : before.ToArray(),
+            captureReady = Host.CaptureReady,
+            verificationScope = "processExit",
+            verificationReason = gone
+                ? "已观察到关闭前锁定的全部原神进程退出。"
+                : "CloseGame 已调用，但 10 秒内仍能观察到原神进程；关闭未核验，不得报告已退出。",
+        };
+    }
+
+    /// <summary>按宿主使用的原神进程名清单收集当前会话的进程 ID；清单不可读时退回常见两个进程名。</summary>
+    private static List<int> SessionGenshinProcesses()
+    {
+        var names = new[] { "YuanShen", "GenshinImpact" }.AsEnumerable();
+        var context = Reflect.Singleton("BetterGenshinImpact.GameTask.TaskContext");
+        if (context?.GetType().GetMethod("GetGenshinGameProcessNameList")?.Invoke(context, null)
+            is System.Collections.IEnumerable list)
+        {
+            var collected = list.Cast<object?>().OfType<string>().Where(name => !string.IsNullOrWhiteSpace(name)).ToList();
+            if (collected.Count > 0) names = collected;
+        }
+        var session = Process.GetCurrentProcess().SessionId;
+        var result = new List<int>();
+        foreach (var name in names)
+            foreach (var process in Process.GetProcessesByName(name))
+                using (process)
+                {
+                    try
+                    {
+                        if (!process.HasExited && process.SessionId == session) result.Add(process.Id);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // 进程刚好退出。
+                    }
+                }
+        return result;
+    }
+
+    private static bool ProcessIsAlive(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 }

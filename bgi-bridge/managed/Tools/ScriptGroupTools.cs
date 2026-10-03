@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using BgiBridge.Bgi;
 using BgiBridge.Catalog;
 using BgiBridge.Protocol;
@@ -19,10 +19,10 @@ public static class ScriptGroupTools
             "按名称运行配置组",
             "调用 BetterGI 自带的按名称执行入口，运行指定配置组中的已启用任务。无需用户预先在脚本调度页选中目标。",
             ["用户要求运行一个已从 User/ScriptGroup 确认存在的配置组时。"],
-            ["截图器就绪且已进入游戏主界面。", "窗口分辨率为 16:9。", "没有其他独立任务持锁。", "groupName 来自 User/ScriptGroup 的真实 name。"],
+            ["战斗/特殊/未知前提路线（resolve/prepare 的 partyConfirmationRequired=true）：先完成缺配队 user.ask、bgi.inspect_group_effective 读实际生效配置与策略并按角色与策略要求适配回读，再运行。", "游戏未就绪时接口会按真实状态自动准备：启动游戏或挂上截图器并阻塞等待至主界面（至多 120 秒）；非 16:9 或超时如实失败。", "窗口分辨率为 16:9。", "没有其他独立任务持锁。", "groupName 来自 User/ScriptGroup 的真实 name。"],
             ["启动配置组中的游戏自动化、脚本、路线或 Shell 任务；具体影响由组内已启用任务决定。"],
-            "默认 waitForCompletion=false：accepted=true 表示宿主已接受运行，交接后立即返回，不守护整组。只有用户明确要求等结果、后续步骤或跟踪进度时才设 true。verified 的 launch 范围只核验启动交接，不是业务完成。",
-            "普通运行请求用返回证据总结本次已提交或执行方法已返回，并结束本轮。不继续 job.get、查任务状态、日志或截图，不重跑。只有用户明确要求等待结果、后续步骤、查看进度或排错时才继续。",
+            "默认 waitForCompletion=false：accepted=true 表示宿主已接受运行，交接后立即返回，不守护整组。同一宿主计划的后续步骤与 closeGameAfter 等收尾都保持 false；只有用户明确要求监控等结果时才设 true。verified 的 launch 范围只核验启动交接，不是业务完成。",
+            "普通运行请求用返回证据总结本次已提交或执行方法已返回，并结束本轮。不继续 job.get、查任务状态、日志或截图，不重跑。只有用户明确要求监控等结果才继续；查看当前状态与排障只是当前请求的一次读取，不自动持续盯。",
             "已经发送的游戏输入和脚本副作用不能自动撤销；需要停止时使用对应停止操作并核验终态。",
             [JsonSerializer.SerializeToElement(new { groupName = "用户目录中读取到的精确配置组名称" })],
             "bridge-stable-operation");
@@ -35,7 +35,8 @@ public static class ScriptGroupTools
             destructive: true,
             inputSchema: AgentSchemas.Input(id),
             guide: guide,
-            requiresGameReady: true);
+            requiresGameReady: true,
+            preparation: "ensureGameReady");
     }
 
     private static async Task<object?> Invoke(
@@ -44,12 +45,9 @@ public static class ScriptGroupTools
     {
         var requested = arguments.GetProperty("groupName").GetString()!.Trim();
         var waitForCompletion = arguments.TryGetProperty("waitForCompletion", out var wait) && wait.GetBoolean();
-        if (!Host.CaptureReady)
-            throw BridgeException.GameNotReady("截图器或游戏窗口尚未就绪。");
-        // 对齐 BetterGI 原生调度前置：主界面才算在游戏里；登录/加载画面跑配置组必然失败。
-        if (!Host.InMainUi())
-            throw BridgeException.GameNotReady(
-                "游戏还没进入主界面（登录或加载画面）。用 bgi.wait_ready 阻塞等待 ready=true，不让模型循环查状态。");
+        // 就绪准备由工具执行层按真实状态处理：无进程→宿主命令启动；有进程无截图→
+        // 挂上截图器；有截图在加载→阻塞等主界面；非 16:9/超时→如实失败。
+        await StatusTools.EnsureGameReady(cancellation).ConfigureAwait(false);
         // 脚本依赖 16:9 截图；非 16:9 时整组会逐条异常退出，宁可在这里拦下。
         if (!Host.GameSixteenToNine())
             throw BridgeException.GameNotReady(
@@ -85,6 +83,8 @@ public static class ScriptGroupTools
             var resolved = matches[0];
             var groups = BindGroupsFromDisk(Path.Combine(AppContext.BaseDirectory, "User", "ScriptGroup"), resolved);
             cancellation.ThrowIfCancellationRequested();
+            // 组间空档任务锁可能已释放但 RunnerContext.IsContinuousRunGroup 仍为 true；在 UI 线程启动前最后核验，缺证按占用处理。
+            ScriptGroupPlanTools.RequireContinuousRunIdle();
             // 直接执行已绑定对象，不刷新会重写其他配置组的界面集合。
             var execution = Reflect.Call(viewModel, "StartGroups", groups, null, false);
             return await ScriptLaunch.Finish(Reflect.Await(execution), resolved, waitForCompletion, cancellation);
@@ -110,8 +110,7 @@ public static class ScriptGroupTools
     private static string[] ResolveGroupsFromDisk(string? requested)
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "User", "ScriptGroup");
-        if (!Directory.Exists(directory)) return [];
-        var names = new List<string>();
+        if (!Directory.Exists(directory)) return [];        var names = new List<string>();
         foreach (var file in Directory.EnumerateFiles(directory, "*.json"))
         {
             try
@@ -136,5 +135,22 @@ public static class ScriptGroupTools
             }
         }
         return names.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+    }
+
+    /// <summary>按组内 name 唯一定位配置组文件；供改写组配置的接口复用同一解析。</summary>
+    internal static string RequireGroupFile(string directory, string requested)
+    {
+        var files = Directory.EnumerateFiles(directory, "*.json").Where(file =>
+        {
+            try { using var json = JsonDocument.Parse(File.ReadAllText(file)); return json.RootElement.GetProperty("name").GetString() == requested; }
+            catch (JsonException) { return false; }
+        }).ToArray();
+        if (files.Length == 0)
+        {
+            var available = ResolveGroupsFromDisk(null).Take(30);
+            throw BridgeException.NotFound($"配置组不存在：{requested}。当前可用：{string.Join("、", available)}");
+        }
+        if (files.Length != 1) throw new BridgeException("AMBIGUOUS_TARGET", $"存在多个同名配置组：{requested}；未执行。", 409);
+        return files[0];
     }
 }

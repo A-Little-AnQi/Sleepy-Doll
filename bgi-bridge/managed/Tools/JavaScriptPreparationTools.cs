@@ -14,7 +14,7 @@ public static class JavaScriptPreparationTools
         const string id = "bgi.prepare_js_group";
         var guide = new AgentGuide("准备 JS 配置组", "用已安装 JS 脚本的宿主构造器与真实设置定义建立单任务配置组，不执行脚本。",
             ["用户要求运行已安装或刚订阅的 JS，且没有可复用配置组时。"],
-            ["folderName 来自 JsScript；先读取 manifest、settingsUi 和 README；settings 只填写已定义参数。"],
+            ["folderName 来自 JsScript；先读取 manifest、settingsUi 和 README；settings 只填写已定义参数。groupName 依据用户目标直接取简短自然名，如“莉奈娅挖矿”“兽怪暴徒”；不拼目录、作者、时间或参数长句，不为命名再次提问，缺省时自动生成。"],
             ["新建一个配置组，已有不同内容的同名组不覆盖。"], "prepared=true 返回实际 groupName，之后使用 run_script_group。",
             "prepared 只表示配置准备完成，用户要求运行时继续执行。", "可删除生成的配置组，脚本保留。", [], "bridge-stable-operation");
         registry.Register(id, "scheduler", guide.Purpose, Prepare, readOnly: false, guide: guide);
@@ -54,7 +54,9 @@ public static class JavaScriptPreparationTools
         var groupType = Reflect.FindType("BetterGenshinImpact.Core.Script.Group.ScriptGroup") ?? throw BridgeException.Missing("配置组构造器不可用。");
         var taskType = Reflect.FindType("BetterGenshinImpact.Core.Script.Group.ScriptGroupProject") ?? throw BridgeException.Missing("配置组项目构造器不可用。");
         var group = Activator.CreateInstance(groupType)!;
-        var name = arguments.TryGetProperty("groupName", out var selected) ? selected.GetString()! : "Sleepy Doll-JS-" + folder;
+        var manifestName = Reflect.Get(manifest, "Name") as string;
+        var name = arguments.TryGetProperty("groupName", out var selected) ? selected.GetString()!
+            : GroupNaming.Default(string.IsNullOrWhiteSpace(manifestName) ? folder : manifestName, "脚本任务");
         if (name.Length == 0 || name.Length > 160 || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
             throw BridgeException.InvalidArgument("groupName 必须是有效文件名。");
         var file = Path.Combine(root, "ScriptGroup", name + ".json");

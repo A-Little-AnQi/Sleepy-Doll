@@ -101,6 +101,33 @@ public static class StatusTools
                 "只读。",
                 [System.Text.Json.JsonSerializer.SerializeToElement(new { })]));
 
+        // 统一的原生就绪准备入口：RootBridge 在已授权的写动作提交前按契约
+        // preparation=ensureGameReady 通用调用；也可以被显式调用。只读与配置写
+        // 不会经由它启动游戏。
+        registry.Register(
+            "bgi.ensure_game_ready",
+            Group,
+            "按真实状态做一次就绪准备并阻塞等待到主界面：需要时用宿主命令启动游戏或挂上截图器，最多等 120 秒。",
+            async (_, cancellation) =>
+            {
+                await EnsureGameReady(cancellation).ConfigureAwait(false);
+                var (ready, detail) = BridgeState.Capture();
+                return ReadinessResult(ready, detail, ResolutionNote(ready));
+            },
+            readOnly: false,
+            destructive: true,
+            guide: new AgentGuide(
+                "统一就绪准备",
+                "按真实状态分类处理：无进程→宿主命令启动；有进程无截图→挂截图器；加载→阻塞等主界面；非 16:9/超时如实失败。",
+                ["运行类接口在提交前需要就绪准备时（通常由运行时按契约自动执行）；排障时显式调用一次。"],
+                ["BetterGI 桥已连接。"],
+                ["可能启动原神进程或挂上截图器；不发送游戏输入，不改配置。"],
+                "prepared=true 且 ready=true 表示就绪完成；失败时按返回的具体阻碍处理。",
+                "以 ready 与 runtime 状态为准；超时/非 16:9 是失败不是就绪。",
+                "就绪状态是观测事实，无需回滚；游戏可按需关闭。",
+                [System.Text.Json.JsonSerializer.SerializeToElement(new { })],
+                "bridge-stable-operation"));
+
         // 宿主按「联动启动」的配置拉起原神并开始截图，不需要用户回到界面点启动。
         registry.Register(
             "bgi.start_game",
@@ -165,6 +192,116 @@ public static class StatusTools
             readOnly: false);
     }
 
+    /// <summary>就绪准备状态机的迁移判定。纯函数，供静态验收覆盖全部状态。</summary>
+    internal enum ReadinessStep
+    {
+        Ready,
+        /// <summary>截图器未挂上；即使游戏进程已在运行，也要通过宿主启动命令挂截图器。</summary>
+        AttachCapturer,
+        WaitForMainUi,
+        FailResolution,
+        FailNotRunning,
+        FailTimeout,
+    }
+
+    /// <summary>
+    /// 按真实观测状态分类下一步：无进程、有进程无截图、有截图在加载、就绪、非 16:9、
+    /// 失败超时。不依赖调用方提示词，工具执行层自己消化就绪准备。
+    /// </summary>
+    internal static ReadinessStep ClassifyReadiness(
+        bool captureReady,
+        bool gameProcessRunning,
+        bool inMainUi,
+        bool windowSizeKnown,
+        bool sixteenToNine,
+        TimeSpan waited,
+        TimeSpan limit)
+    {
+        if (captureReady && windowSizeKnown && !sixteenToNine) return ReadinessStep.FailResolution;
+        if (captureReady && inMainUi) return ReadinessStep.Ready;
+        if (waited >= limit) return ReadinessStep.FailTimeout;
+        if (!captureReady && !gameProcessRunning && waited >= TimeSpan.FromSeconds(5))
+            return ReadinessStep.FailNotRunning;
+        if (!captureReady) return ReadinessStep.AttachCapturer;
+        return ReadinessStep.WaitForMainUi;
+    }
+
+    /// <summary>
+    /// 运行前置的确定性就绪准备：先按状态机分类，需要时用与 bgi.start_game 相同的
+    /// 宿主命令把截图器挂上（游戏已开时不会重复拉起进程），再按 bgi.wait_ready 的
+    /// 语义一次阻塞等待到主界面、分辨率错误或限时。不新增守护线程；取消只作用于
+    /// 等待，已交给宿主的启动命令由宿主执行完。
+    /// </summary>
+    internal static async Task EnsureGameReady(CancellationToken cancellation)
+    {
+        var watch = Stopwatch.StartNew();
+        var launched = false;
+        while (true)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            var size = Host.GameClientSize();
+            switch (ClassifyReadiness(
+                Host.CaptureReady,
+                Host.GameProcessRunning(),
+                Host.InMainUi(),
+                size is not null,
+                Host.GameSixteenToNine(),
+                watch.Elapsed,
+                TimeSpan.FromSeconds(120)))
+            {
+                case ReadinessStep.Ready:
+                    return;
+                case ReadinessStep.FailResolution:
+                    throw BridgeException.GameNotReady(ResolutionWarning());
+                case ReadinessStep.FailNotRunning:
+                    throw BridgeException.GameNotReady(
+                        "游戏进程未运行，就绪准备未完成。先用 bgi.start_game 启动，并按它返回的缺项处理。");
+                case ReadinessStep.FailTimeout:
+                    throw BridgeException.GameNotReady(
+                        "等待 120 秒后游戏仍未进入主界面；如实向用户报告当前状态，不继续空等。");
+                case ReadinessStep.AttachCapturer when !launched:
+                    launched = true;
+                    Task launch;
+                    lock (LaunchGate)
+                    {
+                        launch = Launching is { IsCompleted: false } running ? running : Launching = Launch();
+                    }
+                    // 取消只作用于本次等待；宿主命令发出后继续执行完。
+                    var settled = await Task.WhenAny(launch, Task.Delay(LaunchWait, cancellation))
+                        .ConfigureAwait(false);
+                    cancellation.ThrowIfCancellationRequested();
+                    if (settled == launch)
+                    {
+                        await launch.ConfigureAwait(false);
+                        if (!Host.CaptureReady)
+                            throw BridgeException.Failed(
+                                "BetterGI 的启动流程已经结束，但截图器仍未就绪：没有找到原神窗口，BetterGI 也就没有开始截图。"
+                                    + "请确认原神能正常启动，或让用户在 BetterGI 的启动页手动点击启动。");
+                    }
+                    continue;
+                default:
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellation).ConfigureAwait(false);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>bgi.ensure_game_ready 的返回体。verified 与 ready 同值：只有截图器
+    /// 与主界面实测就绪才为 true，宿主 Job 完成语义（result.verified==true 才记
+    /// 核验成功）据此判定；未就绪的路径在 EnsureGameReady 内抛错，不会返回
+    /// verified=false 的完成结果。</summary>
+    internal static object ReadinessResult(bool ready, object runtime, string note) => new
+    {
+        prepared = true,
+        ready,
+        verified = ready,
+        observedAt = DateTimeOffset.UtcNow,
+        note,
+        runtime,
+        verificationScope = "readiness",
+        verificationReason = "只核验截图器与主界面就绪；未核验登录账号或任何业务结果。",
+    };
+
     /// <summary>就绪提示按阶段区分：未到主界面、非 16:9 都如实说，别让上层以为能直接跑任务。</summary>
     private static string ResolutionNote(bool ready)
     {
@@ -174,7 +311,7 @@ public static class StatusTools
             return Host.CaptureReady
                 ? "截图器已就绪，但游戏还没进入主界面；用 bgi.wait_ready 阻塞等到 ready=true（以主界面为准）再运行任务。"
                 : Host.GameProcessRunning()
-                    ? "原神进程已启动，截图器尚未就绪；用 bgi.wait_ready 一次阻塞等待。"
+                    ? "原神进程已启动，但截图器尚未就绪；先调用 bgi.start_game（游戏已开时它会挂上截图器，不会重复拉起进程），再用 bgi.wait_ready 一次阻塞等待。"
                     : Host.DisplaySize() is { } display
                         ? $"原神进程未运行；当前桌面会话为 {display.Width}x{display.Height}。先确认它能容纳目标游戏分辨率，再启动。"
                         : "原神进程未运行；先确认所需分辨率，再用 bgi.start_game 启动。";

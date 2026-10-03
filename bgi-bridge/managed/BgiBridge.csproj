@@ -43,5 +43,11 @@
     <EmbeddedResource Include="generated/host-documentation.json" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- dev/ 静态验收直接测内部状态机与合并逻辑。 -->
+    <InternalsVisibleTo Include="ReadinessPartyChecks" />
+    <InternalsVisibleTo Include="ProductionCoreChecks" />
+  </ItemGroup>
+
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
 </Project>

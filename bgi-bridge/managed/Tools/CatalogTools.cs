@@ -68,6 +68,7 @@ public static class CatalogTools
         NativeUiTools.Register(registry);
         LocalResourceDeletionTools.Register(registry);
         ScriptGroupTools.Register(registry);
+        ScriptGroupPlanTools.Register(registry);
         ScriptGroupDeletionTools.Register(registry);
         TaskStopTools.Register(registry);
         NavigationTools.Register(registry);
@@ -158,4 +159,5 @@ public static class CatalogTools
     private static SettingChange[] ReadChanges(JsonElement changes) => changes.EnumerateArray()
         .Select(change => new SettingChange(change.GetProperty("path").GetString()!,
             change.GetProperty("value").Clone(), change.GetProperty("expectedVersion").GetString()!)).ToArray();
+
 }

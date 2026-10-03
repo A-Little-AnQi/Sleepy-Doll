@@ -19,6 +19,9 @@ public sealed record MethodDescriptor(
     public required AgentGuide Guide { get; init; }
     public string? UnavailableReason { get; init; }
     public bool RequiresGameReady { get; init; }
+    /// <summary>执行前准备声明：null=无；"ensureGameReady"=提交前由 RootBridge 通用执行
+    /// 原生就绪准备（已授权的写动作才触发；只读与配置写不会因此启动游戏）。</summary>
+    public string? Preparation { get; init; }
     public string Effect => ReadOnly ? "readOnly" : Group == "settings" ? "configurationWrite"
         : RequiresGameReady ? "gameWrite" : "hostCommand";
     public JsonElement OutputSchema => AgentSchemas.Output(Id, Guide.ResultMeaning);
@@ -64,12 +67,13 @@ public sealed class MethodRegistry
         JsonElement? inputSchema = null,
         AgentGuide? guide = null,
         string? unavailableReason = null,
-        bool requiresGameReady = false)
+        bool requiresGameReady = false,
+        string? preparation = null)
     {
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("方法 id 不能为空。", nameof(id));
         var documentation = guide ?? AgentGuides.For(id);
         var descriptor = new MethodDescriptor(id, group, documentation.Purpose, readOnly, destructive,
-            inputSchema ?? AgentSchemas.Input(id)) { Guide = documentation, UnavailableReason = unavailableReason, RequiresGameReady = requiresGameReady };
+            inputSchema ?? AgentSchemas.Input(id)) { Guide = documentation, UnavailableReason = unavailableReason, RequiresGameReady = requiresGameReady, Preparation = preparation };
         if (!_methods.TryAdd(id, (descriptor, handler)))
             throw new InvalidOperationException($"方法 id 重复：{id}");
     }

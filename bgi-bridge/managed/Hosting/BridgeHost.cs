@@ -324,6 +324,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
             summary = descriptor.Guide.Purpose, guide = descriptor.Guide,
             inputSchema = descriptor.InputSchema, outputSchema = descriptor.OutputSchema,
             effect = descriptor.Effect,
+            preparation = descriptor.Preparation,
             executionMode = descriptor.ReadOnly ? "inline" : "job",
             concurrency = descriptor.ReadOnly ? "parallel" : "gameExclusive",
             cancellation = descriptor.ReadOnly || descriptor.Group == "settings" || descriptor.RequiresGameReady ? "cooperative" : "waitOnly",

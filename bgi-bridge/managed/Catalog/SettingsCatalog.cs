@@ -68,7 +68,7 @@ public static class SettingsCatalog
         ["autoStygianOnslaughtConfig"] = "自动幽境危战的难度、队伍与轮数。",
         ["autoWoodConfig"] = "自动伐木的轮数与每日上限。",
         ["childSessionConfig"] = "多实例分身会话的窗口与隔离设置。",
-        ["commonConfig"] = "通用行为：截图保存、任务结束动作等。",
+        ["commonConfig"] = "通用行为：快捷键截图与调试截图、退出时最小化至托盘、界面主题与背景图、兑换码推送通知。",
         ["devConfig"] = "开发调试开关。",
         ["genshinStartConfig"] = "原神启动路径与启动参数。",
         ["getGridIconsConfig"] = "背包网格图标采集与测试参数。",

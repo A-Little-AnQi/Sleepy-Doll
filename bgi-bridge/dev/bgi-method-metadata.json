@@ -1,0 +1,310 @@
+{
+  "bgi.inspect_group_effective": {
+    "group": "scheduler",
+    "summary": "只读揭示一个配置组各运行字段实际生效的值与来源（组内覆盖 vs 与全局当前值一致），以及有效战斗策略的类型/文件/版本与开头要求原文。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "groupName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "从 User/ScriptGroup 读取到的精确配置组 name。"
+        }
+      },
+      "required": [
+        "groupName"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "核对组有效配置来源",
+      "purpose": "只读揭示一个配置组各运行字段实际生效的值与来源（组内覆盖 vs 与全局当前值一致），以及有效战斗策略的类型/文件/版本与开头要求原文。",
+      "whenToUse": [
+        "运行前核对组配置是否满足用户目标、诊断组配置覆盖全局有效设置类问题时。"
+      ],
+      "preconditions": [
+        "groupName 来自 User/ScriptGroup 的真实 name；不需要启动游戏。"
+      ],
+      "sideEffects": [
+        "只读；不修改任何文件，不启动游戏。"
+      ],
+      "resultMeaning": "fields[] 给出每个关键字的组内值与来源；strategy 给出实际生效策略面。缺失/不可读字段如实标注，不猜。",
+      "verification": "以 fields[].source 与 strategy.version 为准；source=groupOverride 表示该字段与全局不同，需判断是有意自定义还是历史默认覆盖。",
+      "rollback": "无需回滚。",
+      "documentationSource": "bridge-stable-operation"
+    }
+  },
+  "bgi.prepare_pathing_group": {
+    "group": "scheduler",
+    "summary": "用宿主原生构造器把所选父目录下全部路线包装成一个配置组，保留原文件名和目录；运行配置继承全局配置当前有效值（同名同类型字段深拷贝），并返回路线需求聚合与有效战斗策略面。",
+    "readOnly": false,
+    "destructive": true,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "已安装的完整父目录，pathing/ 前缀直接替换为 User/AutoPathing/（不在前面追加）；目录不存在会失败。"
+        },
+        "groupName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "description": "可选；缺省时按目标目录末段自动取简短自然名。给出时必须是有效文件名，按原样使用，不覆盖已有不同内容配置组。"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "准备地图追踪配置组",
+      "purpose": "用宿主原生构造器把所选父目录下全部路线包装成一个配置组，保留原文件名和目录；运行配置继承全局配置当前有效值（同名同类型字段深拷贝），并返回路线需求聚合与有效战斗策略面。",
+      "whenToUse": [
+        "资源已订阅或本机已安装，需要为路线父目录建立可运行的配置组。"
+      ],
+      "preconditions": [
+        "path 是 pathing/ 开始的精确目录路径，对应 User/AutoPathing 下同名子目录（替换前缀，不在前面追加 AutoPathing）；目录不存在直接失败，无需先启动游戏。groupName 依据用户目标直接取简短自然名，如“挖矿讨伐”；不拼目录、作者、时间或参数长句，不为命名再次提问，缺省时自动生成。"
+      ],
+      "sideEffects": [
+        "只创建一个稳定命名的配置组；已有同名但不同内容的组不覆盖，已有组的显式配置保持不动。新组的 autoFightConfig 等同名同类型字段继承全局配置当前有效值，不用类型默认冒充继承。"
+      ],
+      "resultMeaning": "prepared=true 只表示完整配置组已落盘，不代表已经运行。requirements.partyConfirmationRequired=true（含战斗 fight/combat_script 或特殊机制动作）时，运行前必须完成当前任务的配队确认：用户原话已给队名/队员则用已给值；队员组成或策略适配所需角色信息缺失且无法从现场可靠观测时，用 user.ask 一次问清，未答复不得启动。策略文件列出的角色不是实际队伍名单。autoFightStrategy.requirementsExcerpt 是有效策略文件开头的原文要求，适配组配置以它为准。",
+      "verification": "以返回的 inheritedSettings、requirements（含 sources）与 autoFightStrategy（exists/requirementsExcerpt）为准；队伍与赶路角色用 bgi.set_pathing_party 写入。只有用户明确要求运行时才运行；游戏未就绪时运行接口会按真实状态自行准备。",
+      "rollback": "删除该配置组后重新 prepare 即回到继承基线；不动路线与订阅。",
+      "documentationSource": "bridge-stable-operation"
+    }
+  },
+  "bgi.run_script_group": {
+    "group": "scheduler",
+    "summary": "调用 BetterGI 自带的按名称执行入口，运行指定配置组中的已启用任务。无需用户预先在脚本调度页选中目标。",
+    "readOnly": false,
+    "destructive": true,
+    "effect": "gameWrite",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "groupName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "从 User/ScriptGroup 配置文件读取到的精确 name。"
+        },
+        "waitForCompletion": {
+          "type": "boolean",
+          "default": false,
+          "description": "默认 false，普通请求与快捷任务都是确认交给宿主即返回。同一计划的后续步骤、closeGameAfter 等收尾都不是监控授权；只有用户明确要求等结果才为 true。"
+        }
+      },
+      "required": [
+        "groupName"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "按名称运行配置组",
+      "purpose": "调用 BetterGI 自带的按名称执行入口，运行指定配置组中的已启用任务。无需用户预先在脚本调度页选中目标。",
+      "whenToUse": [
+        "用户要求运行一个已从 User/ScriptGroup 确认存在的配置组时。"
+      ],
+      "preconditions": [
+        "战斗/特殊/未知前提路线（resolve/prepare 的 partyConfirmationRequired=true）：先完成缺配队 user.ask、bgi.inspect_group_effective 读实际生效配置与策略并按角色与策略要求适配回读，再运行。",
+        "游戏未就绪时接口会按真实状态自动准备：启动游戏或挂上截图器并阻塞等待至主界面（至多 120 秒）；非 16:9 或超时如实失败。",
+        "窗口分辨率为 16:9。",
+        "没有其他独立任务持锁。",
+        "groupName 来自 User/ScriptGroup 的真实 name。"
+      ],
+      "sideEffects": [
+        "启动配置组中的游戏自动化、脚本、路线或 Shell 任务；具体影响由组内已启用任务决定。"
+      ],
+      "resultMeaning": "默认 waitForCompletion=false：accepted=true 表示宿主已接受运行，交接后立即返回，不守护整组。同一宿主计划的后续步骤与 closeGameAfter 等收尾都保持 false；只有用户明确要求监控等结果时才设 true。verified 的 launch 范围只核验启动交接，不是业务完成。",
+      "verification": "普通运行请求用返回证据总结本次已提交或执行方法已返回，并结束本轮。不继续 job.get、查任务状态、日志或截图，不重跑。只有用户明确要求监控等结果才继续；查看当前状态与排障只是当前请求的一次读取，不自动持续盯。",
+      "rollback": "已经发送的游戏输入和脚本副作用不能自动撤销；需要停止时使用对应停止操作并核验终态。",
+      "documentationSource": "bridge-stable-operation"
+    }
+  },
+  "bgi.run_script_groups": {
+    "group": "scheduler",
+    "summary": "把多个已存在的配置组按请求顺序合成一份宿主统一进度计划一次执行，各组配置保持原样不拆散；可选在调度进度全部成功核验后关闭游戏。",
+    "readOnly": false,
+    "destructive": true,
+    "effect": "gameWrite",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "groupNames": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "description": "按执行顺序排列的配置组精确 name，均来自 User/ScriptGroup；允许重复以再次运行同一组，顺序即执行顺序。"
+        },
+        "closeGameAfter": {
+          "type": "boolean",
+          "default": false,
+          "description": "可选，默认 false；只有调度进度全部成功核验且未手动取消、关闭已核验时才整体算完成，缺证不关。"
+        },
+        "waitForCompletion": {
+          "type": "boolean",
+          "default": false,
+          "description": "默认 false，宿主接受整份计划即返回。true 时等宿主计划返回并核对调度进度。"
+        }
+      },
+      "required": [
+        "groupNames"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "按顺序运行多个配置组",
+      "purpose": "把多个已存在的配置组按请求顺序合成一份宿主统一进度计划一次执行，各组配置保持原样不拆散；可选在调度进度全部成功核验后关闭游戏。",
+      "whenToUse": [
+        "用户要求一次按顺序运行多个配置组时。"
+      ],
+      "preconditions": [
+        "战斗/特殊/未知前提路线（partyConfirmationRequired=true）：先完成缺配队 user.ask、inspect_group_effective 读实际生效配置与策略并按角色与策略要求适配回读，再运行。",
+        "游戏未就绪时接口会按真实状态自动准备：启动游戏或挂上截图器并阻塞等待至主界面（至多 120 秒）；非 16:9 或超时如实失败。",
+        "窗口分辨率为 16:9。",
+        "没有其他独立任务持锁。",
+        "groupNames 均来自 User/ScriptGroup 的真实 name。"
+      ],
+      "sideEffects": [
+        "按顺序启动所有组内的游戏自动化、脚本、路线或 Shell 任务；closeGameAfter=true 且收尾证据齐全时会在结束后关闭游戏。"
+      ],
+      "resultMeaning": "默认 waitForCompletion=false：accepted=true 表示宿主已接受整份计划并交接，立即返回，不守护执行；Sleepy-Doll 退出后宿主计划继续。只有用户明确要求等结果时才设 true。",
+      "verification": "普通多组运行请求用返回证据总结本次已交接，并结束本轮。不轮询进度、不查任务状态或日志。",
+      "rollback": "已发送的游戏输入和脚本副作用不能自动撤销；closeGameAfter 只在整个 EndTime 存在、全部历史成功且未手动取消时才会关闭游戏，缺证一律不关。",
+      "documentationSource": "bridge-stable-operation"
+    }
+  },
+  "bgi.set_pathing_party": {
+    "group": "scheduler",
+    "summary": "把用户点名的队伍与赶路角色写入配置组的 pathingConfig；其他配置字段原样保留。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "groupName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "从 User/ScriptGroup 读取到的精确配置组 name。"
+        },
+        "expectedSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$",
+          "description": "bgi.user.read 返回的目标配置组当前 SHA-256；内容不一致时拒绝写入（乐观并发）。"
+        },
+        "partyName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "用户点名的队伍名；写入时同时置 pathingConfig.enabled=true。省略表示不改队伍。"
+        },
+        "hurryAvatar": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "赶路角色：本机支持列表内的名字（如 玛薇卡、自动）或常见俗称（如火神）；空字符串表示不使用技能赶路。省略表示不改。"
+        }
+      },
+      "required": [
+        "groupName",
+        "expectedSha256"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "设置配置组队伍与赶路角色",
+      "purpose": "把用户点名的队伍与赶路角色写入配置组的 pathingConfig；其他配置字段原样保留。",
+      "whenToUse": [
+        "用户为现成配置组指定队伍、赶路/加速角色等运行偏好时；角色俗称由本接口做数据映射，不需要模型猜字段。"
+      ],
+      "preconditions": [
+        "groupName 来自 User/ScriptGroup 的真实 name，不需要启动游戏。",
+        "expectedSha256 来自 bgi.user.read 的当前 SHA-256；内容不一致时拒绝写入。",
+        "partyName 用用户原话中的队伍名。",
+        "hurryAvatar 接受本机支持列表内的角色名、常见俗称或“自动”；空字符串表示不使用技能赶路。"
+      ],
+      "sideEffects": [
+        "只修改该组 config.pathingConfig 的对应字段；写 partyName 时同时置 enabled=true，否则新队名不生效。文件其余字段不动。"
+      ],
+      "resultMeaning": "configured=true 表示字段已写入并回读核验；不代表已运行任何脚本。",
+      "verification": "以返回的 partyName、partySwitchEnabled、hurryOnAvatar 与回读核验为准。",
+      "rollback": "再次调用同一接口改回原值即可；不删除组、不动路线。",
+      "documentationSource": "bridge-stable-operation"
+    }
+  },
+  "bgi.sync_group_effective_config": {
+    "group": "scheduler",
+    "summary": "把配置组中明确列出的运行字段替换为全局配置当前有效值（CAS：expectedSha256 + 每文件锁 + 原子替换 + 写后真实 diff），其余字段原样保留。用于修复创建时被类型默认覆盖的已证实错误配置；不用于无差别重置用户自定义。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "groupName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "从 User/ScriptGroup 读取到的精确配置组 name。"
+        },
+        "expectedSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$",
+          "description": "bgi.user.read 返回的目标配置组当前 SHA-256；内容不一致时拒绝写入（乐观并发）。"
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "description": "要替换为全局当前值的字段名（如 AutoFightConfig）；必须同时存在于组 PathingConfig 与全局配置根且同类型。"
+        }
+      },
+      "required": [
+        "groupName",
+        "expectedSha256",
+        "fields"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "按全局现值同步组字段",
+      "purpose": "把配置组中明确列出的运行字段替换为全局配置当前有效值（CAS：expectedSha256 + 每文件锁 + 原子替换 + 写后真实 diff），其余字段原样保留。用于修复创建时被类型默认覆盖的已证实错误配置；不用于无差别重置用户自定义。",
+      "whenToUse": [
+        "已证实组内字段是错误默认（如旧版创建用类型默认覆盖了全局有效战斗配置）需要修复时；只列需要修复的字段。"
+      ],
+      "preconditions": [
+        "groupName 精确；expectedSha256 来自 bgi.user.read 当前值。",
+        "fields 只允许同时存在于组 PathingConfig 与全局配置根且同类型的字段（本接口按此校验）。"
+      ],
+      "sideEffects": [
+        "只替换 fields 列出的字段为全局当前值；其余字段与文件其他部分逐字段保留。"
+      ],
+      "resultMeaning": "synced=true 且 otherFieldsPreserved=true 表示替换完成并回读核验；SHA 不匹配返回 VERSION_CONFLICT 未写入。",
+      "verification": "回读 replacedFields 的值与全局当前值一致；其他字段与改前逐字段一致。",
+      "rollback": "再次调用同一接口换回原值即可；不删除组。",
+      "documentationSource": "bridge-stable-operation"
+    }
+  }
+}
