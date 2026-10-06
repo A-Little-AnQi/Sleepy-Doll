@@ -88,6 +88,22 @@ test("不合法路径、查询串、方法和多段 Range 在访问 R2 前拒绝
     assert((await worker.fetch(request, fixture.env)).status >= 400); assert.equal(fixture.reads, 0);
   }
 });
+
+test("Alpha、Beta、RC 和带构建信息的版本可下载，非法后缀不能读取 R2", async () => {
+  for (const version of ['0.2.0-alpha.1', '0.2.0-beta.10', '0.2.0-rc.1', '0.2.0+build.2']) {
+    const fixture = downloadEnv();
+    const url = `https://sleepy-doll-download.restless-nh3.com/releases/${version}/Sleepy-Doll-${version}-setup.exe`;
+    assert.equal((await worker.fetch(new Request(url), fixture.env)).status, 200);
+    assert.equal(fixture.reads, 1);
+    assert.equal(validateEvent({ ...event, version }).events[0].params.app_version, version);
+  }
+  for (const version of ['0.02.0-alpha.1', '0.2.0-alpha.01', 'v0.2.0']) {
+    const fixture = downloadEnv();
+    const url = `https://sleepy-doll-download.restless-nh3.com/releases/${version}/Sleepy-Doll-${version}-setup.exe`;
+    assert.equal((await worker.fetch(new Request(url), fixture.env)).status, 404);
+    assert.equal(fixture.reads, 0);
+  }
+});
 test("限流、缺失保护绑定和手动暂停均不访问 R2", async () => {
   const blocked = downloadEnv({ allowed: false });
   assert.equal((await worker.fetch(new Request(downloadUrl), blocked.env)).status, 429);

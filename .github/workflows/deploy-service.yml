@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test cloudflare/worker.test.mjs installer/r2-budget.test.mjs
+      - run: node --test cloudflare/worker.test.mjs installer/r2-budget.test.mjs installer/release-version.test.mjs
       - name: Audit R2 storage budget
         env:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

@@ -31,7 +31,7 @@ jobs:
           dotnet-version: 8.0.x
       - run: npm ci
       - run: npm run build
-      - run: node --test cloudflare/worker.test.mjs installer/r2-budget.test.mjs
+      - run: node --test cloudflare/worker.test.mjs installer/r2-budget.test.mjs installer/release-version.test.mjs
       - run: cargo fmt --all -- --check
       - run: cargo check
       - run: cargo check --no-default-features

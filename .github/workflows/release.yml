@@ -4,6 +4,13 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      channel:
+        description: '发布通道（正式版 stable / 测试版 test）'
+        required: true
+        type: choice
+        default: stable
+        options: [stable, test]
 
 concurrency:
   group: sleepy-doll-release
@@ -42,15 +49,9 @@ jobs:
         with:
           dotnet-version: 8.0.x
       - name: Resolve version
-        shell: pwsh
-        run: |
-          $cargo = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
-          $frontend = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($cargo -ne $frontend) { throw "Cargo 和前端版本不一致" }
-          $tag = "v$cargo"
-          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}" -ne $tag) { throw "标签与源码版本不一致" }
-          "VERSION=$cargo" >> $env:GITHUB_ENV
-          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+        env:
+          RELEASE_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.channel || '' }}
+        run: node installer/release-version.mjs --github
       - run: npm ci
       - name: Build product
         shell: cmd
@@ -81,8 +82,9 @@ jobs:
             gh release create $env:RELEASE_TAG @assets --target "${{ github.sha }}" --draft --title "Sleepy Doll $env:VERSION" --notes-file $notes
             if ($LASTEXITCODE -ne 0) { throw "创建 Release 失败" }
           }
-          $prerelease = if ($env:VERSION -like '0.0.*') { "--prerelease=true" } else { "--prerelease=false" }
-          gh release edit $env:RELEASE_TAG --draft=false $prerelease --notes-file $notes
+          $prerelease = if ($env:RELEASE_CHANNEL -eq 'test') { "--prerelease=true" } else { "--prerelease=false" }
+          $latest = if ($env:RELEASE_CHANNEL -eq 'stable') { "--latest=true" } else { "--latest=false" }
+          gh release edit $env:RELEASE_TAG --draft=false $prerelease $latest --notes-file $notes
           if ($LASTEXITCODE -ne 0) { throw "发布 Release 失败" }
       - name: Promote update channel
         env:
@@ -92,7 +94,8 @@ jobs:
       - name: Verify published manifest
         shell: pwsh
         run: |
-          $channel = if ($env:VERSION -like '0.0.*') { 'test' } else { 'stable' }
+          $channel = $env:RELEASE_CHANNEL
           $manifest = Invoke-RestMethod "https://sleepy-doll.restless-nh3.com/api/releases/$channel"
           if ($manifest.version -ne $env:VERSION) { throw "线上更新清单版本错误" }
+          if ($manifest.channel -ne $channel) { throw "线上更新清单通道错误" }
           "已验证 $channel 通道：$($manifest.version)" >> $env:GITHUB_STEP_SUMMARY

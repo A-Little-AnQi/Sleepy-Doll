@@ -11,14 +11,20 @@
 - Worker：`sleepy-doll-distribution`。
 - GA4：独立的 Sleepy Doll 媒体资源，衡量 ID `G-PBWX0V3ESR`。
 
-`0.0.*` 属于测试通道，GitHub Release 标记为预发布。正式首版使用 `0.1.0`，属于正式通道。测试发布不会修改正式通道。
+发布属性由 `release-channel.json` 明确指定，当前 `0.1.0` 为 `stable` 正式版。`0.x` 不代表测试版，`1.x` 也不代表正式版。测试发布不会修改正式通道。
+
+- `stable`：正式通道，GitHub Release 取消 Pre-release 并标记 Latest，不接受带预发布后缀的版本。
+- `test`：测试通道，GitHub Release 标记 Pre-release，不标记 Latest。
+- 支持 BetterGI 使用的 SemVer 后缀，例如 `0.2.0-alpha.1`，也支持 `-beta.1`、`-rc.1`。这些仅是命名示例，不指定下一正式版的版本号。
+- 同一基础版本按 `alpha.2 < alpha.10 < beta.1 < rc.1 < 无后缀正式版本` 比较；构建信息 `+build` 不改变更新优先级。
 
 ## 发布步骤
 
 1. 同步修改 `Cargo.toml`、`package.json` 和 `package-lock.json` 的产品版本。
+   在 `release-channel.json` 选择 `stable` 或 `test`；带 Alpha、Beta、RC 后缀的版本必须选择 `test`。
 2. 添加 `web/src/app/release-notes/changelog-<版本>.md`，并更新 `UpdateDialog.tsx` 引用。
 3. 提交源码，推送分支，等待检查成功。
-4. 创建并推送对应标签，例如 `v0.0.1`；也可手动运行 release 工作流。
+4. 创建并推送对应标签，例如 `v0.1.0`；标签发布读取仓库中的通道配置。手动运行 release 工作流时须明确选择发布通道，该选择同步写入构建中的通道配置，保证客户端、R2 清单与 GitHub 标记一致。
 5. 安装包、SHA-256 和版本清单写入 `dist/`。工作流上传安装包并从公开地址取回校验。
 6. 部署 Worker，发布 GitHub Release，最后写入 `channels/test.json` 或 `channels/stable.json`。
 
@@ -28,7 +34,9 @@ GitHub Actions Secrets：`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`CLOUDFLA
 
 ## 客户端行为
 
-桌面程序启动后后台检查更新，设置页提供手动检查和通道选择。只接受 HTTPS 固定下载域名、正确版本路径和 SHA-256。下载安装包位于用户目录的 `.sleepy-doll/updates/`；安装前再次校验。
+桌面程序启动后后台检查更新，手动检查与通道选择位于设置页「关于」标签（UI 入口：`web/src/pages/settings/AboutPage.tsx` + `web/src/app/ReleaseSettings.tsx`）。只接受 HTTPS 固定下载域名、正确版本路径和 SHA-256。下载安装包位于用户目录的 `.sleepy-doll/updates/`；安装前再次校验。
+
+当前版本同时显示构建的正式／测试属性，与用户选择的更新通道分开。新安装默认使用构建自身的通道，已有用户保存的通道选择保留。正式通道只读取 `channels/stable.json`，测试通道只读取 `channels/test.json`；两者不静默互换。官网的主下载选择正式版，测试版使用独立入口，正式版缺失时不会悄悄改下载测试包。
 
 安装更新要求当前程序位于注册安装目录，且没有正在执行的任务。安装器等待原进程退出，再调用原位置更新逻辑并重新启动。未登记的便携目录通过安装器更新。配置、会话和原有快捷方式保留。
 
@@ -36,11 +44,23 @@ GitHub Actions Secrets：`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`CLOUDFLA
 
 ## 基础统计
 
-官网和软件统计默认关闭，用户主动开启后发送匿名基础事件。软件在设置页可以关闭。使用随机安装标识，不发送对话、提示词、模型密钥、文件路径或用户文档。
+客户端统计默认开启，新安装会在启动、检查更新和更新完成时上报匿名事件，业务埋点参数为版本、通道、平台、事件名、目标版本、`sessionId` 与随机 `clientId`，Google tag 还会附带标准会话和浏览器/设备信息，不含对话、模型密钥或文件路径。用户显式保存过 `analyticsEnabled=false` 的停用选择会被保留，修改更新通道不会改动统计开关。
 
-事件包括官网访问、下载点击、软件启动、更新检查、发现新版、软件下载校验完成、更新后首次启动成功和更新失败。官网点击不代表文件下载完成，下载校验完成不代表安装完成。
+客户端上报不再经过官网或 Worker：原生层把白名单事件经内存事件出口转交给界面，由界面内的官方 gtag.js（`https://www.googletagmanager.com/gtag/js?id=G-J691D7H7BY`）直连 Google Analytics。GA 资源 557227178 下使用独立的「桌面客户端」web 数据流（16041216887，测量 ID `G-J691D7H7BY`，`https://sleepy-doll.localhost`），增强型衡量关闭；上报带固定虚拟 `page_location=https://sleepy-doll.localhost/app`，这只是 GA 里的数据标签，客户端从不访问该网址；Google tag 直连无需任何 secret，客户端不保存任何 GA API 密钥，也不手工拼未公开的收集协议。`client_id` 沿用偏好文件里的随机 UUID，consent 中广告三项始终拒绝、analytics 仅在用户开启后授予，不发送页面浏览，也不读取对话、标题、URL 或文件路径。事件在界面就绪前最多缓冲 32 条、超过 30 秒丢弃；脚本加载失败或离线不影响任何功能，不弹提示、不重试。关闭统计（`analyticsEnabled=false`）后重启即完全停用：不加载脚本、置 `ga-disable` 标记，连无 Cookie ping 也不发送。以下统计描述仅适用于官网。
+
+官网统计默认关闭，用户在网站主动同意后启用 GA4，发送匿名访问与下载点击事件。不发送对话、提示词、模型密钥、文件路径或用户文档。官网与 Worker 的统计链路保持原样，仅为兼容已发布的 0.0.1 客户端保留 `/api/events`，不因客户端直连而修改网站实现。
+
+事件包括官网访问与下载点击。官网点击不代表文件下载完成，下载校验完成不代表安装完成。
 
 Worker 校验事件白名单、字段格式、请求体大小和来源，并限流。GA 密钥仅保存在 Worker 服务端。统计接口失败不影响启动、下载或更新。测试通道事件启用 GA4 DebugView。
+
+### 在 GA 中查看
+
+资源：Sleepy Doll（557227178）。客户端直连事件进入独立的「桌面客户端」数据流（`G-J691D7H7BY`），与官网 web 数据流分开查看；旧版 0.0.1 经 Worker 上报的历史数据仍在原有探索里。报告导航「客户端统计 / 使用情况」中的「日活与启动」「版本与通道」「更新结果」。
+
+「日活与启动」按 `app_start` 的日期分组：`totalUsers` 是去重匿名安装，`eventCount` 是启动次数，不含官网流量。它不是实名人数，也不符合 GA 的互动时长口径——跨日持续运行但没有再次启动的安装，不会计入新一天的启动日活，当前按「启动日活」理解。报告时区已核实为 GMT+08 中国时间。统计默认开启但用户可显式关闭，因此这些数字不代表全部安装量。
+
+「更新结果」按 `update_check` / `update_available` / `update_download_complete` / `update_success` / `update_failed` 事件查看。数据里包含既有验证运行产生的记录，不能当作真实客户增长解读。
 
 ## 验收
 

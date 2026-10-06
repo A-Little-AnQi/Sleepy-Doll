@@ -2,16 +2,12 @@ import { createHash, createHmac } from "node:crypto";
 import { readFile, writeFile, stat } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { parseListing, checkStorageBudget } from "./r2-budget.mjs";
+import { releaseConfig } from "./release-version.mjs";
+import { compareVersions } from "../cloudflare/version.mjs";
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const hmac = (key, value) => createHmac("sha256", key).update(value).digest();
-const version = JSON.parse(await readFile("package.json", "utf8")).version;
-const cargo = /^version\s*=\s*"([^"]+)"/m.exec(
-  await readFile("Cargo.toml", "utf8"),
-)?.[1];
-if (!/^\d+\.\d+\.\d+$/.test(version) || cargo !== version)
-  throw Error("前端和 Cargo 版本号必须一致");
-const channel = version.startsWith("0.0.") ? "test" : "stable";
+const { version, channel } = await releaseConfig(process.env.RELEASE_CHANNEL);
 const name = `Sleepy-Doll-${version}-setup.exe`;
 const file = `dist/${name}`;
 const key = `releases/${version}/${name}`;
@@ -112,6 +108,19 @@ const budget = checkStorageBudget(objects, [
   { key: `channels/${channel}.json`, size: manifestBytes.length },
 ]);
 console.log(`R2 容量检查通过：${budget.before} → ${budget.after} 字节，上限 ${budget.limit}`);
+// Reject channel rollback before GitHub publication, and re-check on promotion.
+const current = await s3("GET", `channels/${channel}.json`);
+if (current.ok) {
+  const previous = await current.json();
+  if (previous.channel !== channel) throw Error("通道清单与目标通道不一致");
+  if (compareVersions(previous.version, version) > 0)
+    throw Error("拒绝用旧版本覆盖更新通道");
+} else if (current.status !== 404) throw Error(`读取通道失败：HTTP ${current.status}`);
+const archived = await s3("GET", `releases/${version}/release.json`);
+if (archived.ok) {
+  if ((await archived.json()).channel !== channel)
+    throw Error("此版本已用于另一发布通道，请使用新的版本号");
+} else if (archived.status !== 404) throw Error(`读取历史版本失败：HTTP ${archived.status}`);
 await writeFile(`${file}.sha256`, `${digest}  ${name}\n`);
 await writeFile(
   `dist/Sleepy-Doll-${version}-release.json`,
@@ -122,21 +131,6 @@ if (process.argv.includes("--promote")) {
   const head = await requireSuccess(await s3("HEAD", key), "读取安装包");
   if (head.headers.get("x-amz-meta-sha256") !== digest)
     throw Error("R2 安装包摘要与本次构建不一致");
-  const current = await s3("GET", `channels/${channel}.json`);
-  if (current.ok) {
-    const previous = await current.json();
-    const compare = (a, b) => {
-      const x = a.split(".").map(Number),
-        y = b.split(".").map(Number);
-      for (let i = 0; i < 3; i++) {
-        if (x[i] !== y[i]) return x[i] - y[i];
-      }
-      return 0;
-    };
-    if (compare(previous.version, version) > 0)
-      throw Error("拒绝用旧版本覆盖更新通道");
-  } else if (current.status !== 404)
-    throw Error(`读取通道失败：HTTP ${current.status}`);
   await requireSuccess(
     await s3(
       "PUT",

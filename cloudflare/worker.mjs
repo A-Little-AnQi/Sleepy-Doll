@@ -1,3 +1,5 @@
+import { VERSION, parseVersion } from './version.mjs';
+
 const EVENTS = new Set([
   "page_view",
   "download_click",
@@ -8,15 +10,15 @@ const EVENTS = new Set([
   "update_success",
   "update_failed",
 ]);
-const VERSION = /^\d+\.\d+\.\d+$/;
 const UUID = /^[a-f0-9-]{36}$/i;
 const SITE = "https://sleepy-doll.restless-nh3.com";
 const MAX_DOWNLOAD = 256 * 1024 * 1024;
 
 function releaseKey(path) {
-  const match = /^\/releases\/(\d+\.\d+\.\d+)\/(Sleepy-Doll-\d+\.\d+\.\d+-setup\.exe(?:\.sha256)?|release\.json)$/.exec(path);
+  const match = /^\/releases\/([^/]+)\/([^/]+)$/.exec(path);
   if (!match) return null;
-  if (match[2] !== "release.json" && !match[2].startsWith(`Sleepy-Doll-${match[1]}-setup.exe`)) return null;
+  try { parseVersion(match[1]); } catch { return null; }
+  if (!["release.json", `Sleepy-Doll-${match[1]}-setup.exe`, `Sleepy-Doll-${match[1]}-setup.exe.sha256`].includes(match[2])) return null;
   return path.slice(1);
 }
 

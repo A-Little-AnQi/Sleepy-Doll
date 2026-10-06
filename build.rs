@@ -1,4 +1,24 @@
 fn main() {
+    println!("cargo:rerun-if-changed=release-channel.json");
+    let channel_config: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string("release-channel.json").expect("reading release-channel.json"),
+    )
+    .expect("parsing release-channel.json");
+    let channel = channel_config["channel"]
+        .as_str()
+        .expect("release channel is required");
+    assert!(
+        matches!(channel, "stable" | "test"),
+        "release channel must be stable or test"
+    );
+    assert!(
+        channel != "stable"
+            || std::env::var("CARGO_PKG_VERSION_PRE")
+                .unwrap_or_default()
+                .is_empty(),
+        "prerelease versions cannot be built for the stable channel"
+    );
+    println!("cargo:rustc-env=SLEEPY_RELEASE_CHANNEL={channel}");
     println!("cargo:rerun-if-changed=assets/sleepy-doll.manifest");
     println!("cargo:rerun-if-changed=assets/sleepy-doll.rc");
     println!("cargo:rerun-if-changed=assets/sleepy-doll.ico");
