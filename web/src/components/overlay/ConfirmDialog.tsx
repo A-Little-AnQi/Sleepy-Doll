@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Dialog } from "./Dialog";
+import { useT } from "../../i18n";
 
 export function ConfirmDialog({
   open,
@@ -20,6 +21,7 @@ export function ConfirmDialog({
   onConfirm(): void;
   onClose(): void;
 }) {
+  const t = useT();
   return (
     <Dialog
       compact
@@ -36,7 +38,7 @@ export function ConfirmDialog({
             disabled={busy}
             onClick={onClose}
           >
-            取消
+            {t.common.cancel}
           </button>
           <button
             type="button"

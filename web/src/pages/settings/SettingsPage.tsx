@@ -187,7 +187,7 @@ export function SettingsPage({
                     className="subtle-action"
                     onClick={() => setEditing(true)}
                   >
-                    编辑配置
+                    {t.configEditor.editConfig}
                   </button>
                 </SettingRow>
               </section>

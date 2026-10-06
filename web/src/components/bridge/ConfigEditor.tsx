@@ -47,7 +47,9 @@ export function ConfigEditor({
       await onSaved();
       onClose();
     } catch (error) {
-      setError(error instanceof Error ? error.message : t.configEditor.saveFailed);
+      setError(
+        error instanceof Error ? error.message : t.configEditor.saveFailed,
+      );
     } finally {
       setSaving(false);
     }
@@ -62,7 +64,7 @@ export function ConfigEditor({
       footer={
         <>
           <button type="button" className="subtle-action" onClick={onClose}>
-            取消
+            {t.common.cancel}
           </button>
           <button
             type="button"

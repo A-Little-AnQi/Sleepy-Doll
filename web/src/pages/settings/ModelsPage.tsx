@@ -22,6 +22,8 @@ import {
 } from "../../models/presets";
 import "./ModelsPage.css";
 import { useT, type Text } from "../../i18n";
+import { useLocale, type LocaleId } from "../../appearance/locale";
+import { presetName } from "../../models/presets";
 
 const protocols = (t: Text) => [
   { value: "openai-responses", label: "OpenAI Responses" },
@@ -37,10 +39,11 @@ const authModes = (t: Text) => [
   { value: "bearer", label: "Bearer" },
 ];
 
-const presetOptions = MODEL_PRESETS.map((preset) => ({
-  value: preset.id,
-  label: preset.name,
-}));
+const presetOptions = (locale: LocaleId) =>
+  MODEL_PRESETS.map((preset) => ({
+    value: preset.id,
+    label: presetName(preset, locale),
+  }));
 
 type ModelForm = {
   id: string;
@@ -78,12 +81,14 @@ function emptyForm(id = `model-${Date.now()}`): ModelForm {
 
 function fromPreset(
   preset: ModelPreset,
+  locale: LocaleId,
   id = `model-${Date.now()}`,
 ): ModelForm {
   return {
     id,
     preset: preset.id,
-    name: preset.id === "custom" ? "" : preset.name,
+    // 新建/切换预设的默认名按当前语言显示；已存模型名与用户草稿不走这里。
+    name: preset.id === "custom" ? "" : presetName(preset, locale),
     protocol: preset.protocol,
     model: "",
     baseUrl: preset.baseUrl,
@@ -133,6 +138,7 @@ export function ModelsPage({
   reload(): Promise<void>;
 }) {
   const t = useT();
+  const locale = useLocale();
   const [selectedId, setSelectedId] = useState(
     () =>
       bootstrap.models.find((model) => model.active)?.id ??
@@ -209,7 +215,7 @@ export function ModelsPage({
       return;
     }
     updateForm((draft) => ({
-      ...fromPreset(next, draft.id),
+      ...fromPreset(next, locale, draft.id),
       apiKey: draft.apiKey,
     }));
   };
@@ -312,7 +318,7 @@ export function ModelsPage({
         <h2>{t.settings.models}</h2>
         <button className="secondary-action" type="button" onClick={add}>
           <PlusIcon className="button-icon" />
-          添加模型
+          {t.models.addModel}
         </button>
       </header>
       <div className="model-workspace">
@@ -341,7 +347,7 @@ export function ModelsPage({
               <span>
                 <strong>{model.name}</strong>
                 <small>
-                  {presetLabel(model)}
+                  {presetLabel(model, locale)}
                   {model.model ? ` · ${model.model}` : ""}
                 </small>
               </span>
@@ -367,289 +373,319 @@ export function ModelsPage({
             }}
           >
             <div className="model-form-scroll" data-select-boundary="true">
-            <header className="model-form-head">
-              <h3>
-                {creating
-                  ? t.models.addModel
-                  : (selected?.name ?? t.settings.models)}
-              </h3>
-              {dirty && <span className="tag">{t.models.unsaved}</span>}
-              {selected?.active && (
-                <span className="tag tag-active">{t.models.defaultModel}</span>
+              <header className="model-form-head">
+                <h3>
+                  {creating
+                    ? t.models.addModel
+                    : (selected?.name ?? t.settings.models)}
+                </h3>
+                {dirty && <span className="tag">{t.models.unsaved}</span>}
+                {selected?.active && (
+                  <span className="tag tag-active">
+                    {t.models.defaultModel}
+                  </span>
+                )}
+              </header>
+              {error && (
+                <Toast message={error} onDismiss={() => setError("")} />
               )}
-            </header>
-            {error && <Toast message={error} onDismiss={() => setError("")} />}
-            {notice && (
-              <Toast message={notice} onDismiss={() => setNotice("")} />
-            )}
-            <section className="form-section">
-              <label>
-                <span>{t.models.provider}</span>
-                <Select
-                  label={t.models.provider}
-                  placeholder={t.models.pickProvider}
-                  value={form.preset}
-                  options={presetOptions}
-                  onChange={applyPreset}
-                />
-              </label>
-              {(preset?.platformUrl || preset?.keyUrl) && (
-                <div className="model-provider-links">
-                  {preset?.platformUrl && (
-                    <a
-                      className="model-provider-link"
-                      href={preset.platformUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      开发者平台
-                    </a>
-                  )}
-                  {preset?.keyUrl && (
-                    <a
-                      className="model-provider-link"
-                      href={preset.keyUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      获取 API 密钥
-                    </a>
-                  )}
-                </div>
+              {notice && (
+                <Toast message={notice} onDismiss={() => setNotice("")} />
               )}
-              <label>
-                <span>{t.models.nameLabel}</span>
-                <input
-                  required
-                  value={form.name}
-                  placeholder={t.models.providerExample}
-                  onChange={(event) => change("name", event.target.value)}
-                />
-              </label>
-              <label>
-                <span>{t.models.protocol}</span>
-                <Select
-                  label={t.models.protocol}
-                  placeholder={t.models.pickProtocol}
-                  value={form.protocol}
-                  options={protocols(t)}
-                  onChange={(value) => change("protocol", value)}
-                />
-              </label>
-              <label>
-                <span>API 地址</span>
-                <input
-                  type="url"
-                  required
-                  placeholder="https://api.example.com/v1"
-                  value={form.baseUrl}
-                  onChange={(event) => change("baseUrl", event.target.value)}
-                />
-              </label>
-              {needsKey && (
+              <section className="form-section">
                 <label>
-                  <span>API Key</span>
-                  <div className="key-field">
-                    <input
-                      type={showKey ? "text" : "password"}
-                      autoComplete="off"
-                      aria-label={t.models.apiKey}
-                      required={creating}
-                      placeholder={
-                        selected
-                          ? t.models.apiKeyKeep
-                          : t.models.keyPlaceholderNew
-                      }
-                      value={form.apiKey}
-                      onChange={(event) => change("apiKey", event.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="key-reveal"
-                      aria-label={showKey ? "隐藏密钥" : "显示密钥"}
-                      aria-pressed={showKey}
-                      onClick={() => setShowKey((shown) => !shown)}
-                    >
-                      {showKey ? (
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                          <path d="M12 5C5.5 5 1.7 11.2 1.6 11.5a1 1 0 0 0 0 .9C1.7 12.8 5.5 19 12 19s10.3-6.2 10.4-6.6a1 1 0 0 0 0-.9C22.3 11.2 18.5 5 12 5Zm0 11.5A4.5 4.5 0 1 1 16.5 12 4.5 4.5 0 0 1 12 16.5Z" fill="currentColor"/>
-                          <circle cx="12" cy="12" r="2.6" fill="currentColor"/>
-                        </svg>
-                      ) : (
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                          <path d="M12 5C5.5 5 1.7 11.2 1.6 11.5a1 1 0 0 0 0 .9l1.8-.9C4.7 9.9 7.8 7 12 7s7.3 2.9 8.6 4.5c-.4.5-1.2 1.5-2.4 2.4l1.3 1.5c1.8-1.4 2.8-3.1 2.9-3.4a1 1 0 0 0 0-.9C22.3 11.2 18.5 5 12 5Z" fill="currentColor"/>
-                          <path d="M4.3 3 3 4.3l16.7 16.7 1.3-1.3Z" fill="currentColor"/>
-                          <path d="M8.1 9.3A4.4 4.4 0 0 0 12 16.4c1.2 0 2.3-.5 3.1-1.2l-1.4-1.4A2.5 2.5 0 0 1 9.5 10.7Z" fill="currentColor"/>
-                        </svg>
-                      )}
-                    </button>
-                  </div>
+                  <span>{t.models.provider}</span>
+                  <Select
+                    label={t.models.provider}
+                    placeholder={t.models.pickProvider}
+                    value={form.preset}
+                    options={presetOptions(locale)}
+                    onChange={applyPreset}
+                  />
                 </label>
-              )}
-              <div className="model-field">
-                <span>{t.models.modelLabel}</span>
-                <div className="model-pick">
-                  {catalog.length ? (
-                    <Select
-                      label={t.models.modelLabel}
-                      placeholder={t.models.pickModel}
-                      value={form.model}
-                      options={modelOptions}
-                      onChange={(value) => change("model", value)}
-                    />
-                  ) : (
-                    <input
-                      required
-                      aria-label={t.models.modelLabel}
-                      placeholder={preset?.model || t.models.name}
-                      value={form.model}
-                      onChange={(event) => change("model", event.target.value)}
-                    />
-                  )}
-                  <button
-                    type="button"
-                    className="secondary-action"
-                    disabled={
-                      listing || busy || !form.protocol || !form.baseUrl.trim()
-                    }
-                    onClick={() => void fetchModels()}
-                  >
-                    {listing ? t.models.fetching : t.models.fetchModels}
-                  </button>
-                </div>
-              </div>
-            </section>
-            <section className="form-section model-advanced">
-              <button
-                type="button"
-                className="model-advanced-toggle"
-                aria-expanded={advanced}
-                onClick={() => setAdvanced((open) => !open)}
-              >
-                <DisclosureChevron expanded={advanced} />
-                高级选项
-              </button>
-              <div
-                className={`model-advanced-body${advanced ? "" : " is-collapsed"}`}
-                inert={!advanced}
-              >
-                <div className="model-advanced-inner">
-                  <h4>{t.models.connection}</h4>
-                  {(form.protocol === "anthropic-messages" ||
-                    form.protocol === "gemini") && (
-                    <>
-                      <Select
-                        label={t.models.auth}
-                        value={form.auth}
-                        options={authModes(t)}
-                        onChange={(value) =>
-                          updateForm((draft) => ({
-                            ...draft,
-                            auth: value as ModelForm["auth"],
-                          }))
-                        }
-                      />
-                    </>
-                  )}
-                  <label>
-                    <span>响应超时（秒）</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={600}
-                      required
-                      value={form.timeoutMs / 1000}
-                      onChange={(event) =>
-                        updateForm((draft) => ({
-                          ...draft,
-                          timeoutMs: Number(event.target.value) * 1000,
-                        }))
-                      }
-                    />
-                  </label>
-                  <h4>{t.models.window}</h4>
-                  <div className="form-grid">
-                    <label>
-                      <span>{t.models.contextLabel}</span>
-                      <input
-                        type="number"
-                        min={8192}
-                        max={2000000}
-                        required
-                        value={form.contextWindow}
-                        onChange={(event) =>
-                          updateForm((draft) => ({
-                            ...draft,
-                            contextWindow: Number(event.target.value),
-                            contextWindowManual: true,
-                          }))
-                        }
-                      />
-                    </label>
-                    <label>
-                      <span>{t.models.maxOutputLabel}</span>
-                      <input
-                        type="number"
-                        min={256}
-                        max={128000}
-                        required
-                        value={form.maxOutputTokens}
-                        onChange={(event) =>
-                          updateForm((draft) => ({
-                            ...draft,
-                            maxOutputTokens: Number(event.target.value),
-                          }))
-                        }
-                      />
-                    </label>
+                {(preset?.platformUrl || preset?.keyUrl) && (
+                  <div className="model-provider-links">
+                    {preset?.platformUrl && (
+                      <a
+                        className="model-provider-link"
+                        href={preset.platformUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {t.models.developerPlatform}
+                      </a>
+                    )}
+                    {preset?.keyUrl && (
+                      <a
+                        className="model-provider-link"
+                        href={preset.keyUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {t.models.getKey}
+                      </a>
+                    )}
                   </div>
-                  <div className="model-context-suggestion">
-                    <span>
-                      {contextWindows[form.model]
-                        ? t.models.contextReported
-                        : form.preset === "ollama"
-                          ? t.models.contextLocalFallback
-                          : t.models.contextFallback}
-                    </span>
+                )}
+                <label>
+                  <span>{t.models.nameLabel}</span>
+                  <input
+                    required
+                    value={form.name}
+                    placeholder={t.models.providerExample}
+                    onChange={(event) => change("name", event.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>{t.models.protocol}</span>
+                  <Select
+                    label={t.models.protocol}
+                    placeholder={t.models.pickProtocol}
+                    value={form.protocol}
+                    options={protocols(t)}
+                    onChange={(value) => change("protocol", value)}
+                  />
+                </label>
+                <label>
+                  <span>{t.models.apiAddr}</span>
+                  <input
+                    type="url"
+                    required
+                    placeholder="https://api.example.com/v1"
+                    value={form.baseUrl}
+                    onChange={(event) => change("baseUrl", event.target.value)}
+                  />
+                </label>
+                {needsKey && (
+                  <label>
+                    <span>API Key</span>
+                    <div className="key-field">
+                      <input
+                        type={showKey ? "text" : "password"}
+                        autoComplete="off"
+                        aria-label={t.models.apiKey}
+                        required={creating}
+                        placeholder={
+                          selected
+                            ? t.models.apiKeyKeep
+                            : t.models.keyPlaceholderNew
+                        }
+                        value={form.apiKey}
+                        onChange={(event) =>
+                          change("apiKey", event.target.value)
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="key-reveal"
+                        aria-label={
+                          showKey ? t.models.hideKey : t.models.showKey
+                        }
+                        aria-pressed={showKey}
+                        onClick={() => setShowKey((shown) => !shown)}
+                      >
+                        {showKey ? (
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                              d="M12 5C5.5 5 1.7 11.2 1.6 11.5a1 1 0 0 0 0 .9C1.7 12.8 5.5 19 12 19s10.3-6.2 10.4-6.6a1 1 0 0 0 0-.9C22.3 11.2 18.5 5 12 5Zm0 11.5A4.5 4.5 0 1 1 16.5 12 4.5 4.5 0 0 1 12 16.5Z"
+                              fill="currentColor"
+                            />
+                            <circle
+                              cx="12"
+                              cy="12"
+                              r="2.6"
+                              fill="currentColor"
+                            />
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                              d="M12 5C5.5 5 1.7 11.2 1.6 11.5a1 1 0 0 0 0 .9l1.8-.9C4.7 9.9 7.8 7 12 7s7.3 2.9 8.6 4.5c-.4.5-1.2 1.5-2.4 2.4l1.3 1.5c1.8-1.4 2.8-3.1 2.9-3.4a1 1 0 0 0 0-.9C22.3 11.2 18.5 5 12 5Z"
+                              fill="currentColor"
+                            />
+                            <path
+                              d="M4.3 3 3 4.3l16.7 16.7 1.3-1.3Z"
+                              fill="currentColor"
+                            />
+                            <path
+                              d="M8.1 9.3A4.4 4.4 0 0 0 12 16.4c1.2 0 2.3-.5 3.1-1.2l-1.4-1.4A2.5 2.5 0 0 1 9.5 10.7Z"
+                              fill="currentColor"
+                            />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  </label>
+                )}
+                <div className="model-field">
+                  <span>{t.models.modelLabel}</span>
+                  <div className="model-pick">
+                    {catalog.length ? (
+                      <Select
+                        label={t.models.modelLabel}
+                        placeholder={t.models.pickModel}
+                        value={form.model}
+                        options={modelOptions}
+                        onChange={(value) => change("model", value)}
+                      />
+                    ) : (
+                      <input
+                        required
+                        aria-label={t.models.modelLabel}
+                        placeholder={preset?.model || t.models.name}
+                        value={form.model}
+                        onChange={(event) =>
+                          change("model", event.target.value)
+                        }
+                      />
+                    )}
                     <button
                       type="button"
-                      className="subtle-action"
-                      onClick={() =>
-                        updateForm((draft) => ({
-                          ...draft,
-                          contextWindow: contextSuggestion(
-                            draft,
-                            contextWindows,
-                          ),
-                          contextWindowManual: false,
-                        }))
+                      className="secondary-action"
+                      disabled={
+                        listing ||
+                        busy ||
+                        !form.protocol ||
+                        !form.baseUrl.trim()
                       }
+                      onClick={() => void fetchModels()}
                     >
-                      {t.models.useContextSuggestion} ·{" "}
-                      {Math.round(
-                        contextSuggestion(form, contextWindows) / 1000,
-                      )}
-                      k
+                      {listing ? t.models.fetching : t.models.fetchModels}
                     </button>
                   </div>
-                  {form.protocol === "anthropic-messages" && (
-                    <label className="toggle-row">
-                      <span>{t.models.promptCacheLabel}</span>
-                      <Switch
-                        label={t.models.promptCacheLabel}
-                        checked={form.promptCache}
-                        onChange={(promptCache) =>
+                </div>
+              </section>
+              <section className="form-section model-advanced">
+                <button
+                  type="button"
+                  className="model-advanced-toggle"
+                  aria-expanded={advanced}
+                  onClick={() => setAdvanced((open) => !open)}
+                >
+                  <DisclosureChevron expanded={advanced} />
+                  {t.models.advanced}
+                </button>
+                <div
+                  className={`model-advanced-body${advanced ? "" : " is-collapsed"}`}
+                  inert={!advanced}
+                >
+                  <div className="model-advanced-inner">
+                    <h4>{t.models.connection}</h4>
+                    {(form.protocol === "anthropic-messages" ||
+                      form.protocol === "gemini") && (
+                      <>
+                        <Select
+                          label={t.models.auth}
+                          value={form.auth}
+                          options={authModes(t)}
+                          onChange={(value) =>
+                            updateForm((draft) => ({
+                              ...draft,
+                              auth: value as ModelForm["auth"],
+                            }))
+                          }
+                        />
+                      </>
+                    )}
+                    <label>
+                      <span>{t.models.timeoutLabel}</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={600}
+                        required
+                        value={form.timeoutMs / 1000}
+                        onChange={(event) =>
                           updateForm((draft) => ({
                             ...draft,
-                            promptCache,
+                            timeoutMs: Number(event.target.value) * 1000,
                           }))
                         }
                       />
                     </label>
-                  )}
+                    <h4>{t.models.window}</h4>
+                    <div className="form-grid">
+                      <label>
+                        <span>{t.models.contextLabel}</span>
+                        <input
+                          type="number"
+                          min={8192}
+                          max={2000000}
+                          required
+                          value={form.contextWindow}
+                          onChange={(event) =>
+                            updateForm((draft) => ({
+                              ...draft,
+                              contextWindow: Number(event.target.value),
+                              contextWindowManual: true,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>{t.models.maxOutputLabel}</span>
+                        <input
+                          type="number"
+                          min={256}
+                          max={128000}
+                          required
+                          value={form.maxOutputTokens}
+                          onChange={(event) =>
+                            updateForm((draft) => ({
+                              ...draft,
+                              maxOutputTokens: Number(event.target.value),
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+                    <div className="model-context-suggestion">
+                      <span>
+                        {contextWindows[form.model]
+                          ? t.models.contextReported
+                          : form.preset === "ollama"
+                            ? t.models.contextLocalFallback
+                            : t.models.contextFallback}
+                      </span>
+                      <button
+                        type="button"
+                        className="subtle-action"
+                        onClick={() =>
+                          updateForm((draft) => ({
+                            ...draft,
+                            contextWindow: contextSuggestion(
+                              draft,
+                              contextWindows,
+                            ),
+                            contextWindowManual: false,
+                          }))
+                        }
+                      >
+                        {t.models.useContextSuggestion} ·{" "}
+                        {Math.round(
+                          contextSuggestion(form, contextWindows) / 1000,
+                        )}
+                        k
+                      </button>
+                    </div>
+                    {form.protocol === "anthropic-messages" && (
+                      <label className="toggle-row">
+                        <span>{t.models.promptCacheLabel}</span>
+                        <Switch
+                          label={t.models.promptCacheLabel}
+                          checked={form.promptCache}
+                          onChange={(promptCache) =>
+                            updateForm((draft) => ({
+                              ...draft,
+                              promptCache,
+                            }))
+                          }
+                        />
+                      </label>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </section>
+              </section>
             </div>
             <footer className="detail-actions">
               {selected && !selected.active && (
@@ -666,7 +702,7 @@ export function ModelsPage({
                       .finally(() => setBusy(false));
                   }}
                 >
-                  设为默认模型
+                  {t.models.setDefaultModel}
                 </button>
               )}
               {selected && (
@@ -677,7 +713,7 @@ export function ModelsPage({
                   onClick={() => setAskingDelete(true)}
                 >
                   <TrashIcon className="button-icon" />
-                  删除配置
+                  {t.models.deleteConfig}
                 </button>
               )}
               <button className="primary-action" disabled={busy}>
@@ -714,11 +750,11 @@ export function ModelsPage({
             .finally(() => setBusy(false));
         }}
       >
-        <p>确定删除模型配置「{selected?.name}」？</p>
+        <p>{t.models.deleteConfigConfirm(selected?.name ?? "")}</p>
         <p>
           {bootstrap.models.some((model) => model.id !== selected?.id)
-            ? "使用此配置的对话将改用默认模型。"
-            : "删除后，需要添加模型才能继续对话。"}
+            ? t.models.deleteFallbackNote
+            : t.models.deleteLastNote}
         </p>
       </ConfirmDialog>
     </div>

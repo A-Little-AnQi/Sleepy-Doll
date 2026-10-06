@@ -1,8 +1,12 @@
+import type { LocaleId } from "../appearance/locale";
+
 export type ModelAuthMode = "auto" | "apiKey" | "bearer";
 
 export type ModelPreset = {
   id: string;
   name: string;
+  /** 英文界面显示名；缺省时两种语言都用 name（多为拉丁品牌名）。 */
+  nameEn?: string;
   protocol: string;
   baseUrl: string;
   model: string;
@@ -43,6 +47,7 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
   {
     id: "zhipu",
     name: "智谱 GLM",
+    nameEn: "Zhipu GLM",
     protocol: "anthropic-messages",
     baseUrl: "https://open.bigmodel.cn/api/anthropic/v1",
     model: "glm-4.5",
@@ -71,6 +76,7 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
   {
     id: "bailian",
     name: "通义百炼",
+    nameEn: "Alibaba Bailian",
     protocol: "anthropic-messages",
     baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic/v1",
     model: "qwen-plus",
@@ -100,6 +106,7 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
   {
     id: "siliconflow",
     name: "硅基流动",
+    nameEn: "SiliconFlow",
     protocol: "anthropic-messages",
     baseUrl: "https://api.siliconflow.cn/v1",
     model: "deepseek-ai/DeepSeek-V3",
@@ -142,6 +149,7 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
   {
     id: "anthropic",
     name: "Claude 官方",
+    nameEn: "Claude",
     protocol: "anthropic-messages",
     baseUrl: "https://api.anthropic.com/v1",
     model: "claude-sonnet-4-5",
@@ -170,6 +178,7 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
   {
     id: "ollama",
     name: "Ollama 本机",
+    nameEn: "Ollama (local)",
     protocol: "ollama-chat",
     baseUrl: "http://127.0.0.1:11434",
     model: "",
@@ -183,6 +192,7 @@ export const MODEL_PRESETS: readonly ModelPreset[] = [
   {
     id: "custom",
     name: "自定义",
+    nameEn: "Custom",
     protocol: "openai-chat",
     baseUrl: "",
     model: "",
@@ -238,7 +248,17 @@ export function matchPreset(model: { protocol: string; baseUrl: string }) {
   );
 }
 
-export function presetLabel(model: { protocol: string; baseUrl: string }) {
+/** 预设在指定语言下的显示名；只影响界面显示，不改写用户已存的模型名。 */
+export function presetName(preset: ModelPreset, locale: LocaleId) {
+  return locale === "en" && preset.nameEn ? preset.nameEn : preset.name;
+}
+
+export function presetLabel(
+  model: { protocol: string; baseUrl: string },
+  locale: LocaleId = "zh",
+) {
   const preset = presetById(matchPreset(model));
-  return !preset || preset.id === "custom" ? "自定义" : preset.name;
+  return !preset || preset.id === "custom"
+    ? presetName(preset ?? MODEL_PRESETS[MODEL_PRESETS.length - 1]!, locale)
+    : presetName(preset, locale);
 }

@@ -7,38 +7,51 @@ import { SlidingTabs } from "../controls/SlidingTabs";
 import { Checkbox } from "../controls/Checkbox";
 import { ChevronIcon, SearchIcon } from "../icons";
 import type { RecoveryRecord, RecoveryPreview } from "../../ipc/types";
+import { useT, type Text } from "../../i18n";
+import { useLocale, type LocaleId } from "../../appearance/locale";
 import "./BridgeRecovery.css";
 
-const when = (value?: string) =>
-  value ? new Date(value).toLocaleString() : "时间未知";
+// helper 不用 hook：文案与日期 locale 由调用方显式传入。
+const when = (value: string | undefined, t: Text, locale: LocaleId) =>
+  value
+    ? new Date(value).toLocaleString(locale === "en" ? "en-US" : "zh-CN")
+    : t.bridgeRecovery.whenUnknown;
 const fields = (record: RecoveryRecord) =>
   record.fields ?? record.paths.map((path) => ({ path, label: path }));
-const title = (record: RecoveryRecord) =>
+const title = (record: RecoveryRecord, t: Text, locale: LocaleId) =>
   record.kind === "unavailable"
-    ? "无法读取的备份"
+    ? t.bridgeRecovery.unreadableBackup
     : record.paths.length
       ? fields(record)
           .slice(0, 2)
           .map((field) => field.label)
-          .join("、") +
-        (record.paths.length > 2 ? ` 等 ${record.paths.length} 项` : "")
+          .join(locale === "en" ? ", " : "、") +
+        (record.paths.length > 2
+          ? ` ${t.bridge.backupItemsCount(
+              // 英语短语是“+N more”，N 是被省略的字段数；中文“等 N 项”用总数。
+              locale === "en" ? record.paths.length - 2 : record.paths.length,
+            )}`
+          : "")
       : record.operation === "offline-restore"
-        ? "恢复前的完整备份"
-        : "完整配置备份";
-function valueText(value: unknown) {
+        ? t.bridgeRecovery.preRestoreFullBackup
+        : t.bridgeRecovery.fullConfigBackup;
+function valueText(value: unknown, t: Text) {
+  const r = t.bridgeRecovery;
   return value === null || value === undefined
-    ? "未设置"
+    ? r.notSet
     : value === ""
-      ? "（空字符串）"
+      ? r.emptyString
       : typeof value === "boolean"
         ? value
-          ? "开启"
-          : "关闭"
+          ? r.on
+          : r.off
         : typeof value === "object"
           ? JSON.stringify(value, null, 2)
           : String(value);
 }
 export function BridgeRecovery({ onBack }: { onBack(): void }) {
+  const t = useT();
+  const locale = useLocale();
   const [records, setRecords] = useState<RecoveryRecord[]>([]);
   const [runningTargets, setRunningTargets] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -174,11 +187,12 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
     setPreviewError("");
     try {
       const result = await api.restoreBridgeConfig(preview);
-      if (!result.restored) throw new Error("恢复结果尚未确认，请刷新后核对。");
+      if (!result.restored)
+        throw new Error(t.bridgeRecovery.restoreUnconfirmed);
       setNotice(
         result.online
-          ? "所选设置已恢复并生效，其他设置保留。"
-          : "配置已恢复，重新启动 BetterGI 后生效。",
+          ? t.bridgeRecovery.restoredOnline
+          : t.bridgeRecovery.restoredOffline,
       );
       setUndo(result.recoveryChangeId);
       setSelected(undefined);
@@ -205,7 +219,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
       ? records.filter((record) => record.paths.length)
       : backups
   ).filter((record) =>
-    (title(record) + when(record.createdAt))
+    (title(record, t, locale) + when(record.createdAt, t, locale))
       .toLowerCase()
       .includes(query.trim().toLowerCase()),
   );
@@ -222,14 +236,16 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
       </div>
       <div className="page-title">
         <div>
-          <h2>配置恢复</h2>
+          <h2>{t.bridge.recoveryHeading}</h2>
         </div>
         <button
           className="secondary-action"
           disabled={loading || restoring}
           onClick={() => void refresh()}
         >
-          {loading ? "正在读取" : "刷新记录"}
+          {loading
+            ? t.bridgeRecovery.loadingShort
+            : t.bridgeRecovery.refreshRecords}
         </button>
       </div>
       {notice && (
@@ -237,24 +253,24 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
           <span>{notice}</span>
           {undoRecord && (
             <button className="subtle-action" onClick={() => open(undoRecord)}>
-              查看并撤销本次恢复
+              {t.bridgeRecovery.viewUndoRestore}
             </button>
           )}
           <button className="subtle-action" onClick={() => setNotice("")}>
-            关闭提示
+            {t.bridgeRecovery.dismissNotice}
           </button>
         </div>
       )}
       {error && <Toast message={error} onDismiss={() => setError("")} />}
       <div className="list-toolbar">
         <SlidingTabs
-          ariaLabel="配置恢复范围"
+          ariaLabel={t.bridgeRecovery.scopeTabs}
           value={tab}
           onChange={setTab}
           items={[
             {
               id: "changes",
-              name: "设置变更",
+              name: t.bridgeRecovery.tabChanges,
               extra: (
                 <span>
                   {records.filter((record) => record.paths.length).length}
@@ -263,7 +279,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
             },
             {
               id: "backups",
-              name: "完整备份",
+              name: t.bridgeRecovery.tabBackups,
               extra: <span>{backups.length}</span>,
             },
           ]}
@@ -271,8 +287,8 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
         <label className="search-field">
           <SearchIcon />
           <input
-            aria-label="搜索恢复记录"
-            placeholder="搜索设置名称或日期"
+            aria-label={t.bridgeRecovery.searchRecords}
+            placeholder={t.bridgeRecovery.searchPlaceholder}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -283,14 +299,14 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
           {visible.map((record) => (
             <article className="recovery-row" key={record.changeId}>
               <div>
-                <strong>{title(record)}</strong>
+                <strong>{title(record, t, locale)}</strong>
                 <small>
-                  {when(record.createdAt)} ·{" "}
+                  {when(record.createdAt, t, locale)} ·{" "}
                   {record.operation === "setting-restore"
-                    ? "恢复前的设置"
+                    ? t.bridgeRecovery.preRestoreSetting
                     : record.paths.length
-                      ? `${record.paths.length} 项设置修改`
-                      : "完整配置快照"}
+                      ? t.bridgeRecovery.changesCount(record.paths.length)
+                      : t.bridgeRecovery.fullSnapshot}
                 </small>
                 {record.configPath && (
                   <small
@@ -307,7 +323,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
                 disabled={record.canPreview === false || restoring}
                 onClick={() => open(record)}
               >
-                查看与恢复
+                {t.bridgeRecovery.viewAndRestore}
               </button>
             </article>
           ))}
@@ -316,28 +332,34 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
         !loading && (
           <p className="empty-note">
             {query
-              ? "没有匹配的记录。"
+              ? t.bridgeRecovery.noMatch
               : tab === "changes"
-                ? "还没有设置变更记录。操作前的快照可在“完整备份”中查看。"
-                : "还没有完整备份。"}
+                ? t.bridgeRecovery.emptyChanges
+                : t.bridgeRecovery.emptyBackups}
           </p>
         )
       )}
       <Dialog
         open={Boolean(selected)}
         onClose={close}
-        title={mode === "fields" ? "恢复所选设置" : "恢复完整备份"}
+        title={
+          mode === "fields"
+            ? t.bridgeRecovery.restoreSelectedTitle
+            : t.bridgeRecovery.restoreFullTitle
+        }
         subtitle={
-          selected ? `${when(selected.createdAt)} · ${title(selected)}` : ""
+          selected
+            ? `${when(selected.createdAt, t, locale)} · ${title(selected, t, locale)}`
+            : ""
         }
         className="recovery-preview-dialog"
         footer={
           <>
             <span className="recovery-preview-status">
               {previewing
-                ? "正在核对…"
+                ? t.bridgeRecovery.verifying
                 : mode === "fields" && paths.length >= 20
-                  ? "单次最多 20 项"
+                  ? t.bridgeRecovery.maxPerRestore
                   : ""}
             </span>
             <button
@@ -345,7 +367,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
               disabled={restoring}
               onClick={close}
             >
-              取消
+              {t.common.cancel}
             </button>
             <button
               className="primary-action"
@@ -355,10 +377,10 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
               onClick={() => void restore()}
             >
               {restoring
-                ? "恢复中…"
+                ? t.bridge.restoring
                 : mode === "full"
-                  ? "恢复完整配置"
-                  : `恢复 ${paths.length} 项`}
+                  ? t.bridgeRecovery.restoreFullAction
+                  : t.bridgeRecovery.restoreCount(paths.length)}
             </button>
           </>
         }
@@ -371,7 +393,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
               disabled={restoring}
               onClick={() => setMode("fields")}
             >
-              所选设置
+              {t.bridgeRecovery.modeFields}
             </button>
             <button
               className="subtle-action"
@@ -379,16 +401,18 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
               disabled={restoring}
               onClick={() => setMode("full")}
             >
-              完整配置
+              {t.bridgeRecovery.modeFull}
             </button>
           </div>
         ) : null}
         {selected?.configPath && (
-          <p className="recovery-target">恢复到：{selected.configPath}</p>
+          <p className="recovery-target">
+            {t.bridgeRecovery.restoreTo(selected.configPath)}
+          </p>
         )}
         {mode === "full" && (
           <p className="recovery-full-warning">
-            将替换整份配置，不恢复脚本、路线或配置组。恢复前请退出 BetterGI。
+            {t.bridgeRecovery.fullWarning}
           </p>
         )}
         {previewError && (
@@ -433,24 +457,24 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
                     {row && (mode === "full" || checked) && (
                       <span>
                         {!row.changed
-                          ? "无变化"
+                          ? t.bridgeRecovery.noChange
                           : row.related
-                            ? "联动设置"
+                            ? t.bridgeRecovery.relatedChange
                             : row.laterChanged
-                              ? "将覆盖后续修改"
-                              : "将恢复"}
+                              ? t.bridgeRecovery.willOverwriteLater
+                              : t.bridgeRecovery.willRestore}
                       </span>
                     )}
                   </div>
                   {row && (mode === "full" || checked) && (
                     <div className="recovery-values">
                       <div>
-                        <small>当前值</small>
-                        <pre>{valueText(row.current)}</pre>
+                        <small>{t.bridgeRecovery.currentValue}</small>
+                        <pre>{valueText(row.current, t)}</pre>
                       </div>
                       <div>
-                        <small>恢复为</small>
-                        <pre>{valueText(row.restore)}</pre>
+                        <small>{t.bridgeRecovery.restoreValue}</small>
+                        <pre>{valueText(row.restore, t)}</pre>
                       </div>
                     </div>
                   )}
@@ -465,7 +489,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
             disabled={previewing || restoring}
             onClick={() => setGeneration((value) => value + 1)}
           >
-            刷新预览
+            {t.bridgeRecovery.refreshPreview}
           </button>
         )}
       </Dialog>
