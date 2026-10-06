@@ -244,7 +244,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
 }
 
-/// 安装程序的 WebView2 缓存目录，放在系统临时目录里。
+/// Installer-owned cache beside the executable, never in system Temp.
 fn webview_cache() -> PathBuf {
     setup::scratch_root().join("webview2")
 }
@@ -276,7 +276,9 @@ fn apply_update_after(pid: u32) -> Result<(), Box<dyn std::error::Error>> {
 
 /// 关窗口，退出前安排好清理。
 fn quit(control_flow: &mut ControlFlow) {
-    setup::cleanup_after_exit(&[setup::Removal::Tree(webview_cache())]);
+    if let Err(error) = setup::cleanup_after_exit(&[setup::Removal::Tree(setup::scratch_root())]) {
+        native_message(&format!("无法安排安装缓存清理：{error}"));
+    }
     *control_flow = ControlFlow::Exit;
 }
 

@@ -17,9 +17,17 @@ pub fn uninstall(
     remove_user_data: bool,
     progress: Progress,
 ) -> Result<(), Error> {
+    super::validate_directory(&directory.to_string_lossy())?;
+    if !directory.file_name().is_some_and(|name| {
+        name.eq_ignore_ascii_case(super::NAME) || name.eq_ignore_ascii_case(super::SLUG)
+    }) {
+        return Err(Error::message("卸载目录不属于 Sleepy Doll，未删除任何文件"));
+    }
     progress(0.0, "正在移除文件…");
     // 运行中的程序与 BetterGI 加载的桥都锁着自己的文件，动手之前先查一遍。
-    if let Some(busy) = busy_program(&removals(archive, directory)) {
+    let mut programs = removals(archive, directory);
+    cached_programs(&directory.join("bridge-cache"), &mut programs);
+    if let Some(busy) = busy_program(&programs) {
         return Err(Error::message(format!(
             "{} 正在使用中：请先退出 Sleepy Doll（连着 BetterGI 的话也退出它），再重新卸载。",
             busy.display()
@@ -47,12 +55,51 @@ pub fn uninstall(
 
     progress(0.95, "正在收尾…");
     // 卸载入口与空掉的安装目录都要等本进程退出后才删得掉。
-    cleanup_after_exit(&[
-        Removal::File(directory.join(UNINSTALLER)),
-        Removal::Empty(directory.to_path_buf()),
-    ]);
+    cleanup_after_exit(&cleanup_plan(directory, remove_user_data))?;
     progress(1.0, "卸载完成");
     Ok(())
+}
+
+pub(super) fn cleanup_plan(directory: &Path, remove_user_data: bool) -> Vec<Removal> {
+    let keeps_local_data = !remove_user_data
+        && (directory.join(DATA_DIRECTORY).exists()
+            || directory.join("bridge").join(DATA_DIRECTORY).exists());
+    if !keeps_local_data {
+        return vec![Removal::Tree(directory.to_path_buf())];
+    }
+    // Explicitly retained user data keeps its location; runtime caches never do.
+    vec![
+        Removal::File(directory.join(UNINSTALLER)),
+        Removal::Tree(directory.join("bridge-cache")),
+        Removal::Tree(directory.join(".cache")),
+    ]
+}
+
+fn cached_programs(directory: &Path, targets: &mut Vec<PathBuf>) {
+    let Ok(metadata) = fs::symlink_metadata(directory) else {
+        return;
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return;
+        }
+    }
+    if metadata.file_type().is_symlink() {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            cached_programs(&path, targets);
+        } else if is_program(&path) {
+            targets.push(path);
+        }
+    }
 }
 
 /// 卸载要删的文件：载荷清单里的每一项。
@@ -68,7 +115,7 @@ fn removals(archive: &Archive, directory: &Path) -> Vec<PathBuf> {
 ///
 /// `fallback` 是安装目录不可写时用户数据落到的地方（`%APPDATA%\Sleepy Doll`）。
 /// 单个文件删不掉不中断，剩下的照样清。
-fn remove_files(
+pub(super) fn remove_files(
     archive: &Archive,
     directory: &Path,
     remove_user_data: bool,
@@ -94,8 +141,8 @@ fn remove_files(
         }
         // 旧布局下桥会在自己旁边另建一棵 user\。
         let nested = directory.join("bridge").join(DATA_DIRECTORY);
-        if nested.is_dir() {
-            let _ = fs::remove_dir_all(&nested);
+        if nested.is_dir() && fs::remove_dir_all(&nested).is_err() {
+            leftovers.push(nested);
         }
         // 安装目录不可写时程序把数据落在漫游目录里。
         if let Some(fallback) = fallback
@@ -178,5 +225,38 @@ fn remove_shortcuts() {
         .flatten()
     {
         let _ = fs::remove_file(directory.join(&name));
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::os::windows::fs::OpenOptionsExt;
+
+    #[test]
+    fn uninstall_cleanup_preflight_detects_loaded_cached_bridge() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target/.tmp/uninstall-verification/cached-lock");
+        fs::create_dir_all(root.join("bridge-cache/hash")).unwrap();
+        let path = root.join("bridge-cache/hash/BgiBridge.dll");
+        fs::write(&path, b"bridge").unwrap();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+        let mut programs = Vec::new();
+        cached_programs(&root.join("bridge-cache"), &mut programs);
+        assert_eq!(busy_program(&programs), Some(&path));
+        drop(lock);
+        assert!(busy_program(&programs).is_none());
+    }
+
+    #[test]
+    fn uninstall_cleanup_rejects_unrelated_installation_roots_before_deleting() {
+        let archive = Archive::new(b"[]", vec![]).unwrap();
+        for path in ["D:\\", "D:\\BetterGI", "C:\\Windows"] {
+            assert!(uninstall(&archive, Path::new(path), true, &mut |_, _| {}).is_err());
+        }
     }
 }
