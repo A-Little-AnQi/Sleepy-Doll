@@ -406,6 +406,7 @@ export interface Bootstrap {
     connected: boolean;
     baseUrl: string;
     launchSilently?: boolean;
+    autoStart?: boolean;
     error?: string;
     /** 进程里驻留的桥落后于安装目录：重启 BetterGI 后重连生效。 */
     stale?: boolean;

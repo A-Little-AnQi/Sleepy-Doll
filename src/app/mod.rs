@@ -151,6 +151,7 @@ impl AppController {
             "model.use"
                 | "bridge.setEnabled"
                 | "bridge.setLaunchSilently"
+                | "bridge.setLaunchBehavior"
                 | "bridge.restore"
                 | "model.save"
                 | "model.delete"
@@ -887,6 +888,15 @@ impl AppController {
                     .ok_or_else(|| Error::Config("silently 必须是布尔值".into()))?;
                 self.set_bridge_launch_silently(silently)
             }
+            "bridge.setLaunchBehavior" => {
+                let auto_start = params["autoStart"]
+                    .as_bool()
+                    .ok_or_else(|| Error::Config("autoStart 必须是布尔值".into()))?;
+                let silently = params["launchSilently"]
+                    .as_bool()
+                    .ok_or_else(|| Error::Config("launchSilently 必须是布尔值".into()))?;
+                self.set_bridge_launch_behavior(auto_start, silently)
+            }
             _ => Err(Error::Config(format!("unknown IPC method: {method}"))),
         }
     }
@@ -1129,7 +1139,7 @@ impl AppController {
 
     fn set_bridge_enabled(&self, enabled: bool) -> Result<Value> {
         if enabled {
-            self.connect_bridge()?;
+            self.connect_bridge_inner()?;
             Ok(json!({"enabled":true}))
         } else {
             let mut config = self.config.lock().unwrap().bridge.clone();
@@ -1146,8 +1156,13 @@ impl AppController {
         }
     }
 
-    /// 连接 BetterGI 的完整流程：宿主没运行就自动启动，注入后记住安装位置。
+    /// Connect to BetterGI, honoring the opt-in launch preference.
     pub fn connect_bridge(&self) -> Result<()> {
+        let _edit = self.config_edit.lock().unwrap();
+        self.connect_bridge_inner()
+    }
+
+    fn connect_bridge_inner(&self) -> Result<()> {
         let mut config = self.config.lock().unwrap().bridge.clone();
         log::info!("正在连接 BetterGI（{}）", config.base_url);
         crate::bridge::control::prepare(&mut config)
@@ -1220,6 +1235,16 @@ impl AppController {
         Ok(json!({"launchSilently":silently}))
     }
 
+    fn set_bridge_launch_behavior(&self, auto_start: bool, silently: bool) -> Result<Value> {
+        let mut current = self.config.lock().expect("config mutex poisoned");
+        let mut bridge = current.bridge.clone();
+        bridge.auto_start = auto_start;
+        bridge.launch_silently = silently;
+        AppConfig::set_bridge(&self.config_path, &bridge)?;
+        current.bridge = bridge;
+        Ok(json!({"autoStart":auto_start,"launchSilently":silently}))
+    }
+
     /// 桥开关当前是否打开。给桌面壳的监视循环用。
     pub fn bridge_enabled(&self) -> bool {
         self.config.lock().unwrap().bridge.enabled
@@ -1243,7 +1268,7 @@ impl AppController {
     fn bridge_status_for(mut config: crate::config::BridgeConfig) -> Value {
         config.timeout_ms = config.timeout_ms.min(2000);
         if !config.enabled {
-            return json!({"enabled":false,"connected":false,"baseUrl":config.base_url,"launchSilently":config.launch_silently});
+            return json!({"enabled":false,"connected":false,"baseUrl":config.base_url,"autoStart":config.auto_start,"launchSilently":config.launch_silently});
         }
         match crate::bridge::control::info(&config) {
             Ok(info) => {
@@ -1251,7 +1276,7 @@ impl AppController {
                     .as_str()
                     .zip(crate::bridge::control::installed_bridge_code())
                     .is_some_and(|(live, installed)| live != installed);
-                json!({"enabled":true,"connected":info["enabled"] != false,"baseUrl":config.base_url,"launchSilently":config.launch_silently,"stale":stale})
+                json!({"enabled":true,"connected":info["enabled"] != false,"baseUrl":config.base_url,"autoStart":config.auto_start,"launchSilently":config.launch_silently,"stale":stale})
             }
             Err(error) => {
                 let message = match &error {
@@ -1260,7 +1285,7 @@ impl AppController {
                     }
                     _ => error.to_string(),
                 };
-                json!({"enabled":true,"connected":false,"baseUrl":config.base_url,"launchSilently":config.launch_silently,"error":message})
+                json!({"enabled":true,"connected":false,"baseUrl":config.base_url,"autoStart":config.auto_start,"launchSilently":config.launch_silently,"error":message})
             }
         }
     }
@@ -1503,6 +1528,53 @@ impl AppController {
         self.supervisor.update_config(config.clone())?;
         *self.config.lock().expect("config mutex poisoned") = config;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod bridge_auto_start_tests {
+    use super::*;
+
+    #[test]
+    fn auto_start_preferences_persist_and_keep_connection_settings() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target/.tmp/bridge-auto-start")
+            .join(format!("rpc-{}", uuid::Uuid::new_v4().simple()));
+        let path = root.join("config.json");
+        crate::config::seed(&path).unwrap();
+        let mut bridge = AppConfig::load(&path).unwrap().bridge;
+        assert!(!bridge.auto_start);
+        bridge.enabled = false;
+        bridge.host_install_path = Some(PathBuf::from("remembered-bgi"));
+        AppConfig::set_bridge(&path, &bridge).unwrap();
+        let controller = Arc::new(AppController::load(&path).unwrap());
+        for (auto_start, silently) in [(true, false), (true, true), (false, true)] {
+            let result = controller
+                .handle(
+                    "bridge.setLaunchBehavior",
+                    json!({"autoStart":auto_start,"launchSilently":silently}),
+                    Arc::new(|_, _| {}),
+                )
+                .unwrap();
+            assert_eq!(result["autoStart"], auto_start);
+            let saved = AppConfig::load(&path).unwrap().bridge;
+            assert_eq!(saved.auto_start, auto_start);
+            assert_eq!(saved.launch_silently, silently);
+            assert_eq!(saved.host_install_path, bridge.host_install_path);
+            assert!(!saved.enabled);
+            assert_eq!(controller.bridge_status()["autoStart"], auto_start);
+        }
+        assert!(
+            controller
+                .handle(
+                    "bridge.setLaunchBehavior",
+                    json!({"autoStart":true,"launchSilently":"invalid"}),
+                    Arc::new(|_, _| {})
+                )
+                .is_err()
+        );
+        assert!(!AppConfig::load(&path).unwrap().bridge.auto_start);
+        controller.shutdown();
     }
 }
 

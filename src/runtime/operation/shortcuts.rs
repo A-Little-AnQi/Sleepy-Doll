@@ -246,6 +246,7 @@ mod tests {
             instance_id: None,
             timeout_ms: 1000,
             host_install_path: None,
+            auto_start: true,
             launch_silently: false,
         });
         register_tools(&mut registry, std::sync::Arc::new(client)).unwrap();

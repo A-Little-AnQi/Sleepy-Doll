@@ -2002,6 +2002,7 @@ async fn main() -> std::process::ExitCode {
         instance_id: None,
         timeout_ms: 1000,
         host_install_path: None,
+        auto_start: true,
         launch_silently: false,
     });
     if register_tools(&mut bridge, Arc::new(client)).is_err() {

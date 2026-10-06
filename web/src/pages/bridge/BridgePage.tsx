@@ -24,16 +24,26 @@ export function BridgePage({
   const [showCatalog, setShowCatalog] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
   const bridge = bootstrap.bridge;
-  const [launchSilently, setLaunchSilently] = useState(
-    bridge.launchSilently ?? false,
+  const [launchMode, setLaunchMode] = useState(
+    bridge.autoStart !== true
+      ? "off"
+      : bridge.launchSilently
+        ? "silent"
+        : "visible",
   );
   const [savingLaunch, setSavingLaunch] = useState(false);
   useEffect(() => {
     void reload();
   }, [reload]);
   useEffect(() => {
-    setLaunchSilently(bridge.launchSilently ?? false);
-  }, [bridge.launchSilently]);
+    setLaunchMode(
+      bridge.autoStart !== true
+        ? "off"
+        : bridge.launchSilently
+          ? "silent"
+          : "visible",
+    );
+  }, [bridge.autoStart, bridge.launchSilently]);
   const toggle = async (enabled: boolean) => {
     setBusy(true);
     setError("");
@@ -59,7 +69,11 @@ export function BridgePage({
       ? { title: t.nav.connected, detail: t.bridge.bgRunning }
       : {
           title: t.nav.disconnected,
-          detail: bridge.error ?? t.bridge.bgNotRunning,
+          detail:
+            bridge.error ??
+            (launchMode === "off"
+              ? t.bridge.bgNotRunningManual
+              : t.bridge.bgNotRunning),
         };
   return (
     <div className="page-sheet bridge-page">
@@ -105,22 +119,30 @@ export function BridgePage({
         >
           <Select
             label={t.bridge.launchBehavior}
-            value={launchSilently ? "silent" : "visible"}
+            value={launchMode}
             disabled={savingLaunch}
             options={[
-              { value: "silent", label: t.bridge.launchSilent },
+              { value: "off", label: t.bridge.launchOff },
               { value: "visible", label: t.bridge.launchVisible },
+              { value: "silent", label: t.bridge.launchSilent },
             ]}
             onChange={(value) => {
-              const next = value === "silent";
-              setLaunchSilently(next);
+              const previous = launchMode;
+              setLaunchMode(value);
               setSavingLaunch(true);
               setError("");
               void api
-                .setBridgeLaunchSilently(next)
-                .then(reload)
+                .setBridgeLaunchBehavior(
+                  value !== "off",
+                  value === "off"
+                    ? (bridge.launchSilently ?? false)
+                    : value === "silent",
+                )
+                .then(() => {
+                  void reload().catch((reason) => setError(readError(reason)));
+                })
                 .catch((reason) => {
-                  setLaunchSilently(!next);
+                  setLaunchMode(previous);
                   setError(readError(reason));
                 })
                 .finally(() => setSavingLaunch(false));

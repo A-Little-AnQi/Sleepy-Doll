@@ -91,7 +91,7 @@ pub fn is_host_running() -> bool {
 
 /// 连接前保证宿主在运行：没运行就找到安装位置启动它，并等进程出现。
 fn ensure_host_running(config: &BridgeConfig) -> Result<()> {
-    if host_running() {
+    if !should_launch_host(config, host_running())? {
         return super::origin::require_running_hosts();
     }
     let executable = locate_host(config).ok_or_else(|| {
@@ -116,6 +116,48 @@ fn ensure_host_running(config: &BridgeConfig) -> Result<()> {
         std::thread::sleep(Duration::from_secs(1));
     }
     Ok(())
+}
+
+fn should_launch_host(config: &BridgeConfig, running: bool) -> Result<bool> {
+    if running {
+        return Ok(false);
+    }
+    if !config.auto_start {
+        return Err(Error::Tool(
+            "BetterGI 未运行。自动启动已关闭，请先打开 BetterGI，再连接。".into(),
+        ));
+    }
+    Ok(true)
+}
+
+#[cfg(test)]
+mod auto_start_tests {
+    use super::*;
+
+    #[test]
+    fn auto_start_controls_launch_without_disabling_existing_connections() {
+        let mut config: BridgeConfig =
+            serde_json::from_value(json!({"baseUrl":"http://127.0.0.1:26101"})).unwrap();
+        assert!(!config.auto_start); // older configs also default to off
+        assert!(should_launch_host(&config, false).is_err());
+        config.auto_start = true;
+        assert!(should_launch_host(&config, false).unwrap());
+        config.auto_start = false;
+        assert!(
+            should_launch_host(&config, false)
+                .unwrap_err()
+                .to_string()
+                .contains("自动启动已关闭")
+        );
+        assert!(!should_launch_host(&config, true).unwrap());
+        let saved = serde_json::to_value(&config).unwrap();
+        assert_eq!(saved["autoStart"], false);
+        assert!(
+            !serde_json::from_value::<BridgeConfig>(saved)
+                .unwrap()
+                .auto_start
+        );
+    }
 }
 
 fn launch_host(executable: &Path, directory: &Path, silently: bool) -> Result<()> {

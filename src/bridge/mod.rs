@@ -940,6 +940,7 @@ mod user_write_tests {
             instance_id: None,
             timeout_ms: 5_000,
             host_install_path: None,
+            auto_start: true,
             launch_silently: false,
         }));
         let mut registry = ToolRegistry::default();

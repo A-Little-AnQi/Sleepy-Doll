@@ -220,10 +220,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         thread::spawn(move || distribution.startup());
     }
     let startup_config = sleepy_doll::AppConfig::load(&config_path)?;
-    if startup_config.host_plugin_enabled() && startup_config.bridge.enabled {
+    if startup_config.host_plugin_enabled()
+        && (startup_config.bridge.auto_start
+            || (startup_config.bridge.enabled && sleepy_doll::bridge::control::is_host_running()))
+    {
         let startup = controller.clone();
         thread::spawn(move || {
-            // 后台自动连接，失败原因只记日志。
+            // Opt-in startup may launch BetterGI; otherwise only attach to a running instance.
             if let Err(error) = startup.handle(
                 "bridge.setEnabled",
                 json!({"enabled":true}),

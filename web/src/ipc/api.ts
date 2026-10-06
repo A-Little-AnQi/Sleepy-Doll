@@ -329,6 +329,14 @@ export const api = {
     invoke<{ launchSilently: boolean }>("bridge.setLaunchSilently", {
       silently,
     }),
+  setBridgeLaunchBehavior: (autoStart: boolean, launchSilently: boolean) =>
+    invoke<{ autoStart: boolean; launchSilently: boolean }>(
+      "bridge.setLaunchBehavior",
+      {
+        autoStart,
+        launchSilently,
+      },
+    ),
   installPlugin: (path: string) =>
     invoke<{ id: string }>("plugin.install", { path }),
   installSkill: (path: string) =>
