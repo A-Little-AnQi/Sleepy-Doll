@@ -4757,6 +4757,9 @@ mod record_result_tests {
                     std::thread::sleep(Duration::from_millis(5));
                     continue;
                 };
+                // Accepted Windows sockets can inherit the listener's nonblocking
+                // mode; request reads use their own bounded blocking timeout.
+                stream.set_nonblocking(false).unwrap();
                 let body = read_body(&mut stream);
                 stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n").unwrap();
                 count += 1;

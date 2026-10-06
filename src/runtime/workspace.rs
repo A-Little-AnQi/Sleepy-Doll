@@ -197,6 +197,8 @@ impl Workspace {
         };
 
         let exe = powershell_executable()?;
+        #[cfg(test)]
+        eprintln!("workspace.shell runtime: {}", exe.display());
         let byte_limit = output_limit.saturating_mul(4);
         let payload = json!({
             "workspace": cwd.to_string_lossy(),
@@ -560,6 +562,7 @@ fn restore_common_environment(process: &mut tokio::process::Command, root: &Path
         "ProgramData",
         "NUMBER_OF_PROCESSORS",
         "PROCESSOR_ARCHITECTURE",
+        "PSModulePath",
     ] {
         if let Some(value) = std::env::var_os(key) {
             process.env(key, value);
@@ -656,6 +659,28 @@ fn truncate_output(bytes: &[u8], limit: usize) -> (String, bool) {
 fn powershell_executable() -> Result<PathBuf> {
     #[cfg(windows)]
     {
+        // Prefer the installed PowerShell 7 runtime. Actions runs its Windows
+        // steps with it as well; Windows PowerShell remains the fallback.
+        for key in ["ProgramFiles", "ProgramW6432"] {
+            if let Some(root) = std::env::var_os(key) {
+                let exe = PathBuf::from(root)
+                    .join("PowerShell")
+                    .join("7")
+                    .join("pwsh.exe");
+                if exe.is_file() {
+                    return Ok(exe);
+                }
+            }
+        }
+        if let Some(exe) = find_in_path("pwsh") {
+            let exe = PathBuf::from(exe);
+            if exe
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+            {
+                return Ok(exe);
+            }
+        }
         let system_root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
         let exe = PathBuf::from(system_root)
             .join("System32")
