@@ -1,7 +1,49 @@
 /* 固定四行（标题 / 工具行 / 过滤行 / 内容），内容行吃满剩余高度：
    空状态作为 grid item 默认拉伸，其 align-content: center 才真正生效。 */
-.tasks-page {
+/* 快捷任务页：居中内容列（覆盖全局 page-sheet 为双类高优先级），标题文本左对齐。 */
+.page-sheet.tasks-page {
   grid-template-rows: auto auto auto minmax(0, 1fr);
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px;
+  gap: 32px;
+}
+@media (min-width: 1600px) {
+  .page-sheet.tasks-page {
+    padding: 40px;
+  }
+}
+@media (max-width: 700px) {
+  .page-sheet.tasks-page {
+    padding: 20px;
+  }
+}
+/* 标题、tabs、搜索、卡片共用同一左基线；辅助信息与次级筛选靠右，与卡片列右缘共基线。 */
+.tasks-page .tasks-tabs-toolbar {
+  justify-content: flex-start;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.tasks-page .tasks-tabs-toolbar > .muted {
+  flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.tasks-page .tasks-filter-toolbar {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.tasks-page .tasks-filter-toolbar .search-field {
+  flex: 1 1 240px;
+  max-width: 480px;
+  min-width: 160px;
+}
+.tasks-page .tasks-filter-toolbar .filter-row {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 .tasks-page .filter-row {
   display: flex;
@@ -13,10 +55,10 @@
   background: var(--selected);
   color: var(--text);
 }
-.task-grid {
+.tasks-page .task-grid {
   display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
   align-content: start;
 }
 .record-list {

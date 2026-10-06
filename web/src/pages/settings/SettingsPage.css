@@ -13,18 +13,33 @@
   padding: 28px 0 0;
 }
 
-/* 滚动容器占满页框、滚动条贴边（与对话页同一模式），内容列在内部居中。 */
-.settings-nav {
+/* 统一内容列：导航与正文同宽居中，切换子页时左右基线不跳。 */
+.settings-column {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   width: min(calc(100% - var(--settings-gutter-pair)), 920px);
   margin-inline: auto;
+}
+
+/* 滚动容器占满列宽、滚动条贴列右缘（与对话页同一模式）。 */
+.settings-nav {
+  width: 100%;
+  margin-inline: 0;
   flex: 0 0 auto;
   padding: 12px 0 14px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
 
+/* 页签属于导航，与正文共用左基线。 */
 .settings-nav .sd-tabs {
   width: 100%;
+  max-width: 100%;
+  margin-inline-start: 0;
+  justify-content: flex-start;
 }
 
 .settings-nav .app-brand-icon {
@@ -34,6 +49,7 @@
 
 .settings-content {
   flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
@@ -42,6 +58,7 @@
   padding: 28px 0 48px;
 }
 
+/* 子页占满列宽，不做各自的二次收窄居中。 */
 .settings-content > .page-sheet,
 .settings-content > .bridge-api-explorer,
 .settings-content > .bridge-recovery,
@@ -50,25 +67,44 @@
 .settings-content .page-sheet,
 .settings-content .bridge-api-explorer,
 .settings-content .bridge-recovery {
-  width: min(calc(100% - var(--settings-gutter-pair)), 920px);
-  margin-inline: auto;
+  width: 100%;
+  margin-inline: 0;
   max-width: none;
   height: auto;
   padding: 0;
   overflow: visible;
 }
 
+/* 模型页自身分上下滚动区 + 固定保存行，外层不再整体滚动。 */
+.settings-content.is-models {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  padding-bottom: 28px;
+}
+
+.settings-content.is-models > .model-settings {
+  height: 100%;
+  min-height: 0;
+}
+
+.settings-content .block-head {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .settings-general {
   display: grid;
   gap: 26px;
-  width: min(100%, 720px);
-  margin-inline: auto;
+  width: 100%;
+  margin-inline: 0;
 }
 
 .settings-general > h2 {
   margin: 0 0 2px;
   font-size: 22px;
   font-weight: 650;
+  text-align: left;
 }
 
 .settings-group {
@@ -82,34 +118,31 @@
   color: var(--muted);
 }
 
-.settings-about {
+/* 「关于」页产品名：字号只用字标自身高度表达，不重复版本数字。 */
+.settings-about-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 0;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  font-size: 12px;
-  cursor: pointer;
-  justify-self: start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
-.settings-about:hover {
-  color: var(--text);
+.settings-about-brand .app-wordmark {
+  height: 28px;
 }
 
 .settings-sponsor {
   display: grid;
   gap: 14px;
-  width: min(100%, 720px);
-  margin-inline: auto;
+  width: 100%;
+  margin-inline: 0;
 }
 
 .settings-sponsor h2 {
   margin: 0;
   font-size: 22px;
   font-weight: 650;
+  text-align: left;
 }
 
 .settings-sponsor p {

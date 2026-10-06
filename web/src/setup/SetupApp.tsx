@@ -14,7 +14,7 @@ import { useT } from "../i18n";
 
 /** 原生没应答时用它渲染，目录取安装器的首选值。 */
 const PREVIEW_INFO: SetupInfo = {
-  version: "0.1.0",
+  version: __APP_VERSION__,
   directory: "D:\\Sleepy Doll",
   defaultDirectory: "D:\\Sleepy Doll",
   installed: false,
@@ -166,8 +166,11 @@ export function SetupApp() {
         <main className="setup-main">
           <header className="setup-head">
             <h2>{action} Sleepy Doll</h2>
+          </header>
+
+          <div className="setup-body">
             {resting ? (
-              <p>
+              <p className="setup-description">
                 {uninstall
                   ? t.setup.uninstallNote
                   : update
@@ -175,9 +178,6 @@ export function SetupApp() {
                     : t.setup.installNote}
               </p>
             ) : null}
-          </header>
-
-          <div className="setup-body">
             {resting ? (
               uninstall || update ? (
                 <dl className="setup-meta">

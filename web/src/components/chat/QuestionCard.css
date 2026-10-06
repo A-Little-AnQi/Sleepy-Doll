@@ -1,31 +1,38 @@
-/* 待处理请求浮层：absolute 覆盖绘制，不占消息流与输入框布局。
-   锚在 composer-dock 上沿之上，随 composer 扩高自动上移。 */
+/* 待处理请求层：独立 dock 内的 normal-flow 内容，宽随 dock（与 composer 同宽），
+   不覆盖消息流与输入框；交互区高度封顶，短窗口在层内部滚动。 */
 .pending-request-layer {
-  position: absolute;
-  right: 16px;
-  bottom: calc(100% + 10px);
+  /* 外层只是滚动容器，不提供任何背板：显式透明，
+     圆角外不留矩形背景/裁切痕迹，卡片自带背景与边框。 */
+  background: transparent;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  width: min(420px, calc(100% - 32px));
-  /* maxHeight 由宿主按 composer 上沿到视口顶部的实际空间给出（内联样式），
-     这里只兜底极端情况；溢出在容器内滚动。 */
-  max-height: 60dvh;
+  width: 100%;
+  /* 等待时宿主按真实可用空间写入变量；无变量（非等待/未挂载）用兜底。 */
+  max-height: var(--pending-request-max-height, min(50dvh, 320px));
   overflow-y: auto;
-  z-index: 30;
-  pointer-events: none;
 }
 
-.pending-request-card,
-.pending-request-chip {
-  pointer-events: auto;
+.pending-request-layer > * {
+  flex-shrink: 0;
 }
 
 .pending-request-card {
+  /* 单卡自身 flex column：header/footer 不缩，body 内部滚动，
+     长题短窗也不会把 footer 主按钮截掉。 */
+  display: flex;
+  flex-direction: column;
+  max-height: var(--pending-request-max-height, min(50dvh, 320px));
   padding: 14px 16px;
   border: 1px solid var(--border-strong);
   border-radius: var(--layout-radius);
   background: var(--surface, var(--subtle));
+  /* 阴影只留给 dark 主题：亮色下阴影画在圆角外，会被外层滚动容器
+     按矩形裁切成背板，因此亮色/默认直接 none。 */
+  box-shadow: none;
+}
+
+:root[data-theme="dark"] .pending-request-card {
   box-shadow: 0 12px 32px rgb(0 0 0 / 22%);
 }
 
@@ -34,6 +41,7 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 10px;
+  flex-shrink: 0;
 }
 
 .pending-request-header > svg {
@@ -87,7 +95,13 @@
 }
 
 .pending-request-body {
+  flex: 1 1 auto;
   min-height: 0;
+  overflow-y: auto;
+}
+
+.pending-request-footer {
+  flex-shrink: 0;
 }
 
 .pending-request-text {
@@ -210,6 +224,16 @@
   margin-top: 4px;
 }
 
+/* 审批卡 footer：两按钮紧邻右对齐，不用两端拉开；只作用审批卡，问答卡不动。 */
+.pending-approval-card .pending-request-footer {
+  justify-content: flex-end;
+}
+
+.pending-approval-card .pending-request-submit {
+  margin-left: 0;
+  flex: none;
+}
+
 .pending-approval-card pre {
   max-height: 160px;
   overflow: auto;
@@ -221,19 +245,21 @@
   font-size: 12px;
 }
 
-/* 收起/已答复状态的窄条入口。 */
+/* 收起/已答复状态的入口：与展开卡片同宽的左对齐紧凑条，不右漂、无浮层阴影。 */
 .pending-request-chip {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 6px;
-  align-self: flex-end;
-  padding: 6px 12px;
+  align-self: stretch;
+  width: 100%;
+  padding: 8px 12px;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--layout-radius);
   background: var(--surface, var(--subtle));
   color: var(--text);
   font-size: 12px;
-  box-shadow: 0 8px 20px rgb(0 0 0 / 18%);
+  text-align: left;
 }
 
 .pending-request-chip > svg {
@@ -242,11 +268,36 @@
   color: var(--gold);
 }
 
+/* 审批摘要的业务变更列表：label/value 两列清晰可读。 */
+.pending-approval-changes {
+  margin: 0 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pending-approval-change {
+  display: grid;
+  /* 两列都 minmax(0,…)：超长字段名/值在窄屏换行而不是把列撑爆。 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  column-gap: 10px;
+  align-items: baseline;
+}
+
+.pending-approval-change dt {
+  color: var(--secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.pending-approval-change dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 600px) {
-  .pending-request-layer {
-    right: 12px;
-    width: calc(100% - 24px);
-  }
   .pending-request-card {
     padding: 12px;
   }

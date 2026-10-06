@@ -1,6 +1,6 @@
 {
   "name": "sleepy-doll-ui",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "A Codex-inspired, BGI-oriented local agent runtime",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "backend": "cargo run --no-default-features --features dev-ipc --bin sleepy-doll-dev",
     "desktop": "npm run dist && powershell -NoProfile -Command \"Start-Process -FilePath './target/release/sleepy-doll.exe'\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "npm run typecheck && vite build",
+    "build": "node installer/release-version.mjs && npm run typecheck && vite build",
     "dist": "cmd /c .\\build-desktop.cmd",
     "clean:rust": "powershell -NoProfile -ExecutionPolicy Bypass -File ./clean-build-cache.ps1",
     "format": "prettier --write \"web/**/*.{ts,tsx,css,html}\" \"*.{json,ts}\" \"!package-lock.json\"",

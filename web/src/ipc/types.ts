@@ -321,6 +321,12 @@ export interface QuestionRequestInfo {
 /** 答复载荷：题目 id → 字符串数组，与 `run.question.answer` 契约一致。 */
 export type QuestionAnswers = Record<string, { answers: string[] }>;
 
+/** 审批卡的可读摘要，由 Rust 侧从业务参数整理；UI 不做任何特例映射。 */
+export interface ApprovalPresentation {
+  title: string;
+  summary: string;
+  changes: Array<{ label: string; value: string }>;
+}
 export interface RunApproval {
   id: string;
   runId: string;
@@ -329,6 +335,7 @@ export interface RunApproval {
     instanceId?: string;
     arguments?: unknown;
     binding?: { description?: string };
+    presentation?: ApprovalPresentation;
   };
   expiresAt: number;
 }

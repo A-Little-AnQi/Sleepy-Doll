@@ -11,6 +11,10 @@
 .task-card:hover {
   border-color: var(--border-strong);
 }
+/* 只有可打开详情的卡片才有可点击外观；详情卡片不显示手型。 */
+.task-card[data-openable="true"] {
+  cursor: pointer;
+}
 .task-card-application {
   color: var(--muted);
   font-size: 11px;
@@ -46,8 +50,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.task-card-name:hover {
-  text-decoration: underline;
+button.task-card-name:focus-visible {
+  outline: 2px solid var(--secondary);
+  outline-offset: 2px;
 }
 .task-card-pinned {
   display: inline-flex;

@@ -5,13 +5,14 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent,
 } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Dialog } from "../components/overlay/Dialog";
 import { useT, type Text } from "../i18n";
 import "./UpdateDialog.css";
-import changelogSource from "./release-notes/changelog-0.0.1.md?raw";
+import changelogSource from "./release-notes/changelog-0.1.0.md?raw";
 import guideSource from "./release-notes/guide.md?raw";
 import faqSource from "./release-notes/faq.md?raw";
 
@@ -49,6 +50,24 @@ export function UpdateDialog({
   }, [open, initialTab]);
   const items = useMemo(() => tabs(t), [t]);
   const active = items.find((item) => item.key === tab) ?? items[0];
+  // 文档间的跳转链接（如 faq.md）只切换标签页，不离开弹窗；外部链接照常打开。
+  const onArticleClick = (event: MouseEvent<HTMLDivElement>) => {
+    const link = (event.target as HTMLElement).closest("a");
+    if (!link) return;
+    const match = /^(guide|faq|changelog[^/?#]*)\.md$/.exec(
+      link.getAttribute("href") ?? "",
+    );
+    const destination = match?.[1];
+    if (!destination) return;
+    event.preventDefault();
+    setTab(
+      destination.startsWith("guide")
+        ? "guide"
+        : destination.startsWith("faq")
+          ? "faq"
+          : "changelog",
+    );
+  };
   useLayoutEffect(() => {
     if (open && body.current) body.current.scrollTop = 0;
   }, [tab, open]);
@@ -96,14 +115,15 @@ export function UpdateDialog({
   if (!active) return null;
   return (
     <Dialog
-      title={t.update.title}
+      title={
+        active.key === "guide"
+          ? t.account.help
+          : active.key === "faq"
+            ? t.update.faq
+            : t.update.title
+      }
       open={open}
       onClose={onClose}
-      footer={
-        <button type="button" className="primary-action" onClick={onClose}>
-          {t.update.start}
-        </button>
-      }
     >
       <div className="update-dialog" data-tab={active.key}>
         <div className="update-dialog-toolbar">
@@ -163,8 +183,14 @@ export function UpdateDialog({
           aria-labelledby={`${id}-${active.key}`}
           tabIndex={0}
         >
-          <article className="update-dialog-article" key={active.key}>
-            <Markdown remarkPlugins={[remarkGfm]}>{active.source}</Markdown>
+          <article
+            className="update-dialog-article"
+            key={active.key}
+            onClick={onArticleClick}
+          >
+            <Markdown remarkPlugins={[remarkGfm]}>
+              {active.source.replace(/^# [^\r\n]+\r?\n+/, "")}
+            </Markdown>
           </article>
         </div>
       </div>

@@ -437,6 +437,7 @@ export const api = {
 
 export interface ReleaseState {
   currentVersion: string;
+  currentChannel: "test" | "stable";
   channel: "test" | "stable";
   analyticsEnabled: boolean;
   downloaded: boolean;

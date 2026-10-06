@@ -1182,6 +1182,13 @@ function ConversationRow({
           aria-current={current ? "page" : undefined}
           onClick={onOpen}
         >
+          {running && (
+            <span
+              className="conversation-status running"
+              title={taskLabels[running.state] ?? t.app.running}
+              aria-label={taskLabels[running.state] ?? t.app.running}
+            />
+          )}
           <span className="app-conversation-title">{entry.title}</span>
         </button>
         <div className="app-conversation-actions">
@@ -1218,13 +1225,6 @@ function ConversationRow({
             <TrashIcon className="button-icon" />
           </button>
         </div>
-        {running && (
-          <span
-            className="conversation-status running"
-            title={taskLabels[running.state] ?? t.app.running}
-            aria-label={taskLabels[running.state] ?? t.app.running}
-          />
-        )}
       </li>
       <ConfirmDialog
         open={asking != null}

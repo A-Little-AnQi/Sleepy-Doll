@@ -3,7 +3,10 @@ import { api, type ReleaseState } from "../ipc/api";
 import { Select } from "../components/controls/Select";
 import { SettingRow } from "../components/controls/SettingRow";
 import { Dialog } from "../components/overlay/Dialog";
+import { Toast } from "../components/overlay/Toast";
 import { useLocale } from "../appearance/locale";
+import { readError } from "../session";
+import "./ReleaseSettings.css";
 
 const zh = {
   title: "软件更新",
@@ -13,10 +16,6 @@ const zh = {
   channel: "更新通道",
   stable: "正式版",
   test: "测试版",
-  analytics: "匿名基础统计",
-  analyticsHint: "统计启动、检查更新和更新结果。",
-  on: "开启",
-  off: "关闭",
   latest: "当前已是最新版本，或所选通道尚未发布。",
   download: "下载更新",
   downloading: "正在下载并校验…",
@@ -32,10 +31,6 @@ const en: typeof zh = {
   channel: "Update channel",
   stable: "Stable",
   test: "Test",
-  analytics: "Anonymous basic analytics",
-  analyticsHint: "Record launches, update checks and update results.",
-  on: "On",
-  off: "Off",
   latest: "Up to date, or no release in this channel.",
   download: "Download update",
   downloading: "Downloading and verifying…",
@@ -56,13 +51,16 @@ function ReleaseActions({
   const [error, setError] = useState("");
   if (!state.release) return null;
   return (
-    <div>
-      <p>
-        {text.available} · {state.release.version}
-      </p>
-      <p style={{ whiteSpace: "pre-wrap" }}>{state.release.notes}</p>
+    <div className="release-actions">
+      <div className="release-info">
+        <strong>
+          {text.available} · {state.release.version}
+        </strong>
+        <p className="release-notes">{state.release.notes}</p>
+      </div>
       <button
         type="button"
+        className="primary-action"
         disabled={busy}
         onClick={async () => {
           setBusy(true);
@@ -71,7 +69,7 @@ function ReleaseActions({
             if (state.downloaded) await api.releaseInstall();
             else onState(await api.releaseDownload());
           } catch (reason) {
-            setError(String(reason));
+            setError(readError(reason));
           } finally {
             setBusy(false);
           }
@@ -85,11 +83,15 @@ function ReleaseActions({
             ? text.install
             : text.download}
       </button>
-      {error && <p role="alert">{error}</p>}
+      {error && <p className="release-error" role="alert">{error}</p>}
     </div>
   );
 }
 
+/**
+ * 「关于」页的软件更新区：release.state 是唯一数据源，
+ * 检查结果与错误走 Toast 浮层，不插入设置列表。
+ */
 export function ReleaseSettings() {
   const text = useLocale() === "en" ? en : zh;
   const [state, setState] = useState<ReleaseState | null>(null);
@@ -99,23 +101,48 @@ export function ReleaseSettings() {
     void api
       .releaseState()
       .then(setState)
-      .catch((reason) => setMessage(String(reason)));
+      .catch((reason) => setMessage(readError(reason)));
   }, []);
-  async function configure(enabled: boolean, channel: string) {
+  // configure 只负责换通道：统计开关沿用服务端既有偏好，不得在此改写。
+  async function configure(channel: string) {
     try {
-      setState(await api.releaseConfigure(enabled, channel));
+      setState(
+        await api.releaseConfigure(state?.analyticsEnabled ?? false, channel),
+      );
     } catch (reason) {
-      setMessage(String(reason));
+      setMessage(readError(reason));
     }
   }
   return (
-    <section className="settings-group">
-      <h3>{text.title}</h3>
-      <p>
-        {text.current} · {state?.currentVersion ?? __APP_VERSION__}
-      </p>
-      {state && (
-        <>
+    <>
+      <section className="settings-group release-settings">
+        <h3>{text.title}</h3>
+        <SettingRow
+          label={text.current}
+          hint={`${state?.currentVersion ?? __APP_VERSION__} · ${text[state?.currentChannel ?? __APP_CHANNEL__]}`}
+        >
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setMessage("");
+              try {
+                const next = await api.releaseCheck();
+                setState(next);
+                if (!next.release) setMessage(text.latest);
+              } catch (reason) {
+                setMessage(readError(reason));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? text.checking : text.check}
+          </button>
+        </SettingRow>
+        {state && (
           <SettingRow label={text.channel}>
             <Select
               label={text.channel}
@@ -124,48 +151,16 @@ export function ReleaseSettings() {
                 { value: "stable", label: text.stable },
                 { value: "test", label: text.test },
               ]}
-              onChange={(channel) =>
-                void configure(state.analyticsEnabled, channel)
-              }
+              onChange={(channel) => void configure(channel)}
             />
           </SettingRow>
-          <SettingRow label={text.analytics} hint={text.analyticsHint}>
-            <Select
-              label={text.analytics}
-              value={state.analyticsEnabled ? "on" : "off"}
-              options={[
-                { value: "on", label: text.on },
-                { value: "off", label: text.off },
-              ]}
-              onChange={(value) =>
-                void configure(value === "on", state.channel)
-              }
-            />
-          </SettingRow>
-        </>
+        )}
+        {state && <ReleaseActions state={state} onState={setState} />}
+      </section>
+      {message && (
+        <Toast message={message} onDismiss={() => setMessage("")} />
       )}
-      <button
-        type="button"
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          setMessage("");
-          try {
-            const next = await api.releaseCheck();
-            setState(next);
-            if (!next.release) setMessage(text.latest);
-          } catch (reason) {
-            setMessage(String(reason));
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        {busy ? text.checking : text.check}
-      </button>
-      {message && <p role="status">{message}</p>}
-      {state && <ReleaseActions state={state} onState={setState} />}
-    </section>
+    </>
   );
 }
 

@@ -1,0 +1,59 @@
+.app-checkbox {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.app-checkbox input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app-checkbox-box {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--inverse);
+  transition:
+    background-color var(--motion-fast, 120ms) var(--ease-standard, ease),
+    border-color var(--motion-fast, 120ms) var(--ease-standard, ease);
+}
+
+.app-checkbox:hover .app-checkbox-box {
+  border-color: var(--muted);
+}
+
+.app-checkbox input:checked + .app-checkbox-box {
+  border-color: var(--solid);
+  background: var(--solid);
+}
+
+.app-checkbox-mark {
+  width: 12px;
+  height: 12px;
+}
+
+/* 焦点画在自定义框上，原生 input 不可见但仍是焦点来源。 */
+.app-checkbox input:focus-visible + .app-checkbox-box {
+  outline: 2px solid var(--secondary);
+  outline-offset: 2px;
+}
+
+.app-checkbox.is-disabled {
+  cursor: default;
+  opacity: 0.4;
+}

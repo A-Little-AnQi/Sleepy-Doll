@@ -1,7 +1,9 @@
+/* 页头固定，编辑区占满剩余高度：内部再分「滚动正文 + 保存行」。 */
 .model-settings {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 22px;
-  align-content: start;
+  min-height: 0;
 }
 
 .model-page-head {
@@ -9,6 +11,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 20px;
+  text-align: left;
 }
 
 .model-page-head h2 {
@@ -24,16 +27,18 @@
 .model-workspace {
   display: grid;
   grid-template-columns: minmax(196px, 240px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 28px;
-  align-items: start;
+  align-items: stretch;
+  min-height: 0;
 }
 
 .model-list {
   display: grid;
   gap: 2px;
   align-content: start;
-  position: sticky;
-  top: 0;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .model-list-empty {
@@ -88,12 +93,27 @@
 
 .model-editor {
   min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .model-form {
   display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 22px;
   min-width: 0;
+  min-height: 0;
+}
+
+/* 表头、提示与全部字段在这里滚动；保存行是表单的第二行，不随内容滚。 */
+.model-form-scroll {
+  display: grid;
+  gap: 22px;
+  align-content: start;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .model-form-head {
@@ -223,13 +243,11 @@
   opacity: 0;
 }
 
+/* 正常文档流的保存行：右对齐，保存主按钮在 DOM 最后（视觉与 Tab 均最右）。 */
 .model-form .detail-actions {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
   padding: 12px 0 8px;
   border-top: 1px solid var(--border);
-  background: var(--surface);
+  justify-content: flex-end;
 }
 
 .model-context-suggestion {
@@ -248,14 +266,15 @@
 
   .model-workspace {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
     gap: 16px;
   }
 
   .model-list {
-    position: static;
     display: flex;
     gap: 4px;
     overflow-x: auto;
+    overflow-y: hidden;
     scrollbar-width: none;
   }
 

@@ -1,4 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import type { TaskSummary, TaskInfo } from "../../ipc/types";
 import { isRunning, taskLabels } from "../../session";
 import { taskError } from "./task-display";
@@ -28,12 +33,14 @@ export function TaskCard({
   busy,
   actions,
   showSource,
+  showDescription = true,
   activeRun,
 }: {
   task: TaskSummary;
   busy?: boolean;
   actions: TaskActions;
   showSource?: boolean;
+  showDescription?: boolean;
   activeRun?: TaskInfo | undefined;
 }) {
   const t = useT();
@@ -62,16 +69,33 @@ export function TaskCard({
       : task.state === "unavailable"
         ? () => actions.connect?.(task)
         : () => actions.open?.(task);
+  const openable = Boolean(actions.open);
+  // 整卡点击打开详情：按钮/菜单等交互元素与正在选择的文本都不误触。
+  const openFromCard = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest("button, a, input, textarea, select, label, .task-card-menu")) return;
+    if (window.getSelection()?.toString()) return;
+    actions.open?.(task);
+  };
   return (
     <article
       className="task-card"
       data-state={task.state}
       data-running={running}
+      data-openable={openable || undefined}
+      onClick={openable ? openFromCard : undefined}
     >
       <div className="task-card-head">
-        <button className="task-card-name" onClick={() => actions.open?.(task)}>
-          {task.name}
-        </button>
+        {actions.open ? (
+          <button
+            className="task-card-name"
+            onClick={() => actions.open?.(task)}
+          >
+            {task.name}
+          </button>
+        ) : (
+          <span className="task-card-name">{task.name}</span>
+        )}
         {task.pinned && (
           <span className="task-card-pinned" title={t.taskCard.pinned}>
             <PinIcon />
@@ -174,9 +198,11 @@ export function TaskCard({
           )}
         </div>
       </div>
-      <p className="task-card-description">
-        {task.description || t.taskCard.noDescription}
-      </p>
+      {showDescription && (
+        <p className="task-card-description">
+          {task.description || t.taskCard.noDescription}
+        </p>
+      )}
       {task.shortcut && (
         <span className="task-card-application">
           {task.shortcut.applicationName} · {task.shortcut.targetName}

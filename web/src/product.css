@@ -38,8 +38,8 @@
   --font-label: 11px;
   --gold: #c9a227;
   --gold-bright: #f0d36a;
-  --chat-user: #f1e08a;
-  --chat-user-text: #2c2a1d;
+  --chat-user: #FFD400;
+  --chat-user-text: #000;
   --chat-detail-rule: #d8d8d8;
   --chat-prose-width: 760px;
   --chat-message-meta-height: 24px;
@@ -74,8 +74,8 @@
   --knob-shadow: 0 1px 2px #000a, 0 4px 10px #0007, inset 0 1px 0 #ffffff18;
   --gold: #e4bc4a;
   --gold-bright: #f6e19a;
-  --chat-user: #d4bd54;
-  --chat-user-text: #16130a;
+  --chat-user: #FFD400;
+  --chat-user-text: #000;
   --chat-detail-rule: #3a3a3a;
   color-scheme: dark;
 }
@@ -373,6 +373,7 @@ a {
   padding: 40px 44px;
   display: grid;
   gap: 32px;
+  text-align: left;
 }
 
 .page-title {
@@ -380,18 +381,21 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
+  text-align: left;
 }
 
 .page-title h2 {
   font-size: 23px;
   margin: 0;
   font-weight: 600;
+  text-align: left;
 }
 
 .page-title p {
   margin: 8px 0 0;
   color: var(--muted);
   font-size: 13px;
+  text-align: left;
 }
 
 .page-block {

@@ -4,6 +4,10 @@
   gap: 22px;
 }
 
+.bridge-overview {
+  text-align: left;
+}
+
 .bridge-overview h2 {
   margin: 0;
   font-size: 22px;

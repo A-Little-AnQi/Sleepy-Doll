@@ -16,7 +16,7 @@ import {
   SettingsIcon,
   StopIcon,
 } from "../../components/icons";
-import { SkillMenu } from "../../components/chat/SkillMenu";
+import { SkillMenu, filterSkills } from "../../components/chat/SkillMenu";
 import { Select } from "../../components/controls/Select";
 import {
   isRunning,
@@ -27,7 +27,12 @@ import {
   useSession,
 } from "../../session";
 import { Toast } from "../../components/overlay/Toast";
-import type { Bootstrap, QuestionAnswers, QuestionRequestInfo, RunApproval } from "../../ipc/types";
+import type {
+  Bootstrap,
+  QuestionAnswers,
+  QuestionRequestInfo,
+  RunApproval,
+} from "../../ipc/types";
 import { MotionSwitch } from "../../components/controls/MotionSwitch";
 import { DisclosureChevron } from "../../components/controls/DisclosureChevron";
 import { resolveConversationModel } from "../../models";
@@ -95,6 +100,20 @@ export function RunPlanCard({ plan }: { plan: Plan }) {
   );
 }
 
+// 从光标往回找 `/查询词` 的起点；`/` 必须在文本空白分界之后，
+// token 里再出现别的 `/`（URL、路径）就不算命令，返回 -1。
+function slashTokenStart(value: string, caret: number): number {
+  for (let i = Math.min(caret, value.length) - 1; i >= 0; i -= 1) {
+    const char = value.charAt(i);
+    if (char === "/") {
+      if (i === 0 || /\s/.test(value.charAt(i - 1))) return i;
+      return -1;
+    }
+    if (/\s/.test(char)) return -1;
+  }
+  return -1;
+}
+
 export function ChatPage({
   bootstrap,
   conversationId,
@@ -145,9 +164,6 @@ export function ChatPage({
   );
   const [error, setError] = useState("");
   const [now, setNow] = useState(Date.now());
-  // 浮层可用高度跟随 composer 实际几何：短窗口/大输入框时不会越出顶部。
-  const [layerMax, setLayerMax] = useState<number | undefined>(undefined);
-  const [layerCenter, setLayerCenter] = useState<number | undefined>(undefined);
   const [pendingModel, setPendingModel] = useState<string | null>(null);
   const conversation = bootstrap.conversations.find(
     (entry) => entry.id === conversationId,
@@ -200,31 +216,6 @@ export function ChatPage({
     return () => clearInterval(timer);
   }, [busy, approval, questionRequests]);
   useLayoutEffect(() => {
-    const node = dock.current;
-    if (!node) return;
-    const update = () => {
-      // 浮层锚在 dock 上方 10px；可用高度是 dock 上沿到 workspace 顶部的
-      // 实际空间（再留 12px 上边距），没有下限撑出，tiny 空间靠内部滚动。
-      const dockTop = node.getBoundingClientRect().top;
-      const workspaceTop =
-        workspace.current?.getBoundingClientRect().top ?? 0;
-      const space = dockTop - workspaceTop;
-      setLayerMax(Math.max(0, Math.floor(space - 24)));
-      // 浮层垂直中心落在可用区中点 (workspace.top+dock.top)/2：
-      // dock 内坐标即 -space/2（0 是有效值）。
-      setLayerCenter(-Math.floor(space) / 2);
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(node);
-    if (workspace.current) observer.observe(workspace.current);
-    window.addEventListener("resize", update);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", update);
-    };
-  }, []);
-  useLayoutEffect(() => {
     if (!flow.current) return;
     const observer = new ResizeObserver(() => {
       if (follow.current) {
@@ -248,6 +239,33 @@ export function ChatPage({
       ),
     [bootstrap.skills],
   );
+  // `/` 菜单：start 是输入框里 `/` 的下标，query 是 `/` 到光标之间的筛选词。
+  const [slash, setSlash] = useState<{
+    start: number;
+    query: string;
+    index: number;
+  } | null>(null);
+  useEffect(() => {
+    setSlash(null);
+  }, [draftKey]);
+  const updateSlash = (value: string, caret: number) => {
+    if (sending || busy || !invocableSkills.length) {
+      setSlash(null);
+      return;
+    }
+    const start = slashTokenStart(value, caret);
+    if (start < 0) {
+      setSlash(null);
+      return;
+    }
+    const query = value.slice(start + 1, caret);
+    // 同一段 token 的同词不重置高亮；只有 token 或查询词变了才回到第一项。
+    setSlash((prev) =>
+      prev && prev.start === start && prev.query === query
+        ? prev
+        : { start, query, index: 0 },
+    );
+  };
   // 技能菜单把 `$技能名` 插到光标处；运行时按这个前缀显式装载该技能。
   const insertSkill = (name: string) => {
     const marker = `$${name} `;
@@ -257,11 +275,43 @@ export function ChatPage({
       return;
     }
     const at = node.selectionStart ?? prompt.length;
+    // 光标停在还没关掉的 `/查询词` 上时，+ 按钮选同一技能也走替换，别留下 "/$"。
+    const token = slashTokenStart(prompt, at);
+    if (token >= 0) {
+      const query = prompt.slice(token + 1, at);
+      if (
+        filterSkills(invocableSkills, query).some(
+          (skill) => skill.name === name,
+        )
+      ) {
+        const caret = token + marker.length;
+        setDraft(prompt.slice(0, token) + marker + prompt.slice(at));
+        requestAnimationFrame(() => {
+          node.focus();
+          node.setSelectionRange(caret, caret);
+        });
+        return;
+      }
+    }
     setDraft(prompt.slice(0, at) + marker + prompt.slice(at));
     requestAnimationFrame(() => {
       node.focus();
       const caret = at + marker.length;
       node.setSelectionRange(caret, caret);
+    });
+  };
+  // slash 菜单选中：只替换 `/查询词` 这一段，前后文字与光标位置都保留。
+  const applySlashPick = (name: string) => {
+    if (!slash) return;
+    const node = textarea.current;
+    const caret = node?.selectionStart ?? prompt.length;
+    const marker = `$${name} `;
+    const at = slash.start;
+    setSlash(null);
+    setDraft(prompt.slice(0, at) + marker + prompt.slice(caret));
+    requestAnimationFrame(() => {
+      node?.focus();
+      node?.setSelectionRange(at + marker.length, at + marker.length);
     });
   };
   // 主消息只负责发起新请求；运行中的补充由独立问答面板或后台交接处理，
@@ -288,8 +338,12 @@ export function ChatPage({
     }
     const clientKey =
       pending?.prompt === value ? pending.key : crypto.randomUUID();
-    sessionStorage.setItem(retryKey, JSON.stringify({ key: clientKey, prompt: value }));
+    sessionStorage.setItem(
+      retryKey,
+      JSON.stringify({ key: clientKey, prompt: value }),
+    );
     setSending(true);
+    setSlash(null);
     follow.current = true;
     setError("");
     setDraft("");
@@ -338,6 +392,40 @@ export function ChatPage({
     : question || questionRequests.length || approval
       ? undefined
       : phaseLabel(task);
+  // 等待用户作答/确认：busy 保持（不能发新消息），但要明说在等什么，
+  // 取消入口仍可用，文案换成「取消任务」。
+  const waitingForUser = Boolean(
+    question || questionRequests.length || approval,
+  );
+  // 等待时把交互区可用高度写进 CSS 变量：min(320px, 工作区高度 50%,
+  // 扣除 composer/等待行/padding 并给历史至少留 100px)。只算高度，无循环。
+  useLayoutEffect(() => {
+    const ws = workspace.current;
+    const dk = dock.current;
+    if (!ws || !dk || !waitingForUser) return;
+    const update = () => {
+      const wsH = ws.getBoundingClientRect().height;
+      const dkH = dk.getBoundingClientRect().height;
+      const waitH =
+        ws.querySelector(".composer-waiting")?.getBoundingClientRect().height ??
+        0;
+      const dkPad = parseFloat(getComputedStyle(dk).paddingTop) || 0;
+      const avail = wsH - dkH - waitH - dkPad - 100;
+      const max = Math.max(
+        0,
+        Math.min(320, Math.floor(wsH * 0.5), Math.floor(avail)),
+      );
+      ws.style.setProperty("--pending-request-max-height", `${max}px`);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(ws);
+    observer.observe(dk);
+    return () => {
+      observer.disconnect();
+      ws.style.removeProperty("--pending-request-max-height");
+    };
+  }, [waitingForUser]);
   // 结构化答复走专用 RPC；旧事件（无 journal 记录）保持 run.input 兼容。
   const answerQuestion = async (
     request: QuestionRequestInfo,
@@ -350,11 +438,17 @@ export function ChatPage({
       if (!text) throw new Error(t.chat.writeReply);
       await api.supplement(request.runId, text, clientKey);
     } else {
-      await api.answerQuestion(request.runId, request.requestId, answers, clientKey);
+      await api.answerQuestion(
+        request.runId,
+        request.requestId,
+        answers,
+        clientKey,
+      );
     }
     // ACK 成功：在发起答复的那个会话里立即终结该请求，迟到的事件/快照
     // 都不能复活它；回调按 origin 归属，不写当前恰好打开的别的聊天。
-    if (origin) session(origin).resolveQuestionRequest(request.runId, request.requestId);
+    if (origin)
+      session(origin).resolveQuestionRequest(request.runId, request.requestId);
   };
   const decideApproval = async (target: RunApproval, approved: boolean) => {
     setError("");
@@ -433,6 +527,13 @@ export function ChatPage({
                   phase={phase}
                   seconds={elapsed}
                   running={busy}
+                  waiting={
+                    waitingForUser
+                      ? approval
+                        ? t.chat.composerWaitingApproval
+                        : t.chat.composerWaitingQuestion
+                      : undefined
+                  }
                   toolLabels={toolLabels}
                   tasks={bootstrap.tasks}
                   currentTask={task}
@@ -487,17 +588,26 @@ export function ChatPage({
           </button>
         </div>
       )}
-      <div className="composer-dock" ref={dock}>
+      {/* 等待期间明示在等什么；ContextMeter（上下文用量）照常保留，不画 spinner。 */}
+      {waitingForUser && (
+        <p className="composer-waiting" role="status">
+          {approval
+            ? t.chat.composerWaitingApproval
+            : t.chat.composerWaitingQuestion}
+        </p>
+      )}
+      {/* 问答/审批独立 dock：与 composer 同宽，不覆盖历史与输入框。 */}
+      <div className="pending-request-dock">
         <PendingRequestLayer
           requests={questionRequests}
           approval={approval}
           now={now}
           conversationId={conversationId}
-          {...(layerMax != null ? { maxHeight: layerMax } : {})}
-          {...(layerCenter != null ? { centerTop: layerCenter } : {})}
           onAnswer={answerQuestion}
           onDecide={decideApproval}
         />
+      </div>
+      <div className="composer-dock" ref={dock} data-waiting={waitingForUser}>
         {(error || data.error) && (
           <Toast
             message={error || data.error}
@@ -511,24 +621,91 @@ export function ChatPage({
             id={inputId}
             ref={textarea}
             aria-label={t.chat.message}
-            placeholder={t.chat.composerPlaceholderNew}
+            placeholder={
+              waitingForUser
+                ? t.chat.composerPlaceholderWaiting
+                : t.chat.composerPlaceholderNew
+            }
             value={prompt}
             disabled={sending || busy}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              const node = event.target;
+              updateSlash(node.value, node.selectionStart ?? node.value.length);
+            }}
             onKeyDown={(event) => {
-              if (event.nativeEvent.isComposing) return;
+              // IME 组合中的按键（含 keyCode 229）一律不拦截。
+              if (event.nativeEvent.isComposing || event.keyCode === 229)
+                return;
               const modified =
                 localStorage.getItem("sleepy-doll-send-key") === "modifier";
-              if (
+              // 菜单选择永远是纯 Enter；发送快捷键才跟随用户偏好。
+              const menuEnter =
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.altKey;
+              const plainEnter =
                 event.key === "Enter" &&
                 !event.shiftKey &&
                 (modified
                   ? event.ctrlKey || event.metaKey
-                  : !event.ctrlKey && !event.metaKey)
-              ) {
+                  : !event.ctrlKey && !event.metaKey);
+              if (slash) {
+                const items = filterSkills(invocableSkills, slash.query);
+                const index = items.length
+                  ? Math.min(slash.index, items.length - 1)
+                  : -1;
+                // 只有看得到匹配项时才截获方向键，普通移动不抢。
+                if (
+                  (event.key === "ArrowDown" || event.key === "ArrowUp") &&
+                  items.length
+                ) {
+                  event.preventDefault();
+                  const next =
+                    (index +
+                      (event.key === "ArrowDown" ? 1 : -1) +
+                      items.length) %
+                    items.length;
+                  setSlash({ ...slash, index: next });
+                  return;
+                }
+                // 光标移出这段 token 就收起，避免菜单挂在过期的查询词上。
+                if (
+                  event.key === "ArrowLeft" ||
+                  event.key === "ArrowRight" ||
+                  event.key === "Home" ||
+                  event.key === "End" ||
+                  event.key === "PageUp" ||
+                  event.key === "PageDown"
+                ) {
+                  setSlash(null);
+                  return;
+                }
+                if (event.key === "Escape") {
+                  setSlash(null);
+                  return;
+                }
+                if (menuEnter && items.length) {
+                  event.preventDefault();
+                  const choice = items[index];
+                  if (choice) applySlashPick(choice.name);
+                  return;
+                }
+              }
+              if (plainEnter) {
                 event.preventDefault();
                 void send();
               }
+            }}
+            onSelect={(event) => {
+              const node = event.currentTarget;
+              if ((node.selectionStart ?? 0) !== (node.selectionEnd ?? 0)) {
+                setSlash(null);
+                return;
+              }
+              updateSlash(node.value, node.selectionStart ?? node.value.length);
             }}
           />
           <div className="composer-actions">
@@ -536,6 +713,10 @@ export function ChatPage({
               skills={invocableSkills}
               disabled={sending || busy}
               onPick={insertSkill}
+              slash={slash}
+              onSlashPick={applySlashPick}
+              onSlashClose={() => setSlash(null)}
+              anchorElement={textarea.current}
             />
             <div className="composer-menu composer-approval">
               <Select
@@ -549,7 +730,6 @@ export function ChatPage({
                 onChange={(mode) =>
                   void act(async () => {
                     await api.setPermission(mode);
-                    await reload();
                   })
                 }
               />
@@ -596,8 +776,20 @@ export function ChatPage({
                 <button
                   type="button"
                   className="send-action"
-                  aria-label={interrupting ? "正在停止" : t.chat.stop}
-                  title={interrupting ? "正在停止" : t.chat.stop}
+                  aria-label={
+                    interrupting
+                      ? "正在停止"
+                      : waitingForUser
+                        ? t.chat.cancelTask
+                        : t.chat.stop
+                  }
+                  title={
+                    interrupting
+                      ? "正在停止"
+                      : waitingForUser
+                        ? t.chat.cancelTask
+                        : t.chat.stop
+                  }
                   aria-busy={interrupting}
                   disabled={interrupting}
                   data-stopping={interrupting}

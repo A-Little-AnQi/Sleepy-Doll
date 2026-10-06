@@ -10,7 +10,7 @@ import {
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
-import { AlertIcon, CheckIcon, CopyIcon } from "../icons";
+import { AlertIcon, CheckIcon, CopyIcon, HelpIcon } from "../icons";
 import { DisclosureChevron } from "../controls/DisclosureChevron";
 import type { ContextActivity, MessageInfo, TaskInfo } from "../../ipc/types";
 import "./Transcript.css";
@@ -245,10 +245,13 @@ function ActivityGroup({
   activities,
   labels,
   active,
+  waiting,
 }: {
   activities: Activity[];
   labels: ToolLabels;
   active: boolean;
+  /** 运行停在等待用户（问答/审批）：pending 不画 spinner，改静态等待提示。 */
+  waiting?: string | undefined;
 }) {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
@@ -256,6 +259,8 @@ function ActivityGroup({
     (activity) => outcome(activity) === "running",
   );
   const running = active && pending;
+  // 等待用户时的 pending 工具：静态图标 + 等待文案，不再是执行中 spinner。
+  const waitingRun = running && waiting;
   const failed = activities.some((activity) => outcome(activity) === "failed");
   const label = [
     ...new Set(
@@ -274,7 +279,9 @@ function ActivityGroup({
         aria-expanded={expanded}
         onClick={() => setExpanded((open) => !open)}
       >
-        {running ? (
+        {waitingRun ? (
+          <HelpIcon className="activity-icon" />
+        ) : running ? (
           <span className="activity-spinner" />
         ) : failed || pending ? (
           <AlertIcon className="activity-icon" />
@@ -285,11 +292,13 @@ function ActivityGroup({
         {subject && <span className="activity-subject">{subject}</span>}
         {(pending || failed) && (
           <span className="activity-outcome">
-            {running
-              ? t.chat.statusRunning
-              : pending
-                ? "未收到结果"
-                : t.transcript.callFailed}
+            {waitingRun
+              ? waiting
+              : running
+                ? t.chat.statusRunning
+                : pending
+                  ? "未收到结果"
+                  : t.transcript.callFailed}
           </span>
         )}
         <DisclosureChevron expanded={expanded} className="activity-expand" />
@@ -553,6 +562,7 @@ export const Transcript = memo(function Transcript({
   tasks = [],
   currentTask,
   running = Boolean(phase),
+  waiting,
   contextActivities = [],
 }: {
   messages: MessageInfo[];
@@ -563,6 +573,8 @@ export const Transcript = memo(function Transcript({
   tasks?: TaskInfo[];
   currentTask?: TaskInfo | undefined;
   running?: boolean;
+  /** 等待用户输入（问答/审批）的提示文案：active turn 不再画执行中 spinner。 */
+  waiting?: string | undefined;
   contextActivities?: ContextActivity[];
 }) {
   const t = useT();
@@ -659,17 +671,16 @@ export const Transcript = memo(function Transcript({
                       !active ||
                       compacting ||
                       Boolean(answer) ||
+                      Boolean(waiting) ||
                       ["awaitingUser", "awaitingApproval"].includes(
                         task?.state ?? "",
                       )
                     }
                   >
                     <span className="activity-spinner" aria-hidden="true" />
-                    <span>
-                      {phase === "正在停止"
-                        ? phase
-                        : t.transcript.thinkingRunning}
-                    </span>
+                    {/* phase 来自运行状态的真实阶段文案（正在检查运行条件/正在执行
+                        等）；没有阶段信息时才退回通用「思考中」。 */}
+                    <span>{phase ?? t.transcript.thinkingRunning}</span>
                     <time aria-hidden="true">{seconds}s</time>
                   </div>
                   <ProcessDisclosure
@@ -693,6 +704,7 @@ export const Transcript = memo(function Transcript({
                             activities={part.activities}
                             labels={toolLabels}
                             active={active}
+                            waiting={waiting}
                           />
                         ) : part.kind === "context" ? (
                           <div

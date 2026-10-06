@@ -2,3 +2,4 @@
 
 /** 由 vite define 注入：package.json 的版本号。 */
 declare const __APP_VERSION__: string;
+declare const __APP_CHANNEL__: "stable" | "test";

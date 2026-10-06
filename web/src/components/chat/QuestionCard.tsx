@@ -9,6 +9,7 @@ import type {
   QuestionRequestInfo,
   RunApproval,
 } from "../../ipc/types";
+import { approvalPresentation, safeApprovalArguments } from "./approval-display";
 import "./QuestionCard.css";
 
 /** 自由文字的选择值：选择按选项下标结构化存储，-1 表示自由文字，
@@ -88,15 +89,15 @@ function ownGet<T>(record: Record<string, T>, key: string): T | undefined {
 }
 
 /** 单题当前的有效答复文本；没答完返回空串。
- *  无选项的纯文字题先走文本分支，不依赖任何选择记录。 */
+ *  选项题：选了选项按选项作答；直接输入文字（或没选）按文字作答。 */
 function answerText(question: QuestionInfo, draft: DraftState): string {
-  if (!question.options?.length)
-    return (ownGet(draft.texts, question.id) ?? "").trim();
+  const text = (ownGet(draft.texts, question.id) ?? "").trim();
+  if (!question.options?.length) return text;
   const pick = ownGet(draft.picks, question.id);
-  if (pick === undefined) return "";
-  if (pick === FREE_PICK) return (ownGet(draft.texts, question.id) ?? "").trim();
-  // 下标必须落在真实选项里；越界的存量草稿按未答处理。
-  return question.options[pick]?.label ?? "";
+  if (pick !== undefined && pick !== FREE_PICK)
+    // 下标必须落在真实选项里；越界的存量草稿按未答处理。
+    return question.options[pick]?.label ?? "";
+  return text;
 }
 
 /** 无原型污染风险的答复表：键来自后端题目 id，也防御 id=__proto__ 之类。 */
@@ -175,6 +176,8 @@ function QuestionRequestCard({
     }
   };
   const advanceOrSubmit = () => {
+    // 空答复 Enter 既不进下一题也不提交。
+    if (!answerText(question, draft)) return;
     if (index < questions.length - 1) patch({ index: index + 1 });
     else void submit();
   };
@@ -197,12 +200,20 @@ function QuestionRequestCard({
       </button>
     );
   const textChanged = (value: string) =>
-    patch({ texts: { ...draft.texts, [question.id]: value } });
+    patch(
+      question.options?.length
+        ? // 选项题里输入文字即放弃已选选项，按文字作答。
+          {
+            texts: { ...draft.texts, [question.id]: value },
+            picks: { ...draft.picks, [question.id]: FREE_PICK },
+          }
+        : { texts: { ...draft.texts, [question.id]: value } },
+    );
   const freeform = (autoFocus = false) => (
     <textarea
       className="pending-request-freeform"
       aria-label={t.chat.writeReply}
-      placeholder={t.chat.composerPlaceholderReply}
+      placeholder={t.chat.answerPlaceholder}
       autoFocus={autoFocus}
       value={ownGet(draft.texts, question.id) ?? ""}
       disabled={sending}
@@ -246,6 +257,8 @@ function QuestionRequestCard({
             role="radiogroup"
             aria-label={question.header}
           >
+            {/* 文字输入在选项之前，填写入口始终一眼可见。 */}
+            {freeform()}
             {question.options.map((option, optionIndex) => (
               <label
                 key={option.label}
@@ -260,6 +273,8 @@ function QuestionRequestCard({
                   onChange={() =>
                     patch({
                       picks: { ...draft.picks, [question.id]: optionIndex },
+                      // 选选项即作答：清掉旧自由文字，两种答案不并存。
+                      texts: { ...draft.texts, [question.id]: "" },
                     })
                   }
                 />
@@ -273,24 +288,6 @@ function QuestionRequestCard({
                 )}
               </label>
             ))}
-            <label
-              className="pending-request-option"
-              data-checked={ownGet(draft.picks, question.id) === FREE_PICK}
-            >
-              <input
-                type="radio"
-                name={`${storageKey}:${question.id}`}
-                disabled={sending}
-                checked={ownGet(draft.picks, question.id) === FREE_PICK}
-                onChange={() =>
-                  patch({ picks: { ...draft.picks, [question.id]: FREE_PICK } })
-                }
-              />
-              <span className="pending-request-option-label">
-                {t.chat.otherAnswer}
-              </span>
-            </label>
-            {ownGet(draft.picks, question.id) === FREE_PICK && freeform()}
           </div>
         ) : (
           freeform()
@@ -351,38 +348,48 @@ function ApprovalCard({
     setConfirming(true);
     void onDecide(approved).finally(() => setConfirming(false));
   };
+  const presentation = approvalPresentation(approval.request);
   return (
     <section
       className="pending-request-card pending-approval-card"
-      aria-label={t.chat.confirmExec}
+      aria-label={presentation.title || t.chat.confirmExec}
     >
       <header className="pending-request-header">
-        <h3>{t.chat.confirmExec}</h3>
-        <span className="pending-request-badge">{t.chat.waitingForReply}</span>
+        <h3>{presentation.title || t.chat.confirmExec}</h3>
+        <span className="pending-request-badge">{t.chat.waitingApproval}</span>
       </header>
       <div className="pending-request-body">
-        <div className="pending-request-text">
-          {approval.request.binding?.description ?? approval.request.methodId}
-        </div>
+        {/* summary/changes 由 helper 保证可读：presentation 优先，空则回退真实参数推导。 */}
+        <div className="pending-request-text">{presentation.summary}</div>
+        <dl className="pending-approval-changes">
+          {presentation.changes.map((change, index) => (
+            <div key={`${index}:${change.label}`} className="pending-approval-change">
+              <dt>{change.label}</dt>
+              <dd>{change.value}</dd>
+            </div>
+          ))}
+        </dl>
         <details>
-          <summary>{t.chat.opParams}</summary>
-          <pre>{JSON.stringify(approval.request.arguments, null, 2)}</pre>
+          <summary>{t.chat.approvalDetails}</summary>
+          <pre>
+            {JSON.stringify(safeApprovalArguments(approval.request.arguments), null, 2)}
+          </pre>
         </details>
       </div>
       <footer className="pending-request-footer">
-        <button
-          className="primary-action"
-          disabled={confirming || expired}
-          onClick={() => decide(true)}
-        >
-          {t.chat.allow}
-        </button>
         <button
           className="secondary-action"
           disabled={confirming || expired}
           onClick={() => decide(false)}
         >
           {t.chat.deny}
+        </button>
+        <button
+          className="primary-action pending-request-submit"
+          disabled={confirming || expired}
+          onClick={() => decide(true)}
+        >
+          {t.chat.allow}
         </button>
         {expired && <p className="muted">{t.chat.approvalExpired}</p>}
       </footer>
@@ -391,17 +398,15 @@ function ApprovalCard({
 }
 
 /**
- * 会话的待处理请求浮层：结构化问答与审批确认都在这里，独立于
- * conversation-flow 与 ComposerDeck 绘制，不占消息和输入框的布局。
- * maxHeight 由宿主按 composer 实际几何计算，短窗口不会越出顶部。
+ * 会话的待处理请求层：结构化问答与审批确认都在这里，作为独立 dock
+ * 出现在 normal flow 里（chat-scroll 之后、composer 之前），不覆盖
+ * 历史与输入框；高度超限在层内部滚动。
  */
 export function PendingRequestLayer({
   requests,
   approval,
   now,
   conversationId,
-  maxHeight,
-  centerTop,
   onAnswer,
   onDecide,
 }: {
@@ -409,9 +414,6 @@ export function PendingRequestLayer({
   approval: RunApproval | undefined;
   now: number;
   conversationId: string | undefined;
-  maxHeight?: number;
-  /** 相对 composer-dock 顶部的浮层垂直中心；0 是有效值，不能按 truthy 丢掉。 */
-  centerTop?: number;
   onAnswer(
     request: QuestionRequestInfo,
     answers: QuestionAnswers,
@@ -421,24 +423,11 @@ export function PendingRequestLayer({
 }) {
   const t = useT();
   if (!requests.length && !approval) return null;
-  const centered = centerTop != null;
   return (
     <div
       className="pending-request-layer"
       role="region"
       aria-label={t.chat.needInfo}
-      style={{
-        ...(maxHeight !== undefined ? { maxHeight } : {}),
-        ...(centered
-          ? {
-              left: "50%",
-              top: centerTop,
-              right: "auto",
-              bottom: "auto",
-              transform: "translate(-50%, -50%)",
-            }
-          : {}),
-      }}
     >
       {approval && (
         <ApprovalCard

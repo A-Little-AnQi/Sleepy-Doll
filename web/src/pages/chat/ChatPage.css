@@ -71,6 +71,8 @@
   min-height: 0;
   padding: 20px 24px 24px;
   overflow-y: auto;
+  /* 两侧都预留滚动条槽，避免只留右边把欢迎区中心挤偏 3-4px。 */
+  scrollbar-gutter: stable both-edges;
 }
 
 .chat-workspace.is-welcome {
@@ -217,6 +219,38 @@
   flex: 0 0 auto;
 }
 
+/* 问答/审批 dock：与 composer 同宽同 padding，正常文档流，
+   在 chat-scroll 之后、composer 之前，不覆盖任何一方。 */
+.pending-request-dock {
+  /* dock 只是布局占位，显式透明，不给圆角外提供任何矩形底色。 */
+  background: transparent;
+  width: 100%;
+  max-width: var(--chat-prose-width);
+  align-self: center;
+  padding: 10px var(--page-padding) 0;
+  flex: 0 0 auto;
+}
+
+.pending-request-dock:empty {
+  display: none;
+}
+
+.pending-request-dock > * {
+  min-width: 0;
+}
+
+/* 等待用户期间的 composer 提示行：说明在等什么，不是 spinner。 */
+.composer-waiting {
+  width: 100%;
+  max-width: var(--chat-prose-width);
+  align-self: center;
+  margin: 0;
+  padding: 10px var(--page-padding) 0;
+  color: var(--secondary);
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
 /* 网格列默认 min-width:auto，会把 composer 行的 min-content 撑破窄窗口；
    释放后操作行才能按上面的收缩规则截断，而不是把 dock 横向撑出滚动。 */
 .composer-dock > * {
@@ -272,8 +306,23 @@
   .composer-dock {
     padding: 12px 24px 24px;
   }
+  .pending-request-dock {
+    padding: 10px 24px 0;
+  }
+  .composer-waiting {
+    padding: 10px 24px 0;
+  }
   .chat-workspace.is-welcome {
     padding-bottom: 0;
+  }
+}
+
+/* 短窗等待用户时压缩主输入框可视高度（只读等待态），草稿内容不变、内部可滚；
+   正常编辑/执行不受影响。 */
+@media (max-height: 680px) {
+  .composer-dock[data-waiting="true"] textarea {
+    max-height: 72px;
+    overflow-y: auto;
   }
 }
 

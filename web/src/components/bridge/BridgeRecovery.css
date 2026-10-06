@@ -3,30 +3,15 @@
   gap: 20px;
   min-width: 0;
 }
+.bridge-recovery .block-head {
+  display: flex;
+  justify-content: flex-start;
+}
 .bridge-recovery .page-title {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-}
-.recovery-intro {
-  margin: 8px 0 0;
-  font-size: 12px;
-}
-.recovery-explanation {
-  border: 1px solid var(--border);
-  padding: 14px 16px;
-  border-radius: 12px;
-  background: var(--subtle);
-  font-size: 12px;
-  color: var(--secondary);
-  line-height: 1.8;
-}
-.recovery-explanation p {
-  margin: 0;
-}
-.recovery-explanation p + p {
-  margin-top: 6px;
 }
 .recovery-list {
   border: 1px solid var(--border);
@@ -115,6 +100,7 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  justify-content: flex-start;
 }
 .recovery-mode [aria-pressed="true"] {
   background: var(--selected);
@@ -148,12 +134,9 @@
   color: var(--secondary);
   padding: 0 4px;
 }
-.recovery-fields label {
-  display: flex;
-  gap: 8px;
-  align-items: center;
+.recovery-fields label,
+.recovery-fields .app-checkbox {
   font-size: 12px;
-  cursor: pointer;
 }
 .recovery-error {
   margin: 0;
@@ -178,7 +161,7 @@
   gap: 10px;
   font-size: 12px;
 }
-.recovery-difference-title span {
+.recovery-difference-title > span {
   color: var(--muted);
   font-size: 11px;
 }
@@ -204,7 +187,13 @@
   overflow-wrap: anywhere;
 }
 .recovery-repreview {
-  justify-self: start;
+  justify-self: end;
+  align-self: flex-end;
+}
+
+.recovery-difference-title .app-checkbox {
+  flex: 1;
+  min-width: 0;
 }
 @media (max-width: 700px) {
   .recovery-values {

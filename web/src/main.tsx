@@ -5,8 +5,11 @@ import { ContextMenu } from "./components/shell/ContextMenu";
 import { DesktopReady } from "./components/shell/DesktopReady";
 import { WindowResizeHandles } from "./components/shell/TitleBar";
 import { framelessWindow } from "./ipc/api";
+import { initAnalytics } from "./app/analytics";
 import "./product.css";
 import "./motion.css";
+
+initAnalytics();
 
 class ErrorBoundary extends Component<
   { children: ReactNode },

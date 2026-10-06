@@ -396,7 +396,7 @@
   display: block;
   width: 6px;
   height: 6px;
-  margin-inline: 6px 10px;
+  margin-inline: 0;
   border-radius: 50%;
   background: var(--text);
   flex-shrink: 0;

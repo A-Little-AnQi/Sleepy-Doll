@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../../ipc/api";
 import { isRunning, readError, taskLabels } from "../../session";
 import type { Bootstrap, TaskSummary } from "../../ipc/types";
-import { ChevronIcon, CloseIcon, HistoryIcon, SearchIcon } from "../icons";
+import { CloseIcon, HistoryIcon, SearchIcon } from "../icons";
 import { TaskCard, type TaskActions } from "../tasks/TaskCard";
 import { taskRun, taskError } from "../tasks/task-display";
+import { taskPlan } from "../tasks/task-plan";
 import { ConfirmDialog } from "../overlay/ConfirmDialog";
 import { Toast } from "../overlay/Toast";
 import "./details-panel.css";
@@ -13,6 +14,7 @@ export function DetailsPanel({
   bootstrap,
   selectedTask,
   onSelectTask,
+  onOpenConversation,
   onConnectTools,
   reload,
   onClose,
@@ -96,7 +98,20 @@ export function DetailsPanel({
     remove: (task) => setRemoving(task),
     connect: () => onConnectTools?.(),
   };
+  const selectedActions = { ...actions };
+  delete selectedActions.open;
   const currentRun = selected ? taskRun(selected, bootstrap.tasks) : undefined;
+  // 与该任务关联的运行记录：倒序取最近 5 条，含进行中的一次。
+  const runs = selected
+    ? bootstrap.tasks
+        .filter(
+          (run) =>
+            run.source?.kind === "savedWorkflow" &&
+            run.source.workflowId === selected.id,
+        )
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, 5)
+    : [];
   return (
     <aside
       ref={panel}
@@ -104,20 +119,10 @@ export function DetailsPanel({
       aria-label="快捷任务"
     >
       <header className="details-head">
-        {selected ? (
-          <button
-            className="icon-button"
-            aria-label="返回快捷任务"
-            onClick={() => onSelectTask(undefined)}
-          >
-            <ChevronIcon className="button-icon shortcut-back-icon" />
-          </button>
-        ) : (
-          <span className="details-heading-icon">
-            <HistoryIcon />
-          </span>
-        )}
-        <h2>{selected ? selected.name : "快捷任务"}</h2>
+        <span className="details-heading-icon">
+          <HistoryIcon />
+        </span>
+        <h2>{selected ? "任务详情" : "快捷任务"}</h2>
         {!selected && <span className="details-count">{tasks.length}</span>}
         <button
           className="icon-button"
@@ -133,39 +138,64 @@ export function DetailsPanel({
           <>
             <TaskCard
               task={selected}
-              activeRun={currentRun}
+              activeRun={isRunning(currentRun) ? currentRun : undefined}
               busy={busy === selected.id}
-              actions={actions}
+              actions={selectedActions}
             />
             <section className="shortcut-purpose">
-              <h3>这项任务</h3>
-              <p>
-                {selected.description ||
-                  `运行 ${selected.shortcut?.targetName}`}
-              </p>
-              <dl>
-                <dt>应用</dt>
-                <dd>{selected.shortcut?.applicationName}</dd>
-                <dt>任务</dt>
-                <dd>{selected.shortcut?.targetName}</dd>
-              </dl>
-              <p className="muted">
-                点击运行即可执行，不会重新配置或重放对话。要调整绑定，在对话里让
-                AI 修改这个入口。
-              </p>
+              <h3>执行内容</h3>
+              <ol className="shortcut-plan">
+                {taskPlan(selected.shortcut).map((line, index) => (
+                  <li key={index}>{line}</li>
+                ))}
+              </ol>
             </section>
-            {currentRun && (
+            {selected.sourceConversationId && !selected.sourceDeleted && (
               <section className="shortcut-purpose">
-                <h3>{isRunning(currentRun) ? "正在运行" : "最近一次运行"}</h3>
-                <p>{taskLabels[currentRun.state] ?? currentRun.state}</p>
-                {currentRun.error && (
-                  <p className="shortcut-run-error">
-                    {taskError(currentRun.error)}
-                  </p>
-                )}
-                <small>{new Date(currentRun.createdAt).toLocaleString()}</small>
+                <div className="shortcut-source-row">
+                  <h3>来源对话</h3>
+                  <small>
+                    更新于 {new Date(selected.updatedAt).toLocaleString()}
+                  </small>
+                </div>
+                <button
+                  className="subtle-action shortcut-source"
+                  onClick={() =>
+                    onOpenConversation(selected.sourceConversationId!)
+                  }
+                >
+                  {selected.sourceTitleSnapshot || "打开对话"}
+                </button>
               </section>
             )}
+            <section className="shortcut-purpose">
+              <h3>运行记录</h3>
+              {runs.length ? (
+                <ul className="detail-runs shortcut-runs">
+                  {runs.map((run) => (
+                    <li key={run.id} data-running={isRunning(run)}>
+                      <div className="detail-run-meta">
+                        <span className="detail-run-state">
+                          <i />
+                          {taskLabels[run.state] ?? run.state}
+                        </span>
+                        <time>{new Date(run.createdAt).toLocaleString()}</time>
+                      </div>
+                      {run.error && (
+                        <p className="shortcut-run-error">
+                          {taskError(run.error)}
+                        </p>
+                      )}
+                      {run.result && (
+                        <p className="shortcut-run-result">{run.result}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>尚未运行。</p>
+              )}
+            </section>
           </>
         ) : (
           <>

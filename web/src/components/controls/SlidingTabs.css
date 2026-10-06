@@ -11,14 +11,14 @@
 
 .sd-tabs-pill {
   position: absolute;
-  top: 4px;
-  bottom: 4px;
   left: 0;
+  top: 0;
   z-index: 0;
   border-radius: 6px;
   background: var(--selected);
   pointer-events: none;
   opacity: 0;
+  /* left/top/width/height 由组件按当前选中按钮的本地 offset 精确设置（含高度与顶部）。 */
 }
 
 .sd-tabs-pill[data-ready="true"] {

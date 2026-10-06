@@ -100,7 +100,7 @@ export function TasksPage({
           </p>
         </div>
       </div>
-      <div className="list-toolbar">
+      <div className="list-toolbar tasks-tabs-toolbar">
         <SlidingTabs
           ariaLabel="快捷任务"
           value={tab}
@@ -120,7 +120,7 @@ export function TasksPage({
         </span>
       </div>
       {error && <Toast message={error} onDismiss={() => setError("")} />}
-      <div className="list-toolbar">
+      <div className="list-toolbar tasks-filter-toolbar">
         <label className="search-field">
           <SearchIcon />
           <input

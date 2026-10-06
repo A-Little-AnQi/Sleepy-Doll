@@ -112,6 +112,12 @@ export function Select({
       side.current = undefined;
       return;
     }
+    // 打开时记下边界的初始滚动值：迟到的 scroll 事件（如点击前
+    // scrollIntoView 已完成的滚动）值未变，不应误关菜单。
+    const boundaryEl = trigger.current?.closest("[data-select-boundary]");
+    const boundaryScroll = boundaryEl
+      ? { top: boundaryEl.scrollTop, left: boundaryEl.scrollLeft }
+      : null;
     const place = (event?: Event) => {
       // 列表自身滚动时不重算定位。
       if (
@@ -120,8 +126,32 @@ export function Select({
       ) {
         return;
       }
+      // 有边界的 Select：resize 直接收起；边界自身的真实滚动（值变化）
+      // 也收起，避免触发器滚出可见区后菜单越过边界；值未变的迟到
+      // 事件忽略；边界以外的滚动按原逻辑重定位。无边界语义不变。
+      if (boundaryEl && event) {
+        if (event.type === "resize") {
+          setOpen(false);
+          return;
+        }
+        if (event.target instanceof Node && boundaryEl.contains(event.target)) {
+          if (
+            boundaryEl.scrollTop === boundaryScroll?.top &&
+            boundaryEl.scrollLeft === boundaryScroll?.left
+          ) {
+            return;
+          }
+          setOpen(false);
+          return;
+        }
+      }
       const anchor = trigger.current?.getBoundingClientRect();
       if (!anchor) return;
+      const boundary = boundaryEl?.getBoundingClientRect();
+      const limitTop = boundary ? Math.max(MARGIN, boundary.top) : MARGIN;
+      const limitBottom = boundary
+        ? Math.min(window.innerHeight - MARGIN, boundary.bottom)
+        : window.innerHeight - MARGIN;
       const width = Math.min(
         Math.max(anchor.width, roomy ? 240 : 0),
         window.innerWidth - MARGIN * 2,
@@ -130,20 +160,21 @@ export function Select({
         Math.max(MARGIN, anchor.left),
         window.innerWidth - width - MARGIN,
       );
-      const below = window.innerHeight - anchor.bottom - GAP - MARGIN;
-      const above = anchor.top - GAP - MARGIN;
+      const below = limitBottom - anchor.bottom - GAP;
+      const above = anchor.top - GAP - limitTop;
       if (side.current == null) {
         side.current = below < 160 && above > below ? "above" : "below";
       }
       const flip = side.current === "above";
       const available = flip ? above : below;
+      const floor = boundary ? 0 : 120;
       const next: Placement = {
         left,
         ...(flip
           ? { bottom: window.innerHeight - anchor.top + GAP }
           : { top: anchor.bottom + GAP }),
         width,
-        maxHeight: Math.max(120, Math.min(300, available)),
+        maxHeight: Math.max(floor, Math.min(300, available)),
       };
       setPlacement((current) =>
         samePlacement(current, next) ? current : next,

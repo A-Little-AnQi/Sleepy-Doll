@@ -14,8 +14,8 @@
 }
 
 .select-trigger > span {
-  /* 行高归一后文字 em 框直接参与居中，字面中心与箭头中心同高。 */
-  line-height: 1;
+  /* 使用字体自然行高，保留下伸字母的完整字形。 */
+  line-height: normal;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;

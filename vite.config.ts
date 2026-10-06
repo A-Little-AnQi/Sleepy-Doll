@@ -101,6 +101,9 @@ export default defineConfig({
   plugins: [react(), designCssLast(), ipcProxy()],
   // 版本号唯一来源是 package.json：更新弹窗拿它和本地记录比对。
   define: {
+    __APP_CHANNEL__: JSON.stringify(
+      JSON.parse(fs.readFileSync(fileURLToPath(new URL("./release-channel.json", import.meta.url)), "utf8")).channel,
+    ),
     __APP_VERSION__: JSON.stringify(
       JSON.parse(
         fs.readFileSync(

@@ -27,7 +27,8 @@ export type Page =
   | "extensions"
   | "bridge"
   | "settings"
-  | "sponsor";
+  | "sponsor"
+  | "about";
 
 export default function App() {
   const t = useT();
@@ -232,7 +233,10 @@ export default function App() {
         setPage("chat");
       }}
       onConversation={openConversation}
-      onToggleDetails={() => setDetailsOpen(!detailsOpen)}
+      onToggleDetails={() => {
+        if (!detailsOpen) setSelectedTask(undefined);
+        setDetailsOpen(!detailsOpen);
+      }}
       reload={reload}
       composingNewChat={composingNewChat}
     >
@@ -281,7 +285,8 @@ export default function App() {
             section={
               visiblePage === "models" ||
               visiblePage === "bridge" ||
-              visiblePage === "sponsor"
+              visiblePage === "sponsor" ||
+              visiblePage === "about"
                 ? visiblePage
                 : "settings"
             }

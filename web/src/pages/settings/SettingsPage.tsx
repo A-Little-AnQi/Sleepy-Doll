@@ -7,10 +7,12 @@ import {
   ModelIcon,
   SettingsIcon,
   BrandIcon,
+  HelpIcon,
 } from "../../components/icons";
 import { Select } from "../../components/controls/Select";
 import { ThemeSwitch } from "../../components/controls/ThemeSwitch";
 import { ModelsPage } from "./ModelsPage";
+import { AboutPage } from "./AboutPage";
 import { BridgePage } from "../bridge/BridgePage";
 /** 更新弹窗的指南链接要跳到的设置页（跨页面打开）。 */
 export type HelpOpen = "models" | "bridge" | "extensions" | "tasks";
@@ -27,9 +29,8 @@ import {
 } from "../../appearance/locale";
 import { useT } from "../../i18n";
 import sponsorQr from "../../brand/sponsor-qr.jpg";
-import { ReleaseSettings } from "../../app/ReleaseSettings";
 
-type Section = "settings" | "models" | "bridge" | "sponsor";
+type Section = "settings" | "models" | "bridge" | "sponsor" | "about";
 
 export function SettingsPage({
   bootstrap,
@@ -71,135 +72,128 @@ export function SettingsPage({
   }, [bootstrap.configPath]);
   return (
     <div className="settings-layout">
-      <div className="settings-nav">
-        <SlidingTabs
-          ariaLabel={t.settings.categories}
-          value={section}
-          onChange={onSection}
-          items={[
-            {
-              id: "settings",
-              name: t.settings.general,
-              icon: <SettingsIcon className="button-icon" />,
-            },
-            {
-              id: "models",
-              name: t.settings.models,
-              icon: <ModelIcon className="button-icon" />,
-            },
-            ...(hostPluginEnabled(bootstrap)
-              ? [
-                  {
-                    id: "bridge" as const,
-                    name: t.settings.bettergi,
-                    icon: <BridgeIcon className="button-icon" />,
-                  },
-                ]
-              : []),
-            {
-              id: "sponsor",
-              name: t.settings.sponsor,
-              icon: <BrandIcon className="button-icon" />,
-            },
-          ]}
-        />
-      </div>
-      <div className="settings-content">
-        {section === "models" ? (
-          <ModelsPage bootstrap={bootstrap} reload={reload} />
-        ) : section === "bridge" ? (
-          <BridgePage bootstrap={bootstrap} reload={reload} />
-        ) : section === "sponsor" ? (
-          <SponsorNote />
-        ) : (
-          <div className="settings-general">
-            <h2>{t.settings.general}</h2>
-            <section className="settings-group">
-              <SettingRow label={t.settings.theme}>
-                <ThemeSwitch theme={theme} onChange={writeTheme} />
-              </SettingRow>
-              <SettingRow label={t.settings.language}>
-                <Select
-                  label={t.settings.language}
-                  value={locale}
-                  options={LOCALE_OPTIONS}
-                  onChange={(value) => writeLocale(value as LocaleId)}
-                />
-              </SettingRow>
-            </section>
-            <section className="settings-group">
-              <h3>{t.settings.dialogHeading}</h3>
-              <SettingRow label={t.settings.sendKey}>
-                <Select
-                  label={t.settings.sendKey}
-                  value={sendKey}
-                  options={[
-                    { value: "enter", label: t.settings.sendKeyEnter },
-                    { value: "modifier", label: t.settings.sendKeyModifier },
-                  ]}
-                  onChange={(value) => {
-                    setSendKey(value);
-                    localStorage.setItem("sleepy-doll-send-key", value);
-                  }}
-                />
-              </SettingRow>
-            </section>
-            {trayEnabled !== null ? (
+      <div className="settings-column">
+        <div className="settings-nav">
+          <SlidingTabs
+            ariaLabel={t.settings.categories}
+            value={section}
+            onChange={onSection}
+            items={[
+              {
+                id: "settings",
+                name: t.settings.general,
+                icon: <SettingsIcon className="button-icon" />,
+              },
+              {
+                id: "models",
+                name: t.settings.models,
+                icon: <ModelIcon className="button-icon" />,
+              },
+              ...(hostPluginEnabled(bootstrap)
+                ? [
+                    {
+                      id: "bridge" as const,
+                      name: t.settings.bettergi,
+                      icon: <BridgeIcon className="button-icon" />,
+                    },
+                  ]
+                : []),
+              {
+                id: "sponsor",
+                name: t.settings.sponsor,
+                icon: <BrandIcon className="button-icon" />,
+              },
+              {
+                id: "about",
+                name: t.settings.about,
+                icon: <HelpIcon className="button-icon" />,
+              },
+            ]}
+          />
+        </div>
+        <div
+          className={`settings-content${section === "models" ? " is-models" : ""}`}
+        >
+          {section === "models" ? (
+            <ModelsPage bootstrap={bootstrap} reload={reload} />
+          ) : section === "bridge" ? (
+            <BridgePage bootstrap={bootstrap} reload={reload} />
+          ) : section === "sponsor" ? (
+            <SponsorNote />
+          ) : section === "about" ? (
+            <AboutPage />
+          ) : (
+            <div className="settings-general">
+              <h2>{t.settings.general}</h2>
               <section className="settings-group">
-                <h3>{t.settings.tray}</h3>
-                <SettingRow
-                  label={t.settings.trayIcon}
-                  hint={t.settings.trayIconHint}
-                >
+                <SettingRow label={t.settings.theme}>
+                  <ThemeSwitch theme={theme} onChange={writeTheme} />
+                </SettingRow>
+                <SettingRow label={t.settings.language}>
                   <Select
-                    label={t.settings.trayIcon}
-                    value={trayEnabled ? "show" : "hide"}
+                    label={t.settings.language}
+                    value={locale}
+                    options={LOCALE_OPTIONS}
+                    onChange={(value) => writeLocale(value as LocaleId)}
+                  />
+                </SettingRow>
+              </section>
+              <section className="settings-group">
+                <h3>{t.settings.dialogHeading}</h3>
+                <SettingRow label={t.settings.sendKey}>
+                  <Select
+                    label={t.settings.sendKey}
+                    value={sendKey}
                     options={[
-                      { value: "show", label: t.settings.trayShow },
-                      { value: "hide", label: t.settings.trayHide },
+                      { value: "enter", label: t.settings.sendKeyEnter },
+                      { value: "modifier", label: t.settings.sendKeyModifier },
                     ]}
                     onChange={(value) => {
-                      const next = value === "show";
-                      setTrayEnabled(next);
-                      api
-                        .traySetEnabled(next)
-                        .catch(() => setTrayEnabled(!next));
+                      setSendKey(value);
+                      localStorage.setItem("sleepy-doll-send-key", value);
                     }}
                   />
                 </SettingRow>
               </section>
-            ) : null}
-            <section className="settings-group">
-              <h3>{t.settings.configHeading}</h3>
-              <SettingRow label={t.settings.configFile} hint={configPath}>
-                <button
-                  className="subtle-action"
-                  onClick={() => setEditing(true)}
-                >
-                  编辑配置
-                </button>
-              </SettingRow>
-            </section>
-            <button
-              type="button"
-              className="settings-about"
-              onClick={() =>
-                window.dispatchEvent(
-                  new CustomEvent("sleepy-doll:open-release-notes", {
-                    detail: "changelog",
-                  }),
-                )
-              }
-              title={t.settings.releaseNotes}
-            >
-              <BrandIcon className="brand-mark" />
-              <span>
-                Sleepy Doll <span className="muted">{__APP_VERSION__}</span>
-              </span>
-            </button>
-            <ReleaseSettings />
-          </div>
-        )}
+              {trayEnabled !== null ? (
+                <section className="settings-group">
+                  <h3>{t.settings.tray}</h3>
+                  <SettingRow
+                    label={t.settings.trayIcon}
+                    hint={t.settings.trayIconHint}
+                  >
+                    <Select
+                      label={t.settings.trayIcon}
+                      value={trayEnabled ? "show" : "hide"}
+                      options={[
+                        { value: "show", label: t.settings.trayShow },
+                        { value: "hide", label: t.settings.trayHide },
+                      ]}
+                      onChange={(value) => {
+                        const next = value === "show";
+                        setTrayEnabled(next);
+                        api
+                          .traySetEnabled(next)
+                          .catch(() => setTrayEnabled(!next));
+                      }}
+                    />
+                  </SettingRow>
+                </section>
+              ) : null}
+              <section className="settings-group">
+                <h3>{t.settings.configHeading}</h3>
+                <SettingRow label={t.settings.configFile} hint={configPath}>
+                  <button
+                    className="subtle-action"
+                    onClick={() => setEditing(true)}
+                  >
+                    编辑配置
+                  </button>
+                </SettingRow>
+              </section>
+            </div>
+          )}
+        </div>
       </div>
       <ConfigEditor
         path={configPath}

@@ -3,6 +3,10 @@
   gap: 20px;
 }
 
+.extensions-page > .page-title {
+  text-align: left;
+}
+
 .extension-list {
   border: 1px solid var(--border);
   border-radius: 10px;

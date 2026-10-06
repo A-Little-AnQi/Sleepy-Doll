@@ -366,6 +366,7 @@ export function ModelsPage({
               void save();
             }}
           >
+            <div className="model-form-scroll" data-select-boundary="true">
             <header className="model-form-head">
               <h3>
                 {creating
@@ -649,10 +650,8 @@ export function ModelsPage({
                 </div>
               </div>
             </section>
+            </div>
             <footer className="detail-actions">
-              <button className="primary-action" disabled={busy}>
-                {busy ? t.models.saving : t.common.save}
-              </button>
               {selected && !selected.active && (
                 <button
                   type="button"
@@ -681,6 +680,9 @@ export function ModelsPage({
                   删除配置
                 </button>
               )}
+              <button className="primary-action" disabled={busy}>
+                {busy ? t.models.saving : t.common.save}
+              </button>
             </footer>
           </form>
         </MotionSwitch>

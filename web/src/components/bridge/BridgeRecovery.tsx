@@ -4,6 +4,7 @@ import { readError } from "../../session";
 import { Dialog } from "../overlay/Dialog";
 import { Toast } from "../overlay/Toast";
 import { SlidingTabs } from "../controls/SlidingTabs";
+import { Checkbox } from "../controls/Checkbox";
 import { ChevronIcon, SearchIcon } from "../icons";
 import type { RecoveryRecord, RecoveryPreview } from "../../ipc/types";
 import "./BridgeRecovery.css";
@@ -150,7 +151,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
   const open = (record: RecoveryRecord) => {
     setSelected(record);
     setMode(record.paths.length ? "fields" : "full");
-    setPaths(record.paths.slice(0, 20));
+    setPaths([]);
     setPreview(undefined);
     setPreviewError("");
   };
@@ -222,9 +223,6 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
       <div className="page-title">
         <div>
           <h2>配置恢复</h2>
-          <p className="muted recovery-intro">
-            先查看恢复范围与目标值，再确认恢复。
-          </p>
         </div>
         <button
           className="secondary-action"
@@ -233,17 +231,6 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
         >
           {loading ? "正在读取" : "刷新记录"}
         </button>
-      </div>
-      <div className="recovery-explanation">
-        <p>
-          <strong>设置变更</strong>
-          ：选择要恢复的设置，保留其他配置。连接正常且没有任务运行时，可直接恢复。
-        </p>
-        <p>
-          <strong>完整备份</strong>
-          ：用于配置损坏等情况，会替换整份配置。需先退出对应的
-          BetterGI，避免自动保存把恢复结果覆盖。
-        </p>
       </div>
       {notice && (
         <div className="recovery-success" role="status">
@@ -348,12 +335,10 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
           <>
             <span className="recovery-preview-status">
               {previewing
-                ? "正在核对当前配置…"
-                : preview?.online
-                  ? "通过当前连接恢复，内存与文件会一起更新。"
-                  : mode === "full"
-                    ? "恢复前会另存当前配置；本次将替换整份配置。"
-                    : "恢复前会另存当前配置；其他设置保留。"}
+                ? "正在核对…"
+                : mode === "fields" && paths.length >= 20
+                  ? "单次最多 20 项"
+                  : ""}
             </span>
             <button
               className="subtle-action"
@@ -372,8 +357,8 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
               {restoring
                 ? "恢复中…"
                 : mode === "full"
-                  ? "确认恢复完整配置"
-                  : `恢复所选 ${paths.length} 项`}
+                  ? "恢复完整配置"
+                  : `恢复 ${paths.length} 项`}
             </button>
           </>
         }
@@ -386,7 +371,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
               disabled={restoring}
               onClick={() => setMode("fields")}
             >
-              仅恢复所选设置
+              所选设置
             </button>
             <button
               className="subtle-action"
@@ -394,7 +379,7 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
               disabled={restoring}
               onClick={() => setMode("full")}
             >
-              改用完整备份
+              完整配置
             </button>
           </div>
         ) : null}
@@ -403,33 +388,8 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
         )}
         {mode === "full" && (
           <p className="recovery-full-warning">
-            这会恢复备份时的所有设置，之后的其他配置修改也会被替换。脚本、路线和配置组文件不会由此恢复。
+            将替换整份配置，不恢复脚本、路线或配置组。恢复前请退出 BetterGI。
           </p>
-        )}
-        {mode === "fields" && selected && (
-          <fieldset className="recovery-fields">
-            <legend>选择需要恢复的设置（单次最多 20 项）</legend>
-            {fields(selected).map((field) => (
-              <label key={field.path}>
-                <input
-                  type="checkbox"
-                  checked={paths.includes(field.path)}
-                  disabled={
-                    restoring ||
-                    (!paths.includes(field.path) && paths.length >= 20)
-                  }
-                  onChange={(event) =>
-                    setPaths((current) =>
-                      event.target.checked
-                        ? [...current, field.path]
-                        : current.filter((path) => path !== field.path),
-                    )
-                  }
-                />
-                {field.label}
-              </label>
-            ))}
-          </fieldset>
         )}
         {previewError && (
           <p className="recovery-error" role="alert">
@@ -441,49 +401,71 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
             {preview.reason}
           </p>
         )}
-        {previewing ? (
-          <p className="muted" role="status">
-            正在读取当前值与备份值…
-          </p>
-        ) : (
-          preview && (
-            <div className="recovery-differences">
-              {preview.differences.map((row) => (
-                <section className="recovery-difference" key={row.path}>
-                  <div className="recovery-difference-title">
-                    <strong>{row.label}</strong>
-                    <span>
-                      {!row.changed
-                        ? "无需变化"
-                        : row.related
-                          ? "联动设置"
-                          : row.laterChanged
-                            ? "后来还改过，此次会替换"
-                            : "将恢复"}
-                    </span>
-                  </div>
-                  <div className="recovery-values">
-                    <div>
-                      <small>当前值</small>
-                      <pre>{valueText(row.current)}</pre>
-                    </div>
-                    <div>
-                      <small>恢复为</small>
-                      <pre>{valueText(row.restore)}</pre>
-                    </div>
-                  </div>
-                </section>
-              ))}
-            </div>
-          )
-        )}
         {selected && (
+          <div className="recovery-differences">
+            {(mode === "fields"
+              ? fields(selected)
+              : (preview?.differences ?? [])
+            ).map((field) => {
+              const row = preview?.differences.find(
+                (item) => item.path === field.path,
+              );
+              const checked = paths.includes(field.path);
+              return (
+                <section className="recovery-difference" key={field.path}>
+                  <div className="recovery-difference-title">
+                    {mode === "fields" ? (
+                      <Checkbox
+                        checked={checked}
+                        disabled={restoring || (!checked && paths.length >= 20)}
+                        onChange={(next) =>
+                          setPaths((current) =>
+                            next
+                              ? [...current, field.path]
+                              : current.filter((path) => path !== field.path),
+                          )
+                        }
+                        label={field.label}
+                      />
+                    ) : (
+                      <strong>{field.label}</strong>
+                    )}
+                    {row && (mode === "full" || checked) && (
+                      <span>
+                        {!row.changed
+                          ? "无变化"
+                          : row.related
+                            ? "联动设置"
+                            : row.laterChanged
+                              ? "将覆盖后续修改"
+                              : "将恢复"}
+                      </span>
+                    )}
+                  </div>
+                  {row && (mode === "full" || checked) && (
+                    <div className="recovery-values">
+                      <div>
+                        <small>当前值</small>
+                        <pre>{valueText(row.current)}</pre>
+                      </div>
+                      <div>
+                        <small>恢复为</small>
+                        <pre>{valueText(row.restore)}</pre>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        )}
+        {selected && (mode === "full" || paths.length > 0) && (
           <button
             className="subtle-action recovery-repreview"
             disabled={previewing || restoring}
             onClick={() => setGeneration((value) => value + 1)}
           >
-            重新核对当前配置
+            刷新预览
           </button>
         )}
       </Dialog>

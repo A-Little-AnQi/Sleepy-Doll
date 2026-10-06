@@ -1,0 +1,66 @@
+/* 软件更新区：说明文字自然换行，动作按钮与设置控件同宽对齐。 */
+.release-settings .setting-row-copy {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.release-settings .setting-row-hint {
+  font-family: inherit;
+  font-size: var(--font-meta);
+  line-height: 1.5;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.release-settings .setting-row-control > button,
+.release-actions .primary-action {
+  width: var(--setting-control-width, 140px);
+  max-width: 100%;
+}
+
+.release-settings .setting-row-control > button {
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0 12px;
+}
+
+.release-actions {
+  display: grid;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.release-info {
+  display: grid;
+  gap: 4px;
+}
+
+.release-info strong {
+  font-size: var(--font-body);
+  font-weight: 600;
+}
+
+.release-notes {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.release-error {
+  margin: 0;
+  color: var(--secondary);
+  font-size: var(--font-meta);
+}
+
+@media (max-width: 700px) {
+  .release-settings .setting-row-control > button,
+  .release-actions .primary-action {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+}
