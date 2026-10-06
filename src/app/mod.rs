@@ -800,7 +800,10 @@ impl AppController {
                 let mode: PermissionMode = serde_json::from_value(params["mode"].clone())
                     .map_err(|_| Error::Config("未知的审批级别".into()))?;
                 AppConfig::set_permission_mode(&self.config_path, mode)?;
-                self.reload_runtime()?;
+                // 对话执行中可切：走热更新，只同步两份内存配置的这一字段，
+                // 不取 model_gate、不重建 hooks/plugins、不打断当前任务。
+                self.config.lock().unwrap().runtime.permission_mode = mode;
+                self.supervisor.update_permission_mode(mode);
                 Ok(json!({"mode":mode,"label":mode.label()}))
             }
             "model.use" => self.use_model(required(&params, "id")?),

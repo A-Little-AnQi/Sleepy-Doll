@@ -32,7 +32,7 @@ use tao::{
 #[cfg(target_os = "windows")]
 use wry::WebViewBuilderExtWindows;
 use wry::{
-    WebContext, WebView, WebViewBuilder,
+    NewWindowResponse, WebContext, WebView, WebViewBuilder,
     http::{Request, Response, header::CONTENT_TYPE},
 };
 
@@ -273,6 +273,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let proxy = event_loop.create_proxy();
     #[cfg(target_os = "windows")]
     install_panic_hotkey(proxy.clone());
+    {
+        // 统计事件不再发官网：把白名单负载转交给界面，由其中的 Google tag 直连发送。
+        // 启动早期（app_start 等）积压的事件会在注册时按序补发；FrontendReady
+        // 前由事件循环的 pending_messages 缓存。
+        let distribution = controller.distribution.clone();
+        let analytics_proxy = proxy.clone();
+        distribution.set_sink(Arc::new(move |payload| {
+            let _ = analytics_proxy.send_event(UserEvent::ToWeb(
+                json!({"kind":"event","id":"analytics","result":payload}),
+            ));
+        }));
+    }
     let placement_path = window_placement_path(&user_directory);
     let placement = load_window_placement(&placement_path)
         .filter(|placement| placement_is_visible(placement, &event_loop));
@@ -369,21 +381,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return true;
             }
             // Markdown 链接在系统浏览器里打开。
-            if url::Url::parse(&destination)
-                .is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
-            {
-                #[cfg(target_os = "windows")]
-                let _ = std::process::Command::new("explorer.exe")
-                    .arg(&destination)
-                    .spawn();
-                #[cfg(target_os = "linux")]
-                let _ = std::process::Command::new("xdg-open")
-                    .arg(&destination)
-                    .spawn();
-                #[cfg(target_os = "macos")]
-                let _ = std::process::Command::new("open").arg(&destination).spawn();
-            }
+            open_external_url(&destination);
             false
+        })
+        .with_new_window_req_handler(|destination, _features| {
+            // target=_blank 的外链同样交给系统浏览器，WebView 内不弹窗。
+            open_external_url(&destination);
+            NewWindowResponse::Deny
         })
         .with_url("sleepy://localhost/")
         .with_devtools(cfg!(debug_assertions))
@@ -1429,6 +1433,27 @@ fn is_application_url(value: &str) -> bool {
             && url.username().is_empty()
             && url.password().is_none()
     })
+}
+
+/// 把 HTTP(S) 链接交给系统默认浏览器；其他 scheme 不处理。打开失败只记日志。
+fn open_external_url(destination: &str) {
+    if !url::Url::parse(destination).is_ok_and(|url| matches!(url.scheme(), "http" | "https")) {
+        return;
+    }
+    #[cfg(target_os = "windows")]
+    let opened = std::process::Command::new("explorer.exe")
+        .arg(destination)
+        .spawn();
+    #[cfg(target_os = "linux")]
+    let opened = std::process::Command::new("xdg-open")
+        .arg(destination)
+        .spawn();
+    #[cfg(target_os = "macos")]
+    let opened = std::process::Command::new("open").arg(destination).spawn();
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    if let Err(error) = opened {
+        log::warn!("系统浏览器打开 {destination} 失败：{error}");
+    }
 }
 
 fn asset_response(request: Request<Vec<u8>>) -> Response<Vec<u8>> {

@@ -54,6 +54,34 @@ impl PermissionMode {
     }
 }
 
+/// 会话进行中切到新审批级别时，仍在等待用户答复的审批如何按新级别继续。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingApprovalEffect {
+    /// 切到完全控制：等待中的审批按新级别视为同意。
+    Approved,
+    /// 切到只读：未提交的写入不再执行，按可恢复错误交回。
+    Denied,
+    /// 其余级别仍等用户的显式答复。
+    KeepWaiting,
+}
+
+/// 切换审批级别对等待中审批的影响。只看最新级别本身：
+/// 已被用户答复或已过期的审批不受此判定约束，不会被覆盖。
+pub fn pending_approval_on_switch(latest: PermissionMode) -> PendingApprovalEffect {
+    match latest {
+        PermissionMode::FullAccess => PendingApprovalEffect::Approved,
+        PermissionMode::PlanOnly => PendingApprovalEffect::Denied,
+        PermissionMode::AskEach | PermissionMode::TrustedScopes => {
+            PendingApprovalEffect::KeepWaiting
+        }
+    }
+}
+
+/// 切到只读后未提交写入的可恢复拒绝文案（交给模型重读继续，不是终态）。
+pub fn plan_only_blocked_message() -> &'static str {
+    "审批级别已切为只读，本次写入未提交；需要修改时请等用户调回可写级别"
+}
+
 /// 大范围判定的阈值。
 pub const LARGE_SCOPE_FIELDS: usize = 10;
 pub const LARGE_SCOPE_OBJECTS: usize = 3;

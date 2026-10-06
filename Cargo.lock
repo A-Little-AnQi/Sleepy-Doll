@@ -2856,7 +2856,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "sleepy-doll"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "embed-resource",
@@ -2865,9 +2865,11 @@ dependencies = [
  "jsonschema",
  "log",
  "mime_guess",
+ "regex",
  "reqwest",
  "rusqlite",
  "rust-embed",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",

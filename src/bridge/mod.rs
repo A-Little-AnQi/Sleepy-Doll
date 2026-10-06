@@ -1,5 +1,6 @@
 //! 与 BetterGI 的接触面：桥的客户端、工具，以及桥进程的生命周期。
 
+pub(crate) mod approval;
 pub mod control;
 pub mod features;
 pub(crate) mod origin;
@@ -265,6 +266,9 @@ fn user_path(root: &Path, relative: &str) -> Result<PathBuf> {
 pub struct BgiClient {
     config: BridgeConfig,
     agent: ureq::Agent,
+    /// 生产恒为 true：每个非 info 请求前都核对对端进程来源。只有本地
+    /// 假服务器的测试经 for_tests 置 false；不构成公开 API。
+    origin_preflight: bool,
 }
 
 impl BgiClient {
@@ -273,7 +277,20 @@ impl BgiClient {
             .timeout_global(Some(Duration::from_millis(config.timeout_ms)))
             .build()
             .new_agent();
-        Self { config, agent }
+        Self {
+            config,
+            agent,
+            origin_preflight: true,
+        }
+    }
+
+    /// 仅供测试：本地假服务器没有官方 BetterGI 进程，跳过来源预检。
+    #[cfg(test)]
+    pub(crate) fn for_tests(config: BridgeConfig) -> Self {
+        Self {
+            origin_preflight: false,
+            ..Self::new(config)
+        }
     }
 
     pub fn enabled(&self) -> bool {
@@ -371,7 +388,7 @@ impl BgiClient {
         if !self.config.enabled {
             return Err(Error::Tool("BGI Bridge 未启用".into()));
         }
-        if path != "/bridge/v1/info" {
+        if path != "/bridge/v1/info" && self.origin_preflight {
             control::info(&self.config)?;
         }
         let url = format!("{}{}", self.config.base_url.trim_end_matches('/'), path);
@@ -670,7 +687,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         (
             "bgi.user.write",
             "写入配置文件",
-            "原子创建或替换 BetterGI User 资源文件。已有文件必须提交 user.read 返回的 sha256，写入前校验 JSON、比较版本并保留独立备份；写后自动核验。不得修改 User/config.json。",
+            "原子创建或替换 BetterGI User 资源文件。替换已有文件必须先在本轮重新 user.read 并提交它返回的 sha256；历史轮读取的内容与 sha256 不是当前证据。校验不一致时本次不写入，会以 ok:false 返回版本冲突——重新读取最新文件，保留其中新出现的变更，只改用户目标的字段后再次提交；只有确实无法确定改法时才询问用户。写入前校验 JSON、比较版本并保留独立备份；写后自动核验。不得修改 User/config.json。",
             json!({"type":"object","properties":{"path":{"type":"string","description":"相对 User 路径；不得是 config.json"},"content":{"type":"string","description":"保留未知字段后的完整文件内容"},"expectedSha256":{"type":"string","pattern":"^[0-9a-f]{64}$","description":"替换已有文件时必填，使用最近一次 user.read 返回的 sha256；新建文件省略"}},"required":["path","content"],"additionalProperties":false}),
             {
                 let client = client.clone();
@@ -696,14 +713,14 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
                             Error::Tool("目标已存在；必须先读取并提交 expectedSha256，未写入".into())
                         })?;
                         if actual != expected {
-                            return Err(Error::Conflict(
+                            return Err(Error::Stale(
                                 "目标文件在读取后发生变化；未覆盖较新的内容，请重新读取".into(),
                             ));
                         }
                         Some(actual)
                     } else {
                         if a.get("expectedSha256").is_some() {
-                            return Err(Error::Conflict(
+                            return Err(Error::Stale(
                                 "目标文件已不存在；未按替换请求重新创建".into(),
                             ));
                         }
@@ -756,7 +773,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
                     let current = fs::read(&path)
                         .map_err(|error| Error::Tool(format!("读取当前目标失败，未恢复：{error}")))?;
                     if sha256(&current) != a["expectedSha256"].as_str().unwrap_or("") {
-                        return Err(Error::Conflict(
+                        return Err(Error::Stale(
                             "目标文件在写入后又发生变化；未覆盖较新的内容".into(),
                         ));
                     }
@@ -839,4 +856,198 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod user_write_tests {
+    use super::*;
+    use std::io::{Read, Write as IoWrite};
+    use std::net::TcpListener;
+
+    /// 只应答 GET /bridge/v1/host 的假桥：user.write 的其余逻辑全在本地文件上。
+    /// 返回 RAII 守卫：Drop 时停止接收循环并 join 线程，不遗留端口占用。
+    struct FakeHostBridge {
+        base_url: String,
+        address: std::net::SocketAddr,
+        stop: Arc<std::sync::atomic::AtomicBool>,
+        handle: Option<std::thread::JoinHandle<()>>,
+    }
+    impl FakeHostBridge {
+        fn start(user_path: String) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let port = address.port();
+            let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let flagged = stop.clone();
+            let handle = std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(mut stream) = stream else { break };
+                    let mut buffer = [0u8; 4096];
+                    let _ = stream.read(&mut buffer);
+                    let body = json!({"userPath": user_path}).to_string();
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    let _ = stream.write_all(head.as_bytes());
+                    if flagged.load(std::sync::atomic::Ordering::SeqCst) {
+                        break;
+                    }
+                }
+            });
+            Self {
+                base_url: format!("http://127.0.0.1:{port}"),
+                address,
+                stop,
+                handle: Some(handle),
+            }
+        }
+    }
+    impl Drop for FakeHostBridge {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            // 空连接唤醒阻塞的 accept，让线程走到停止检查后退出。
+            let _ = std::net::TcpStream::connect(self.address);
+            if let Some(handle) = self.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+
+    fn sha_of(bytes: &[u8]) -> String {
+        sha256(bytes)
+    }
+
+    /// 临时数据统一放 target/.tmp/task-write-recovery（不写系统 Temp，也不
+    /// 删除既有内容：固定文件每次覆写复位，一次性文件用唯一名）。
+    fn user_dir(name: &str) -> PathBuf {
+        let dir = PathBuf::from("target/.tmp/task-write-recovery").join(name);
+        std::fs::create_dir_all(dir.join("settings")).unwrap();
+        std::fs::write(
+            dir.join("settings").join("groups.json"),
+            "{\"x\":1,\"note\":\"保留我\"}",
+        )
+        .unwrap();
+        dir
+    }
+
+    fn registry(base_url: &str) -> ToolRegistry {
+        let client = Arc::new(BgiClient::for_tests(BridgeConfig {
+            enabled: true,
+            base_url: base_url.into(),
+            token: Some("test-token".into()),
+            instance_id: None,
+            timeout_ms: 5_000,
+            host_install_path: None,
+            launch_silently: false,
+        }));
+        let mut registry = ToolRegistry::default();
+        register_tools(&mut registry, client).unwrap();
+        registry
+    }
+
+    async fn read(registry: &ToolRegistry, path: &str) -> Result<Value> {
+        registry
+            .call_async(
+                "bgi.user.read",
+                &json!({"path": path}),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+    }
+
+    async fn write(registry: &ToolRegistry, path: &str, content: &str, sha: &str) -> Result<Value> {
+        registry
+            .call_async(
+                "bgi.user.write",
+                &json!({"path":path,"content":content,"expectedSha256":sha}),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+    }
+
+    #[tokio::test]
+    async fn stale_hash_conflicts_are_recoverable_and_leave_file_untouched() {
+        let dir = user_dir("stale-hash");
+        let server = FakeHostBridge::start(dir.to_string_lossy().into_owned());
+        let registry = &registry(&server.base_url);
+        let target = dir.join("settings").join("groups.json");
+
+        // 读取后文件被别处更新：旧 SHA 提交必须得到可恢复的版本冲突（Stale），
+        // 而不是终止运行的 Conflict，也绝不覆盖较新内容。
+        let outdated = sha_of(b"{\"x\":0}");
+        let error = write(&registry, "settings/groups.json", "{\"x\":2}", &outdated)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, Error::Stale(_)),
+            "旧校验值应产生版本冲突，实际：{error}"
+        );
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            "{\"x\":1,\"note\":\"保留我\"}".as_bytes(),
+            "冲突时文件必须保持原样"
+        );
+
+        // 模型按指引走完整恢复路径：真实调用 bgi.user.read 取回全文与 SHA，
+        // 从最新 JSON 只改目标字段 x、保留 note，再提交写入。
+        let latest = read(&registry, "settings/groups.json")
+            .await
+            .expect("重新读取必须成功");
+        assert_eq!(latest["truncated"], json!(false), "恢复依据必须是完整读取");
+        let mut document: Value = serde_json::from_str(latest["text"].as_str().unwrap()).unwrap();
+        document["x"] = json!(2);
+        let replaced = serde_json::to_string(&document).unwrap();
+        let ok = write(
+            &registry,
+            "settings/groups.json",
+            &replaced,
+            latest["sha256"].as_str().unwrap(),
+        )
+        .await
+        .expect("以重读返回的 SHA 提交应成功");
+        assert_eq!(ok["verified"], json!(true));
+        let written: Value = serde_json::from_slice(&std::fs::read(&target).unwrap()).unwrap();
+        assert_eq!(written["x"], json!(2));
+        assert_eq!(
+            written["note"],
+            json!("保留我"),
+            "重读后的写入必须保留原有字段"
+        );
+
+        // 成功后旧 SHA 再用立即再次冲突：不得悄悄通过。
+        let again = write(&registry, "settings/groups.json", "{\"x\":3}", &outdated).await;
+        assert!(matches!(again, Err(Error::Stale(_))));
+        let final_state: Value = serde_json::from_slice(&std::fs::read(&target).unwrap()).unwrap();
+        assert_eq!(final_state["x"], json!(2), "第二次冲突同样不得覆盖");
+    }
+
+    #[tokio::test]
+    async fn replace_request_for_missing_file_is_stale_not_recreate() {
+        let dir = user_dir("missing-target");
+        let server = FakeHostBridge::start(dir.to_string_lossy().into_owned());
+        let registry = &registry(&server.base_url);
+        // 目标已不存在但按替换语义提交了 SHA：必须反馈冲突，不得悄悄重建。
+        // 文件名带唯一 ID，重跑不依赖删除。
+        let missing = format!("settings/gone-{}.json", uuid::Uuid::new_v4());
+        let error = write(&registry, &missing, "{}", &"0".repeat(64))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, Error::Stale(_)),
+            "目标消失应反馈版本冲突：{error}"
+        );
+        assert!(!dir.join(&missing).exists());
+        // 新建省略 SHA 仍然直接成功。
+        let created = registry
+            .call_async(
+                "bgi.user.write",
+                &json!({"path":missing,"content":"{}"}),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(created["created"], json!(true));
+    }
 }

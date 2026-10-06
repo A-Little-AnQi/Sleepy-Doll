@@ -152,68 +152,6 @@ fn reading_guide(value: &mut Value, guide: Option<&str>) {
     }
 }
 
-/// BGI 操作任务不通过软件目录里的桥二进制发现能力。
-pub fn workspace_restriction(
-    prompt: &str,
-    history: &[Message],
-    name: &str,
-    arguments: &Value,
-) -> Option<&'static str> {
-    if !name.starts_with("workspace.") {
-        return None;
-    }
-    if [
-        "开发桥",
-        "调试桥",
-        "桥源码",
-        "程序集分析",
-        "代码审查",
-        "开发接口",
-    ]
-    .iter()
-    .any(|word| prompt.contains(word))
-    {
-        return None;
-    }
-    let bgi_task = history
-        .iter()
-        .rev()
-        .take_while(|message| message.role != Role::User)
-        .any(|message| {
-            message
-                .tool_calls
-                .iter()
-                .any(|call| call.name.starts_with("bgi."))
-        });
-    if !bgi_task {
-        return None;
-    }
-    let subject = if name == "workspace.shell" {
-        arguments["command"].as_str()
-    } else {
-        arguments["path"].as_str()
-    }
-    .unwrap_or("")
-    .to_lowercase();
-    if [
-        "bridge-cache",
-        "bgibridge",
-        "reflection.assembly",
-        "system.reflection",
-        "getmethods(",
-        "gettypes(",
-    ]
-    .iter()
-    .any(|word| subject.contains(word))
-    {
-        Some(
-            "BGI 操作禁止通过桥缓存或程序集扫描发现接口。地图追踪用仓库 pathing 父目录，直接 describe/invoke bgi.subscribe_script_resources、bgi.prepare_pathing_group、bgi.run_script_group；游戏未就绪直接 bgi.start_game/get_status。接口不可用如实报告该阻塞，不改用 PowerShell 绕过。",
-        )
-    } else {
-        None
-    }
-}
-
 /// 只约束 BGI 接口检索，通用 Agent 与其他工具保持可用。
 pub async fn search_interface(
     prompt: &str,
@@ -482,28 +420,6 @@ mod tests {
         );
         assert!(!RetrievalState::from_history(&history).needs_source_change());
         assert!(!RetrievalState::from_history(&history).search_stopped());
-        assert!(
-            workspace_restriction(
-                "跑血斛",
-                &history,
-                "workspace.shell",
-                &json!({"command":"Select-String bridge-cache/abc/BgiBridge.dll"})
-            )
-            .is_some()
-        );
-        assert!(
-            workspace_restriction("跑血斛", &history, "workspace.list", &json!({"path":""}))
-                .is_none()
-        );
-        assert!(
-            workspace_restriction(
-                "调试桥源码",
-                &history,
-                "workspace.read",
-                &json!({"path":"bridge-cache/a/BgiBridge.dll"})
-            )
-            .is_none()
-        );
     }
 
     #[test]

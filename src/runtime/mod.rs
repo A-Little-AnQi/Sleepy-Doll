@@ -1,3 +1,4 @@
+pub mod approval;
 pub mod context;
 pub mod gateway;
 pub mod host;
@@ -169,7 +170,7 @@ fn launch_handoff(call: &ToolCall, run: &Run, output: &Value) -> Option<(Vec<Str
 /// 行的后续任务时点名数量。
 fn handoff_message(names: &[String], close: bool, pending_tasks: usize) -> String {
     let mut text = if names.is_empty() {
-        "已提交配置组后台运行计划，宿主将按顺序执行。".to_owned()
+        "已提交任务后台运行计划，将按顺序执行。".to_owned()
     } else {
         let listed = names
             .iter()
@@ -179,7 +180,7 @@ fn handoff_message(names: &[String], close: bool, pending_tasks: usize) -> Strin
         if close {
             format!("已提交{listed}后台运行计划，完成后会关闭原神。")
         } else {
-            format!("已提交{listed}后台运行计划，宿主将继续执行完成。")
+            format!("已提交{listed}后台运行计划，将继续执行完成。")
         }
     };
     if pending_tasks > 0 {
@@ -247,7 +248,8 @@ pub const CORE_AGENT_POLICY: &str = r#"你是 Sleepy Doll，一个本地桌面�
 3. 需要启动程序、更新内容、修改配置或执行任务时，直接去做。要不要先征求同意由运行时的审批级别决定，不要在对话里替它先问一遍；被拦下时再说明它在等什么。涉及不可逆结果时说明它实际会改掉什么。
 4. 一个数据源已经明确报出连接或鉴权错误时，不再调用依赖它的其他工具，直接报告这一个阻塞项。
 5. 回复先给结果；只附必要证据、生效条件，或一个无法自行解决的阻塞项。不要给用户罗列选择题来代替继续工作，也不要把自己能做到的准备步骤交回给用户。
-6. 软件目录内的本机操作使用 workspace 工具。用户没有 Node、Python、Git 或其他开发环境，命令只通过 PowerShell 执行；不要让用户安装中间件或运行时。路径必须落在软件目录内，越界或被拒绝就停止，不要改用其他方式绕过。宿主软件的配置只能走对应的桥，不能用 workspace 文件或 PowerShell 改。
+6. 通用本机操作使用 workspace 工具：支持绝对与相对路径，工作目录默认是软件目录，也可以按调用指定。只读操作（read、list、search、read_many、environment）不需要写审批；路径已知时优先直接读可靠位置，不重复列父目录。大文件的统计用一次批量 search 对全文件分组计数，不反复小段读取，也不把整份巨型 JSON 吞进上下文；截断结果只代表样本，不代表文件其余内容丢失。需要脚本时可以调用本机已安装的程序，按实际环境判断，不凭空断定没有开发环境，也不让用户无必要地安装软件。写入与命令执行仍按当前审批模式；版本冲突（ok:false，未写入）按第 7 条处理。修改宿主软件的实时设置优先走对应的桥以同步内存，但不因此笼统禁止通用文件访问宿主目录。
+7. 修改已有文件前必须在本轮重新读取：历史轮读到的内容和校验值不是当前证据。收到版本冲突（ok:false，未写入）就重新读取最新文件，保留其中新出现的变更，只改用户目标的字段后再次提交；确定不了改法才问用户，不要用旧内容覆盖或反复提交同一校验值。
 
 对用户说话：
 - 普通请求默认工具静默执行：中间过程不写旁白，做完给一段最终结果。真正缺少必要信息时用 user.ask 的独立控件问，不在普通正文里复述问题或选项；仅当用户明确要求过程或进度说明时才在中途说明，普通排障同样静默执行后只给最终结果。
@@ -255,7 +257,9 @@ pub const CORE_AGENT_POLICY: &str = r#"你是 Sleepy Doll，一个本地桌面�
   逐步的工具调用细节留在界面的过程时间线里（用户可展开），总结不复述每一笔。
 - 问什么就答什么。范围跟问句走：问入口只给入口，问能不能只答能不能。不要把相邻功能、产品总览、未点名的步骤或「接下来还可以」写进答复；问 1 不要答成 123456。
 - 不要用编号清单把一次提问扩成导览或完整教程。用户没要求展开时，不要主动展开。
-- 进程、注入、反射、程序集、服务、方法、路由、端点、RPC、schema、序列化、HTTP 状态码都是内部实现，不是用户要看的内容；把它们翻译成用户的功能和结果。
+- 提问用普通人话：一次只问真正缺的信息，说清缺什么、怎么回答；只有真实可选的答案才列选项，用户直接打字回答同样有效，不用「没有××」「其他」凑选项。
+- 审批说明写具体目标和改变后的效果，比如「把挖矿讨伐这组任务的队伍换成××」；不出现 JSON 字段名、方法名或其它实现词汇。
+- 进程、注入、反射、程序集、服务、方法、路由、端点、RPC、schema、序列化、HTTP 状态码、宿主、原生构造器、深拷贝、策略面都是内部实现，不是用户要看的内容；把它们翻译成用户的功能和结果。
 - 只有用户明确要求开发排障时，才展开内部标识和原始错误摘要。"#;
 
 pub fn configured_agent_instructions(prompt: &str) -> &str {
@@ -278,6 +282,35 @@ pub(crate) fn executor() -> &'static tokio::runtime::Runtime {
             .build()
             .expect("runtime initialization")
     })
+}
+
+/// 等待中的审批按最新审批级别继续：完全控制视为同意、只读拒绝（可恢复），
+/// 其余级别继续等用户。已答复/过期审批不被覆盖。宿主桥的等待循环同样使用。
+pub(crate) fn apply_permission_switch_to_pending(
+    journal: &Arc<Journal>,
+    latest_mode: operation::permissions::PermissionMode,
+    run: &Run,
+    approval_id: &str,
+) -> Result<Option<bool>> {
+    let effect = operation::permissions::pending_approval_on_switch(latest_mode);
+    let approved = match effect {
+        operation::permissions::PendingApprovalEffect::KeepWaiting => return Ok(None),
+        operation::permissions::PendingApprovalEffect::Approved => true,
+        operation::permissions::PendingApprovalEffect::Denied => false,
+    };
+    match journal.decide(approval_id, approved) {
+        Ok(approval) => {
+            journal.emit(
+                run,
+                "approval.resolved",
+                json!({"id":approval.id,"approved":approved,"by":"modeSwitch"}),
+            )?;
+            Ok(Some(approved))
+        }
+        // 用户已答复或审批过期：不覆盖，按原有流程处理。
+        Err(Error::Conflict(_)) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 pub struct Supervisor {
@@ -1061,6 +1094,34 @@ impl Supervisor {
             std::thread::sleep(Duration::from_millis(100));
         }
     }
+    /// 会话进行中热切换审批级别：只更新内存配置里的这一字段。
+    /// 不取 model_gate 写锁（模型调用持读锁时也能立即生效）、不重建
+    /// hooks/extensions，也不取消进行中的模型调用或游戏任务。
+    pub fn update_permission_mode(&self, mode: operation::permissions::PermissionMode) {
+        self.config.write().unwrap().runtime.permission_mode = mode;
+        // 立即唤醒按 notifier 等待的审批循环（宿主桥等），不必等它们的轮询间隔。
+        let notifier = self.journal.notifier();
+        notifier.notify_waiters();
+        notifier.notify_one();
+    }
+
+    /// 授权判定取当前最新级别，而不是运行开始时快照。
+    fn latest_permission_mode(&self) -> operation::permissions::PermissionMode {
+        self.config.read().unwrap().runtime.permission_mode
+    }
+
+    /// 会话中切换审批级别时处理等待中的审批：切到完全控制视为同意并持久化
+    /// 决定（前端事件让卡片消失）；切到只读拒绝未提交的写入。已被用户答复
+    /// 或已过期的审批返回 None，按原决定继续，不被覆盖。
+    fn apply_mode_switch_to_pending(&self, run: &Run, approval_id: &str) -> Result<Option<bool>> {
+        apply_permission_switch_to_pending(
+            &self.journal,
+            self.latest_permission_mode(),
+            run,
+            approval_id,
+        )
+    }
+
     pub fn update_config(&self, config: AppConfig) -> Result<()> {
         config.validate()?;
         let hooks = Arc::new(host::hooks::HookBus::new(config.hooks.clone())?);
@@ -2180,20 +2241,7 @@ impl Supervisor {
         // 观测时刻跟着每个工具结果走：模型据此判断间隔与超时，而不是盲目重试。
         // 不写进 system——那会改写缓存前缀，让整段历史重新计费。
         let observed = observed_at(run);
-        let value = match result {
-            Ok(v) => {
-                log::info!("工具 {} 成功", call.name);
-                json!({"ok":true,"observedAt":observed,"value":v})
-            }
-            Err(Error::Cancelled) => return Err(Error::Cancelled),
-            Err(Error::Storage(e)) => return Err(Error::Storage(e)),
-            Err(Error::Conflict(e)) => return Err(Error::Conflict(e)),
-            Err(e) => {
-                // 工具失败的原因只在这里记录。
-                log::warn!("工具 {} 失败：{e}", call.name);
-                json!({"ok":false,"observedAt":observed,"error":e.to_string()})
-            }
-        };
+        let value = tool_outcome(result, &observed, &call.name)?;
         self.journal
             .record_tool(&run.conversation_id, call, &value)?;
         let full = value.to_string();
@@ -2265,7 +2313,7 @@ impl Supervisor {
             (
                 "user.ask",
                 "询问用户",
-                "仅询问无法从本机文件、接口契约或状态取得，且不同答案会改变目标或不可逆结果的信息；没有确实缺少的必要信息就不要问。用 questions 提供 1–3 个结构化问题：每题一个简短 id、几个字的 header 和一句话 question，需要选项时给 options（label 加一句 description）。一次问完；不要重复运行时审批；不在普通回复中重复问题或选项。",
+                "仅询问无法从本机文件、接口契约或状态取得，且不同答案会改变目标或不可逆结果的信息；没有确实缺少的必要信息就不要问。问题必须用普通人能直接看懂的话：先说清现在缺什么、怎么回答，不用术语。用 questions 提供 1–3 个结构化问题：每题一个简短 id、几个字的 header 和一句话 question，只有真实存在、用户真的可以选的答案才给 options，用户也可以不选、直接用文字回答；不要用「没有××」「其他」这类选项代替实际答案。需要选项时给 options（label 加一句 description）。一次问完；不要重复运行时审批；不在普通回复中重复问题或选项。",
                 json!({
                     "questions":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"object","required":["id","header","question"],"properties":{
                         "id":{"type":"string","description":"问题标识，答复按它回填"},
@@ -2566,6 +2614,51 @@ impl Supervisor {
         )
     }
 
+    /// 审批卡片的展示载荷。只对写文件类工具读一次基线内容供差异预览；
+    /// 取不到、被截断或哈希不一致都按无基线处理，不影响审批本身。
+    async fn approval_presentation(
+        &self,
+        call: &ToolCall,
+        definition: &ToolDefinition,
+        cancel: &CancellationToken,
+    ) -> Result<Value> {
+        let mut previous = None;
+        if matches!(call.name.as_str(), "bgi.user.write" | "workspace.write") {
+            if let (Some(reader), Some(target), Some(expected)) = (
+                definition.execution.scope_reader.as_deref(),
+                definition.execution.scope_target.as_deref(),
+                call.arguments["expectedSha256"].as_str(),
+            ) {
+                if let Some(path) = call.arguments[target].as_str() {
+                    let result = self
+                        .tools()
+                        .call_async(reader, &json!({"path": path}), cancel.clone())
+                        .await;
+                    if matches!(&result, Err(Error::Cancelled)) {
+                        return Err(Error::Cancelled);
+                    }
+                    if cancel.is_cancelled() {
+                        return Err(Error::Cancelled);
+                    }
+                    if let Ok(value) = result {
+                        previous =
+                            approval::checked_previous(&value, Some(expected)).map(str::to_owned);
+                    }
+                }
+            }
+        }
+        if cancel.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+        Ok(approval::presentation(
+            &call.name,
+            &call.arguments,
+            &definition.label,
+            &definition.description,
+            previous.as_deref(),
+        ))
+    }
+
     /// 按契约声明算出本次写入的实际影响。
     ///
     /// 读的是目标资源的当前内容，不是工具名。取不到差异时返回 `None`，由上层
@@ -2676,17 +2769,6 @@ impl Supervisor {
         let a = &call.arguments;
         let current = self.config.read().unwrap().clone();
         let definitions = self.definitions(exposed);
-        if current.host_plugin_enabled()
-            && call.name.starts_with("workspace.")
-            && let Some(reason) = crate::bridge::retrieval::workspace_restriction(
-                &run.prompt,
-                &self.journal.history(run)?,
-                &call.name,
-                a,
-            )
-        {
-            return Err(Error::Tool(reason.into()));
-        }
         let definition = definitions
             .iter()
             .find(|t| t.name == call.name)
@@ -2716,8 +2798,24 @@ impl Supervisor {
             cancel,
         )
         .await?;
-        if !crate::extension::validate(a, &definition.input_schema, "$").is_empty() {
-            return Err(Error::Tool("工具参数不符合契约".into()));
+        let validation_issues = crate::extension::validate(a, &definition.input_schema, "$");
+        if !validation_issues.is_empty() {
+            // 与 ToolRegistry::call_async 同口径：反馈字段路径与约束（最多 5 条），
+            // 不回显参数原值，帮助一次定位缺必填字段。
+            let details = validation_issues
+                .iter()
+                .take(5)
+                .map(|issue| {
+                    let path = issue.get("path").and_then(Value::as_str).unwrap_or("$");
+                    let message = issue
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    format!("{path}：{message}")
+                })
+                .collect::<Vec<_>>()
+                .join("；");
+            return Err(Error::Tool(format!("工具参数不符合契约：{details}")));
         }
         match call.name.as_str() {
             "tools.search" => {
@@ -2774,14 +2872,14 @@ impl Supervisor {
                 grants.extend(self.operations.store.grants().unwrap_or_default());
                 let permission = self.operations.permission_decision(
                     &operation,
-                    current.runtime.permission_mode,
+                    self.latest_permission_mode(),
                     &grants,
                 )?;
                 let operation = if permission == operation::permissions::PermissionDecision::Allow {
                     self.operations.execute_pre_authorized(&operation.id)?
                 } else {
                     let plan_hash = hash(&json!(operation.plan));
-                    let request = json!({
+                    let mut request = json!({
                         "methodId":"operation.execute",
                         "arguments":{
                             "operationId":operation.id,
@@ -2793,6 +2891,13 @@ impl Supervisor {
                         "operationRevision":operation.revision,
                         "planHash":plan_hash,
                     });
+                    request["presentation"] = approval::presentation(
+                        "operation.execute",
+                        &request["arguments"],
+                        &operation.title,
+                        &operation.title,
+                        None,
+                    );
                     let approval = Approval {
                         id: uuid::Uuid::new_v4().to_string(),
                         run_id: run.id.clone(),
@@ -2814,6 +2919,19 @@ impl Supervisor {
                             let _ = self.operations.cancel(&operation.id);
                             self.journal.save(run, RunState::Executing)?;
                             return Err(Error::Tool("等待操作授权超时".into()));
+                        }
+                        // 会话中切审批级别：等待中的审批按新级别继续。
+                        if let Some(approved) =
+                            self.apply_mode_switch_to_pending(run, &approval.id)?
+                        {
+                            self.journal.save(run, RunState::Executing)?;
+                            if !approved {
+                                let _ = self.operations.cancel(&operation.id);
+                                return Err(Error::Tool(
+                                    operation::permissions::plan_only_blocked_message().into(),
+                                ));
+                            }
+                            break;
                         }
                         if let Some(decision) = self.journal.approval_result(&approval.id)?.decision
                         {
@@ -3366,7 +3484,10 @@ impl Supervisor {
             | "bgi.feature.search"
             | "bgi.feature.read"
             | "workspace.list"
-            | "workspace.read" => {
+            | "workspace.read"
+            | "workspace.search"
+            | "workspace.read_many"
+            | "workspace.environment" => {
                 let registry = self.tools().clone();
                 let call = call.clone();
                 registry
@@ -3382,10 +3503,10 @@ impl Supervisor {
             }
             "bgi.user.write" | "bgi.user.restore" | "bgi.job.cancel" | "workspace.write"
             | "workspace.delete" | "workspace.shell" => {
-                let request = json!({"methodId":call.name,"arguments":a});
+                let mut request = json!({"methodId":call.name,"arguments":a});
                 let scope = self.change_scope(call, definition, cancel).await;
                 let permission = operation::permissions::PermissionEngine::decide(
-                    current.runtime.permission_mode,
+                    self.latest_permission_mode(),
                     &operation::permissions::PermissionRequest {
                         provider_id: definition.source.as_str(),
                         resource_ids: &[],
@@ -3403,6 +3524,8 @@ impl Supervisor {
                 if !current.runtime.allows(&request)
                     && permission != operation::permissions::PermissionDecision::Allow
                 {
+                    request["presentation"] =
+                        self.approval_presentation(call, definition, cancel).await?;
                     let approval = Approval {
                         id: uuid::Uuid::new_v4().to_string(),
                         run_id: run.id.clone(),
@@ -3423,6 +3546,18 @@ impl Supervisor {
                             self.journal.save(run, RunState::Executing)?;
                             return Err(Error::Tool("等待操作授权超时".into()));
                         }
+                        // 会话中切审批级别：等待中的审批按新级别继续。
+                        if let Some(approved) =
+                            self.apply_mode_switch_to_pending(run, &approval.id)?
+                        {
+                            self.journal.save(run, RunState::Executing)?;
+                            if !approved {
+                                return Err(Error::Tool(
+                                    operation::permissions::plan_only_blocked_message().into(),
+                                ));
+                            }
+                            break;
+                        }
                         if let Some(decision) = self.journal.approval_result(&approval.id)?.decision
                         {
                             if !decision {
@@ -3434,6 +3569,14 @@ impl Supervisor {
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
                     self.journal.save(run, RunState::Executing)?;
+                }
+                // 提交前复核：等待期间切到只读则本次写入不再执行，
+                // 作为可恢复错误交回模型，不假称已撤回任何已发出的动作。
+                if self.latest_permission_mode() == operation::permissions::PermissionMode::PlanOnly
+                {
+                    return Err(Error::Tool(
+                        operation::permissions::plan_only_blocked_message().into(),
+                    ));
                 }
                 let registry = self.tools().clone();
                 let call = call.clone();
@@ -3504,10 +3647,10 @@ impl Supervisor {
                         })
                     })
                     .map(|step| step.id.clone());
-                let request = json!({"methodId":call.name,"arguments":a,"catalogVersion":hash(&json!(definition)),"instanceId":instance,"stepId":step_id});
+                let mut request = json!({"methodId":call.name,"arguments":a,"catalogVersion":hash(&json!(definition)),"instanceId":instance,"stepId":step_id});
                 let scope = self.change_scope(call, definition, cancel).await;
                 let permission = operation::permissions::PermissionEngine::decide(
-                    current.runtime.permission_mode,
+                    self.latest_permission_mode(),
                     &operation::permissions::PermissionRequest {
                         provider_id: plugin,
                         resource_ids: &[],
@@ -3525,6 +3668,8 @@ impl Supervisor {
                 if !current.runtime.allows(&request)
                     && permission != operation::permissions::PermissionDecision::Allow
                 {
+                    request["presentation"] =
+                        self.approval_presentation(call, definition, cancel).await?;
                     let approval = Approval {
                         id: uuid::Uuid::new_v4().to_string(),
                         run_id: run.id.clone(),
@@ -3545,6 +3690,18 @@ impl Supervisor {
                             self.journal.save(run, RunState::Executing)?;
                             return Err(Error::Tool("等待插件授权超时".into()));
                         }
+                        // 会话中切审批级别：等待中的审批按新级别继续。
+                        if let Some(approved) =
+                            self.apply_mode_switch_to_pending(run, &approval.id)?
+                        {
+                            self.journal.save(run, RunState::Executing)?;
+                            if !approved {
+                                return Err(Error::Tool(
+                                    operation::permissions::plan_only_blocked_message().into(),
+                                ));
+                            }
+                            break;
+                        }
                         if let Some(decision) = self.journal.approval_result(&approval.id)?.decision
                         {
                             if !decision {
@@ -3556,6 +3713,13 @@ impl Supervisor {
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
                     self.journal.save(run, RunState::Executing)?;
+                }
+                // 提交前复核：等待期间切到只读则本次插件写入不再提交。
+                if self.latest_permission_mode() == operation::permissions::PermissionMode::PlanOnly
+                {
+                    return Err(Error::Tool(
+                        operation::permissions::plan_only_blocked_message().into(),
+                    ));
                 }
                 if !self
                     .config
@@ -3659,6 +3823,29 @@ fn observed_at(run: &Run) -> String {
         now.format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| now.unix_timestamp().to_string())
     )
+}
+
+/// 工具结果边界的分类。成功与可恢复失败（普通工具错误、文件版本冲突等）
+/// 变成反馈负载交给模型继续；Cancelled、存储错误与运行控制冲突原样上抛，
+/// 终止本次运行。文件版本冲突（`Error::Stale`）不覆盖较新内容：模型收到
+/// ok:false 后重新读取最新文件、保留新变更再提交，预算与每轮上限照常计数。
+fn tool_outcome(result: Result<Value>, observed: &str, name: &str) -> Result<Value> {
+    match result {
+        Ok(value) => {
+            log::info!("工具 {name} 成功");
+            Ok(json!({"ok":true,"observedAt":observed,"value":value}))
+        }
+        Err(error @ (Error::Cancelled | Error::Storage(_) | Error::Conflict(_))) => Err(error),
+        Err(error @ Error::Stale(_)) => {
+            log::warn!("工具 {name} 版本冲突，反馈模型重新读取：{error}");
+            Ok(json!({"ok":false,"observedAt":observed,"error":error.to_string()}))
+        }
+        Err(error) => {
+            // 工具失败的原因只在这里记录。
+            log::warn!("工具 {name} 失败：{error}");
+            Ok(json!({"ok":false,"observedAt":observed,"error":error.to_string()}))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3833,5 +4020,401 @@ mod handoff_tests {
         assert!(state.terminal());
         // 待核对仍占互斥锁：旧记录的锁语义保持不变。
         assert!(state.holds_lease());
+    }
+}
+
+#[cfg(test)]
+mod tool_outcome_tests {
+    use super::*;
+
+    const OBSERVED: &str = "2026-10-05T00:00:00Z (运行开始后 1 秒)";
+
+    #[test]
+    fn stale_write_conflict_becomes_recoverable_tool_result() {
+        let payload = tool_outcome(
+            Err(Error::Stale(
+                "目标文件在读取后发生变化；未覆盖较新的内容，请重新读取".into(),
+            )),
+            OBSERVED,
+            "bgi.user.write",
+        )
+        .expect("版本冲突必须作为 ok:false 结果交回模型，而不是终止运行");
+        assert_eq!(payload["ok"], json!(false));
+        assert_eq!(payload["observedAt"], json!(OBSERVED));
+        let message = payload["error"].as_str().unwrap();
+        assert!(
+            message.contains("重新读取"),
+            "冲突反馈要引导模型重新读取：{message}"
+        );
+    }
+
+    #[test]
+    fn ordinary_tool_errors_stay_recoverable() {
+        for error in [
+            Error::Tool("参数不符合契约".into()),
+            Error::Http("连接中断".into()),
+            Error::Timeout("等待超时".into()),
+        ] {
+            let payload = tool_outcome(Err(error), OBSERVED, "bgi.api.invoke").unwrap();
+            assert_eq!(payload["ok"], json!(false));
+            assert!(payload["error"].as_str().is_some());
+        }
+    }
+
+    #[test]
+    fn cancel_storage_and_run_control_conflict_stay_terminal() {
+        // 这些错误必须原样上抛：取消是用户意图，存储损坏不能继续派发动作，
+        // 运行控制冲突（预算、任务状态等）不能当作可重试的工具失败。
+        for kind in ["cancelled", "budget", "deleted"] {
+            let error = match kind {
+                "cancelled" => Error::Cancelled,
+                "budget" => Error::Conflict("工具调用超过预算".into()),
+                _ => Error::Conflict("这个快捷任务已被删除".into()),
+            };
+            let returned = tool_outcome(Err(error), OBSERVED, "any").unwrap_err();
+            assert!(matches!(
+                (&returned, kind),
+                (Error::Cancelled, "cancelled") | (Error::Conflict(_), _)
+            ));
+        }
+        let storage = rusqlite::Error::InvalidQuery;
+        let returned = tool_outcome(Err(Error::Storage(storage)), OBSERVED, "any").unwrap_err();
+        assert!(matches!(returned, Error::Storage(_)));
+    }
+
+    #[test]
+    fn success_wraps_value_with_observation() {
+        let payload = tool_outcome(Ok(json!({"sha256":"ab"})), OBSERVED, "bgi.user.read").unwrap();
+        assert_eq!(payload["ok"], json!(true));
+        assert_eq!(payload["value"]["sha256"], json!("ab"));
+    }
+}
+
+/// 生产 record_result 回归：版本冲突必须完整落进工具结果、消息历史与事件，
+/// 运行不进入终态，后续工具轮次照常配对——而不是只验证 tool_outcome 分类。
+#[cfg(test)]
+mod record_result_tests {
+    use super::*;
+    use crate::model::Role;
+    use std::path::PathBuf;
+
+    /// 用生产 Journal/OperationEngine 在 target/.tmp 下构造最小 Supervisor；
+    /// 不经过 Supervisor::new（那会绑定应用装配），字段语义与生产一致。
+    fn supervisor_with_run(name: &str) -> (Arc<Supervisor>, Run, PathBuf) {
+        let unique = format!("{name}-{}", uuid::Uuid::new_v4().simple());
+        let dir = PathBuf::from("target/.tmp/task-write-recovery")
+            .join("record-result")
+            .join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("journal.db");
+        let journal = Arc::new(Journal::open(&db).unwrap());
+        let store = Arc::new(operation::operations::OperationStore::open(&db).unwrap());
+        let artifacts = Arc::new(
+            crate::runtime::store::artifacts::ArtifactStore::new(
+                dir.join("artifacts"),
+                64 * 1024 * 1024,
+            )
+            .unwrap(),
+        );
+        let config: crate::config::AppConfig = serde_json::from_value(json!({
+            "version": 2,
+            "activeModel": "fixture",
+            "models": [],
+            "agent": {"systemPrompt": ""},
+            "bridge": {"enabled": false, "baseUrl": "http://127.0.0.1:1", "timeoutMs": 1000},
+            "storage": {"database": db.to_string_lossy()}
+        }))
+        .unwrap();
+        let supervisor = Supervisor {
+            shutting_down: std::sync::atomic::AtomicBool::new(false),
+            journal: journal.clone(),
+            tasks: Arc::new(operation::task_store::TaskStore::open(&db).unwrap()),
+            config: RwLock::new(config),
+            extensions: RwLock::new(RuntimeExtensions {
+                skills: Arc::new(crate::extension::skills::SkillRegistry::default()),
+                tools: Arc::new(crate::extension::ToolRegistry::default()),
+                adapters: vec![],
+            }),
+            active: Mutex::new(HashMap::new()),
+            deleting_conversations: Mutex::new(HashSet::new()),
+            model_gate: tokio::sync::RwLock::new(()),
+            catalog: host::catalog::Catalog::default(),
+            hooks: RwLock::new(Arc::new(host::hooks::HookBus::new(Vec::new()).unwrap())),
+            operations: Arc::new(operation::operations::OperationEngine::new(
+                store, artifacts,
+            )),
+        };
+        let mut run = journal
+            .create(
+                "把挖矿队伍换成钟离",
+                &format!("conv-{unique}"),
+                format!("key-{unique}").as_str(),
+                3600,
+                None,
+            )
+            .unwrap();
+        journal.save(&mut run, RunState::Preflighting).unwrap();
+        journal.save(&mut run, RunState::Executing).unwrap();
+        (Arc::new(supervisor), run, db)
+    }
+
+    fn call(id: &str, name: &str) -> ToolCall {
+        ToolCall {
+            id: id.into(),
+            name: name.into(),
+            arguments: json!({"path": "settings/groups.json"}),
+        }
+    }
+
+    fn pending_approval(run: &Run, id: &str) -> Approval {
+        Approval {
+            id: id.into(),
+            run_id: run.id.clone(),
+            request_hash: "hash".into(),
+            request: json!({"methodId": "workspace.write"}),
+            expires_at: unix_now() + 300,
+            decision: None,
+        }
+    }
+
+    // 模型调用持有 model_gate 读锁时，切审批级别必须立即生效，不等待写锁。
+    #[tokio::test]
+    async fn switching_permission_mode_does_not_wait_for_model_gate_read() {
+        let (supervisor, _run, _db) = supervisor_with_run("mode-switch-gate");
+        let gate_read = supervisor.model_gate.read().await;
+        let other = supervisor.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            other.update_permission_mode(operation::permissions::PermissionMode::FullAccess);
+            tx.send(()).unwrap();
+        });
+        rx.recv_timeout(Duration::from_secs(2))
+            .expect("热更新不得等待 model_gate 写锁");
+        assert_eq!(
+            supervisor.latest_permission_mode(),
+            operation::permissions::PermissionMode::FullAccess
+        );
+        drop(gate_read);
+    }
+
+    // 等待中的审批在切到完全控制时按新授权继续：持久化决定并事件通知。
+    #[test]
+    fn pending_approval_resolved_by_full_access_switch() {
+        let (supervisor, mut run, _db) = supervisor_with_run("mode-switch-allow");
+        let approval = pending_approval(&run, "appr-allow");
+        supervisor.journal.approval(&approval).unwrap();
+        supervisor
+            .journal
+            .save(&mut run, RunState::AwaitingApproval)
+            .unwrap();
+        supervisor.update_permission_mode(operation::permissions::PermissionMode::FullAccess);
+        let effect = supervisor
+            .apply_mode_switch_to_pending(&run, &approval.id)
+            .unwrap();
+        assert_eq!(effect, Some(true));
+        assert_eq!(
+            supervisor
+                .journal
+                .approval_result(&approval.id)
+                .unwrap()
+                .decision,
+            Some(true)
+        );
+        // 已有决定的审批不被二次覆盖。
+        let again = supervisor
+            .apply_mode_switch_to_pending(&run, &approval.id)
+            .unwrap();
+        assert_eq!(again, None);
+    }
+
+    // 切到只读：未提交写入的等待审批被拒绝并持久化为否决；用户已拒绝的
+    // 审批不被切级改写。
+    #[test]
+    fn pending_approval_denied_by_plan_only_switch() {
+        let (supervisor, mut run, _db) = supervisor_with_run("mode-switch-deny");
+        let approval = pending_approval(&run, "appr-deny");
+        supervisor.journal.approval(&approval).unwrap();
+        supervisor
+            .journal
+            .save(&mut run, RunState::AwaitingApproval)
+            .unwrap();
+        supervisor.update_permission_mode(operation::permissions::PermissionMode::PlanOnly);
+        let effect = supervisor
+            .apply_mode_switch_to_pending(&run, &approval.id)
+            .unwrap();
+        assert_eq!(effect, Some(false));
+        assert_eq!(
+            supervisor
+                .journal
+                .approval_result(&approval.id)
+                .unwrap()
+                .decision,
+            Some(false)
+        );
+
+        // 用户已拒绝后切到完全控制：原决定保留。
+        let user_denied = pending_approval(&run, "appr-user-deny");
+        supervisor.journal.approval(&user_denied).unwrap();
+        supervisor.journal.decide(&user_denied.id, false).unwrap();
+        supervisor.update_permission_mode(operation::permissions::PermissionMode::FullAccess);
+        let kept = supervisor
+            .apply_mode_switch_to_pending(&run, &user_denied.id)
+            .unwrap();
+        assert_eq!(kept, None);
+        assert_eq!(
+            supervisor
+                .journal
+                .approval_result(&user_denied.id)
+                .unwrap()
+                .decision,
+            Some(false)
+        );
+    }
+
+    // 切回请求审批级别：等待中的审批继续等用户，不代用户做决定。
+    #[test]
+    fn pending_approval_keeps_waiting_under_ask_each() {
+        let (supervisor, mut run, _db) = supervisor_with_run("mode-switch-wait");
+        let approval = pending_approval(&run, "appr-wait");
+        supervisor.journal.approval(&approval).unwrap();
+        supervisor
+            .journal
+            .save(&mut run, RunState::AwaitingApproval)
+            .unwrap();
+        supervisor.update_permission_mode(operation::permissions::PermissionMode::AskEach);
+        assert_eq!(
+            supervisor
+                .apply_mode_switch_to_pending(&run, &approval.id)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            supervisor
+                .journal
+                .approval_result(&approval.id)
+                .unwrap()
+                .decision,
+            None
+        );
+    }
+
+    #[test]
+    fn stale_conflict_is_recorded_and_returned_to_model_without_terminating() {
+        let (supervisor, run, db) = supervisor_with_run("stale");
+        let conflict =
+            Error::Stale("目标文件在读取后发生变化；未覆盖较新的内容，请重新读取".into());
+        let failed_call = call("call_stale", "bgi.user.write");
+        let mut assistant = context::message(Role::Assistant, "");
+        assistant.tool_calls.push(failed_call.clone());
+        supervisor.journal.append_message(&run, &assistant).unwrap();
+        let mut history = vec![assistant];
+        supervisor
+            .record_result(&run, &failed_call, Err(conflict), 12_000, &mut history)
+            .expect("版本冲突必须作为工具结果交回模型，不允许终止运行");
+
+        // 传给后续模型调用的历史：新增 Role::Tool，配对 call.id，错误完整。
+        assert_eq!(history.len(), 2);
+        let message = &history[1];
+        assert!(matches!(message.role, Role::Tool));
+        assert_eq!(message.tool_call_id.as_deref(), Some("call_stale"));
+        let payload: Value = serde_json::from_str(&message.content).unwrap();
+        assert_eq!(payload["ok"], json!(false));
+        assert_eq!(
+            payload["error"],
+            json!("版本冲突：目标文件在读取后发生变化；未覆盖较新的内容，请重新读取")
+        );
+        let packed = context::build(
+            CORE_AGENT_POLICY.into(),
+            history.clone(),
+            context::ContextBudget::Tokens(30_000),
+        )
+        .unwrap();
+        assert!(
+            packed.messages.iter().any(|message| {
+                message.role == Role::Tool
+                    && message.tool_call_id.as_deref() == Some("call_stale")
+                    && message.content == history[1].content
+            }),
+            "冲突结果必须保留在实际发送给模型的上下文中"
+        );
+
+        // Journal 持久化：工具结果进 tool_calls，消息进会话历史。
+        let connection = rusqlite::Connection::open(&db).unwrap();
+        let recorded: String = connection
+            .query_row(
+                "SELECT result_json FROM tool_calls WHERE call_id='call_stale'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("版本冲突必须记入 tool_calls");
+        let recorded: Value = serde_json::from_str(&recorded).unwrap();
+        assert_eq!(recorded["ok"], json!(false));
+        drop(connection);
+        let stored = supervisor.journal.history(&run).unwrap();
+        let stored = stored
+            .iter()
+            .find(|message| message.tool_call_id.as_deref() == Some("call_stale"))
+            .expect("工具消息必须持久化到会话历史");
+        assert!(matches!(stored.role, Role::Tool));
+
+        // tool.completed 事件携带同一 callId 与 ok:false 结果。
+        let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
+        let completed = events
+            .iter()
+            .find(|event| {
+                event.kind == "tool.completed" && event.data["callId"] == json!("call_stale")
+            })
+            .expect("必须发出 tool.completed");
+        assert_eq!(completed.data["result"]["ok"], json!(false));
+
+        // 运行不得进入终态。
+        let latest = supervisor.journal.get(&run.id).unwrap();
+        assert!(
+            !latest.state.terminal(),
+            "版本冲突后运行仍在执行：{:?}",
+            latest.state
+        );
+
+        // 模型重新读取后成功：record_result 继续正常配对。
+        let reread_call = call("call_reread", "bgi.user.read");
+        let mut assistant = context::message(Role::Assistant, "");
+        assistant.tool_calls.push(reread_call.clone());
+        supervisor.journal.append_message(&run, &assistant).unwrap();
+        history.push(assistant);
+        supervisor
+            .record_result(
+                &run,
+                &reread_call,
+                Ok(json!({"sha256": "ab"})),
+                12_000,
+                &mut history,
+            )
+            .unwrap();
+        assert_eq!(history.len(), 4);
+        let recovered: Value = serde_json::from_str(&history[3].content).unwrap();
+        assert_eq!(recovered["ok"], json!(true));
+        assert_eq!(history[3].tool_call_id.as_deref(), Some("call_reread"));
+    }
+
+    #[test]
+    fn cancelled_still_terminates_without_side_records() {
+        let (supervisor, run, _db) = supervisor_with_run("cancelled");
+        let mut history = Vec::new();
+        let outcome = supervisor.record_result(
+            &run,
+            &call("call_cancel", "bgi.user.write"),
+            Err(Error::Cancelled),
+            12_000,
+            &mut history,
+        );
+        assert!(matches!(outcome, Err(Error::Cancelled)));
+        assert!(history.is_empty(), "取消不产生模型可见的工具结果");
+        let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.data["callId"] == json!("call_cancel")),
+            "取消不得伪造 tool.completed"
+        );
     }
 }

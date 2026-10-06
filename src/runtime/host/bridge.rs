@@ -305,6 +305,16 @@ impl Bridge {
             step_id = Some(next.id.clone());
         }
         let mut request = json!({"instanceId":instance,"methodId":id,"capabilityId":binding.id,"stepId":step_id,"binding":binding,"resources":resources,"bridgeFeatures":info["features"],"catalogVersion":version,"arguments":args,"planRevision":plan.map(|p|p.revision).unwrap_or(0)});
+        // 呈现始终附加到同一 request 上（哈希覆盖它）：有专门人话呈现用之，
+        // 否则退回通用 fallback，不再把内部 binding.description 当用户摘要。
+        request["presentation"] =
+            crate::bridge::approval::presentation(id, args).unwrap_or_else(|| {
+                crate::bridge::approval::fallback_presentation(
+                    descriptor["displayName"].as_str().unwrap_or(""),
+                    args,
+                    descriptor["effect"].as_str().unwrap_or(""),
+                )
+            });
         let effect =
             serde_json::from_value::<crate::extension::ToolEffect>(descriptor["effect"].clone())
                 .unwrap_or(crate::extension::ToolEffect::Unknown);
@@ -320,10 +330,18 @@ impl Bridge {
             // 这一层看不到字段级差异，按未界定处理。
             scope: None,
         };
+        // 授权取最新配置，而不是运行开始时的快照：会话中切审批级别立即生效。
+        let (latest_mode, latest_grants) = {
+            let latest = authorization.read().unwrap();
+            (
+                latest.runtime.permission_mode,
+                latest.runtime.trust_grants.clone(),
+            )
+        };
         let decision = crate::runtime::operation::permissions::PermissionEngine::decide(
-            policy.permission_mode,
+            latest_mode,
             &current_permission,
-            &policy.trust_grants,
+            &latest_grants,
         );
         if decision == crate::runtime::operation::permissions::PermissionDecision::Deny {
             return Err(Error::Tool("当前为只读级别，不能修改配置或执行命令".into()));
@@ -359,6 +377,26 @@ impl Bridge {
                 if result.expires_at < unix_now() {
                     journal.save(run, RunState::Executing)?;
                     return Err(Error::Tool("授权等待已过期".into()));
+                }
+                // 会话中切审批级别：等待中的审批按新级别继续（完全控制同意、
+                // 只读拒绝为可恢复错误）；已答复/过期审批不被覆盖。
+                if let Some(approved) = crate::runtime::apply_permission_switch_to_pending(
+                    journal,
+                    authorization.read().unwrap().runtime.permission_mode,
+                    run,
+                    &approval.id,
+                )? {
+                    journal.save(run, RunState::Executing)?;
+                    if !approved {
+                        return Err(Error::Tool(
+                            crate::runtime::operation::permissions::plan_only_blocked_message()
+                                .into(),
+                        ));
+                    }
+                    // 级别切换放行与级别直通同权：提交前按最新模式复核。
+                    allowed_by_mode = true;
+                    approval_expires = None;
+                    break;
                 }
                 if let Some(allowed) = result.decision {
                     if !allowed {
@@ -587,6 +625,15 @@ impl Bridge {
                     || latest.bridge.token != self.config.token
                 {
                     return Err(Error::Tool("Bridge 配置已变化，请重新发起操作".into()));
+                }
+                // 提交前最终复核：任何路径（级别直通或审批放行）下，最新级别已
+                // 切为只读就不再提交本次写入；已发出的动作不假称撤回。
+                if latest.runtime.permission_mode
+                    == crate::runtime::operation::permissions::PermissionMode::PlanOnly
+                {
+                    return Err(Error::Tool(
+                        crate::runtime::operation::permissions::plan_only_blocked_message().into(),
+                    ));
                 }
                 if allowed_by_mode {
                     if crate::runtime::operation::permissions::PermissionEngine::decide(

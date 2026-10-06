@@ -303,8 +303,24 @@ impl ToolRegistry {
             .ok_or_else(|| Error::Tool("工具未注册".into()))?
             .clone();
         let definition = tool.definition();
-        if !validate(args, &definition.input_schema, "$").is_empty() {
-            return Err(Error::Tool("工具参数不符合契约".into()));
+        let issues = validate(args, &definition.input_schema, "$");
+        if !issues.is_empty() {
+            // 只反馈字段路径与校验消息（最多 5 条），让缺必填字段一次可定位；
+            // 不回显整份 args，避免凭证或大对象进入错误文本。
+            let details = issues
+                .iter()
+                .take(5)
+                .map(|issue| {
+                    let path = issue.get("path").and_then(Value::as_str).unwrap_or("$");
+                    let message = issue
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    format!("{path}：{message}")
+                })
+                .collect::<Vec<_>>()
+                .join("；");
+            return Err(Error::Tool(format!("工具参数不符合契约：{details}")));
         }
         let value = tool.call_async(args.clone(), cancel).await?;
         validate_output(&value, definition.output_schema.as_ref())?;
@@ -409,7 +425,24 @@ pub fn validate(value: &Value, schema: &Value, path: &str) -> Vec<Value> {
         Ok(validator) => validator
             .iter_errors(value)
             .take(32)
-            .map(|e| json!({"path":format!("{path}{}",e.instance_path),"message":e.to_string()}))
+            .map(|e| {
+                // jsonschema 的 Display 会回显参数原值（如 "\"secret\" is not of
+                // type..."），不能进入错误反馈；只保留字段路径与约束本身。
+                // required 的 Display 固定为 "{property} is a required property"
+                // （不含实例值），且其 schema_path 末段即 "required"，据此识别；
+                // 其余分支只用 schema 路径末段作为约束关键词。
+                let schema_path = e.schema_path.to_string();
+                let last = schema_path
+                    .rsplit('/')
+                    .find(|s| !s.is_empty())
+                    .unwrap_or_default();
+                let message = if last == "required" {
+                    e.to_string()
+                } else {
+                    format!("不满足 {last} 约束（{schema_path}）")
+                };
+                json!({"path":format!("{path}{}",e.instance_path),"message":message})
+            })
             .collect(),
         Err(error) => vec![json!({"path":path,"message":format!("工具 Schema 无效：{error}")})],
     }
@@ -479,5 +512,86 @@ where
     }
     fn call(&self, arguments: &Value) -> Result<Value> {
         (self.function)(arguments)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn schema_requiring_path() -> Value {
+        json!({
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"]
+        })
+    }
+
+    // 校验失败必须反馈具体字段路径且不调用工具本体；错误保持可恢复的 Error::Tool
+    #[tokio::test]
+    async fn call_async_invalid_args_report_field_and_skip_tool() {
+        let calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let mut registry = ToolRegistry::default();
+        registry
+            .register(FunctionTool::new(
+                "demo.read",
+                "演示读取",
+                schema_requiring_path(),
+                "test",
+                move |_args| {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    Ok(json!({"ok": true}))
+                },
+            ))
+            .expect("register");
+
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let err = registry
+            .call_async("demo.read", &json!({"other": 1}), cancel)
+            .await
+            .expect_err("must fail");
+        let message = err.to_string();
+        // 缺必填能定位到具体字段，而不是笼统一句
+        assert!(message.contains("path"), "message: {message}");
+        assert!(message.contains("工具参数不符合契约"));
+        // 工具本体未被调用
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        // 可恢复错误（Error::Tool），不是取消/冲突类
+        assert!(matches!(err, Error::Tool(_)));
+
+        // 参数合规时正常执行，不误伤
+        let ok = registry
+            .call_async(
+                "demo.read",
+                &json!({"path": "a.txt"}),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .expect("valid call");
+        assert_eq!(ok, json!({"ok": true}));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    // 校验消息不得回显参数原值（如把实际值嵌进类型错误文案）
+    #[test]
+    fn validate_message_does_not_echo_instance_value() {
+        let schema = json!({
+            "type": "object",
+            "properties": {"token": {"type": "integer"}},
+            "required": ["token"]
+        });
+        let issues = validate(&json!({"token": "s3cretValue"}), &schema, "$");
+        assert!(!issues.is_empty());
+        let text = serde_json::to_string(&issues).unwrap();
+        assert!(!text.contains("s3cretValue"), "echoed value: {text}");
+        assert!(text.contains("token"));
+        // 必填缺失只含属性名
+        let missing = validate(&json!({}), &schema, "$");
+        let missing_text = serde_json::to_string(&missing).unwrap();
+        assert!(missing_text.contains("token"));
+        assert!(missing_text.contains("required"));
     }
 }
