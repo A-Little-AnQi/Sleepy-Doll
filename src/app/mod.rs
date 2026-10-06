@@ -167,6 +167,7 @@ impl AppController {
                 | "shortcut.accept"
                 | "conversation.delete"
                 | "task.submit"
+                | "run.submit"
                 | "run.input"
                 | "run.question.answer"
                 | "workflow.extract"
@@ -281,13 +282,26 @@ impl AppController {
                     .as_str()
                     .map(str::to_owned)
                     .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                Ok(crate::runtime::types::public_run(&self.supervisor.submit(
-                    &prompt,
-                    params["conversationId"].as_str(),
-                    &key,
-                    params["durationSec"].as_i64(),
-                    params["modelId"].as_str(),
-                )?))
+                // interruptActive=true：用户运行中发送新消息，立即打断同一对话
+                // 较早的 Agent 运行；false 保留原排队行为。
+                let run = if params["interruptActive"].as_bool().unwrap_or(false) {
+                    self.supervisor.submit_interrupted(
+                        &prompt,
+                        params["conversationId"].as_str(),
+                        &key,
+                        params["durationSec"].as_i64(),
+                        params["modelId"].as_str(),
+                    )?
+                } else {
+                    self.supervisor.submit(
+                        &prompt,
+                        params["conversationId"].as_str(),
+                        &key,
+                        params["durationSec"].as_i64(),
+                        params["modelId"].as_str(),
+                    )?
+                };
+                Ok(crate::runtime::types::public_run(&run))
             }
             "task.get" | "run.get" => Ok(crate::runtime::types::public_run(
                 &self.supervisor.journal.get(required(&params, "id")?)?,

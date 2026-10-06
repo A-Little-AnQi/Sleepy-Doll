@@ -455,14 +455,14 @@ try {
   assert.equal(after.dock.left, before.dock.left, "composer-dock 左边线不得漂移");
   assert.equal(after.dock.width, before.dock.width, "composer-dock 宽度不得改变");
   assertDockGeometry(await dockGeometry(page), "q-a");
-  // 等待提示行出现，composer 换等待 placeholder，仍 busy 禁用。
+  // 等待提示行出现，composer 保持普通输入提示且可编辑（发送即打断上一轮）。
   await page.getByText("等待你的回答，提交后继续").waitFor();
   assert.equal(
     await composer.getAttribute("placeholder"),
-    "等待你的回复：请在上方卡片作答或确认…",
-    "等待期间 composer placeholder 必须明示在等回复",
+    "告诉我你想完成什么",
+    "等待期间 composer placeholder 保持普通输入提示",
   );
-  assert.ok(await composer.isDisabled(), "等待回答期间主输入 busy 禁用");
+  assert.ok(await composer.isEditable(), "等待回答期间主输入保持可编辑");
   // 基础对齐：标题/正文同左边线；radio 16px 且圆点中心对齐首行行盒中心；
   // description 与 label 左边线一致。
   const alignA = await cardA.evaluate((card) => {
@@ -488,7 +488,7 @@ try {
   assert.ok(alignA.radioSize <= 0.5, `radio 必须是 16x16，实际 ${alignA.probe} 偏差 ${alignA.radioSize}`);
   assert.ok(Math.abs(alignA.radioCenter) <= 1, "radio 圆点必须对齐首行文本行盒中心");
   assert.ok(
-    await page.getByRole("button", { name: "选择技能" }).isDisabled(),
+    await page.getByRole("button", { name: "快捷命令", exact: true }).isDisabled(),
     "busy 时技能菜单必须禁用，避免插入运行中草稿",
   );
   // MarkdownText 渲染块级元素：容器必须是 DIV，且不允许 p 内嵌块级。
@@ -790,8 +790,8 @@ try {
     Math.abs(allowBox.x + allowBox.width - (cardRight - 16)) <= 1,
     "允许按钮必须贴卡片右缘（primary 统一右侧）",
   );
-  // 审批期间主输入保持 busy 禁用，停止按钮可见且是「取消任务」。
-  assert.ok(await composer.isDisabled(), "审批期间主输入禁用");
+  // 审批期间主输入保持可编辑，停止按钮可见且是「取消任务」。
+  assert.ok(await composer.isEditable(), "审批期间主输入可编辑");
   const stopC = page.locator(".composer-submit .send-action");
   assert.ok(await stopC.isVisible());
   assert.equal(await stopC.getAttribute("aria-label"), "取消任务",
@@ -971,7 +971,7 @@ try {
   await composer.waitFor();
   await sleep(400);
   assert.equal(await composer.inputValue(), "", "正常样例的主输入必须为空");
-  assert.ok(await composer.isDisabled(), "run-g 等待回答期间主输入 busy 禁用");
+  assert.ok(await composer.isEditable(), "run-g 等待回答期间主输入可编辑");
   assertDockGeometry(await dockGeometry(page), "q-g");
   // 问题卡 footer：secondary 在左、primary（发送回复）贴右。
   const submitG = cardG.getByRole("button", { name: "发送回复", exact: true });
@@ -1012,7 +1012,7 @@ try {
   const cardsD = page.locator(".pending-request-card");
   await cardsD.first().waitFor();
   await composer.waitFor();
-  assert.ok(await composer.isDisabled(), "q-d 双 run 等待回答，主输入禁用");
+  assert.ok(await composer.isEditable(), "q-d 双 run 等待回答，主输入可编辑");
   assert.equal(await composer.inputValue(), bigDraft, "预置草稿必须恢复");
   await sleep(300);
   assert.equal(await cardsD.count(), 2, "两个 open 请求都要出现");

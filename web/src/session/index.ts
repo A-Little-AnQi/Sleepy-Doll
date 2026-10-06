@@ -162,6 +162,9 @@ class Session {
   private acceptRun(run: TaskInfo) {
     const previous = this.runs.get(run.id);
     if (previous && (previous.revision ?? 0) > (run.revision ?? 0)) return;
+    // A snapshot from before the interrupt must not reopen the old waiting state.
+    if (this.cancelledRuns.has(run.id) && isRunning(run))
+      run = { ...run, state: "cancelling" };
     this.runs.set(run.id, run);
     this.pendingRuns.set(run.id, run);
     // 只有取消语义进 cancelledRuns；blocked/failed 等终态允许后续重试，
@@ -212,16 +215,17 @@ class Session {
             Array.isArray(request.questions) &&
             this.runAcceptsQuestions(request.runId),
         )
-        .map(
-          (request): [string, QuestionRequestInfo] => [
-            `${request.runId}:${request.requestId}`,
-            request,
-          ],
-        )
+        .map((request): [string, QuestionRequestInfo] => [
+          `${request.runId}:${request.requestId}`,
+          request,
+        ])
         .filter(([key]) => !this.resolvedQuestions.has(key)),
     );
   }
-  private acceptQuestionEvent(event: { runId: string; data: Record<string, unknown> }) {
+  private acceptQuestionEvent(event: {
+    runId: string;
+    data: Record<string, unknown>;
+  }) {
     const request = event.data.request as QuestionRequestInfo | undefined;
     const key = `${event.runId}:${request?.requestId ?? "legacy"}`;
     if (this.resolvedQuestions.has(key)) return;
@@ -260,9 +264,7 @@ class Session {
     const staleHint =
       this.snapshot.question !== "" &&
       task?.id === runId &&
-      ![...this.questionRequests.keys()].some((k) =>
-        k.startsWith(`${runId}:`),
-      );
+      ![...this.questionRequests.keys()].some((k) => k.startsWith(`${runId}:`));
     if (removed || staleHint)
       this.publish({
         questionRequests: [...this.questionRequests.values()],
@@ -432,12 +434,20 @@ class Session {
                 new CustomEvent("sleepy-doll:shortcut-saved"),
               );
             }
-            if (event.kind === "cancel.requested") {
+            if (
+              event.kind === "cancel.requested" ||
+              event.kind === "interrupt.requested"
+            ) {
               // 立即记住取消并清掉该 run 的问题/旧提示，不等权威 run.changed；
               // 走 acceptRun 让审批、问题与上下文活动一起收尾。
               this.cancelledRuns.add(event.runId);
+              this.approvals.delete(event.runId);
               const run = this.runs.get(event.runId);
               const hadHint = this.questions.has(event.runId);
+              this.questions.delete(event.runId);
+              for (const key of [...this.questionRequests.keys()])
+                if (key.startsWith(`${event.runId}:`))
+                  this.questionRequests.delete(key);
               if (run && isRunning(run))
                 this.acceptRun({ ...run, state: "cancelling" });
               const task = this.currentTask();
@@ -450,12 +460,18 @@ class Session {
             }
             if (["input.received", "tool.completed"].includes(event.kind))
               refresh = true;
-            if (event.kind === "approval.requested")
+            if (
+              event.kind === "approval.requested" &&
+              !this.cancelledRuns.has(event.runId)
+            )
               this.approvals.set(
                 event.runId,
                 event.data as unknown as RunApproval,
               );
-            if (event.kind === "question") {
+            if (
+              event.kind === "question" &&
+              !this.cancelledRuns.has(event.runId)
+            ) {
               this.questions.set(
                 event.runId,
                 String(event.data.question ?? ""),

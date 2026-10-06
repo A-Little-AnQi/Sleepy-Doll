@@ -147,6 +147,7 @@ export function ChatPage({
   }
   const [unread, setUnread] = useState(false);
   const [sending, setSending] = useState(false);
+  const submissionEpoch = useRef(0);
   const inputId = useId();
   const [stopping, setStopping] = useState(false);
   const interrupting = stopping || task?.state === "cancelling";
@@ -196,6 +197,7 @@ export function ChatPage({
     };
   }, []);
   useLayoutEffect(() => {
+    submissionEpoch.current += 1;
     setError("");
     setSending(false);
     setPendingModel(null);
@@ -249,7 +251,7 @@ export function ChatPage({
     setSlash(null);
   }, [draftKey]);
   const updateSlash = (value: string, caret: number) => {
-    if (sending || busy || !invocableSkills.length) {
+    if (!invocableSkills.length) {
       setSlash(null);
       return;
     }
@@ -314,20 +316,13 @@ export function ChatPage({
       node?.setSelectionRange(at + marker.length, at + marker.length);
     });
   };
-  // 主消息只负责发起新请求；运行中的补充由独立问答面板或后台交接处理，
-  // 输入框在运行期间禁用但保留草稿，交接结束自动恢复。
+  // 发送即发起新请求：本轮仍在运行时由后端打断后接续，不排队；
+  // sending 只作防双击的事务守卫，不阻止编辑草稿或打开 + 菜单。
   const send = async () => {
     const value = prompt.trim();
-    if (
-      !value ||
-      sending ||
-      busy ||
-      stopping ||
-      task?.state === "cancelling" ||
-      !bootstrap.models.length
-    )
-      return;
+    if (!value || sending || !bootstrap.models.length) return;
     const origin = conversationId;
+    const epoch = ++submissionEpoch.current;
     const retryKey = `${draftKey}:pending`;
     let pending: { key: string; prompt: string } | undefined;
     try {
@@ -353,25 +348,64 @@ export function ChatPage({
         origin,
         clientKey,
         origin ? undefined : selectedModel,
+        true,
       );
       session(run.conversationId).start();
-      if (alive.current && current.current === origin)
+      if (
+        alive.current &&
+        current.current === origin &&
+        submissionEpoch.current === epoch
+      ) {
+        // 新对话首次 ACK 后切到新会话，draftKey 会从 new 键变成会话键；
+        // 切换前把用户在等待期间写下的最新草稿（不是已发送的那条）迁移
+        // 过去，否则切换读新键会拿到空、草稿丢失。用户已切到其它对话
+        // （current !== origin）时不迁移不覆盖；已存在会话不受影响。
+        if (!origin) {
+          const latest = localStorage.getItem(draftKey) ?? "";
+          if (latest !== "") {
+            localStorage.setItem(
+              `sleepy-doll-draft:${run.conversationId}`,
+              latest,
+            );
+            // 迁移完成清掉 new 键，同一段草稿不在下次新建对话时重现。
+            localStorage.removeItem(draftKey);
+          }
+        }
         onConversation(run.conversationId);
+      }
       sessionStorage.removeItem(retryKey);
       // The server has accepted this prompt. A shell refresh failure must not
       // restore the draft and invite the same message to be sent a second time.
-      await reload().catch((reason: unknown) => {
-        if (alive.current && current.current === origin)
+      void reload().catch((reason: unknown) => {
+        if (
+          alive.current &&
+          current.current === origin &&
+          submissionEpoch.current === epoch
+        )
           setError(readError(reason));
       });
     } catch (reason) {
-      localStorage.setItem(draftKey, value);
-      if (alive.current && current.current === origin) {
-        setPrompt(value);
+      // 提交失败要放回草稿，但期间用户已写的新草稿绝不能被旧提交文本
+      // 覆盖；只在本会话仍是发起会话、且草稿仍为空（未编辑过）时恢复。
+      if (
+        alive.current &&
+        current.current === origin &&
+        submissionEpoch.current === epoch
+      ) {
+        setPrompt((prev) => {
+          if (prev !== "") return prev;
+          localStorage.setItem(draftKey, value);
+          return value;
+        });
         setError(readError(reason));
       }
     } finally {
-      if (alive.current && current.current === origin) setSending(false);
+      if (
+        alive.current &&
+        current.current === origin &&
+        submissionEpoch.current === epoch
+      )
+        setSending(false);
     }
   };
   const act = async (action: () => Promise<unknown>) => {
@@ -392,8 +426,8 @@ export function ChatPage({
     : question || questionRequests.length || approval
       ? undefined
       : phaseLabel(task);
-  // 等待用户作答/确认：busy 保持（不能发新消息），但要明说在等什么，
-  // 取消入口仍可用，文案换成「取消任务」。
+  // 等待用户作答/确认：输入框仍可编辑、发送即打断；这里只说明在等什么，
+  // 取消入口可用，文案换成「取消任务」。
   const waitingForUser = Boolean(
     question || questionRequests.length || approval,
   );
@@ -621,13 +655,9 @@ export function ChatPage({
             id={inputId}
             ref={textarea}
             aria-label={t.chat.message}
-            placeholder={
-              waitingForUser
-                ? t.chat.composerPlaceholderWaiting
-                : t.chat.composerPlaceholderNew
-            }
+            // 任意运行/等待态都保持可编辑：草稿随时可写，发送会打断上一轮。
+            placeholder={t.chat.composerPlaceholderNew}
             value={prompt}
-            disabled={sending || busy}
             onChange={(event) => {
               setDraft(event.target.value);
               const node = event.target;
@@ -711,7 +741,6 @@ export function ChatPage({
           <div className="composer-actions">
             <SkillMenu
               skills={invocableSkills}
-              disabled={sending || busy}
               onPick={insertSkill}
               slash={slash}
               onSlashPick={applySlashPick}
@@ -771,7 +800,7 @@ export function ChatPage({
                   }}
                 />
               </div>
-              {/* 运行期间只有停止；发送按钮仅用于发起新请求。 */}
+              {/* 运行中停止照常可用；写了新草稿就同时显示发送，发送即打断上一轮。 */}
               {busy && (
                 <button
                   type="button"
@@ -818,7 +847,7 @@ export function ChatPage({
                   )}
                 </button>
               )}
-              {!busy && (
+              {(!busy || prompt.trim()) && (
                 <button
                   type="button"
                   className="send-action"
@@ -829,11 +858,7 @@ export function ChatPage({
                       : t.chat.send
                   }
                   disabled={
-                    sending ||
-                    stopping ||
-                    task?.state === "cancelling" ||
-                    !prompt.trim() ||
-                    !bootstrap.models.length
+                    sending || !prompt.trim() || !bootstrap.models.length
                   }
                   onClick={() => void send()}
                 >

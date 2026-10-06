@@ -585,6 +585,39 @@ impl Supervisor {
         shortcut_target: Option<&str>,
         shortcut_reference: Option<&str>,
     ) -> Result<Run> {
+        let (conversation, duration, resolved) = self.prepare_submission(
+            prompt,
+            conversation,
+            key,
+            duration,
+            model,
+            shortcut_configuration,
+        )?;
+        let run = self.journal.create_configured(
+            prompt,
+            &conversation,
+            key,
+            duration,
+            Some(&resolved),
+            shortcut_configuration,
+            shortcut_target,
+            shortcut_reference,
+        )?;
+        Ok(run)
+    }
+
+    /// 发送前的完整校验与归一：空/超长消息、时限、模型选择都在这里判，
+    /// 不产生任何副作用。打断式发送必须在取消旧运行之前先通过它——
+    /// 无效输入不能取消旧任务。
+    fn prepare_submission(
+        &self,
+        prompt: &str,
+        conversation: Option<&str>,
+        key: &str,
+        duration: Option<i64>,
+        model: Option<&str>,
+        shortcut_configuration: bool,
+    ) -> Result<(String, i64, String)> {
         if self.shutting_down.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(Error::Config("应用正在退出，请重新打开后发送".into()));
         }
@@ -637,19 +670,69 @@ impl Supervisor {
                     .map(|model| model.id.clone())
             })
             .ok_or_else(|| Error::Config("还没有配置模型。请先在设置里添加。".into()))?;
+        Ok((conversation, duration, resolved))
+    }
+
+    /// 打断式发送：新消息立即取消同一对话较早的 Agent 运行（active 取 token、
+    /// queued 置 Cancelled），再创建新 run。不碰其它对话、SavedWorkflow/
+    /// SavedStrategy 来源、已交接后台任务（交接后 run 已退出 active）。
+    pub fn submit_interrupted(
+        &self,
+        prompt: &str,
+        conversation: Option<&str>,
+        key: &str,
+        duration: Option<i64>,
+        model: Option<&str>,
+    ) -> Result<Run> {
+        // 1. 完整校验先行：无效 prompt/model/超长消息在这里失败，不取消任何旧任务。
+        let (conversation, duration, resolved) =
+            self.prepare_submission(prompt, conversation, key, duration, model, false)?;
+        // 2. 持 active 锁完成「幂等检查 → 新消息可靠入库 → 取消本对话较早 Agent」：
+        //    schedule 也取这把锁，新 queued run 不可能在旧 active 退出前被抢跑。
+        //    入库或模型绑定保存失败时直接报错，绝不在这种情况下打断旧消息。
+        let active = self.active.lock().unwrap();
+        if let Some(run) = self.journal.run_by_client_key(key, prompt, &conversation)? {
+            return Ok(run);
+        }
+        let previous = self.journal.pending()?;
         let run = self.journal.create_configured(
             prompt,
             &conversation,
             key,
             duration,
             Some(&resolved),
-            shortcut_configuration,
-            shortcut_target,
-            shortcut_reference,
+            false,
+            None,
+            None,
         )?;
-        // 每个对话都要有绑定的模型。
-        self.journal
-            .set_conversation_model(&conversation, Some(&resolved))?;
+        for mut older in previous {
+            if older.id == run.id
+                || older.conversation_id != conversation
+                || !matches!(older.source, RunSource::Agent)
+            {
+                continue;
+            }
+            if let Some(token) = active.get(&older.id) {
+                // 立即中止旧模型 SSE、用户等待与工具执行；等待中的审批/问题循环
+                // 同靠该 token 退出。不等旧模型自然结束。
+                token.cancel();
+                let _ = self
+                    .journal
+                    .supersede_question_requests(&older, "interrupted");
+                let _ = self.journal.emit(
+                    &older,
+                    "interrupt.requested",
+                    json!({"reason":"newMessage"}),
+                );
+            } else if matches!(older.state, RunState::Queued | RunState::Blocked) {
+                self.journal.save(&mut older, RunState::Cancelled)?;
+            }
+        }
+        drop(active);
+        // 3. 立即唤醒调度循环，不等 1s 兜底；新 run 在旧 active 退出后接续。
+        let notifier = self.journal.notifier();
+        notifier.notify_waiters();
+        notifier.notify_one();
         Ok(run)
     }
 
@@ -862,10 +945,12 @@ impl Supervisor {
         if self.shutting_down.load(std::sync::atomic::Ordering::SeqCst) {
             return Ok(());
         }
-        let runs = self.journal.pending()?;
         let deleting = self.deleting_conversations.lock().unwrap().clone();
         let mut occupied = HashSet::new();
         let mut active = self.active.lock().unwrap();
+        // Read after taking the dispatch lock: interrupting submissions may have
+        // cancelled queued runs while a scheduler was waiting for this lock.
+        let runs = self.journal.pending()?;
         for run in &runs {
             if active.contains_key(&run.id) {
                 occupied.insert(run.conversation_id.clone());
@@ -912,7 +997,11 @@ impl Supervisor {
                         .unwrap_or(true);
                     // 用户停止就是取消终态：即使存在结果未知的外部动作也不改判
                     // NeedsReview——那些动作的证据保留在 attempts 里，另行登记供核对。
-                    let next = Supervisor::terminal_state_on_error(&e, unknown);
+                    let next = if cancel.is_cancelled() {
+                        RunState::Cancelled
+                    } else {
+                        Supervisor::terminal_state_on_error(&e, unknown)
+                    };
                     if unknown && next == RunState::Cancelled {
                         let pending: Vec<Value> = s
                             .journal
@@ -985,6 +1074,11 @@ impl Supervisor {
                     );
                 }
                 s.active.lock().unwrap().remove(&run.id);
+                // 旧 active 退出后立即唤醒调度：同会话排队的新消息（打断式发送）
+                // 不等 1s 兜底就接续。
+                let notifier = s.journal.notifier();
+                notifier.notify_waiters();
+                notifier.notify_one();
             });
         }
         Ok(())
@@ -4416,5 +4510,324 @@ mod record_result_tests {
                 .any(|event| event.data["callId"] == json!("call_cancel")),
             "取消不得伪造 tool.completed"
         );
+    }
+
+    /// 打断式发送夹具：生产 Journal/Supervisor，落盘 target/.tmp/composer-interrupt。
+    /// 配置一个 fake 模型（baseUrl 指向不存在的本地端口，测试不真正调用模型）。
+    fn interrupt_supervisor(name: &str) -> Arc<Supervisor> {
+        let unique = format!("{name}-{}", uuid::Uuid::new_v4().simple());
+        let dir = PathBuf::from("target/.tmp/composer-interrupt").join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("journal.db");
+        let journal = Arc::new(Journal::open(&db).unwrap());
+        let config: crate::config::AppConfig = serde_json::from_value(json!({
+            "version": 2,
+            "activeModel": "fixture",
+            "models": [{
+                "id": "fixture", "name": "fixture", "protocol": "openai-chat",
+                "model": "m", "baseUrl": "http://127.0.0.1:1"
+            }],
+            "agent": {"systemPrompt": ""},
+            "bridge": {"enabled": false, "baseUrl": "http://127.0.0.1:1", "timeoutMs": 1000},
+            "storage": {"database": db.to_string_lossy()}
+        }))
+        .unwrap();
+        let supervisor = Supervisor {
+            shutting_down: std::sync::atomic::AtomicBool::new(false),
+            journal: journal.clone(),
+            tasks: Arc::new(operation::task_store::TaskStore::open(&db).unwrap()),
+            config: RwLock::new(config),
+            extensions: RwLock::new(RuntimeExtensions {
+                skills: Arc::new(crate::extension::skills::SkillRegistry::default()),
+                tools: Arc::new(crate::extension::ToolRegistry::default()),
+                adapters: vec![],
+            }),
+            active: Mutex::new(HashMap::new()),
+            deleting_conversations: Mutex::new(HashSet::new()),
+            model_gate: tokio::sync::RwLock::new(()),
+            catalog: host::catalog::Catalog::default(),
+            hooks: RwLock::new(Arc::new(host::hooks::HookBus::new(Vec::new()).unwrap())),
+            operations: Arc::new(operation::operations::OperationEngine::new(
+                Arc::new(operation::operations::OperationStore::open(&db).unwrap()),
+                Arc::new(
+                    crate::runtime::store::artifacts::ArtifactStore::new(
+                        dir.join("artifacts"),
+                        64 * 1024 * 1024,
+                    )
+                    .unwrap(),
+                ),
+            )),
+        };
+        Arc::new(supervisor)
+    }
+
+    /// 建一个 executing run 并把 token 挂进 active 表，模拟运行中会话
+    /// （模型 SSE、等待用户问题/审批都靠这个 token 退出）。
+    fn active_run(supervisor: &Supervisor, prompt: &str, conversation: &str, key: &str) -> Run {
+        let mut run = supervisor
+            .journal
+            .create(prompt, conversation, key, 300, None)
+            .unwrap();
+        supervisor
+            .journal
+            .save(&mut run, RunState::Preflighting)
+            .unwrap();
+        supervisor
+            .journal
+            .save(&mut run, RunState::Executing)
+            .unwrap();
+        supervisor
+            .active
+            .lock()
+            .unwrap()
+            .insert(run.id.clone(), CancellationToken::new());
+        run
+    }
+
+    fn run_token(supervisor: &Supervisor, id: &str) -> CancellationToken {
+        supervisor.active.lock().unwrap().get(id).cloned().unwrap()
+    }
+
+    // 同对话旧 active token 立即取消、其它对话不取消；同对话排队 Agent 置
+    // Cancelled；SavedWorkflow 来源与已入库聊天历史不受影响。
+    #[test]
+    fn interrupt_cancels_only_same_conversation_agent_runs() {
+        let supervisor = interrupt_supervisor("cancel-scope");
+        let old_a = active_run(&supervisor, "旧消息", "conv-a", "key-old-a");
+        let old_b = active_run(&supervisor, "其它对话", "conv-b", "key-old-b");
+        let queued = supervisor
+            .journal
+            .create("排队中", "conv-a", "key-queued", 300, None)
+            .unwrap();
+        let mut workflow = supervisor
+            .journal
+            .create("工作流", "conv-a", "key-wf", 300, None)
+            .unwrap();
+        workflow.source = RunSource::SavedWorkflow {
+            workflow_id: "wf".into(),
+            workflow_revision: 1,
+        };
+        supervisor
+            .journal
+            .save(&mut workflow, RunState::Queued)
+            .unwrap();
+
+        let run = supervisor
+            .submit_interrupted("新消息", Some("conv-a"), "key-new", None, None)
+            .unwrap();
+        assert_eq!(run.conversation_id, "conv-a");
+        assert!(
+            run_token(&supervisor, &old_a.id).is_cancelled(),
+            "同对话旧 active 必须立即取消"
+        );
+        assert!(
+            !run_token(&supervisor, &old_b.id).is_cancelled(),
+            "其它对话不受影响"
+        );
+        assert!(matches!(
+            supervisor.journal.get(&queued.id).unwrap().state,
+            RunState::Cancelled
+        ));
+        assert!(
+            matches!(
+                supervisor.journal.get(&workflow.id).unwrap().state,
+                RunState::Queued
+            ),
+            "SavedWorkflow 来源不被打断"
+        );
+        // 原聊天历史原样保留：旧消息与新消息都在新 run 的历史里。
+        let history = supervisor.journal.history(&run).unwrap();
+        assert!(
+            history
+                .iter()
+                .any(|m| matches!(m.role, Role::User) && m.content == "旧消息")
+        );
+        assert!(
+            history
+                .iter()
+                .any(|m| matches!(m.role, Role::User) && m.content == "新消息")
+        );
+    }
+
+    // 全新对话的打断式消息：新 run 历史只有这一条用户消息。
+    #[test]
+    fn interrupted_message_starts_with_single_history_entry() {
+        let supervisor = interrupt_supervisor("fresh-history");
+        let run = supervisor
+            .submit_interrupted("第一条", Some("conv-fresh"), "key-fresh", None, None)
+            .unwrap();
+        let history = supervisor.journal.history(&run).unwrap();
+        assert_eq!(history.len(), 1);
+        assert!(matches!(history[0].role, Role::User));
+        assert_eq!(history[0].content, "第一条");
+    }
+
+    // clientKey 重试幂等：返回同一 run，且不取消更晚的运行，也不取消自己。
+    #[test]
+    fn client_key_retry_returns_same_run_without_cancelling_newer() {
+        let supervisor = interrupt_supervisor("retry-idempotent");
+        let first = supervisor
+            .submit_interrupted("消息", Some("conv-r"), "same-key", None, None)
+            .unwrap();
+        let later = active_run(&supervisor, "更晚的运行", "conv-r", "key-later");
+        let retry = supervisor
+            .submit_interrupted("消息", Some("conv-r"), "same-key", None, None)
+            .unwrap();
+        assert_eq!(retry.id, first.id, "重试必须返回同一 run");
+        assert!(
+            !run_token(&supervisor, &later.id).is_cancelled(),
+            "重试不得取消较新的 run"
+        );
+    }
+
+    // 无效输入（空消息/不存在的模型）不取消任何旧任务。
+    #[test]
+    fn invalid_interrupt_input_cancels_nothing() {
+        let supervisor = interrupt_supervisor("invalid-input");
+        let old = active_run(&supervisor, "正在跑", "conv-i", "key-i1");
+        assert!(
+            supervisor
+                .submit_interrupted("   ", Some("conv-i"), "k-empty", None, None)
+                .is_err()
+        );
+        assert!(
+            supervisor
+                .submit_interrupted(
+                    "正常",
+                    Some("conv-i"),
+                    "k-model",
+                    None,
+                    Some("不存在的模型")
+                )
+                .is_err()
+        );
+        assert!(
+            !run_token(&supervisor, &old.id).is_cancelled(),
+            "无效输入不得取消旧任务"
+        );
+    }
+
+    #[tokio::test]
+    async fn interrupt_closes_model_stream_and_dispatches_new_message() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        fn read_body(stream: &mut std::net::TcpStream) -> Value {
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0; 4096];
+            loop {
+                let n = stream.read(&mut buffer).unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&buffer[..n]);
+                if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let header = String::from_utf8_lossy(&bytes[..end]);
+                    let length: usize = header
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|value| value.trim().parse().unwrap())
+                        })
+                        .unwrap();
+                    if bytes.len() >= end + 4 + length {
+                        return serde_json::from_slice(&bytes[end + 4..end + 4 + length]).unwrap();
+                    }
+                }
+                assert!(bytes.len() < 1024 * 1024);
+            }
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (closed_tx, closed_rx) = mpsc::channel();
+        let (next_tx, next_rx) = mpsc::channel();
+        // Bounded local server; no credentials, game, or external requests.
+        let server = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(8);
+            let mut first = None;
+            let mut count = 0;
+            while count < 2 && std::time::Instant::now() < deadline {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    std::thread::sleep(Duration::from_millis(5));
+                    continue;
+                };
+                let body = read_body(&mut stream);
+                stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n").unwrap();
+                count += 1;
+                if count == 1 {
+                    stream.write_all(b"data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n").unwrap();
+                    stream.flush().unwrap();
+                    started_tx.send(()).unwrap();
+                    let closed = closed_tx.clone();
+                    first = Some(std::thread::spawn(move || {
+                        // The old model never sends completion; only client cancellation closes it.
+                        // A client can half-close its request body while still reading
+                        // the response, so read EOF alone does not prove cancellation.
+                        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                        stream
+                            .set_write_timeout(Some(Duration::from_millis(100)))
+                            .unwrap();
+                        while std::time::Instant::now() < deadline {
+                            std::thread::sleep(Duration::from_millis(20));
+                            if stream.write_all(b": heartbeat\n\n").is_err() {
+                                let _ = closed.send(true);
+                                return;
+                            }
+                        }
+                        let _ = closed.send(false);
+                    }));
+                } else {
+                    next_tx.send(body).unwrap();
+                    stream.write_all(b"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"new answer\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n").unwrap();
+                }
+            }
+            if let Some(first) = first {
+                first.join().unwrap();
+            }
+        });
+        let supervisor = interrupt_supervisor("live-stream");
+        supervisor.config.write().unwrap().models[0].base_url = format!("http://{address}/v1");
+        let old = supervisor
+            .submit_interrupted("old request", Some("live"), "live-old", None, None)
+            .unwrap();
+        supervisor.schedule().unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while started_rx.try_recv().is_err() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            supervisor.journal.get(&old.id).unwrap().state,
+            RunState::Deciding
+        );
+        let new = supervisor
+            .submit_interrupted("new request", Some("live"), "live-new", None, None)
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !supervisor.journal.get(&new.id).unwrap().state.terminal()
+            && std::time::Instant::now() < deadline
+        {
+            supervisor.schedule().unwrap();
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let old_state = supervisor.journal.get(&old.id).unwrap().state;
+        let new_state = supervisor.journal.get(&new.id).unwrap().state;
+        server.join().unwrap();
+        assert!(
+            closed_rx.try_recv().unwrap(),
+            "old SSE must close without a final model response"
+        );
+        let body = next_rx.try_recv().unwrap();
+        assert_eq!(
+            body["messages"].as_array().unwrap().last().unwrap()["content"],
+            "new request"
+        );
+        assert_eq!(old_state, RunState::Cancelled);
+        assert_eq!(new_state, RunState::Answered);
     }
 }

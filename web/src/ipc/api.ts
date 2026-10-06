@@ -206,6 +206,7 @@ export const api = {
     conversationId?: string,
     clientKey: string = crypto.randomUUID(),
     modelId?: string | null,
+    interruptActive?: boolean,
   ) =>
     invoke<TaskInfo>("task.submit", {
       prompt,
@@ -213,6 +214,8 @@ export const api = {
       ...(conversationId ? { conversationId } : {}),
       // 新对话里先挑好的模型随第一条消息一起生效；留空表示跟随默认模型。
       ...(modelId ? { modelId } : {}),
+      // 有本轮运行时由发送方打断后接续，而不是排队等旧回复结束。
+      ...(interruptActive ? { interruptActive: true } : {}),
     }),
   task: (id: string) => invoke<TaskInfo>("task.get", { id }),
   tasks: () => invoke<TaskInfo[]>("task.list"),

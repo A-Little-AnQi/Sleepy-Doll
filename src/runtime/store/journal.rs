@@ -55,6 +55,90 @@ pub enum QuestionReopen {
 mod context_activity_tests {
     use super::*;
 
+    #[test]
+    fn interrupt_submission_rolls_back_when_model_binding_fails() {
+        let journal = deletion_journal();
+        journal
+            .connection
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER reject_binding BEFORE UPDATE OF model_id ON conversations
+             BEGIN SELECT RAISE(ABORT, 'binding unavailable'); END;",
+            )
+            .unwrap();
+        assert!(
+            journal
+                .create("new", "chat", "new-key", 300, Some("model"))
+                .is_err()
+        );
+        let db = journal.connection.lock().unwrap();
+        for table in [
+            "runtime_runs",
+            "messages",
+            "conversations",
+            "runtime_events",
+        ] {
+            let count: i64 = db
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(count, 0, "failed submission left rows in {table}");
+        }
+    }
+
+    #[test]
+    fn interrupt_history_pairs_missing_calls_without_changing_chat_records() {
+        let journal = deletion_journal();
+        let mut old = journal.create("old", "chat", "old-key", 300, None).unwrap();
+        let mut assistant = crate::runtime::context::message(crate::model::Role::Assistant, "");
+        assistant.tool_calls = vec![
+            ToolCall {
+                id: "finished".into(),
+                name: "read".into(),
+                arguments: json!({}),
+            },
+            ToolCall {
+                id: "interrupted".into(),
+                name: "write".into(),
+                arguments: json!({}),
+            },
+        ];
+        journal.append_message(&old, &assistant).unwrap();
+        let mut result = crate::runtime::context::message(crate::model::Role::Tool, "real result");
+        result.tool_call_id = Some("finished".into());
+        journal.append_message(&old, &result).unwrap();
+        journal.save(&mut old, RunState::Cancelled).unwrap();
+        let new = journal
+            .create("new", "chat", "new-key", 300, Some("model"))
+            .unwrap();
+        let stored = journal.conversation_messages("chat").unwrap();
+        let history = journal.history(&new).unwrap();
+        assert_eq!(history.len(), 5); // user, assistant, two tool replies, new user
+        let synthetic = history
+            .iter()
+            .find(|m| m.tool_call_id.as_deref() == Some("interrupted"))
+            .unwrap();
+        let payload: Value = serde_json::from_str(&synthetic.content).unwrap();
+        assert_eq!(payload["ok"], false);
+        assert_eq!(payload["executionStatus"], "unknown");
+        assert_eq!(history.last().unwrap().content, "new");
+        assert_eq!(
+            history
+                .iter()
+                .find(|m| m.tool_call_id.as_deref() == Some("finished"))
+                .unwrap(),
+            &result
+        );
+        assert_eq!(
+            journal.conversation_messages("chat").unwrap().len(),
+            stored.len()
+        );
+        assert_eq!(
+            journal.conversation("chat").unwrap().model_id.as_deref(),
+            Some("model")
+        );
+    }
+
     fn deletion_journal() -> Journal {
         let mut connection = Connection::open_in_memory().unwrap();
         connection.execute_batch("CREATE TABLE runtime_runs(id TEXT PRIMARY KEY,conversation_id TEXT,client_key TEXT UNIQUE,state TEXT,revision INTEGER,payload TEXT);
@@ -505,6 +589,12 @@ impl Journal {
             "UPDATE conversations SET updated_at=?1 WHERE id=?2",
             params![stamp, conversation],
         )?;
+        if let Some(model_id) = model_id {
+            tx.execute(
+                "UPDATE conversations SET model_id=?1 WHERE id=?2",
+                params![model_id, conversation],
+            )?;
+        }
         Self::insert_event(&tx, &run, "run.created", &public_run(&run))?;
         Self::insert_checkpoint(&tx, &run)?;
         tx.commit()?;
@@ -525,6 +615,35 @@ impl Journal {
             |r| r.get(0),
         )?;
         Ok(serde_json::from_str(&payload)?)
+    }
+    /// clientKey 幂等预检（只读）：同 key 已有 run 时返回它，prompt/会话不一致
+    /// 视为冲突。打断式重发必须在取消旧运行之前先走这里，重试不能取消任何 run。
+    pub fn run_by_client_key(
+        &self,
+        key: &str,
+        prompt: &str,
+        conversation: &str,
+    ) -> Result<Option<Run>> {
+        let payload: Option<String> = self
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT payload FROM runtime_runs WHERE client_key=?1",
+                [key],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(payload) = payload else {
+            return Ok(None);
+        };
+        let run: Run = serde_json::from_str(&payload)?;
+        if run.prompt != prompt || run.conversation_id != conversation {
+            return Err(Error::Conflict(
+                "submission key reused with different input".into(),
+            ));
+        }
+        Ok(Some(run))
     }
     pub fn list(&self) -> Result<Vec<Run>> {
         self.query_runs("SELECT payload FROM runtime_runs ORDER BY rowid DESC LIMIT 100")
@@ -1496,7 +1615,47 @@ impl Journal {
                 },
             )
             .collect::<Result<Vec<_>>>()?;
-        Ok((summary, entries))
+        // Only the model projection closes missing tool replies from ended turns.
+        // Keep stored chat/audit messages and real tool results unchanged.
+        let mut ended_query = db.prepare(
+            "SELECT json_extract(payload,'$.messageBoundary') FROM runtime_runs
+             WHERE conversation_id=?1 AND state IN ('\"cancelled\"','\"failed\"','\"needsReview\"')",
+        )?;
+        let ended = ended_query
+            .query_map([&run.conversation_id], |row| row.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<std::collections::HashSet<_>>>()?;
+        let mut projected = Vec::new();
+        for (index, entry) in entries.iter().enumerate() {
+            projected.push(entry.clone());
+            if !ended.contains(&entry.sort_key) || entry.message.tool_calls.is_empty() {
+                continue;
+            }
+            // Results belonging to this assistant call must precede the next
+            // assistant/user message; already recorded results remain authoritative.
+            let replies = entries[index + 1..]
+                .iter()
+                .take_while(|next| next.message.role == crate::model::Role::Tool)
+                .filter_map(|next| next.message.tool_call_id.as_deref())
+                .collect::<std::collections::HashSet<_>>();
+            // Append missing replies after the existing contiguous tool messages.
+            // Inserting before them is also protocol-valid and preserves their order.
+            for call in &entry.message.tool_calls {
+                if replies.contains(call.id.as_str()) {
+                    continue;
+                }
+                let mut reply = entry.clone();
+                reply.message = crate::model::Message {
+                    role: crate::model::Role::Tool,
+                    content: json!({"ok":false,"executionStatus":"unknown",
+                        "error":"上一轮已结束，未取得这个调用的最终结果。不能据此判断操作是否执行，也不要直接重复写入；需要时先读取当前状态。"}).to_string(),
+                    tool_call_id: Some(call.id.clone()),
+                    tool_calls: vec![],
+                    reasoning: None,
+                };
+                projected.push(reply);
+            }
+        }
+        Ok((summary, projected))
     }
 
     pub fn save_compaction(
