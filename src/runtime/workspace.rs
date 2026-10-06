@@ -212,9 +212,8 @@ impl Workspace {
                 "-NonInteractive",
                 "-ExecutionPolicy",
                 "Bypass",
-                // 本机 PowerShell 对 Rust 传参的 -EncodedCommand 一律挂起，
-                // 改走 -Command 单参数；script 内命令本体在 base64 JSON 里，
-                // 引号/中文/换行不会破坏外层包装。
+                // 包装器保持 ASCII 单行；命令本体在 base64 JSON 中保留
+                // 引号、中文与换行，避免 Windows 命令行再解析多行包装器。
                 "-Command",
                 &script,
             ])
@@ -676,16 +675,16 @@ fn powershell_executable() -> Result<PathBuf> {
 
 fn host_script(payload_b64: &str) -> String {
     format!(
-        r#"
-$ErrorActionPreference = 'Stop'
-# 默认输出编码是 ANSI，中文错误和文件内容到调用方就成了乱码。
-[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-$OutputEncoding = [Text.UTF8Encoding]::new($false)
-$ctx = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{payload_b64}')) | ConvertFrom-Json
-Set-Location -LiteralPath $ctx.workspace
-& ([scriptblock]::Create($ctx.command))
-if (-not $?) {{ exit 1 }} elseif ($null -ne $LASTEXITCODE) {{ exit $LASTEXITCODE }}
-"#
+        "$ErrorActionPreference = 'Stop'; \
+         [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); \
+         $OutputEncoding = [Text.UTF8Encoding]::new($false); \
+         $ctx = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{payload_b64}')) | ConvertFrom-Json; \
+         Set-Location -LiteralPath $ctx.workspace; \
+         $LASTEXITCODE = $null; \
+         & ([scriptblock]::Create($ctx.command)); \
+         $commandSucceeded = $?; \
+         if ($null -ne $LASTEXITCODE) {{ exit $LASTEXITCODE }}; \
+         if (-not $commandSucceeded) {{ exit 1 }}; exit 0"
     )
 }
 
@@ -859,6 +858,14 @@ mod tests {
         );
         assert!(failure["ok"].as_bool().unwrap(), "{failure}");
         assert_eq!(failure["value"]["exitCode"].as_i64(), Some(3));
+
+        let native_failure = call(
+            &registry,
+            "workspace.shell",
+            json!({"command": "cmd.exe /d /c exit 7", "timeoutMs": 20000}),
+        );
+        assert!(native_failure["ok"].as_bool().unwrap(), "{native_failure}");
+        assert_eq!(native_failure["value"]["exitCode"].as_i64(), Some(7));
     }
 
     #[cfg(windows)]
