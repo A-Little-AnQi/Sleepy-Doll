@@ -66,9 +66,10 @@ try {
   run('gh',['release','upload',`v${version}`,`dist/${name}`,`dist/${name}.sha256`,`dist/Sleepy-Doll-${version}-release.json`,'--clobber']);
   await s3('PUT',channelKey,channelBytes,meta('application/json'));
   gateway(digest,false);paused=false;
-  const url=new URL(manifest.url);url.searchParams.set('sha256',digest);
+  const url=new URL(manifest.url);url.pathname=url.pathname.replace(/\/([^/]+)$/,'/'+digest+'/$1');
   const publicResponse=await fetch(url,{signal:AbortSignal.timeout(60000)});
-  if(!publicResponse.ok||hash(Buffer.from(await publicResponse.arrayBuffer()))!==digest)throw Error('Public replacement verification failed');
+  if(!publicResponse.ok)throw Error(`Public replacement verification failed: HTTP ${publicResponse.status}`);
+  if(hash(Buffer.from(await publicResponse.arrayBuffer()))!==digest)throw Error('Public replacement hash mismatch');
   console.log(JSON.stringify({version,channel:'stable',size:replacement.length,sha256:digest,publicVerified:true}));
 } catch(error) {
   if(!mutated) { if(gatewayAttempted)gateway(expected,false); throw error; }

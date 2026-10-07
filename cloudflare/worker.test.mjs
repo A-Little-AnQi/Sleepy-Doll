@@ -138,13 +138,13 @@ test("旧 CDN 缓存命中仍经过保护入口，且不会读取 R2", async () 
   }
 });
 
-test('替换时只暂停目标版本，哈希查询拒绝旧包且每次最多读取一次', async () => {
+test('替换时只暂停目标版本，哈希路径拒绝旧包且每次最多读取一次', async () => {
   const paused=downloadEnv();paused.env.DOWNLOAD_REPLACE_VERSION='0.0.1';
   assert.equal((await worker.fetch(new Request(downloadUrl),paused.env)).status,503);assert.equal(paused.reads,0);
-  const good=downloadEnv();const valid=downloadUrl+'?sha256='+'a'.repeat(64);
+  const good=downloadEnv();const valid=downloadUrl.replace('/Sleepy-Doll-', '/'+ 'a'.repeat(64) + '/Sleepy-Doll-');
   assert.equal((await worker.fetch(new Request(valid),good.env)).status,200);assert.equal(good.reads,1);
   const stale=downloadEnv();
-  assert.equal((await worker.fetch(new Request(downloadUrl+'?sha256='+'b'.repeat(64)),stale.env)).status,409);assert.equal(stale.reads,1);
+  assert.equal((await worker.fetch(new Request(downloadUrl.replace('/Sleepy-Doll-', '/'+ 'b'.repeat(64) + '/Sleepy-Doll-')),stale.env)).status,409);assert.equal(stale.reads,1);
   const duplicate=downloadEnv();
-  assert.equal((await worker.fetch(new Request(valid+'&sha256='+'a'.repeat(64)),duplicate.env)).status,400);assert.equal(duplicate.reads,0);
+  assert.equal((await worker.fetch(new Request(valid+'?sha256='+'a'.repeat(64)),duplicate.env)).status,400);assert.equal(duplicate.reads,0);
 });

@@ -84,3 +84,12 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           GH_TOKEN: ${{ github.token }}
         run: node scripts/replace-r2-client.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: protected-client-0.1.0
+          path: |
+            dist/Sleepy-Doll-0.1.0-setup.exe
+            target/.tmp/client-protection/javascript-report.json
+            target/.tmp/client-protection/native-report.json
+          retention-days: 3

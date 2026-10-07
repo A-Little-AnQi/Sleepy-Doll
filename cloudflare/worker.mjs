@@ -15,20 +15,18 @@ const SITE = "https://sleepy-doll.restless-nh3.com";
 const MAX_DOWNLOAD = 256 * 1024 * 1024;
 
 function releaseKey(path) {
-  const match = /^\/releases\/([^/]+)\/([^/]+)$/.exec(path);
+  const match = /^\/releases\/([^/]+)\/(?:[a-f0-9]{64}\/)?([^/]+)$/.exec(path);
   if (!match) return null;
   try { parseVersion(match[1]); } catch { return null; }
   if (!["release.json", `Sleepy-Doll-${match[1]}-setup.exe`, `Sleepy-Doll-${match[1]}-setup.exe.sha256`].includes(match[2])) return null;
-  return path.slice(1);
+  return `releases/${match[1]}/${match[2]}`;
 }
 
 async function download(request, env, ctx, url) {
   const key = releaseKey(url.pathname);
   if (!key) return json({ error: "not-found" }, 404);
-  const requestedHash = url.searchParams.get('sha256');
-  const validRevision = requestedHash && /^[a-f0-9]{64}$/.test(requestedHash)
-    && [...url.searchParams].length === 1;
-  if (url.search && !validRevision) return json({ error: "query" }, 400);
+  const requestedHash = /^\/releases\/[^/]+\/([a-f0-9]{64})\//.exec(url.pathname)?.[1];
+  if (url.search) return json({ error: "query" }, 400);
   if (env.DOWNLOAD_REPLACE_VERSION === key.split('/')[1])
     return json({ error: "replacement-in-progress" }, 503);
   if (!["GET", "HEAD"].includes(request.method)) return json({ error: "method" }, 405);
