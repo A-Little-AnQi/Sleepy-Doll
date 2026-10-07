@@ -9,6 +9,33 @@ static (string[] Api, HashSet<string> Private, string[] Native) Inspect(string p
     context.Resolving += (_, name) => File.Exists(Path.Combine(Path.GetDirectoryName(path)!, name.Name + ".dll")) ? context.LoadFromAssemblyPath(Path.Combine(Path.GetDirectoryName(path)!, name.Name + ".dll")) : null;
     var assembly = context.LoadFromAssemblyPath(Path.GetFullPath(path));
     var types = assembly.GetTypes();
+    foreach (var type in types.Where(t => t.GetProperties(BindingFlags.Public | BindingFlags.Instance).Length > 0))
+        foreach (var constructor in type.GetConstructors())
+            if (constructor.GetParameters().Any(p => string.IsNullOrEmpty(p.Name)))
+                throw new Exception(path + ": JSON record constructor parameter metadata lost");
+    foreach (var type in types.Where(t => !t.ContainsGenericParameters
+        && t.GetProperty("EqualityContract", BindingFlags.NonPublic | BindingFlags.Instance) is not null))
+    {
+        if (type.GetProperties(BindingFlags.Public | BindingFlags.Instance).Any(p =>
+            p.GetMethod?.CustomAttributes.Any(a => a.AttributeType.FullName == "System.Runtime.CompilerServices.CompilerGeneratedAttribute") != true)) continue;
+        var constructor = type.GetConstructors().FirstOrDefault();
+        if (constructor is null) continue;
+        if (constructor.GetParameters().Any(p => !(p.ParameterType == typeof(string)
+            || p.ParameterType == typeof(JsonElement) || p.ParameterType.IsPrimitive
+            || p.ParameterType.IsEnum || p.ParameterType.IsArray))) continue;
+        var value = constructor.Invoke(constructor.GetParameters().Select(p =>
+            p.ParameterType == typeof(string) ? (object)"wire-value" :
+            p.ParameterType == typeof(JsonElement) ? JsonSerializer.SerializeToElement<object?>(null) :
+            p.ParameterType.IsArray ? Array.CreateInstance(p.ParameterType.GetElementType()!, 0) :
+            p.ParameterType.IsValueType ? Activator.CreateInstance(p.ParameterType) : null).ToArray());
+        foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.CanWrite && p.PropertyType == typeof(JsonElement)))
+            property.SetValue(value, JsonSerializer.SerializeToElement<object?>(null));
+        var json = JsonSerializer.SerializeToElement(value, type);
+        foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            if (!json.TryGetProperty(property.Name, out _))
+                throw new Exception(path + ": JSON record property lost: " + property.Name);
+    }
     // Detect by metadata and shape: broken builds have already renamed these types.
     foreach (var original in types.Where(t => !t.IsVisible
         && t.CustomAttributes.Any(a => a.AttributeType.FullName == "System.Runtime.CompilerServices.CompilerGeneratedAttribute")
