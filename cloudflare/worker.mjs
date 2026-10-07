@@ -25,7 +25,12 @@ function releaseKey(path) {
 async function download(request, env, ctx, url) {
   const key = releaseKey(url.pathname);
   if (!key) return json({ error: "not-found" }, 404);
-  if (url.search) return json({ error: "query-not-supported" }, 400);
+  const requestedHash = url.searchParams.get('sha256');
+  const validRevision = requestedHash && /^[a-f0-9]{64}$/.test(requestedHash)
+    && [...url.searchParams].length === 1;
+  if (url.search && !validRevision) return json({ error: "query" }, 400);
+  if (env.DOWNLOAD_REPLACE_VERSION === key.split('/')[1])
+    return json({ error: "replacement-in-progress" }, 503);
   if (!["GET", "HEAD"].includes(request.method)) return json({ error: "method" }, 405);
   if (env.DOWNLOADS_DISABLED === "true") return json({ error: "downloads-paused" }, 503);
   const range = request.headers.get("Range");
@@ -38,7 +43,9 @@ async function download(request, env, ctx, url) {
     return response;
   }
   const cache = typeof caches === "undefined" ? null : caches.default;
-  const cacheRequest = new Request(url, { method: "GET", headers: request.headers });
+  const cacheUrl = new URL(url);
+  if (env.CLIENT_DOWNLOAD_REVISION) cacheUrl.searchParams.set('_revision',env.CLIENT_DOWNLOAD_REVISION);
+  const cacheRequest = new Request(cacheUrl, { method: "GET", headers: request.headers });
   const cached = cache && await cache.match(cacheRequest);
   if (cached) {
     const headers = new Headers(cached.headers);
@@ -52,6 +59,10 @@ async function download(request, env, ctx, url) {
       ? await env.RELEASES.head(key)
       : await env.RELEASES.get(key, { range: request.headers, onlyIf: request.headers });
     if (!object) return json({ error: "not-found" }, 404);
+    if (requestedHash && object.customMetadata?.sha256 !== requestedHash) {
+      await object.body?.cancel();
+      return json({ error: "obsolete-download-revision" }, 409);
+    }
     if (object.size > MAX_DOWNLOAD || (object.storageClass && object.storageClass !== "Standard")) {
       await object.body?.cancel();
       return json({ error: "object-policy" }, 503);
@@ -60,7 +71,7 @@ async function download(request, env, ctx, url) {
     object.writeHttpMetadata(headers);
     headers.set("ETag", object.httpEtag);
     headers.set("Accept-Ranges", "bytes");
-    headers.set("Cache-Control", "public, max-age=31536000, immutable");
+    headers.set("Cache-Control", requestedHash ? "public, max-age=31536000, immutable" : "public, max-age=0, must-revalidate");
     headers.set("X-Content-Type-Options", "nosniff");
     headers.set("X-Sleepy-Doll-Gateway", "guarded-r2");
     if (request.method === "HEAD") { headers.set("Content-Length", String(object.size)); return new Response(null, { headers }); }
@@ -74,7 +85,7 @@ async function download(request, env, ctx, url) {
       status = 206;
     } else headers.set("Content-Length", String(object.size));
     const response = new Response(object.body, { status, headers });
-    if (cache && status === 200 && ctx?.waitUntil) ctx.waitUntil(cache.put(new Request(url), response.clone()).catch(() => {}));
+    if (cache && status === 200 && ctx?.waitUntil) ctx.waitUntil(cache.put(cacheRequest, response.clone()).catch(() => {}));
     return response;
   } catch { return json({ error: "storage" }, 502); }
 }

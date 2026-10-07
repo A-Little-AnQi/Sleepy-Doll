@@ -1,0 +1,86 @@
+name: protect-client
+on:
+  workflow_dispatch:
+    inputs:
+      original_sha256:
+        description: Verified SHA-256 of the current 0.1.0 R2 package
+        required: true
+        default: e7d0bd7ab56d8b26af429eccf5e67479e426120368b393cf74b474b3a8d0caad
+permissions:
+  contents: write
+concurrency:
+  group: sleepy-doll-release
+  cancel-in-progress: false
+jobs:
+  protect:
+    runs-on: windows-2022
+    env:
+      TEMP: ${{ github.workspace }}\target\ci\tmp
+      TMP: ${{ github.workspace }}\target\ci\tmp
+      NUGET_PACKAGES: ${{ github.workspace }}\target\ci\nuget
+      DOTNET_CLI_HOME: ${{ github.workspace }}\target\ci\dotnet-home
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      npm_config_cache: ${{ github.workspace }}\target\ci\npm-cache
+      WRANGLER_LOG_PATH: ${{ github.workspace }}\target\ci\wrangler
+      WRANGLER_SEND_METRICS: 'false'
+      TOOL_SOURCE: ${{ github.sha }}
+      REPLACE_VERSION: '0.1.0'
+      REPLACE_EXPECTED_SHA256: ${{ inputs.original_sha256 }}
+      CLOUDFLARE_ACCOUNT_ID: '31b280af27ff4bf0d338ecd49cf27902'
+      R2_BUCKET: sleepy-doll-releases
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.1.0
+      - name: Restore protection tools into the single release checkout
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path $env:TEMP -Force | Out-Null
+          git fetch --no-tags origin $env:TOOL_SOURCE --depth=1
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read protection source' }
+          $paths=@('scripts/client-protection.mjs','scripts/client-protection-native.mjs','scripts/client-protection.vite.mjs','scripts/replace-r2-client.mjs','tests/client-protection/ClientProtectionChecks.csproj','tests/client-protection/Program.cs','cloudflare/worker.mjs','cloudflare/worker.test.mjs')
+          foreach ($path in $paths) {
+            New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
+            $content=git show "${env:TOOL_SOURCE}:$path"
+            if ($LASTEXITCODE -ne 0) { throw "Missing $path" }
+            [IO.File]::WriteAllText((Join-Path $PWD $path),($content -join "`n")+"`n",[Text.UTF8Encoding]::new($false))
+          }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: node scripts/client-protection.mjs --prepare
+      - run: node scripts/client-protection-native.mjs --source
+      - name: Validate protected native instructions
+        run: cargo test --no-default-features --features client-protection --lib protection_contract_tests
+      - name: Validate protected gateway
+        run: node --test cloudflare/worker.test.mjs
+      - name: Build and validate protected client
+        shell: pwsh
+        run: |
+          $build=Get-Content build-desktop.cmd -Raw
+          $build=$build.Replace('call npm run build','call npm run typecheck' + "`r`n" + 'if errorlevel 1 exit /b 1' + "`r`n" + 'call npx --no-install vite build --config scripts/client-protection.vite.mjs')
+          $build=$build.Replace('call bgi-bridge\build.cmd','call bgi-bridge\build.cmd' + "`r`n" + 'if errorlevel 1 exit /b 1' + "`r`n" + 'node scripts/client-protection.mjs --managed')
+          $build=$build.Replace('echo [3/4] Building desktop binary...', 'node scripts/client-protection-native.mjs --assets' + "`r`n" + 'if errorlevel 1 exit /b 1' + "`r`n" + 'echo [3/4] Building desktop binary...')
+          $build=$build.Replace('"%CARGO%" build --release','"%CARGO%" build --release --features client-protection --bin sleepy-doll')
+          # Only the client cargo invocation receives this feature; keep the setup invocation intact.
+          $build=$build.Replace('"%CARGO%" build --release --features client-protection --bin sleepy-doll --features setup --bin sleepy-doll-setup','"%CARGO%" build --release --features setup --bin sleepy-doll-setup')
+          $build=$build.Replace('echo [4/4] Building installer...', 'node scripts/client-protection-native.mjs --verify' + "`r`n" + 'if errorlevel 1 exit /b 1' + "`r`n" + 'echo [4/4] Building installer...')
+          if (-not $build.Contains('client-protection-native.mjs --assets')) { throw 'Release build stages did not match' }
+          [IO.File]::WriteAllText((Join-Path $PWD 'build-desktop.cmd'),$build,[Text.UTF8Encoding]::new($false))
+          cmd /c build-desktop.cmd
+          if ($LASTEXITCODE -ne 0) { throw 'Protected build failed' }
+          cargo test --no-default-features --features client-resources-test --lib resource_decoder_roundtrips
+          if ($LASTEXITCODE -ne 0) { throw 'Native resource verification failed' }
+      - name: Replace and verify the published R2 client
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/replace-r2-client.mjs
