@@ -5,7 +5,7 @@ on:
       original_sha256:
         description: Verified SHA-256 of the current 0.1.0 R2 package
         required: true
-        default: e7d0bd7ab56d8b26af429eccf5e67479e426120368b393cf74b474b3a8d0caad
+        default: ef58b9fecf2e351958e76516925ad692f85d3958f5a77281c0719e3149d40a21
       reuse_build_run:
         description: Optional verified protect-client run whose package should be reused
         required: false
@@ -121,4 +121,5 @@ jobs:
             dist/Sleepy-Doll-0.1.0-setup.exe
             target/.tmp/client-protection/javascript-report.json
             target/.tmp/client-protection/native-report.json
+            target/.tmp/client-protection/managed-report.json
           retention-days: 3

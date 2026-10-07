@@ -56,10 +56,25 @@ export async function managed() {
   const paths=[input,...runtimes.split(/\r?\n/).map(line=>/^(\S+) (8\.\S+) \[(.+)\]$/.exec(line)).filter(Boolean).map(m=>join(m[3],m[2]))];
   const escape=value=>value.replaceAll('&','&amp;').replaceAll('"','&quot;');
   const modules=['BgiBridge.dll','BgiBridge.Recovery.dll'];
-  const xml=`<Obfuscator><Var name="InPath" value="${escape(input)}"/><Var name="OutPath" value="${escape(output)}"/><Var name="KeepPublicApi" value="true"/><Var name="HidePrivateApi" value="true"/><Var name="HideStrings" value="true"/><Var name="RenameProperties" value="false"/><Var name="RenameFields" value="false"/><Var name="RenameEvents" value="false"/><Var name="UseUnicodeNames" value="false"/>${paths.map(p=>`<AssemblySearchPath path="${escape(p)}"/>`).join('')}${modules.map(m=>`<Module file="${escape(join(input,m))}"><SkipType name="*NativeMethods" skipMethods="true" skipFields="true"/></Module>`).join('')}</Obfuscator>`;
+  // Anonymous objects are JSON wire contracts. Their constructor parameter names
+  // must survive as well as their properties (System.Text.Json uses both).
+  const xml=`<Obfuscator><Var name="InPath" value="${escape(input)}"/><Var name="OutPath" value="${escape(output)}"/><Var name="KeepPublicApi" value="true"/><Var name="HidePrivateApi" value="true"/><Var name="HideStrings" value="true"/><Var name="RenameProperties" value="false"/><Var name="KeepProperties" value="true"/><Var name="RenameFields" value="false"/><Var name="RenameEvents" value="false"/><Var name="UseUnicodeNames" value="false"/>${paths.map(p=>`<AssemblySearchPath path="${escape(p)}"/>`).join('')}${modules.map(m=>`<Module file="${escape(join(input,m))}"><SkipType name="*NativeMethods" skipMethods="true" skipFields="true"/><SkipType rx=".*AnonymousType.*" skipMethods="true" skipFields="true" skipProperties="true"/></Module>`).join('')}</Obfuscator>`;
   const config=join(scratch,'obfuscar.xml');await writeFile(config,xml);
   run(join(scratch,'obfuscar','obfuscar.console.exe'),[config]);
   run('dotnet',['run','--project','tests/client-protection/ClientProtectionChecks.csproj','-c','Release','--',input,output]);
+  for(const name of ['BgiBridge.Recovery.runtimeconfig.json','BgiBridge.Recovery.deps.json'])
+    await copyFile(join(input,name),join(output,name));
+  for(const [args,expectedExit,check] of [
+    [['origin',join(scratch,'absent-host.exe')],0,v=>v.ok===true&&v.result.state==='unknown'],
+    [['status','[]'],0,v=>v.ok===true],
+    [['invalid-request'],1,v=>v.ok===false&&typeof v.error?.message==='string'],
+  ]) {
+    const result=spawnSync('dotnet',[join(output,'BgiBridge.Recovery.dll'),...args],{cwd:output,encoding:'utf8',windowsHide:true,timeout:12000});
+    let value;try {value=JSON.parse(result.stdout);}catch {throw Error(`Protected recovery did not return JSON: ${result.stderr}`);}
+    if(result.status!==expectedExit||!check(value))throw Error(`Protected recovery contract failed: ${result.stdout} ${result.stderr}`);
+  }
+  console.log('Protected recovery origin, status and error JSON processes passed');
+  await writeFile(join(scratch,'managed-report.json'),JSON.stringify({revision:'json-contracts-v2',recoveryProcessChecks:['origin','status','error'],files:await Promise.all(modules.map(async name=>({name,sha256:hash(await readFile(join(output,name)))})))},null,2));
   for(const name of modules) await copyFile(join(output,name),join(input,name));
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) {

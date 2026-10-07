@@ -9,6 +9,25 @@ static (string[] Api, HashSet<string> Private, string[] Native) Inspect(string p
     context.Resolving += (_, name) => File.Exists(Path.Combine(Path.GetDirectoryName(path)!, name.Name + ".dll")) ? context.LoadFromAssemblyPath(Path.Combine(Path.GetDirectoryName(path)!, name.Name + ".dll")) : null;
     var assembly = context.LoadFromAssemblyPath(Path.GetFullPath(path));
     var types = assembly.GetTypes();
+    // Detect by metadata and shape: broken builds have already renamed these types.
+    foreach (var original in types.Where(t => !t.IsVisible
+        && t.CustomAttributes.Any(a => a.AttributeType.FullName == "System.Runtime.CompilerServices.CompilerGeneratedAttribute")
+        && t.GetConstructors().Any(c => c.GetParameters().Length > 0)
+        && t.GetProperties(BindingFlags.Public | BindingFlags.Instance).Length > 0))
+    {
+        var type = original.IsGenericTypeDefinition
+            ? original.MakeGenericType(Enumerable.Repeat(typeof(string), original.GetGenericArguments().Length).ToArray())
+            : original;
+        var constructor = type.GetConstructors().Single();
+        var parameters = constructor.GetParameters();
+        if (parameters.Any(p => string.IsNullOrEmpty(p.Name)))
+            throw new Exception(path + ": JSON constructor parameter metadata lost");
+        var value = constructor.Invoke(parameters.Select(_ => (object)"wire-value").ToArray());
+        var json = JsonSerializer.SerializeToElement(value, type);
+        foreach (var parameter in parameters)
+            if (json.GetProperty(parameter.Name!).GetString() != "wire-value")
+                throw new Exception(path + ": JSON anonymous wire contract changed");
+    }
     var api = types.Where(t => t.IsVisible).SelectMany(t => new[] { t.FullName! }.Concat(t.GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly).Select(m => t.FullName + ":" + m))).Order().ToArray();
     var privateNames = types.SelectMany(t => t.GetMethods(BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)).Where(m => !m.IsSpecialName).Select(m => m.Name).ToHashSet();
     var native = types.SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)).Where(m => m.CustomAttributes.Any(a => a.AttributeType.FullName == "System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute")).Select(m => m.DeclaringType!.FullName + ":" + m).Order().ToArray();

@@ -41,6 +41,8 @@ const jsReport=JSON.parse(await readFile('target/.tmp/client-protection/javascri
 if(!jsReport.some(c=>c.protected&&c.before!==c.after)||jsReport.some(c=>c.excluded&&c.before!==c.after))throw Error('Client/installer protection validation failed');
 const nativeReport=JSON.parse(await readFile('target/.tmp/client-protection/native-report.json','utf8'));
 if(!nativeReport.length||nativeReport.some(c=>c.plainSha256===c.encodedSha256))throw Error('Native protection report invalid');
+const managedReport=JSON.parse(await readFile('target/.tmp/client-protection/managed-report.json','utf8'));
+if(managedReport.revision!=='json-contracts-v2'||['origin','status','error'].some(check=>!managedReport.recoveryProcessChecks?.includes(check)))throw Error('Protected bridge JSON/startup validation missing');
 const manifest={...previous,size:replacement.length,sha256:digest,publishedAt:new Date().toISOString()};
 const meta=(type,sha)=>({'content-type':type,'cache-control':'no-store','x-amz-storage-class':'STANDARD',...(sha?{'x-amz-meta-sha256':sha,'content-disposition':`attachment; filename="${name}"`}:{})});
 function gateway(revision,paused) {
