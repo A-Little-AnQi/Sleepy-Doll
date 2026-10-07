@@ -12,6 +12,7 @@ on:
         default: ''
 permissions:
   contents: write
+  actions: read
 concurrency:
   group: sleepy-doll-release
   cancel-in-progress: false

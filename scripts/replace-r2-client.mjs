@@ -39,6 +39,8 @@ const replacement=await readFile(`dist/${name}`),digest=hash(replacement);
 if(digest===expected||replacement.length>256*1024*1024)throw Error('Invalid replacement package');
 const jsReport=JSON.parse(await readFile('target/.tmp/client-protection/javascript-report.json','utf8'));
 if(!jsReport.some(c=>c.protected&&c.before!==c.after)||jsReport.some(c=>c.excluded&&c.before!==c.after))throw Error('Client/installer protection validation failed');
+const nativeReport=JSON.parse(await readFile('target/.tmp/client-protection/native-report.json','utf8'));
+if(!nativeReport.length||nativeReport.some(c=>c.plainSha256===c.encodedSha256))throw Error('Native protection report invalid');
 const manifest={...previous,size:replacement.length,sha256:digest,publishedAt:new Date().toISOString()};
 const meta=(type,sha)=>({'content-type':type,'cache-control':'no-store','x-amz-storage-class':'STANDARD',...(sha?{'x-amz-meta-sha256':sha,'content-disposition':`attachment; filename="${name}"`}:{})});
 function gateway(revision,paused) {
