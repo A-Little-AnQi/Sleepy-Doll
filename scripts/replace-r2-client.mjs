@@ -1,4 +1,5 @@
 import { createHash,createHmac } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { readFile,writeFile,mkdir } from 'node:fs/promises';
 import { resolve,join } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -67,9 +68,19 @@ try {
   await s3('PUT',channelKey,channelBytes,meta('application/json'));
   gateway(digest,false);paused=false;
   const url=new URL(manifest.url);url.pathname=url.pathname.replace(/\/([^/]+)$/,'/'+digest+'/$1');
-  const publicResponse=await fetch(url,{signal:AbortSignal.timeout(60000)});
-  if(!publicResponse.ok)throw Error(`Public replacement verification failed: HTTP ${publicResponse.status}`);
-  if(hash(Buffer.from(await publicResponse.arrayBuffer()))!==digest)throw Error('Public replacement hash mismatch');
+  let verified=false;
+  for(let attempt=0;attempt<12;attempt++) {
+    const publicResponse=await fetch(url,{signal:AbortSignal.timeout(60000)});
+    if(publicResponse.ok) {
+      if(hash(Buffer.from(await publicResponse.arrayBuffer()))!==digest)throw Error('Public replacement hash mismatch');
+      verified=true;break;
+    }
+    const body=(await publicResponse.text()).slice(0,200);
+    console.log(`Public gateway attempt ${attempt+1}: HTTP ${publicResponse.status} ${body}`);
+    if(![503,502,404].includes(publicResponse.status))throw Error(`Public replacement verification failed: HTTP ${publicResponse.status}`);
+    await delay(8000);
+  }
+  if(!verified)throw Error('Public gateway did not finish deployment propagation');
   console.log(JSON.stringify({version,channel:'stable',size:replacement.length,sha256:digest,publicVerified:true}));
 } catch(error) {
   if(!mutated) { if(gatewayAttempted)gateway(expected,false); throw error; }

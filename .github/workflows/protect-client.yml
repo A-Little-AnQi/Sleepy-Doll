@@ -6,6 +6,10 @@ on:
         description: Verified SHA-256 of the current 0.1.0 R2 package
         required: true
         default: e7d0bd7ab56d8b26af429eccf5e67479e426120368b393cf74b474b3a8d0caad
+      reuse_build_run:
+        description: Optional verified protect-client run whose package should be reused
+        required: false
+        default: ''
 permissions:
   contents: write
 concurrency:
@@ -55,12 +59,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: npm ci
       - run: node scripts/client-protection.mjs --prepare
+        if: inputs.reuse_build_run == ''
       - run: node scripts/client-protection-native.mjs --source
+        if: inputs.reuse_build_run == ''
       - name: Validate protected native instructions
+        if: inputs.reuse_build_run == ''
         run: cargo test --no-default-features --features client-protection --lib protection_contract_tests
       - name: Validate protected gateway
         run: node --test cloudflare/worker.test.mjs
       - name: Build and validate protected client
+        if: inputs.reuse_build_run == ''
         shell: pwsh
         run: |
           $build=Get-Content build-desktop.cmd -Raw
@@ -77,6 +85,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Protected build failed' }
           cargo test --no-default-features --features client-resources-test --lib resource_decoder_roundtrips
           if ($LASTEXITCODE -ne 0) { throw 'Native resource verification failed' }
+      - name: Verify reusable build provenance
+        if: inputs.reuse_build_run != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REUSE_RUN: ${{ inputs.reuse_build_run }}
+        run: |
+          if ($env:REUSE_RUN -notmatch '^\d+$') { throw 'Invalid reusable run' }
+          $run=gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:REUSE_RUN" | ConvertFrom-Json
+          if ($run.path -ne '.github/workflows/protect-client.yml') { throw 'Wrong build workflow' }
+          $jobs=gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:REUSE_RUN/jobs" | ConvertFrom-Json
+          $build=$jobs.jobs[0].steps | Where-Object name -eq 'Build and validate protected client'
+          if ($build.conclusion -ne 'success') { throw 'Reusable client build did not pass validation' }
+      - uses: actions/download-artifact@v4
+        if: inputs.reuse_build_run != ''
+        with:
+          name: protected-client-0.1.0
+          run-id: ${{ inputs.reuse_build_run }}
+          github-token: ${{ github.token }}
+          path: ${{ github.workspace }}
       - name: Replace and verify the published R2 client
         env:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
