@@ -64,7 +64,7 @@ impl FeatureIndex {
             .get(id)
             .ok_or_else(|| Error::Tool("BGI 功能条目不存在；使用 search 返回的精确 ID".into()))?;
         Ok(
-            json!({"source":"bgiPluginFeatureIndex", "sourceRevision":self.revision,
+            json!({"source":"bgiPluginFeatureIndex", "sourceRevision":self.revision,"capabilityState":"referenceOnly",
             "item": self.items[*index], "next":"只读取当前条目给出的相关参考资料与当前接口契约。静态索引不证明现场接口可调用，不授予执行权限。"}),
         )
     }
@@ -143,6 +143,78 @@ impl FeatureIndex {
             "next":"使用精确 ID 读取最相关条目；只展开当前任务的链路，不加载整份索引。"}),
         )
     }
+}
+
+/// Read one progressive card's current contracts; never create UI context or
+/// execute the functions being described. A connection failure stays unknown.
+pub(crate) async fn inspect_live(
+    mut card: Value,
+    offset: usize,
+    bridge: &crate::runtime::host::bridge::Bridge,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<Value> {
+    let methods = card["item"]["methodIds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    if methods.is_empty() {
+        return Ok(card);
+    }
+    let total = methods.len();
+    let mut contracts = Vec::new();
+    let mut identity = None;
+    let mut consistent = true;
+    for id in methods.iter().skip(offset).take(4) {
+        match bridge.describe(id, cancel).await {
+            Ok(contract) => {
+                let key = (
+                    contract["instanceId"].clone(),
+                    contract["catalogVersion"].clone(),
+                );
+                if key.0.is_null()
+                    || key.1.is_null()
+                    || identity.as_ref().is_some_and(|v| v != &key)
+                {
+                    consistent = false;
+                }
+                identity = Some(key);
+                contracts.push(json!({"methodId":id,"state":if contract["callable"]==true {"executable"} else {"unavailable"},
+                    "route":if contract["effect"]=="readOnly" {"bgi.api.read"} else {"bgi.api.invoke"},
+                    "priority":if id.starts_with("cmd.") || id.starts_with("bgi.ui.") {"uiFallback"} else {"direct"},"contract":contract}));
+            }
+            Err(crate::error::Error::Cancelled) => return Err(crate::error::Error::Cancelled),
+            Err(error) => {
+                card["capabilityState"] = json!("unknown");
+                card["unavailableReason"] = json!(error.user_message());
+                card["contracts"] = json!(contracts);
+                return Ok(card);
+            }
+        }
+    }
+    let next = (offset + contracts.len() < total).then_some(offset + contracts.len());
+    card["capabilityState"] = json!(if !consistent || contracts.is_empty() || next.is_some() {
+        "unknown"
+    } else if contracts.iter().all(|c| c["state"] == "executable") {
+        "executable"
+    } else {
+        "unavailable"
+    });
+    card["contracts"] = json!(contracts);
+    card["snapshotConsistent"] = json!(consistent);
+    card["methodTotal"] = json!(total);
+    card["nextMethodOffset"] = json!(next);
+    if card["item"]["kind"] == "scriptApi" {
+        card["capabilityState"] = json!("referenceOnly");
+        card["usage"] = json!(
+            "编写脚本的 API 参考；contracts 是读取 JS 绑定说明的入口，不能把 JS 成员直接当桥操作调用。"
+        );
+    }
+    card["next"] = json!(
+        "以逐项 contract 的参数、前置条件和核验范围为准；优先 direct，UI 只作末级回退。executable 不是已执行，也不是用户授权。"
+    );
+    Ok(card)
 }
 
 fn normalize(value: &str) -> String {

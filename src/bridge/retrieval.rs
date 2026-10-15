@@ -163,6 +163,21 @@ pub async fn search_interface(
     guide: Option<&str>,
 ) -> Result<Value> {
     let state = RetrievalState::from_history(history);
+    let mut resource_error = None;
+    // Exact resource titles take precedence over broad native-interface matches.
+    // This probes the repository index, not installed files or a UI tree.
+    if state.interface_searches == 0 || state.needs_source_change() {
+        match tools.call_async("bgi.repo.search",&json!({"query":prompt.chars().take(200).collect::<String>(),"category":"all","limit":8}),cancel.clone()).await {
+            Ok(resources) if resources["items"].as_array().is_some_and(|items|items.iter().any(|item|item["namedInQuery"]==true))=> {
+                let mut result=json!({"items":[],"total":0,"interfacesDeferred":true,"source":"resourceIndex"});
+                attach_resource_candidates(&mut result,&resources,guide);
+                return Ok(result);
+            }
+            Err(Error::Cancelled)=>return Err(Error::Cancelled),
+            Err(error)=>resource_error=Some(error.user_message()),
+            _=>{}
+        }
+    }
     let query = {
         let mut query = url::form_urlencoded::Serializer::new(String::new());
         query
@@ -183,23 +198,11 @@ pub async fn search_interface(
     let mut result = bridge
         .get(&format!("/bridge/v1/catalog?{query}"), cancel)
         .await?;
+    if let Some(error) = resource_error {
+        result["resourceLookupError"] = json!(error);
+    }
     if result["total"].as_u64().unwrap_or(0) > 0 || arguments["query"] == "" {
         return Ok(result);
-    }
-    if state.interface_searches == 0 || state.needs_source_change() {
-        let candidates = tools.call_async("bgi.repo.search", &json!({"query":prompt.chars().take(200).collect::<String>(),"category":"all","limit":8}), cancel.clone()).await;
-        match candidates {
-            Ok(scripts) => {
-                if scripts["items"]
-                    .as_array()
-                    .is_some_and(|items| items.iter().any(|item| item["namedInQuery"] == true))
-                {
-                    attach_resource_candidates(&mut result, &scripts, guide);
-                }
-            }
-            Err(Error::Cancelled) => return Err(Error::Cancelled),
-            Err(_) => {}
-        }
     }
     if state.search_stopped() || state.empty_searches >= 2 {
         result["retrievalAdvice"] = json!(

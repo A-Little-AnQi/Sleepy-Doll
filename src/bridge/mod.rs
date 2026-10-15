@@ -7,6 +7,7 @@ pub(crate) mod origin;
 pub mod recovery;
 pub(crate) mod resolve;
 pub(crate) mod retrieval;
+pub(crate) mod task_semantics;
 
 use std::{
     fs,
@@ -487,7 +488,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             let features = features.clone();
             Arc::new(move |a: &Value| features.search(a["query"].as_str().unwrap_or(""),a["kind"].as_str(),a["offset"].as_u64().unwrap_or(0) as usize,a["limit"].as_u64().unwrap_or(5) as usize)) as BridgeToolFn
         }),
-        ("bgi.feature.read", "读取单项 BGI 链路", "读取 feature.search 返回的一个精确 ID，取得输入来源、步骤、分支、验证方法与相关参考资料。不读取全量手册，不证明当前接口可调用；只按当前目标继续读取引用和 describe。", json!({"type":"object","properties":{"id":{"type":"string","minLength":1}},"required":["id"],"additionalProperties":false}), {
+        ("bgi.feature.read", "读取单项 BGI 链路", "读取 feature.search 返回的一个精确 ID，取得输入来源、步骤、分支、验证方法与相关参考资料。live=true 时分页读取当前接口契约并区分 executable/referenceOnly/unavailable/unknown；默认只读静态参考，不加载全量手册。", json!({"type":"object","properties":{"id":{"type":"string","minLength":1},"live":{"type":"boolean","default":false},"methodOffset":{"type":"integer","minimum":0}},"required":["id"],"additionalProperties":false}), {
             let features = features.clone();
             Arc::new(move |a: &Value| features.read(a["id"].as_str().unwrap_or(""))) as BridgeToolFn
         }),

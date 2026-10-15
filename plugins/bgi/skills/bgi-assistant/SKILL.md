@@ -9,7 +9,7 @@ alwaysLoad: true
 
 此技能只适用于 BGI 目标；产品是通用 Agent，其他工具及普通对话不套用 BGI 规则。
 
-复用已有证据，自行读取现场信息。路径、状态等可观测事实自己读取，不问用户。调用前读取当前接口契约。
+可观测事实自行读取，调用前核对当前契约。
 
 ## 选择下一步
 
@@ -22,11 +22,11 @@ alwaysLoad: true
 - 原生界面交互：读 bgi-operator 的 references/native-ui.md。
 - 删除配置组：定位精确 name/sha256 后 describe/invoke `bgi.delete_script_group`，不操作界面。删除资源走 inspect_local_resource → delete_local_resource。
 - 停止任务：等待中的 Job 用 `bgi.job.cancel`；已交接启动 Job 已终态，用 `bgi.stop_current_task` 并核对原目标。
-- 对象不明确：`bgi.feature.search` 后 `bgi.feature.read`；能否调用以 `bgi.api.describe` 为准。已知稳定接口 ID 时直接 describe，不泛搜索。
+- 对象不明确：`bgi.feature.search` → `bgi.feature.read(live:true)` 分页读取单项当前契约；按 nextMethodOffset 补页。具体状态与链路规则见 references/user-goals.md。已知稳定 ID 直接 describe。
 - 口语目标选域：读 references/user-goals.md。快捷任务：读 references/quick-tasks.md。
 
-入口命名：助手自拟名取 ≤20 字自然中文目标短名（如"挖矿讨伐"），不用 +、@、目录、作者、版本、时间戳拼串；用户给出的名称照用不强改。
+入口自拟名用 ≤20 字自然中文，不拼目录、版本或时间戳；用户命名照用。
 
 多组一次 bgi.run_script_groups，普通对话和快捷入口默认 waitForCompletion=false 后台交接，仅明确要等结果才 true；详见 references/action-policy.md。
 
-按功能卡 references（skill/name/path）读取具体链路，一次只读相关资料。权限由运行时处理，不重复问许可。只报告已核验结果和一个真实阻塞项。
+按功能卡 references 读取单项资料。权限由运行时处理，不重复问许可；报告已核验结果与真实阻塞项。

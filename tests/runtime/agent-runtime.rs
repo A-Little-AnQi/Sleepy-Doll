@@ -503,6 +503,67 @@ async fn ack_recovery_reuses_exact_wire_only_in_the_original_idempotent_instance
 }
 
 #[tokio::test]
+async fn exact_resource_match_precedes_native_interface_lookup() {
+    let native =
+        ModelFixture::new(|_| panic!("exact resource lookup must not query native/UI catalog"));
+    let mut registry = ToolRegistry::default();
+    registry.register(crate::extension::FunctionTool::new("bgi.repo.search","仓库索引",json!({"type":"object"}),"core:bgi", |_|Ok(json!({"total":1,"items":[{"path":"pathing/稻妻/血斛/作者","category":"pathing","namedInQuery":true}]}))).with_execution(crate::extension::ToolExecution::read_only())).unwrap();
+    let bridge = host::bridge::Bridge::for_transport_tests(
+        serde_json::from_value(json!({"baseUrl":native.url})).unwrap(),
+    )
+    .unwrap();
+    let result = crate::bridge::retrieval::search_interface(
+        "跑一下血斛",
+        &[],
+        &json!({"query":"血斛"}),
+        Arc::new(registry),
+        &bridge,
+        &CancellationToken::new(),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["interfacesDeferred"], true);
+    assert_eq!(
+        result["resourceCandidates"]["items"][0]["category"],
+        "pathing"
+    );
+    assert!(native.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn live_feature_cards_distinguish_current_operations_from_script_reference() {
+    let number = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = number.clone();
+    let fixture = ModelFixture::new(move |_| {
+        let n = seen.fetch_add(1, Ordering::SeqCst) % 3;
+        (
+            200,
+            json!({"instanceId":"instance-1","catalogVersion":"v1","callable":n!=2,"effect":if n==0 {"readOnly"} else {"configurationWrite"},"guide":{"verification":"readBack"},"inputSchema":{"type":"object"}}),
+        )
+    });
+    let bridge = host::bridge::Bridge::for_transport_tests(
+        serde_json::from_value(json!({"enabled":true,"baseUrl":fixture.url})).unwrap(),
+    )
+    .unwrap();
+    let card = json!({"item":{"kind":"workflow","methodIds":["bgi.read","bgi.write","cmd.old"]}});
+    let result = crate::bridge::features::inspect_live(card, 0, &bridge, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(result["capabilityState"], "unavailable");
+    assert_eq!(result["contracts"][0]["route"], "bgi.api.read");
+    assert_eq!(result["contracts"][1]["route"], "bgi.api.invoke");
+    assert_eq!(result["contracts"][2]["state"], "unavailable");
+    assert_eq!(result["contracts"][2]["priority"], "uiFallback");
+    assert!(result["snapshotConsistent"].as_bool().unwrap());
+    let js = json!({"item":{"kind":"scriptApi","methodIds":["bgi.js_api.read"]}});
+    let result = crate::bridge::features::inspect_live(js, 0, &bridge, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(result["capabilityState"], "referenceOnly");
+}
+
+#[tokio::test]
 async fn native_observation_does_not_finish_an_explicit_conditional_task() {
     let fixture = ModelFixture::new(|request| {
         if request["messages"][0]["content"]
