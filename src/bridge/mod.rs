@@ -860,6 +860,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             }
             _ => crate::extension::ToolExposure::AfterRead,
         };
+        execution.effect_is_dynamic = matches!(name, "bgi.api.invoke" | "bgi.capability.invoke");
         if name == "bgi.state.get" {
             execution.goal_observation = Some(Box::new(crate::extension::GoalObservationSpec {
                 pointer: "/value/runtime/gameProcessRunning".into(),

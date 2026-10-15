@@ -178,6 +178,8 @@ pub struct Run {
     /// Goal revision captured before the model decision/native shortcut dispatch.
     #[serde(default)]
     pub goal_revision: Option<u64>,
+    #[serde(default)]
+    pub memory_epoch: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

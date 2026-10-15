@@ -76,6 +76,7 @@ export interface MemoryEntry {
   experience: MemoryExperience;
   revision: number;
   userEdited: boolean;
+  validationState: "candidate" | "verified";
   sourceConversationId: string;
   updatedAt: string;
 }

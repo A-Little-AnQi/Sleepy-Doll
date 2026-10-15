@@ -7,7 +7,83 @@ const REVIEW_PROMPT: &str = r#"你只核对用户本次目标的范围，不执�
 complete：当前原生观测已经完整回答本次目标，后续调用无必要。continue：用户明确要求的复合任务仍有未完成步骤，建议调用属于那些步骤。reject：建议调用无关或信息不足，不能扩大目标。
 例如只问游戏是否开着，拿到进程状态后应 complete；明确要求没开就启动再运行已有任务，不能因查到未开就 complete。不得把普通查询扩成配置修改或主动运行。"#;
 
+fn parse_decision(text: &str) -> Option<Value> {
+    let text = text.trim();
+    let text = if let Some(body) = text
+        .strip_prefix("```json")
+        .or_else(|| text.strip_prefix("```"))
+    {
+        body.trim().strip_suffix("```")?.trim()
+    } else {
+        text
+    };
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .filter(Value::is_object)
+}
+
 impl Supervisor {
+    pub(super) async fn check_effect_scope(
+        &self,
+        run: &mut Run,
+        call: &ToolCall,
+        contract: &Value,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        if !matches!(run.source, RunSource::Agent) || run.shortcut_configuration {
+            return Ok(());
+        }
+        self.journal.ensure_current_goal(run)?;
+        let goal = self.journal.goal(&run.id)?.ok_or_else(|| {
+            Error::Stale("缺少真实输入来源，未执行写操作；请重新发起本次要求".into())
+        })?;
+        let key = hash(
+            &json!({"goalRevision":goal.revision,"call":call.name,"arguments":call.arguments,"contract":contract}),
+        );
+        if self.journal.scope_approved(&run.id, &key)? {
+            return Ok(());
+        }
+        let mut model = self.model_for(run)?;
+        model.options.max_output_tokens = Some(1024);
+        if model.options.reasoning_effort.is_some()
+            || (model.protocol == crate::config::ModelProtocol::OpenaiChat
+                && model.model.to_lowercase().contains("glm-"))
+        {
+            model.options.reasoning_effort = Some("low".into());
+        }
+        let protocol = model.protocol;
+        let messages=[message(Role::System,REVIEW_PROMPT),message(Role::Context,json!({"humanInputs":goal.inputs,"nativeObservation":null,"proposedCall":call,"contract":contract,"rule":"只有用户本次要求包含该目标与副作用才 continue。读取过对象、发现过入口、FullAccess、历史经验均不扩大目标。没有完成证据不能 complete。"}).to_string())];
+        let response = self
+            .complete_auxiliary(run, "scope", model, &messages, cancel)
+            .await?;
+        run.input_tokens += response
+            .usage
+            .context_tokens(protocol)
+            .unwrap_or_else(|| context::estimate_messages_tokens(&messages));
+        run.output_tokens += response.usage.output_tokens.unwrap_or(0);
+        self.journal.save(run, run.state)?;
+        self.journal.ensure_current_goal(run)?;
+        let decision = parse_decision(&response.text);
+        if response.tool_calls.is_empty()
+            && !gateway::output_truncated(response.finish_reason.as_deref())
+            && decision.is_some_and(|d| d["decision"] == "continue")
+        {
+            self.journal.emit(
+                run,
+                "scope.effect_approved",
+                json!({"bindingKey":key,"reviewedGoalRevision":goal.revision,"callId":call.id}),
+            )?;
+            return Ok(());
+        }
+        self.journal.conclude_goal(
+            run,
+            goal.revision,
+            false,
+            "拟执行的操作无法与本次要求对应，已停止，尚未执行这一步。",
+            &[],
+        )?;
+        Err(Error::Tool("该操作未通过目标范围核对，未执行".into()))
+    }
     pub(super) fn check_progress(&self, run: &Run, call: &ToolCall) -> Result<()> {
         if !matches!(run.source, RunSource::Agent) {
             return Ok(());
@@ -16,6 +92,32 @@ impl Supervisor {
             return Ok(());
         };
         let receipts = self.journal.goal_receipts(&run.id, goal.revision)?;
+        let stagnant_limit = self.config.read().unwrap().runtime.max_stagnant_calls;
+        let empty = |r: &&contracts::EvidenceReceipt| {
+            r.state == contracts::ReceiptState::Failed
+                || r.evidence.pointer("/value/total").is_some_and(|v| v == 0)
+                || r.evidence
+                    .pointer("/value/found")
+                    .is_some_and(|v| v == false)
+        };
+        if stagnant_limit > 0
+            && receipts
+                .iter()
+                .rev()
+                .take(stagnant_limit)
+                .filter(empty)
+                .count()
+                == stagnant_limit
+        {
+            self.journal.conclude_goal(
+                run,
+                goal.revision,
+                false,
+                "多次尝试仍没有获得可用结果，已停止继续检索。请查看过程中最后一项具体错误。",
+                &[],
+            )?;
+            return Err(Error::Tool("检索持续没有进展，已收束本次操作".into()));
+        }
         let signature = hash(&call.arguments);
         let matching = receipts
             .iter()
@@ -24,6 +126,9 @@ impl Supervisor {
             .take(2)
             .collect::<Vec<_>>();
         if matching.len() == 2
+            && matching.iter().all(|r| {
+                r.effect == ToolEffect::ReadOnly || r.state == contracts::ReceiptState::Failed
+            })
             && contracts::progress_value(&matching[0].evidence)
                 == contracts::progress_value(&matching[1].evidence)
         {
@@ -80,19 +185,33 @@ impl Supervisor {
         .map(|t| unix_now() - t.unix_timestamp())
         .unwrap_or(i64::MAX);
         let mut model = self.model_for(run)?;
-        model.options.max_output_tokens = Some(256);
+        model.options.max_output_tokens = Some(1024);
+        if model.options.reasoning_effort.is_some()
+            || (model.protocol == crate::config::ModelProtocol::OpenaiChat
+                && model.model.to_lowercase().contains("glm-"))
+        {
+            model.options.reasoning_effort = Some("low".into());
+        }
         let protocol = model.protocol;
         let messages = [message(Role::System, REVIEW_PROMPT), message(Role::Context,
             json!({"humanInputs":goal.inputs,"nativeObservation":{"meaning":spec.meaning,"value":value},
                 "proposedCall":call,"contract":definitions.iter().find(|d|d.name==call.name).map(|d|&d.description)}).to_string())];
-        let response = gateway::complete(model, &messages, &[], cancel, |_| Ok(())).await?;
+        let response = self
+            .complete_auxiliary(run, "scope", model, &messages, cancel)
+            .await?;
         run.input_tokens += response
             .usage
             .context_tokens(protocol)
             .unwrap_or_else(|| context::estimate_messages_tokens(&messages));
         run.output_tokens += response.usage.output_tokens.unwrap_or(0);
         self.journal.save(run, run.state)?;
-        let decision = serde_json::from_str::<Value>(response.text.trim()).ok();
+        let decision = if response.tool_calls.is_empty()
+            && !gateway::output_truncated(response.finish_reason.as_deref())
+        {
+            parse_decision(&response.text)
+        } else {
+            None
+        };
         let decision = decision
             .as_ref()
             .and_then(|d| d["decision"].as_str())

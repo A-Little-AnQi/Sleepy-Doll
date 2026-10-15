@@ -1113,6 +1113,7 @@ mod invoke_protocol_tests {
                             }
                             Err(_) => break,
                         };
+                        stream.set_nonblocking(false).unwrap();
                         stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
                         let mut head = Vec::new();
                         let mut buffer = [0u8; 8192];

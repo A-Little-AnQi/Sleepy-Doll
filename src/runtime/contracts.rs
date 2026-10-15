@@ -13,6 +13,7 @@ pub enum InputOrigin {
     HumanSupplement,
     HumanAnswer { request_id: String },
     ShortcutClick { task_id: String, revision: u64 },
+    StrategyClick { strategy_id: String, revision: u64 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,7 +89,11 @@ pub fn receipt_state(value: &Value, effect: crate::extension::ToolEffect) -> Rec
     if value["ok"] != true {
         return ReceiptState::Failed;
     }
-    let body = &value["value"];
+    let body = if value["value"]["includedIn"].is_string() {
+        &value["value"]["result"]
+    } else {
+        &value["value"]
+    };
     if matches!(
         body["outcome"].as_str(),
         Some("verifiedFailed" | "failed" | "cancelled")

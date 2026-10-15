@@ -67,20 +67,81 @@ pub fn estimate_tool_tokens(tools: &[ToolDefinition]) -> u64 {
 }
 
 pub fn tool_evidence(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Object(fields) => serde_json::Value::Object(
-            fields
-                .iter()
-                .filter_map(|(key, value)| {
-                    let evidence = tool_evidence(value);
-                    (!evidence.is_null()).then(|| (key.clone(), evidence))
-                })
-                .collect(),
-        ),
-        serde_json::Value::Array(_) if value.to_string().len() > 2048 => serde_json::Value::Null,
-        serde_json::Value::String(text) if text.len() > 2048 => serde_json::Value::Null,
-        other => other.clone(),
+    fn project(value: &serde_json::Value, budget: &mut usize, depth: usize) -> serde_json::Value {
+        if depth > 8 || *budget < 16 {
+            return serde_json::Value::Null;
+        }
+        match value {
+            serde_json::Value::Object(fields) => {
+                const KEYS: &[&str] = &[
+                    "ok",
+                    "outcome",
+                    "verified",
+                    "verification",
+                    "accepted",
+                    "executionMode",
+                    "verificationScope",
+                    "jobId",
+                    "instanceId",
+                    "catalogVersion",
+                    "sha256",
+                    "valueVersion",
+                    "path",
+                    "observedAt",
+                    "truncated",
+                    "nextLine",
+                    "nextOffset",
+                    "total",
+                    "found",
+                    "value",
+                    "evidence",
+                    "result",
+                ];
+                let ordered = KEYS
+                    .iter()
+                    .filter_map(|key| fields.get_key_value(*key))
+                    .chain(
+                        fields
+                            .iter()
+                            .filter(|(key, _)| !KEYS.contains(&key.as_str())),
+                    );
+                let mut output = serde_json::Map::new();
+                for (key, value) in ordered {
+                    if *budget < key.len() + 16 || output.len() >= 32 {
+                        break;
+                    }
+                    *budget -= key.len() + 4;
+                    let result = project(value, budget, depth + 1);
+                    if !result.is_null() {
+                        output.insert(key.clone(), result);
+                    }
+                }
+                if output.len() != fields.len() {
+                    output.insert("evidenceTruncated".into(), json!(true));
+                }
+                serde_json::Value::Object(output)
+            }
+            serde_json::Value::Array(values)
+                if values.len() <= 16 && value.to_string().len() < *budget / 2 =>
+            {
+                serde_json::Value::Array(
+                    values
+                        .iter()
+                        .map(|v| project(v, budget, depth + 1))
+                        .collect(),
+                )
+            }
+            serde_json::Value::Array(_) => serde_json::Value::Null,
+            serde_json::Value::String(text) if text.len() > 2048 || text.len() > *budget => {
+                serde_json::Value::Null
+            }
+            other => {
+                *budget = budget.saturating_sub(other.to_string().len() + 1);
+                other.clone()
+            }
+        }
     }
+    project(value, &mut 6000, 0)
 }
 
 /// 一次模型请求能否复用上一轮的完整提示前缀。

@@ -260,6 +260,33 @@ fn human_goal_is_independent_of_wire_roles_and_internal_context() {
         .journal
         .create_workflow_run("task", "日常", 7, "click-1", 600)
         .unwrap();
+    let retry = supervisor
+        .journal
+        .create_workflow_run("task", "日常", 7, "click-1", 600)
+        .unwrap();
+    assert_eq!(retry.id, shortcut.id);
+    assert!(
+        supervisor
+            .journal
+            .create_workflow_run("task", "日常", 8, "click-1", 600)
+            .is_err()
+    );
+    assert!(matches!(
+        supervisor.journal.get(&shortcut.id).unwrap().source,
+        RunSource::SavedWorkflow {
+            workflow_revision: 7,
+            ..
+        }
+    ));
+    assert!(
+        supervisor
+            .journal
+            .events(&shortcut.conversation_id, 0)
+            .unwrap()
+            .iter()
+            .filter(|e| e.kind == "run.created")
+            .all(|e| e.data["source"]["kind"] == "savedWorkflow")
+    );
     assert!(matches!(
         supervisor
             .journal
@@ -561,6 +588,218 @@ async fn live_feature_cards_distinguish_current_operations_from_script_reference
         .await
         .unwrap();
     assert_eq!(result["capabilityState"], "referenceOnly");
+}
+
+#[test]
+fn old_memory_cannot_survive_inside_a_compaction_summary() {
+    let supervisor = super::record_result_tests::interrupt_supervisor("summary-memory-epoch");
+    let run = supervisor
+        .journal
+        .create("真实用户目标", "summary", "summary", 600, None)
+        .unwrap();
+    supervisor
+        .journal
+        .append_message(&run, &message(Role::Assistant, "原始事实记录"))
+        .unwrap();
+    let entries = supervisor.journal.history_window(&run).unwrap().1;
+    let boundary = entries.last().unwrap();
+    let plan = context::CompactionPlan {
+        through_sort_key: boundary.sort_key,
+        through_message_id: boundary.id,
+        source: entries.iter().map(|e| e.message.clone()).collect(),
+    };
+    supervisor
+        .journal
+        .save_compaction(&run, &plan, "旧记忆摘要", 0, 0, 0)
+        .unwrap();
+    assert!(
+        supervisor
+            .journal
+            .history(&run)
+            .unwrap()
+            .iter()
+            .any(|m| m.content.contains("旧记忆摘要"))
+    );
+    let db =
+        rusqlite::Connection::open(&supervisor.config.read().unwrap().storage.database).unwrap();
+    db.execute("UPDATE runtime_memory_meta SET edit_epoch=edit_epoch+1", [])
+        .unwrap();
+    let history = supervisor.journal.history(&run).unwrap();
+    assert!(history.iter().all(|m| !m.content.contains("旧记忆摘要")));
+    assert!(history.iter().any(|m| m.content == "原始事实记录"));
+    supervisor
+        .journal
+        .save_compaction(&run, &plan, "迟到的旧摘要", 0, 0, 0)
+        .unwrap();
+    assert!(
+        supervisor
+            .journal
+            .history(&run)
+            .unwrap()
+            .iter()
+            .all(|m| !m.content.contains("迟到的旧摘要"))
+    );
+    supervisor
+        .journal
+        .save_compaction(&run, &plan, "重新生成的摘要", 0, 0, 1)
+        .unwrap();
+    assert!(
+        supervisor
+            .journal
+            .history(&run)
+            .unwrap()
+            .iter()
+            .any(|m| m.content.contains("重新生成的摘要"))
+    );
+    assert_eq!(
+        supervisor.journal.goal(&run.id).unwrap().unwrap().text(),
+        "真实用户目标"
+    );
+}
+
+#[tokio::test]
+async fn discarded_memory_response_is_charged_without_blocking_foreground() {
+    let entered = Arc::new(AtomicBool::new(false));
+    let release = Arc::new(AtomicBool::new(false));
+    let observed = entered.clone();
+    let finish = release.clone();
+    let fixture = ModelFixture::new(move |_| {
+        observed.store(true, Ordering::SeqCst);
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !finish.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        (200, answer(r#"{"goalRelevant":true,"experiences":[]}"#))
+    });
+    let supervisor = supervisor(&fixture);
+    let mut run = supervisor
+        .journal
+        .create("读取脚本配置", "learning", "learning", 600, None)
+        .unwrap();
+    supervisor
+        .journal
+        .save(&mut run, RunState::Deciding)
+        .unwrap();
+    let mut history = Vec::new();
+    for (index, name) in ["workspace.environment", "workspace.read"]
+        .iter()
+        .enumerate()
+    {
+        let call = ToolCall {
+            id: format!("read-{index}"),
+            name: (*name).into(),
+            arguments: json!({"path":"script.json"}),
+        };
+        let mut request = message(Role::Assistant, "");
+        request.tool_calls.push(call.clone());
+        supervisor.journal.append_message(&run, &request).unwrap();
+        supervisor
+            .record_result(
+                &run,
+                &call,
+                Ok(json!({"content":"script config","sha256":"observed"})),
+                12000,
+                &mut history,
+            )
+            .unwrap();
+    }
+    supervisor
+        .journal
+        .finish(&mut run, RunState::Answered)
+        .unwrap();
+    supervisor
+        .memory
+        .enqueue(&run, "learning-implementation")
+        .unwrap();
+    supervisor.memory.claim_learning(&run.id).unwrap();
+    let cancel = CancellationToken::new();
+    let cancelling = cancel.clone();
+    let learner = supervisor.clone();
+    let id = run.id.clone();
+    let worker = tokio::spawn(async move {
+        learner
+            .learn_experience(&id, &cancelling, &CancellationToken::new())
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !entered.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let foreground_lock =
+        tokio::time::timeout(Duration::from_millis(100), supervisor.model_gate.read()).await;
+    cancel.cancel();
+    release.store(true, Ordering::SeqCst);
+    assert!(
+        foreground_lock.is_ok(),
+        "background learner must not own the foreground/config writer gate"
+    );
+    let (count, input, output) = worker.await.unwrap().unwrap();
+    assert_eq!((count, input, output), (0, 100, 30));
+    supervisor
+        .memory
+        .finish_learning(&run.id, true, input, output)
+        .unwrap();
+    let usage = supervisor.journal.model_usage(&run.id).unwrap();
+    assert_eq!(usage["byPurpose"][0]["purpose"], "memory");
+    assert_eq!(usage["byPurpose"][0]["inputTokens"], 100);
+    assert_eq!(usage["byPurpose"][0]["estimated"], false);
+    assert!(supervisor.memory.pending().unwrap().is_none());
+    assert_eq!(fixture.requests.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn wide_tool_results_keep_bounded_evidence_and_verification() {
+    let mut value = json!({"outcome":"verifiedSucceeded","verification":{"status":"succeeded"},"value":{"total":0,"items":[]}});
+    for index in 0..10_000 {
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert(format!("field-{index}"), json!("some data"));
+    }
+    let evidence = context::tool_evidence(&value);
+    assert!(evidence.to_string().len() < 8000);
+    assert_eq!(evidence["verification"]["status"], "succeeded");
+    assert_eq!(evidence["value"]["total"], 0);
+    assert_eq!(evidence["evidenceTruncated"], true);
+}
+
+#[tokio::test]
+async fn full_access_does_not_turn_a_query_into_permission_to_write() {
+    let fixture = ModelFixture::new(|request| {
+        if request["messages"][0]["content"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("你只核对用户本次目标")
+        {
+            return (200, answer(r#"{"decision":"reject"}"#));
+        }
+        (200, tool_calls(vec![("fixture.change", json!({}))]))
+    });
+    let supervisor = supervisor(&fixture);
+    let writes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    install_status_slice(&supervisor, writes.clone());
+    let mut run = supervisor
+        .journal
+        .create("能查看一下配置吗", "scope-write", "scope-write", 600, None)
+        .unwrap();
+    supervisor
+        .session(&mut run, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(run.state, RunState::NeedsReview);
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.requests.lock().unwrap().len(), 2);
+    assert!(supervisor.journal.attempts(&run.id).unwrap().is_empty());
+    assert_eq!(
+        supervisor.journal.model_usage(&run.id).unwrap()["byPurpose"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[tokio::test]
@@ -882,7 +1121,14 @@ fn initial_builtin_tools_include_status_and_expand_with_provider_evidence() {
 #[tokio::test]
 async fn discovered_builtin_shell_becomes_callable_without_loading_a_plugin() {
     let mut turn = 0;
-    let fixture = ModelFixture::new(move |_| {
+    let fixture = ModelFixture::new(move |request| {
+        if request["messages"][0]["content"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("你只核对用户本次目标")
+        {
+            return (200, answer(r#"{"decision":"continue"}"#));
+        }
         turn += 1;
         (
             200,
@@ -915,7 +1161,7 @@ async fn discovered_builtin_shell_becomes_callable_without_loading_a_plugin() {
             .to_string()
             .contains(&gateway::wire_name("workspace.shell"))
     );
-    let result = requests[2]["messages"]
+    let result = requests.last().unwrap()["messages"]
         .as_array()
         .unwrap()
         .iter()
@@ -1096,6 +1342,13 @@ async fn execution_policy_blocks_unread_write_then_allows_read_modify_verify() {
     let file = path.to_string_lossy().into_owned();
     let mut turn = 0;
     let fixture = ModelFixture::new(move |request| {
+        if request["messages"][0]["content"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("你只核对用户本次目标")
+        {
+            return (200, answer(r#"{"decision":"continue"}"#));
+        }
         turn += 1;
         let body = match turn {
             1 => {
@@ -1157,7 +1410,11 @@ async fn execution_policy_blocks_unread_write_then_allows_read_modify_verify() {
         .unwrap();
     assert_eq!(std::fs::read_to_string(path).unwrap(), "after");
     let requests = fixture.requests.lock().unwrap();
-    assert!(requests[4]["messages"].to_string().contains("after"));
+    assert!(
+        requests.last().unwrap()["messages"]
+            .to_string()
+            .contains("after")
+    );
 }
 
 #[tokio::test]

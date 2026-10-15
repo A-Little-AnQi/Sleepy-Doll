@@ -11,6 +11,7 @@ mod scope;
 pub mod store;
 pub mod tool_policy;
 pub mod types;
+mod usage;
 pub mod workspace;
 
 #[cfg(test)]
@@ -941,7 +942,7 @@ impl Supervisor {
                     && !cancel.is_cancelled()
                 {
                     if let Err(error)=s.remember_observed_route(&run) {log::warn!("观测链路保存失败：{error}");}
-                    let _ = s.memory.enqueue(&run);
+                    if let Err(error)=s.enqueue_experience_learning(&run) {log::warn!("经验提炼登记失败：{error}");}
                 }
                 s.active.lock().unwrap().remove(&run.id);
                 // 旧 active 退出后立即唤醒调度：同会话排队的新消息（打断式发送）
@@ -1186,6 +1187,7 @@ impl Supervisor {
         token_budget: u64,
         cancel: &CancellationToken,
     ) -> Result<()> {
+        let compaction_memory_epoch = self.memory.edit_epoch()?;
         self.journal.emit(
             run,
             "context.compaction.started",
@@ -1235,7 +1237,13 @@ impl Supervisor {
             } else {
                 tokio::time::timeout(
                     Duration::from_secs((run.deadline - unix_now()).max(1) as u64),
-                    gateway::complete(summary_model.clone(), &messages, &[], cancel, |_| Ok(())),
+                    self.complete_auxiliary(
+                        run,
+                        "compaction",
+                        summary_model.clone(),
+                        &messages,
+                        cancel,
+                    ),
                 )
                 .await
                 .map_err(|_| Error::Timeout("上下文压缩等待模型超时".into()))?
@@ -1307,8 +1315,14 @@ impl Supervisor {
                 }),
             )?;
         }
-        self.journal
-            .save_compaction(run, plan, &summary, input_tokens, output_tokens)?;
+        self.journal.save_compaction(
+            run,
+            plan,
+            &summary,
+            input_tokens,
+            output_tokens,
+            compaction_memory_epoch,
+        )?;
         run.context_compacted = true;
         self.journal.save(run, RunState::Deciding)?;
         Ok(())
@@ -1401,16 +1415,20 @@ impl Supervisor {
                 let m = message(Role::User, input);
                 history.push(m);
             }
+            if self.finish_goal_conclusion(run)? {
+                return Ok(());
+            }
             run.goal_revision = self.journal.goal(&run.id)?.map(|g| g.revision);
             let epoch = self.memory.edit_epoch()?;
             if epoch != memory_epoch {
                 history = self
                     .memory
-                    .project_contexts(&history, &self.memory_definitions())?;
+                    .project_contexts(&self.journal.history(run)?, &self.memory_definitions())?;
                 recalled = self.recall_memories(&run.prompt)?;
                 memory_epoch = epoch;
                 memory_attached = false;
             }
+            run.memory_epoch = Some(memory_epoch);
             let current = self.config.read().unwrap().clone();
             let skill_environment = self.skill_environment(&current);
             let skill_context = skill_environment.context();
@@ -1665,6 +1683,8 @@ impl Supervisor {
                     .find(|model| &model.id == id)
                     .cloned()
             }));
+            let mut seen_models = HashSet::new();
+            candidates.retain(|candidate| seen_models.insert(hash(&json!(candidate))));
             let mut response = None;
             let mut last_error = None;
             for (index, candidate) in candidates.into_iter().enumerate() {
@@ -1707,6 +1727,13 @@ impl Supervisor {
                 // 增量帧攒批写 SQLite；用普通 Mutex 保持 future 为 Send。
                 let batch = std::sync::Mutex::new((String::new(), std::time::Instant::now()));
                 let model_started = std::time::Instant::now();
+                let request_id = self.journal.begin_model_request(
+                    run,
+                    "foreground",
+                    &candidate,
+                    estimated,
+                    output_reserve,
+                )?;
                 let result = tokio::time::timeout(
                     Duration::from_secs((run.deadline - unix_now()).max(1) as u64),
                     gateway::complete_with_allowed(
@@ -1743,6 +1770,8 @@ impl Supervisor {
                 .await
                 .map_err(|_| Error::Conflict("模型等待超过任务时限".into()))
                 .and_then(|result| result);
+                self.journal
+                    .finish_model_request(&request_id, candidate.protocol, &result)?;
                 // 本轮失败或中途停止时，也把模型已经产生的正文发出去。
                 let tail = std::mem::take(&mut batch.lock().unwrap().0);
                 if !tail.is_empty() {
@@ -2187,6 +2216,21 @@ impl Supervisor {
                     RunState::Succeeded
                 };
                 let final_text = handoff_message(&names, close, pending_tasks);
+                if pending_tasks == 0
+                    && let Some(goal) = self.journal.goal(&run.id)?
+                {
+                    let ids = self
+                        .journal
+                        .goal_receipts(&run.id, goal.revision)?
+                        .iter()
+                        .filter(|r| r.state == contracts::ReceiptState::Accepted)
+                        .map(|r| r.id.clone())
+                        .collect::<Vec<_>>();
+                    if !ids.is_empty() {
+                        self.journal
+                            .conclude_goal(run, goal.revision, true, &final_text, &ids)?;
+                    }
+                }
                 run.result = Some(final_text.clone());
                 if self.journal.finish(run, state)? {
                     // 最终答复必须进消息历史，只发事件会在会话刷新后丢失。
@@ -3025,6 +3069,14 @@ impl Supervisor {
                 .join("；");
             return Err(Error::Tool(format!("工具参数不符合契约：{details}")));
         }
+        if !definition.execution.effect_is_dynamic
+            && !matches!(
+                definition.execution.effect,
+                ToolEffect::ReadOnly | ToolEffect::InternalState
+            )
+        {
+            self.check_effect_scope(run,call,&json!({"description":definition.description,"effect":definition.execution.effect,"schema":definition.input_schema}),cancel).await?;
+        }
         match call.name.as_str() {
             "memory.search" => {
                 let definitions = self.memory_definitions();
@@ -3040,11 +3092,9 @@ impl Supervisor {
                 let quote = call.arguments["quote"].as_str().unwrap_or_default();
                 let inputs = self
                     .journal
-                    .run_history(run)?
-                    .into_iter()
-                    .filter(|message| message.role == Role::User)
-                    .map(|message| message.content)
-                    .collect::<Vec<_>>();
+                    .goal(&run.id)?
+                    .map(|g| g.inputs.into_iter().map(|i| i.text).collect::<Vec<_>>())
+                    .unwrap_or_default();
                 if !inputs.iter().any(|input| input.contains(quote))
                     || !memory::is_forget_request(quote)
                 {
@@ -3396,6 +3446,7 @@ impl Supervisor {
                             }
                         }
                     }
+                    self.check_effect_scope(run,call,&json!({"methodId":id,"effect":contract["effect"],"schema":contract["inputSchema"],"guide":contract["guide"]}),cancel).await?;
                     let mut catalog = self.catalog.clone();
                     catalog.capabilities.insert(
                         id.into(),
@@ -3449,6 +3500,8 @@ impl Supervisor {
                     return Err(Error::Tool("请先读取该能力的完整契约".into()));
                 }
                 let (binding, resources) = self.catalog.resolve(id, &a["arguments"])?;
+                self.check_effect_scope(run, call, &json!(binding), cancel)
+                    .await?;
                 self.journal
                     .emit(run, "resource.bound", resources.clone())?;
                 bridge

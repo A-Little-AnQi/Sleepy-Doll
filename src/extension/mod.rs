@@ -146,6 +146,7 @@ pub enum ToolExposure {
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct ToolExecution {
     pub effect: ToolEffect,
+    pub effect_is_dynamic: bool,
     pub concurrency_safe: bool,
     pub risk: RiskLevel,
     pub concurrency: ConcurrencyMode,
@@ -186,6 +187,7 @@ impl Default for ToolExecution {
     fn default() -> Self {
         Self {
             effect: ToolEffect::Unknown,
+            effect_is_dynamic: false,
             concurrency_safe: false,
             risk: RiskLevel::Standard,
             concurrency: ConcurrencyMode::Serial,

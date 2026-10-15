@@ -99,6 +99,11 @@ export function MemoryPanel() {
       {rows.map(({ entry, compatible }) => (
         <details key={entry.id} className="memory-entry">
           <summary>{entry.experience.intent}</summary>
+          <p className="memory-hint">
+            {entry.validationState === "verified"
+              ? t.settings.memoryVerified
+              : t.settings.memoryCandidate}
+          </p>
           {!compatible && (
             <p className="memory-hint">{t.settings.memoryChanged}</p>
           )}

@@ -1,5 +1,3 @@
-#[cfg(not(feature = "client-protection"))]
-use rust_embed::RustEmbed;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 
@@ -273,9 +271,6 @@ impl TrayPopup {
                 (255, 255, 255, 255)
             })
             .with_custom_protocol("sleepy-tray".into(), |_, request| {
-                #[cfg(not(feature = "client-protection"))]
-                #[cfg(not(feature = "client-protection"))]
-                use rust_embed::RustEmbed;
                 let path = request.uri().path().trim_start_matches('/');
                 let path = if path.is_empty() { "tray.html" } else { path };
                 match crate::UiAssets::get(path) {

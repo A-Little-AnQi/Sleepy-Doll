@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub const LATEST_SCHEMA_VERSION: i64 = 17;
+pub const LATEST_SCHEMA_VERSION: i64 = 18;
 
 pub fn migrate(connection: &mut Connection) -> Result<()> {
     connection.execute_batch(
@@ -337,6 +337,27 @@ const MIGRATIONS: &[(i64, &str)] = &[
             goal_revision INTEGER NOT NULL, call_id TEXT NOT NULL, payload TEXT NOT NULL
         );
         CREATE INDEX runtime_goal_evidence_run ON runtime_goal_evidence(run_id,goal_revision);
+    "#,
+    ),
+    (
+        18,
+        r#"
+        ALTER TABLE runtime_experiences ADD COLUMN validation_state TEXT NOT NULL DEFAULT 'candidate';
+        ALTER TABLE runtime_experiences ADD COLUMN implementation_key TEXT;
+        ALTER TABLE runtime_experiences ADD COLUMN evidence_refs TEXT NOT NULL DEFAULT '[]';
+        CREATE UNIQUE INDEX runtime_memory_implementation ON runtime_experiences(implementation_key) WHERE implementation_key IS NOT NULL;
+        CREATE TABLE runtime_memory_tombstones(implementation_key TEXT PRIMARY KEY);
+        ALTER TABLE runtime_memory_learning ADD COLUMN implementation_key TEXT;
+        CREATE UNIQUE INDEX runtime_learning_implementation ON runtime_memory_learning(implementation_key) WHERE implementation_key IS NOT NULL;
+        UPDATE runtime_memory_learning SET status='complete';
+        ALTER TABLE conversation_compactions ADD COLUMN memory_epoch INTEGER NOT NULL DEFAULT 0;
+        CREATE TABLE runtime_model_requests(
+            id TEXT PRIMARY KEY,run_id TEXT REFERENCES runtime_runs(id) ON DELETE SET NULL,
+            purpose TEXT NOT NULL,model_key TEXT NOT NULL,started_at TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL,output_tokens INTEGER NOT NULL,
+            cache_read_tokens INTEGER NOT NULL DEFAULT 0,estimated INTEGER NOT NULL DEFAULT 1,
+            outcome TEXT NOT NULL DEFAULT 'unknown',finished_at TEXT
+        );
     "#,
     ),
 ];

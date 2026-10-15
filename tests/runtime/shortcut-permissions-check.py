@@ -94,10 +94,13 @@ def main():
         assert run["state"] == "succeeded", run
         assert (FIXTURE / marker).read_text(encoding="utf-8") == mode
         assert run.get("inputTokens", 0) == 0 and run.get("outputTokens", 0) == 0, run
+        assert rpc("run.usage", {"id": run["id"]})["byPurpose"] == [], "固定入口不应产生模型记账"
         events = rpc("events.read", {"conversationId": run["conversationId"], "after": 0})["events"]
         assert not any(event["kind"] == "approval.requested" for event in events), events
         assert rpc("bootstrap", {})["permission"]["mode"] == mode, "不能修改对话审批设置"
     assert not model_requests, model_requests
+    identity = rpc("app.identity", {})
+    assert len(identity["revision"]) == 40 and identity["schemaVersion"] >= 18, identity
     print(json.dumps({"savedTaskModes": 4, "approvalRequests": 0, "modelRequests": 0,
                       "revisionMismatchRejected": True, "dialoguePermissionPreserved": True}), flush=True)
 

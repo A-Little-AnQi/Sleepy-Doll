@@ -281,6 +281,8 @@ const zh = {
       "自动记住经过观测的实现链路。新任务先核对条件和当前接口，不照搬旧参数。",
     memoryEmpty: "尚未形成操作经验。完成有工具操作的任务后会自动学习。",
     memoryChanged: "入口或契约已变化，暂不自动参考",
+    memoryCandidate: "候选经验，使用前仍需核对目标和结果",
+    memoryVerified: "该链路已有目标核验记录",
     memoryEdit: "纠正经验",
     memoryRefresh: "刷新经验",
     memoryDelete: "忘记这条",
@@ -850,6 +852,9 @@ const en: Dict = {
       "Automatically learns observed implementation chains. Checks current conditions and contracts before reusing them.",
     memoryEmpty: "No experience yet. Tool-based work is learned automatically.",
     memoryChanged: "Entry or contract changed; excluded from automatic recall",
+    memoryCandidate:
+      "Candidate experience; check the goal and results before reuse",
+    memoryVerified: "This chain has a goal verification record",
     memoryEdit: "Correct experience",
     memoryRefresh: "Refresh experience",
     memoryDelete: "Forget this",

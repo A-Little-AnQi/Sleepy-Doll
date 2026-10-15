@@ -1079,6 +1079,9 @@ fn restore_json_changes(original: &[u8], applied: &[u8], current: &[u8]) -> Resu
         if base == applied {
             return Ok(current.cloned());
         }
+        if current == base {
+            return Ok(current.cloned());
+        }
         if current == applied {
             return Ok(base.cloned());
         }

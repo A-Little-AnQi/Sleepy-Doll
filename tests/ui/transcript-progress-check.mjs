@@ -128,9 +128,14 @@ try {
   const status = page.locator(".assistant .turn-status");
   await status.waitFor();
   assert(
-    (await status.textContent()).includes("思考中"),
-    "empty waiting turn has no thinking indicator",
+    (await status.textContent()).includes(state.phase),
+    "waiting indicator must display the supplied runtime phase",
   );
+  state = { ...state, phase: undefined };
+  await update();
+  assert((await status.textContent()).includes("思考中"), "missing phase must retain the generic indicator");
+  state = { ...state, phase: processState.phase };
+  await update();
   assert.equal(
     await status.locator("button, .sd-chevron").count(),
     0,
@@ -213,8 +218,8 @@ try {
   );
   assert.equal(await status.isVisible(), true);
   assert(
-    (await status.textContent()).includes("思考中"),
-    "tool execution replaced the independent thinking indicator",
+    (await status.textContent()).includes(state.phase),
+    "tool execution must retain an independent indicator with the current phase",
   );
   assert(
     await page.evaluate(
@@ -249,7 +254,7 @@ try {
     state = { ...state, phase };
     await update();
     await page.waitForTimeout(32);
-    assert((await status.textContent()).includes("思考中"));
+    assert((await status.textContent()).includes(phase));
   }
   const activity = disclosure.locator(".activity-summary").first();
   await activity.click();

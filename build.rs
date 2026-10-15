@@ -1,4 +1,32 @@
 fn main() {
+    for path in [
+        ".git/HEAD",
+        ".git/index",
+        ".git/refs/heads",
+        ".git/packed-refs",
+        "src",
+        "web",
+        "plugins",
+    ] {
+        println!("cargo:rerun-if-changed={path}");
+    }
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+    };
+    let revision = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).map(|s| !s.is_empty());
+    println!("cargo:rustc-env=SLEEPY_SOURCE_REVISION={revision}");
+    println!(
+        "cargo:rustc-env=SLEEPY_SOURCE_DIRTY={}",
+        dirty
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "unknown".into())
+    );
     println!("cargo:rerun-if-changed=release-channel.json");
     let channel_config: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string("release-channel.json").expect("reading release-channel.json"),

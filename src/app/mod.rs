@@ -333,6 +333,13 @@ impl AppController {
                 };
                 Ok(crate::runtime::types::public_run(&run))
             }
+            "run.usage" => self
+                .supervisor
+                .journal
+                .model_usage(required(&params, "id")?),
+            "app.identity" => Ok(
+                json!({"version":env!("CARGO_PKG_VERSION"),"revision":env!("SLEEPY_SOURCE_REVISION"),"dirty":env!("SLEEPY_SOURCE_DIRTY"),"schemaVersion":crate::runtime::store::migrations::LATEST_SCHEMA_VERSION}),
+            ),
             "task.get" | "run.get" => Ok(crate::runtime::types::public_run(
                 &self.supervisor.journal.get(required(&params, "id")?)?,
             )),

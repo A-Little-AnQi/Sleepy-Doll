@@ -498,6 +498,34 @@ impl Journal {
         shortcut_target: Option<&str>,
         shortcut_reference: Option<&str>,
     ) -> Result<Run> {
+        self.create_sourced(
+            prompt,
+            conversation,
+            key,
+            duration,
+            model_id,
+            shortcut_configuration,
+            shortcut_target,
+            shortcut_reference,
+            RunSource::Agent,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn create_sourced(
+        &self,
+        prompt: &str,
+        conversation: &str,
+        key: &str,
+        duration: i64,
+        model_id: Option<&str>,
+        shortcut_configuration: bool,
+        shortcut_target: Option<&str>,
+        shortcut_reference: Option<&str>,
+        source: RunSource,
+        initial_plan: Option<&PlanRevision>,
+    ) -> Result<Run> {
         let mut db = self.connection.lock().unwrap();
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous: Option<String> = tx
@@ -511,6 +539,7 @@ impl Journal {
             let run: Run = serde_json::from_str(&payload)?;
             if run.prompt != prompt
                 || run.conversation_id != conversation
+                || run.source != source
                 || run.shortcut_configuration != shortcut_configuration
                 || run.shortcut_target.as_deref() != shortcut_target
                 || run.shortcut_reference.as_deref() != shortcut_reference
@@ -518,6 +547,12 @@ impl Journal {
                 return Err(Error::Conflict(
                     "submission key reused with different input".into(),
                 ));
+            }
+            if let Some(plan) = initial_plan {
+                let saved:Option<String>=tx.query_row("SELECT payload FROM runtime_plans WHERE run_id=?1 ORDER BY revision DESC LIMIT 1",[&run.id],|r|r.get(0)).optional()?;
+                if saved.as_deref() != Some(serde_json::to_string(plan)?.as_str()) {
+                    return Err(Error::Conflict("提交标识已绑定另一份固定计划".into()));
+                }
             }
             return Ok(run);
         }
@@ -558,11 +593,12 @@ impl Journal {
             message_boundary: 0,
             result: None,
             error: None,
-            source: RunSource::Agent,
+            source,
             model_id: model_id.map(str::to_owned),
             discovered: Vec::new(),
             loaded_tools: Vec::new(),
             goal_revision: None,
+            memory_epoch: None,
         };
         tx.execute("INSERT OR IGNORE INTO conversations(id,title,created_at,updated_at) VALUES(?1,?2,?3,?3)",params![conversation,prompt.chars().take(120).collect::<String>(),stamp])?;
         tx.execute(
@@ -598,7 +634,33 @@ impl Journal {
                 params![model_id, conversation],
             )?;
         }
-        Self::write_goal(&tx, &run, &Goal::new(prompt))?;
+        let mut goal = Goal::new(prompt);
+        match &run.source {
+            RunSource::SavedWorkflow {
+                workflow_id,
+                workflow_revision,
+            } => {
+                goal.inputs[0].origin = InputOrigin::ShortcutClick {
+                    task_id: workflow_id.clone(),
+                    revision: *workflow_revision,
+                }
+            }
+            RunSource::SavedStrategy { strategy_id } => {
+                goal.inputs[0].origin = InputOrigin::StrategyClick {
+                    strategy_id: strategy_id.clone(),
+                    revision: initial_plan.map(|p| p.revision).unwrap_or(0),
+                }
+            }
+            RunSource::Agent => {}
+        }
+        Self::write_goal(&tx, &run, &goal)?;
+        if let Some(plan) = initial_plan {
+            tx.execute(
+                "INSERT INTO runtime_plans VALUES(?1,?2,?3)",
+                params![run.id, plan.revision, serde_json::to_string(plan)?],
+            )?;
+            Self::insert_event(&tx, &run, "plan.changed", &json!(plan))?;
+        }
         Self::insert_event(&tx, &run, "run.created", &public_run(&run))?;
         Self::insert_checkpoint(&tx, &run)?;
         tx.commit()?;
@@ -659,7 +721,63 @@ impl Journal {
             .map(|s| serde_json::from_str(&s).map_err(Into::into))
             .transpose()
     }
+    pub fn begin_model_request(
+        &self,
+        run: &Run,
+        purpose: &str,
+        model: &crate::config::ModelConfig,
+        input: u64,
+        output: u64,
+    ) -> Result<String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let model_key = hash(
+            &json!({"model":model.model,"protocol":model.protocol,"baseUrl":model.base_url,"id":model.id}),
+        );
+        self.connection.lock().unwrap().execute("INSERT INTO runtime_model_requests(id,run_id,purpose,model_key,started_at,input_tokens,output_tokens) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![id,run.id,purpose,model_key,now(),input,output])?;
+        Ok(id)
+    }
+    pub fn finish_model_request(
+        &self,
+        id: &str,
+        protocol: crate::config::ModelProtocol,
+        result: &Result<crate::model::ModelResponse>,
+    ) -> Result<()> {
+        let (input, output, cache, estimated, outcome) = match result {
+            Ok(response) => (
+                response.usage.context_tokens(protocol),
+                response.usage.output_tokens,
+                response.usage.cache_read_tokens.unwrap_or(0),
+                response.usage.context_tokens(protocol).is_none()
+                    || response.usage.output_tokens.is_none(),
+                "received",
+            ),
+            Err(Error::Cancelled) => (None, None, 0, true, "cancelledUsageUnknown"),
+            Err(_) => (None, None, 0, true, "failedUsageUnknown"),
+        };
+        self.connection.lock().unwrap().execute("UPDATE runtime_model_requests SET input_tokens=COALESCE(?2,input_tokens),output_tokens=COALESCE(?3,output_tokens),cache_read_tokens=?4,estimated=?5,outcome=?6,finished_at=?7 WHERE id=?1",params![id,input,output,cache,estimated,outcome,now()])?;
+        Ok(())
+    }
+    pub fn model_usage(&self, run: &str) -> Result<Value> {
+        let db = self.connection.lock().unwrap();
+        let mut q=db.prepare("SELECT purpose,COUNT(*),SUM(input_tokens),SUM(output_tokens),SUM(cache_read_tokens),MAX(estimated) FROM runtime_model_requests WHERE run_id=?1 GROUP BY purpose ORDER BY purpose")?;
+        let rows=q.query_map([run],|r|Ok(json!({"purpose":r.get::<_,String>(0)?,"requests":r.get::<_,u64>(1)?,"inputTokens":r.get::<_,u64>(2)?,"outputTokens":r.get::<_,u64>(3)?,"cacheReadTokens":r.get::<_,u64>(4)?,"estimated":r.get::<_,bool>(5)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(
+            json!({"byPurpose":rows,"note":"估算保留了未收到用量的请求，不代表服务商实际计费。缓存读取量来自服务商报告。"}),
+        )
+    }
     pub fn ensure_current_goal(&self, run: &Run) -> Result<()> {
+        if let Some(expected) = run.memory_epoch {
+            let actual: i64 = self.connection.lock().unwrap().query_row(
+                "SELECT edit_epoch FROM runtime_memory_meta WHERE id=1",
+                [],
+                |r| r.get(0),
+            )?;
+            if expected != actual {
+                return Err(Error::Stale(
+                    "操作经验已由用户修改，旧上下文中的决定未执行；请重新读取当前目标".into(),
+                ));
+            }
+        }
         if let Some(expected) = run.goal_revision
             && self.goal(&run.id)?.is_none_or(|g| g.revision != expected)
         {
@@ -671,6 +789,9 @@ impl Journal {
             return Err(Error::Tool("本次目标已经结束，未执行额外操作".into()));
         }
         Ok(())
+    }
+    pub fn scope_approved(&self, run: &str, key: &str) -> Result<bool> {
+        Ok(self.connection.lock().unwrap().query_row("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE run_id=?1 AND kind='scope.effect_approved' AND json_extract(data,'$.bindingKey')=?2)",params![run,key],|r|r.get(0))?)
     }
     pub fn record_evidence(&self, run: &Run, receipt: &EvidenceReceipt) -> Result<()> {
         let mut db = self.connection.lock().unwrap();
@@ -1731,7 +1852,8 @@ impl Journal {
             .query_row(
                 "SELECT through_sort_key,through_message_id,summary
                  FROM conversation_compactions
-                 WHERE conversation_id=?1 AND through_sort_key<=?2",
+                 WHERE conversation_id=?1 AND through_sort_key<=?2
+                   AND memory_epoch=(SELECT edit_epoch FROM runtime_memory_meta WHERE id=1)",
                 params![run.conversation_id, run.message_boundary],
                 |row| {
                     Ok(crate::runtime::context::StoredSummary {
@@ -1851,22 +1973,33 @@ impl Journal {
         summary: &str,
         input_tokens: u64,
         output_tokens: u64,
+        memory_epoch: i64,
     ) -> Result<()> {
         let mut db = self.connection.lock().unwrap();
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let actual_epoch: i64 = tx.query_row(
+            "SELECT edit_epoch FROM runtime_memory_meta WHERE id=1",
+            [],
+            |r| r.get(0),
+        )?;
+        if actual_epoch != memory_epoch {
+            return Ok(());
+        }
         let changed = tx.execute(
             "INSERT INTO conversation_compactions(
-                 conversation_id,run_id,through_sort_key,through_message_id,summary,created_at
-             ) VALUES(?1,?2,?3,?4,?5,?6)
+                 conversation_id,run_id,through_sort_key,through_message_id,summary,created_at,memory_epoch
+             ) VALUES(?1,?2,?3,?4,?5,?6,(SELECT edit_epoch FROM runtime_memory_meta WHERE id=1))
              ON CONFLICT(conversation_id) DO UPDATE SET
                  run_id=excluded.run_id,
                  through_sort_key=excluded.through_sort_key,
                  through_message_id=excluded.through_message_id,
                  summary=excluded.summary,
-                 created_at=excluded.created_at
+                 created_at=excluded.created_at,
+                 memory_epoch=excluded.memory_epoch
              WHERE excluded.through_sort_key>conversation_compactions.through_sort_key
                 OR (excluded.through_sort_key=conversation_compactions.through_sort_key
-                    AND excluded.through_message_id>conversation_compactions.through_message_id)",
+                    AND excluded.through_message_id>conversation_compactions.through_message_id)
+                OR excluded.memory_epoch<>conversation_compactions.memory_epoch",
             params![
                 run.conversation_id,
                 run.id,
@@ -2357,25 +2490,21 @@ impl Journal {
         key: &str,
         duration: i64,
     ) -> Result<Run> {
-        let conversation = format!("strategy-{}", strategy.id);
-        let mut run = self.create(
+        self.create_sourced(
             &format!("运行策略：{}", strategy.name),
-            &conversation,
+            &format!("strategy-{}", strategy.id),
             key,
             duration,
             None,
-        )?;
-        run.source = RunSource::SavedStrategy {
-            strategy_id: strategy.id.clone(),
-        };
-        self.connection.lock().unwrap().execute(
-            "UPDATE runtime_runs SET payload=?1 WHERE id=?2",
-            params![serde_json::to_string(&run)?, run.id],
-        )?;
-        self.save_plan(&run, &strategy.plan)?;
-        Ok(run)
+            false,
+            None,
+            None,
+            RunSource::SavedStrategy {
+                strategy_id: strategy.id.clone(),
+            },
+            Some(&strategy.plan),
+        )
     }
-
     pub fn create_workflow_run(
         &self,
         task_id: &str,
@@ -2384,32 +2513,21 @@ impl Journal {
         key: &str,
         duration: i64,
     ) -> Result<Run> {
-        let conversation = format!("task-{task_id}");
-        let mut run = self.create(
+        self.create_sourced(
             &format!("运行快捷任务：{name}"),
-            &conversation,
+            &format!("task-{task_id}"),
             key,
             duration,
             None,
-        )?;
-        run.source = RunSource::SavedWorkflow {
-            workflow_id: task_id.to_owned(),
-            workflow_revision: revision,
-        };
-        {
-            let db = self.connection.lock().unwrap();
-            let mut goal = Goal::new(&run.prompt);
-            goal.inputs[0].origin = InputOrigin::ShortcutClick {
-                task_id: task_id.into(),
-                revision,
-            };
-            Self::write_goal(&db, &run, &goal)?;
-        }
-        self.connection.lock().unwrap().execute(
-            "UPDATE runtime_runs SET payload=?1 WHERE id=?2",
-            params![serde_json::to_string(&run)?, run.id],
-        )?;
-        Ok(run)
+            false,
+            None,
+            None,
+            RunSource::SavedWorkflow {
+                workflow_id: task_id.into(),
+                workflow_revision: revision,
+            },
+            None,
+        )
     }
 }
 
