@@ -7,6 +7,7 @@ pub mod memory;
 pub mod operation;
 pub mod policy;
 pub mod questions;
+mod scope;
 pub mod store;
 pub mod tool_policy;
 pub mod types;
@@ -157,15 +158,27 @@ fn group_launch_members(calls: &[ToolCall]) -> Option<(Vec<usize>, Vec<String>, 
 fn launch_handoff(call: &ToolCall, run: &Run, output: &Value) -> Option<(Vec<String>, bool)> {
     if !matches!(run.source, RunSource::Agent)
         || run.shortcut_configuration
-        || !is_group_invoke(call)
+        || call.name != "bgi.api.invoke"
     {
         return None;
     }
     if !operation::executor::launch_submitted(output) {
         return None;
     }
-    let (names, close, wait) = mergeable_group_call(call)?;
-    (!wait).then_some((names, close))
+    if is_group_invoke(call) {
+        let (names, close, wait) = mergeable_group_call(call)?;
+        return (!wait).then_some((names, close));
+    }
+    if call.arguments["methodId"] != "bgi.run_one_dragon"
+        || call.arguments["arguments"]["waitForCompletion"] == true
+    {
+        return None;
+    }
+    let name = output
+        .pointer("/evidence/result/name")
+        .and_then(Value::as_str)
+        .or_else(|| call.arguments["arguments"]["name"].as_str());
+    Some((name.into_iter().map(str::to_owned).collect(), false))
 }
 
 /// 后台交接的确定性最终消息：短、自然，只陈述已提交范围与收尾方式，不暗示
@@ -2106,6 +2119,17 @@ impl Supervisor {
             let batch_has_group_invoke = calls.iter().any(is_group_invoke);
             if calls.len() > 1
                 && !batch_has_group_invoke
+                && !calls.iter().any(|call| {
+                    self.definition(&call.name, &exposed)
+                        .is_some_and(|d| d.execution.goal_observation.is_some())
+                })
+                && self
+                    .journal
+                    .goal_receipts(
+                        &run.id,
+                        self.journal.goal(&run.id)?.map(|g| g.revision).unwrap_or(0),
+                    )?
+                    .is_empty()
                 && calls.iter().all(|call| {
                     self.definition(&call.name, &exposed)
                         .is_some_and(|definition| definition.execution.can_run_concurrently())
@@ -2339,6 +2363,9 @@ impl Supervisor {
                 self.journal.save(run, RunState::Deciding)?;
                 continue;
             }
+            if self.finish_goal_conclusion(run)? {
+                return Ok(());
+            }
             remember_discovered(run, &exposed);
             self.journal.save(run, RunState::Deciding)?;
         }
@@ -2549,7 +2576,7 @@ impl Supervisor {
                     } else {
                         contracts::ReceiptState::Failed
                     },
-                    observed_at: observed.clone(),
+                    observed_at: now(),
                     evidence: context::tool_evidence(&value),
                 },
             )?;
@@ -3135,6 +3162,8 @@ impl Supervisor {
         let a = &call.arguments;
         let current = self.config.read().unwrap().clone();
         let definitions = self.definitions(exposed);
+        self.check_observation_scope(run, call, &definitions, cancel)
+            .await?;
         let definition = definitions
             .iter()
             .find(|t| t.name == call.name)
@@ -4353,6 +4382,16 @@ mod handoff_tests {
         let call = invoke("bgi.run_script_groups", json!({"groupNames":["a","b"]}));
         let run = run_with(RunSource::Agent, false);
         assert!(launch_handoff(&call, &run, &output).is_some());
+        let one_dragon = invoke("bgi.run_one_dragon", json!({"waitForCompletion":false}));
+        assert!(launch_handoff(&one_dragon, &run, &output).is_some());
+        assert!(
+            launch_handoff(
+                &invoke("bgi.run_one_dragon", json!({"waitForCompletion":true})),
+                &run,
+                &output
+            )
+            .is_none()
+        );
         // 入口封装运行不终结。
         let shortcut = run_with(RunSource::Agent, true);
         assert!(launch_handoff(&call, &shortcut, &output).is_none());

@@ -449,6 +449,9 @@ impl MemoryStore {
     }
 
     pub fn enqueue(&self, run: &super::types::Run) -> Result<()> {
+        if matches!(run.source, super::types::RunSource::SavedWorkflow { .. }) {
+            return Ok(());
+        }
         self.connection.lock().unwrap().execute(
             "INSERT OR IGNORE INTO runtime_memory_learning(run_id,source_order,next_attempt) VALUES(?1,?2,?3)",
             params![run.id, run.message_boundary,super::types::unix_now()+3],
@@ -1057,6 +1060,9 @@ mod tests {
 
 impl super::Supervisor {
     pub(super) fn remember_observed_route(&self, run: &super::types::Run) -> Result<usize> {
+        if matches!(run.source, super::types::RunSource::SavedWorkflow { .. }) {
+            return Ok(0);
+        }
         if !matches!(
             run.state,
             super::types::RunState::Answered | super::types::RunState::Succeeded
@@ -1291,6 +1297,9 @@ impl super::Supervisor {
         transport: &tokio_util::sync::CancellationToken,
     ) -> Result<(usize, u64, u64)> {
         let run = self.journal.get(id)?;
+        if matches!(run.source, super::types::RunSource::SavedWorkflow { .. }) {
+            return Ok((0, 0, 0));
+        }
         if !matches!(
             run.state,
             super::types::RunState::Answered

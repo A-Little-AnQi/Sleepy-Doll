@@ -169,6 +169,17 @@ pub struct ToolExecution {
     /// 读取目标当前内容所用的只读工具；与 `Fields` 搭配。
     #[serde(default)]
     pub scope_reader: Option<String>,
+    pub goal_observation: Option<GoalObservationSpec>,
+}
+
+/// Typed native evidence for an information goal, declared by the adapter.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GoalObservationSpec {
+    pub pointer: String,
+    pub meaning: String,
+    pub when_true: String,
+    pub when_false: String,
 }
 
 impl Default for ToolExecution {
@@ -194,6 +205,7 @@ impl Default for ToolExecution {
             scope: ScopeKind::Unknown,
             scope_target: None,
             scope_reader: None,
+            goal_observation: None,
         }
     }
 }

@@ -848,18 +848,25 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             }
         };
         execution.exposure = match name {
+            "bgi.state.get" => crate::extension::ToolExposure::Always,
             "bgi.user.resolve" | "bgi.user.list" | "bgi.user.read" | "bgi.repo.search"
             | "bgi.repo.read" | "bgi.feature.search" | "bgi.feature.read" | "bgi.api.describe" => {
                 crate::extension::ToolExposure::Always
             }
-            "bgi.state.get" | "bgi.job.get" | "bgi.job.cancel" => {
-                crate::extension::ToolExposure::AfterWrite
-            }
+            "bgi.job.get" | "bgi.job.cancel" => crate::extension::ToolExposure::AfterWrite,
             "bgi.capability.search" | "bgi.capability.describe" | "bgi.capability.invoke" => {
                 crate::extension::ToolExposure::OnDemand
             }
             _ => crate::extension::ToolExposure::AfterRead,
         };
+        if name == "bgi.state.get" {
+            execution.goal_observation = Some(crate::extension::GoalObservationSpec {
+                pointer: "/value/runtime/gameProcessRunning".into(),
+                meaning: "当前原神游戏进程是否运行；不能证明已进入游戏主界面".into(),
+                when_true: "游戏开着，已检测到原神进程。".into(),
+                when_false: "游戏没开，当前未检测到原神进程。".into(),
+            });
+        }
         registry.register(
             FunctionTool::new(name, description, schema, "core:bgi", move |arguments| {
                 function(arguments)

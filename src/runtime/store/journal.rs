@@ -667,6 +667,46 @@ impl Journal {
         tx.commit()?;
         Ok(())
     }
+    pub fn goal_receipts(&self, run: &str, revision: u64) -> Result<Vec<EvidenceReceipt>> {
+        let db = self.connection.lock().unwrap();
+        let mut q = db.prepare("SELECT payload FROM runtime_goal_evidence WHERE run_id=?1 AND goal_revision=?2 ORDER BY rowid")?;
+        let rows = q.query_map(params![run, revision], |row| row.get::<_, String>(0))?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
+    pub fn goal_conclusion(&self, run: &str) -> Result<Option<Value>> {
+        let db = self.connection.lock().unwrap();
+        let value: Option<String> = db.query_row("SELECT data FROM runtime_events e JOIN runtime_goals g ON e.run_id=g.run_id WHERE e.run_id=?1 AND e.kind='goal.concluded' AND json_extract(e.data,'$.goalRevision')=g.revision ORDER BY e.sequence DESC LIMIT 1", [run], |row| row.get(0)).optional()?;
+        value
+            .map(|s| serde_json::from_str(&s).map_err(Into::into))
+            .transpose()
+    }
+    pub fn conclude_goal(
+        &self,
+        run: &Run,
+        revision: u64,
+        completed: bool,
+        text: &str,
+        evidence_ids: &[String],
+    ) -> Result<bool> {
+        let mut db = self.connection.lock().unwrap();
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let actual: u64 = tx.query_row(
+            "SELECT revision FROM runtime_goals WHERE run_id=?1",
+            [&run.id],
+            |r| r.get(0),
+        )?;
+        if actual != revision {
+            return Ok(false);
+        }
+        Self::insert_event(
+            &tx,
+            run,
+            "goal.concluded",
+            &json!({"completed":completed,"text":text,"evidenceIds":evidence_ids}),
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
     pub fn get(&self, id: &str) -> Result<Run> {
         let payload: String = self.connection.lock().unwrap().query_row(
             "SELECT payload FROM runtime_runs WHERE id=?1",

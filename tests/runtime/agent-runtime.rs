@@ -270,6 +270,166 @@ fn human_goal_is_independent_of_wire_roles_and_internal_context() {
 }
 
 #[tokio::test]
+async fn native_answer_closes_dispatch_even_with_extra_calls_in_same_response() {
+    for same_batch in [true, false] {
+        let fixture = ModelFixture::new(move |request| {
+            if request["messages"][0]["content"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("你只核对用户本次目标")
+            {
+                return (200, answer(r#"{"decision":"complete"}"#));
+            }
+            let has_result = request["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["role"] == "tool");
+            let mut calls = if has_result {
+                vec![]
+            } else {
+                vec![("fixture.status", json!({}))]
+            };
+            if same_batch || has_result {
+                calls.push(("fixture.change", json!({})));
+            }
+            (200, tool_calls(calls))
+        });
+        let supervisor = supervisor(&fixture);
+        let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        install_status_slice(&supervisor, changes.clone());
+        let mut run = supervisor
+            .journal
+            .create("我游戏开着吗", "scope", "scope", 600, None)
+            .unwrap();
+        supervisor
+            .session(&mut run, &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(run.state, RunState::Answered);
+        assert_eq!(run.result.as_deref(), Some("游戏没开"));
+        assert_eq!(changes.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            fixture.requests.lock().unwrap().len(),
+            if same_batch { 2 } else { 3 }
+        );
+        let history = supervisor.journal.run_history(&run).unwrap();
+        let calls = history.iter().flat_map(|m| &m.tool_calls).count();
+        assert_eq!(
+            calls,
+            history.iter().filter(|m| m.role == Role::Tool).count()
+        );
+    }
+}
+
+fn install_status_slice(supervisor: &Supervisor, changes: Arc<std::sync::atomic::AtomicUsize>) {
+    supervisor
+        .config
+        .write()
+        .unwrap()
+        .plugins
+        .enabled
+        .push("fixture".into());
+    let mut registry = ToolRegistry::default();
+    let mut execution = crate::extension::ToolExecution::read_only();
+    execution.deferred = false;
+    execution.always_load = true;
+    execution.goal_observation = Some(crate::extension::GoalObservationSpec {
+        pointer: "/value/running".into(),
+        meaning: "游戏进程是否运行".into(),
+        when_true: "游戏开着".into(),
+        when_false: "游戏没开".into(),
+    });
+    registry
+        .register(
+            crate::extension::FunctionTool::new(
+                "fixture.status",
+                "读取游戏进程",
+                json!({"type":"object"}),
+                "plugin:fixture",
+                |_| Ok(json!({"running":false})),
+            )
+            .with_execution(execution),
+        )
+        .unwrap();
+    registry
+        .register(
+            crate::extension::FunctionTool::new(
+                "fixture.change",
+                "修改当前配置",
+                json!({"type":"object"}),
+                "plugin:fixture",
+                move |_| {
+                    changes.fetch_add(1, Ordering::SeqCst);
+                    Ok(json!({"verified":true}))
+                },
+            )
+            .with_execution(crate::extension::ToolExecution {
+                effect: ToolEffect::LocalWrite,
+                deferred: false,
+                always_load: true,
+                model_usage: crate::extension::ModelUsage::None,
+                exposure: crate::extension::ToolExposure::Always,
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+    supervisor.extensions.write().unwrap().tools = Arc::new(registry);
+}
+
+#[tokio::test]
+async fn native_observation_does_not_finish_an_explicit_conditional_task() {
+    let fixture = ModelFixture::new(|request| {
+        if request["messages"][0]["content"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("你只核对用户本次目标")
+        {
+            return (200, answer(r#"{"decision":"continue"}"#));
+        }
+        let count = request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "tool")
+            .count();
+        (
+            200,
+            match count {
+                0 => tool_calls(vec![("fixture.status", json!({}))]),
+                1 => tool_calls(vec![("fixture.change", json!({}))]),
+                _ => answer("已按条件修改"),
+            },
+        )
+    });
+    let supervisor = supervisor(&fixture);
+    let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    install_status_slice(&supervisor, changes.clone());
+    let mut run = supervisor
+        .journal
+        .create(
+            "先查游戏，没开就修改配置",
+            "compound",
+            "compound",
+            600,
+            None,
+        )
+        .unwrap();
+    supervisor
+        .session(&mut run, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(changes.load(Ordering::SeqCst), 1);
+    assert!(
+        supervisor
+            .journal
+            .goal_conclusion(&run.id)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn verified_experience_is_learned_and_recalled_in_a_new_conversation() {
     let location = Arc::new(Mutex::new(String::new()));
     let read_location = location.clone();
@@ -434,7 +594,7 @@ fn observed_write_route_is_saved_before_background_refinement() {
 }
 
 #[test]
-fn initial_builtin_tool_set_is_twenty_and_expands_with_provider_evidence() {
+fn initial_builtin_tools_include_status_and_expand_with_provider_evidence() {
     use crate::extension::{FunctionTool, ToolExposure};
     let fixture = ModelFixture::new(|_| (200, answer("unused")));
     let supervisor = supervisor(&fixture);
@@ -483,7 +643,13 @@ fn initial_builtin_tool_set_is_twenty_and_expands_with_provider_evidence() {
         operation::permissions::PermissionMode::AskEach,
         false,
     );
-    assert_eq!(policy.select(&definitions).len(), 20);
+    assert_eq!(policy.select(&definitions).len(), 21);
+    assert!(
+        policy
+            .select(&definitions)
+            .iter()
+            .any(|tool| tool.name == "bgi.state.get")
+    );
     assert!(
         !policy
             .select(&definitions)
