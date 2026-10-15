@@ -860,12 +860,12 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             _ => crate::extension::ToolExposure::AfterRead,
         };
         if name == "bgi.state.get" {
-            execution.goal_observation = Some(crate::extension::GoalObservationSpec {
+            execution.goal_observation = Some(Box::new(crate::extension::GoalObservationSpec {
                 pointer: "/value/runtime/gameProcessRunning".into(),
                 meaning: "当前原神游戏进程是否运行；不能证明已进入游戏主界面".into(),
                 when_true: "游戏开着，已检测到原神进程。".into(),
                 when_false: "游戏没开，当前未检测到原神进程。".into(),
-            });
+            }));
         }
         registry.register(
             FunctionTool::new(name, description, schema, "core:bgi", move |arguments| {
@@ -997,7 +997,7 @@ mod user_write_tests {
         // 读取后文件被别处更新：旧 SHA 提交必须得到可恢复的版本冲突（Stale），
         // 而不是终止运行的 Conflict，也绝不覆盖较新内容。
         let outdated = sha_of(b"{\"x\":0}");
-        let error = write(&registry, "settings/groups.json", "{\"x\":2}", &outdated)
+        let error = write(registry, "settings/groups.json", "{\"x\":2}", &outdated)
             .await
             .unwrap_err();
         assert!(
@@ -1012,7 +1012,7 @@ mod user_write_tests {
 
         // 模型按指引走完整恢复路径：真实调用 bgi.user.read 取回全文与 SHA，
         // 从最新 JSON 只改目标字段 x、保留 note，再提交写入。
-        let latest = read(&registry, "settings/groups.json")
+        let latest = read(registry, "settings/groups.json")
             .await
             .expect("重新读取必须成功");
         assert_eq!(latest["truncated"], json!(false), "恢复依据必须是完整读取");
@@ -1020,7 +1020,7 @@ mod user_write_tests {
         document["x"] = json!(2);
         let replaced = serde_json::to_string(&document).unwrap();
         let ok = write(
-            &registry,
+            registry,
             "settings/groups.json",
             &replaced,
             latest["sha256"].as_str().unwrap(),
@@ -1037,7 +1037,7 @@ mod user_write_tests {
         );
 
         // 成功后旧 SHA 再用立即再次冲突：不得悄悄通过。
-        let again = write(&registry, "settings/groups.json", "{\"x\":3}", &outdated).await;
+        let again = write(registry, "settings/groups.json", "{\"x\":3}", &outdated).await;
         assert!(matches!(again, Err(Error::Stale(_))));
         let final_state: Value = serde_json::from_slice(&std::fs::read(&target).unwrap()).unwrap();
         assert_eq!(final_state["x"], json!(2), "第二次冲突同样不得覆盖");
@@ -1051,7 +1051,7 @@ mod user_write_tests {
         // 目标已不存在但按替换语义提交了 SHA：必须反馈冲突，不得悄悄重建。
         // 文件名带唯一 ID，重跑不依赖删除。
         let missing = format!("settings/gone-{}.json", uuid::Uuid::new_v4());
-        let error = write(&registry, &missing, "{}", &"0".repeat(64))
+        let error = write(registry, &missing, "{}", &"0".repeat(64))
             .await
             .unwrap_err();
         assert!(

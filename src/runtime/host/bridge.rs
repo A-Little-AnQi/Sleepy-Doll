@@ -619,6 +619,7 @@ impl Bridge {
             return Err(Error::Cancelled);
         }
         let check = async {
+            journal.ensure_current_goal(run)?;
             {
                 let latest = authorization.read().unwrap();
                 if !latest.bridge.enabled
@@ -687,6 +688,7 @@ impl Bridge {
             journal.release(&a)?;
             return Err(error);
         }
+        journal.ensure_current_goal(run)?;
         a.request["requestId"] = json!(a.id);
         a.request["execution"] =
             json!({"onDisconnect":"continue","deadlineMs":(run.deadline-unix_now()).max(1)*1000});
@@ -721,21 +723,27 @@ impl Bridge {
                 .request("POST", "/bridge/v1/invoke", Some(&wire), cancel)
                 .await;
         }
+        let submission_uncertain =
+            matches!(&accepted, Err(Error::Http(_)) | Err(Error::Timeout(_)));
         let deduplicates = info["features"]
             .as_array()
             .is_some_and(|f| f.iter().any(|f| f == "idempotency"));
         if deduplicates && matches!(&accepted, Err(Error::Http(_))) && !cancel.is_cancelled() {
             // 只有协商出幂等能力时才允许重发。
-            accepted = self
-                .request("POST", "/bridge/v1/invoke", Some(&wire), cancel)
-                .await;
+            if let Ok(fresh) = self.get("/bridge/v1/info", cancel).await
+                && same_idempotent_instance(&info, &fresh)
+            {
+                accepted = self
+                    .request("POST", "/bridge/v1/invoke", Some(&wire), cancel)
+                    .await;
+            }
         }
         match accepted {
             Ok(v) => {
                 a.job_id = v["jobId"].as_str().map(str::to_owned);
                 a.evidence = v;
             }
-            Err(Error::Tool(e)) => {
+            Err(Error::Tool(e)) if !submission_uncertain => {
                 a.outcome = "failed".into();
                 a.evidence = json!({"reason":e});
                 journal.attempt(&a)?;
@@ -762,6 +770,38 @@ impl Bridge {
         journal.attempt(&a)?;
         journal.save(run, RunState::WaitingJob)?;
         self.wait(journal, run, &mut a, cancel).await
+    }
+    /// Recover only a lost acknowledgement, never mint a replacement request ID.
+    pub async fn recover_ack(
+        &self,
+        journal: &Journal,
+        attempt: &mut Attempt,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let info = self.get("/bridge/v1/info", cancel).await?;
+        let original = json!({"instanceId":attempt.instance_id,"protocolVersion":"1","features":attempt.request["bridgeFeatures"]});
+        if !same_idempotent_instance(&original, &info) || !attempt.request["wire"].is_object() {
+            return Err(Error::Conflict(
+                "旧提交未确认，当前连接不满足同实例原请求对账条件；未重新执行".into(),
+            ));
+        }
+        let wire = &attempt.request["wire"];
+        if wire["requestId"] != attempt.id
+            || wire["instanceId"] != attempt.instance_id
+            || hash(wire) != attempt.request_hash
+        {
+            return Err(Error::Conflict("旧提交原始标识不完整，未重新执行".into()));
+        }
+        let result = self
+            .request("POST", "/bridge/v1/invoke", Some(wire), cancel)
+            .await?;
+        let Some(job) = result["jobId"].as_str().filter(|s| !s.is_empty()) else {
+            return Err(Error::Conflict("原请求仍未返回可恢复的执行记录".into()));
+        };
+        attempt.job_id = Some(job.into());
+        attempt.evidence = result;
+        attempt.outcome = "running".into();
+        journal.attempt(attempt)
     }
     pub async fn wait(
         &self,
@@ -906,6 +946,19 @@ impl Bridge {
             }
         }
     }
+}
+
+fn same_idempotent_instance(original: &Value, current: &Value) -> bool {
+    original["instanceId"]
+        .as_str()
+        .is_some_and(|s| !s.is_empty())
+        && original["instanceId"] == current["instanceId"]
+        && current["protocolVersion"] == "1"
+        && [original, current].iter().all(|v| {
+            v["features"]
+                .as_array()
+                .is_some_and(|f| f.iter().any(|x| x == "idempotency"))
+        })
 }
 
 #[cfg(test)]

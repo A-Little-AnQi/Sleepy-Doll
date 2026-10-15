@@ -761,303 +761,6 @@ fn scrub_text(text: &str) -> String {
         .replace_all(text,"[凭据已省略]").into_owned()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        extension::{ToolDefinition, ToolExecution},
-        model::{ProtocolModel, Role, ToolCall},
-        runtime::context::message,
-    };
-
-    fn definitions() -> Vec<ToolDefinition> {
-        ["fixture.read", "fixture.write"]
-            .into_iter()
-            .map(|name| ToolDefinition {
-                name: name.into(),
-                label: name.into(),
-                description: name.into(),
-                input_schema: json!({"type":"object","properties":{},"additionalProperties":false}),
-                output_schema: None,
-                source: "fixture".into(),
-                provider_version: Some("1".into()),
-                execution: ToolExecution::read_only(),
-            })
-            .collect()
-    }
-    fn experience() -> Experience {
-        Experience {
-            intent: "配置地图追踪脚本".into(),
-            summary: "先读取当前目录和契约，再创建配置组并回读有效配置".into(),
-            keywords: vec!["地图追踪".into(), "脚本".into()],
-            conditions: vec!["本次目标是地图路线，且当前宿主提供配置组构造能力".into()],
-            steps: vec![
-                ExperienceStep {
-                    tool: "fixture.read".into(),
-                    method_id: None,
-                    action: "读取本次现场对象".into(),
-                    input_roles: BTreeMap::new(),
-                },
-                ExperienceStep {
-                    tool: "fixture.write".into(),
-                    method_id: Some("bgi.prepare_pathing_group".into()),
-                    action: "用原生构造器创建组".into(),
-                    input_roles: BTreeMap::from([("path".into(), "本次已核对的路线目录".into())]),
-                },
-            ],
-            verification: vec!["回读实际生效配置，不以启动交接当作完成".into()],
-            pitfalls: vec!["入口不适用就重新定位".into()],
-            anchors: vec![],
-        }
-    }
-    fn run() -> super::super::types::Run {
-        let supervisor =
-            crate::runtime::record_result_tests::interrupt_supervisor("experience-memory");
-        supervisor
-            .journal
-            .create("配置脚本", "conversation", "client", 3600, None)
-            .unwrap()
-    }
-    fn store() -> MemoryStore {
-        MemoryStore::open(Path::new(":memory:")).unwrap()
-    }
-
-    #[test]
-    fn durable_chinese_recall_keeps_relations_instead_of_old_parameters() {
-        let root = crate::test_root("experience-reopen");
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("memory.db");
-        let store = MemoryStore::open(&path).unwrap();
-        let run = run();
-        let experience = experience();
-        let schemas = tool_schemas(&experience, &definitions()).unwrap();
-        store
-            .remember(vec![(experience, schemas)], &run, 0)
-            .unwrap();
-        drop(store);
-        let reopened = MemoryStore::open(&path).unwrap();
-        let entries = reopened.recall("帮另一个脚本配置地图追踪", 4).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(
-            entries[0].experience.steps[1].method_id.as_deref(),
-            Some("bgi.prepare_pathing_group")
-        );
-        assert_eq!(
-            entries[0].experience.steps[1].input_roles["path"],
-            "本次已核对的路线目录"
-        );
-        assert!(reopened.recall("播放音乐", 4).unwrap().is_empty());
-        assert_eq!(reopened.recall(&entries[0].id, 1).unwrap().len(), 1);
-    }
-
-    #[test]
-    fn changed_schema_or_unavailable_native_entry_is_not_compatible() {
-        let store = store();
-        let run = run();
-        let experience = experience();
-        let definitions = definitions();
-        store
-            .remember(
-                vec![(
-                    experience.clone(),
-                    tool_schemas(&experience, &definitions).unwrap(),
-                )],
-                &run,
-                0,
-            )
-            .unwrap();
-        let id = experience.id();
-        assert!(store.get(&id).unwrap().compatible(&definitions));
-        let mut upgraded = definitions.clone();
-        upgraded[0].provider_version = Some("2".into());
-        assert!(store.get(&id).unwrap().compatible(&upgraded));
-        upgraded[0].input_schema =
-            json!({"type":"object","properties":{"newArgument":{"type":"string"}}});
-        assert!(!store.get(&id).unwrap().compatible(&upgraded));
-        store
-            .observe_lookup(
-                "bgi.api.describe",
-                &json!({"methodId":"bgi.prepare_pathing_group"}),
-                &json!({"ok":false,"error":{"message":"HTTP 404 METHOD_NOT_FOUND"}}),
-            )
-            .unwrap();
-        assert!(!store.get(&id).unwrap().compatible(&definitions));
-        store
-            .observe_lookup(
-                "bgi.api.describe",
-                &json!({"methodId":"bgi.prepare_pathing_group"}),
-                &json!({"ok":true,"value":{"callable":true}}),
-            )
-            .unwrap();
-        assert!(store.get(&id).unwrap().compatible(&definitions));
-        store
-            .observe_lookup(
-                "bgi.api.describe",
-                &json!({"methodId":"bgi.prepare_pathing_group"}),
-                &json!({"ok":false,"error":{"message":"connection refused"}}),
-            )
-            .unwrap();
-        assert!(store.get(&id).unwrap().compatible(&definitions));
-    }
-
-    #[test]
-    fn corrections_and_forgetting_evict_context_and_block_stale_learning() {
-        let store = store();
-        let run = run();
-        let experience = experience();
-        let definitions = definitions();
-        let schemas = tool_schemas(&experience, &definitions).unwrap();
-        store
-            .remember(vec![(experience.clone(), schemas.clone())], &run, 0)
-            .unwrap();
-        let entry = store.get(&experience.id()).unwrap();
-        let reference = reference_message(&[entry.clone()], 4000).unwrap();
-        assert_eq!(reference.role, Role::Context);
-        assert_eq!(
-            store
-                .project_contexts(&[reference.clone()], &definitions)
-                .unwrap()[0]
-                .content,
-            reference.content
-        );
-        let mut corrected = experience.clone();
-        corrected.summary = "当前版本优先使用已核对的新契约".into();
-        store
-            .edit(&entry.id, entry.revision, &corrected, &schemas)
-            .unwrap();
-        assert!(
-            store
-                .project_contexts(&[reference], &definitions)
-                .unwrap()
-                .is_empty()
-        );
-        assert_eq!(
-            store
-                .remember(vec![(experience.clone(), schemas.clone())], &run, 0)
-                .unwrap(),
-            0
-        );
-        assert!(store.forget(&entry.id, entry.revision).is_err());
-        let edited = store.get(&entry.id).unwrap();
-        store.enqueue(&run).unwrap();
-        store.forget(&entry.id, edited.revision).unwrap();
-        assert!(store.pending().unwrap().is_none());
-        assert_eq!(
-            store
-                .remember(vec![(experience, schemas)], &run, 1)
-                .unwrap(),
-            0
-        );
-        assert!(store.list(10).unwrap().is_empty());
-    }
-
-    #[test]
-    fn late_old_learning_cannot_replace_a_newer_experience() {
-        let store = store();
-        let mut run = run();
-        let mut experience = experience();
-        let schemas = tool_schemas(&experience, &definitions()).unwrap();
-        run.message_boundary = 10;
-        store
-            .remember(vec![(experience.clone(), schemas.clone())], &run, 0)
-            .unwrap();
-        run.message_boundary = 20;
-        experience.summary = "新版本已验证的参数关系".into();
-        store
-            .remember(vec![(experience.clone(), schemas.clone())], &run, 0)
-            .unwrap();
-        run.message_boundary = 10;
-        experience.summary = "较早结果".into();
-        assert_eq!(
-            store
-                .remember(vec![(experience.clone(), schemas)], &run, 0)
-                .unwrap(),
-            0
-        );
-        assert_eq!(
-            store.get(&experience.id()).unwrap().experience.summary,
-            "新版本已验证的参数关系"
-        );
-    }
-
-    #[test]
-    fn learning_source_uses_tool_observations_and_removes_credentials() {
-        let mut assistant = message(Role::Assistant, "not evidence");
-        assistant.tool_calls = vec![
-            ToolCall {
-                id: "read".into(),
-                name: "fixture.read".into(),
-                arguments: json!({}),
-            },
-            ToolCall {
-                id: "write".into(),
-                name: "fixture.write".into(),
-                arguments: json!({"methodId":"bgi.prepare_pathing_group"}),
-            },
-        ];
-        let mut read=message(Role::Tool,json!({"ok":true,"value":{"content":"{\"apiKey\":\"private-fixture\",\"path\":\"route\"}"}}).to_string());
-        read.tool_call_id = Some("read".into());
-        let mut write = message(
-            Role::Tool,
-            json!({"ok":true,"value":{"verified":true}}).to_string(),
-        );
-        write.tool_call_id = Some("write".into());
-        let source = source_trace(
-            &[assistant, read, write],
-            "密码: private-fixture",
-            &definitions(),
-        )
-        .unwrap();
-        assert!(!source.data.to_string().contains("private-fixture"));
-        assert!(source.methods.contains("bgi.prepare_pathing_group"));
-        let mut unsafe_memory = experience();
-        unsafe_memory.summary = "apiKey=private-fixture".into();
-        assert!(unsafe_memory.validate().is_err());
-        assert!(
-            serde_json::from_value::<Experience>(json!({"done":["配好了"],"remaining":[]}))
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn context_messages_use_valid_provider_roles_and_complete_budgeted_records() {
-        let store = store();
-        let run = run();
-        let experience = experience();
-        store
-            .remember(
-                vec![(
-                    experience.clone(),
-                    tool_schemas(&experience, &definitions()).unwrap(),
-                )],
-                &run,
-                0,
-            )
-            .unwrap();
-        let entry = store.get(&experience.id()).unwrap();
-        assert!(reference_message(&[entry.clone()], 50).is_none());
-        let reference = reference_message(&[entry], 4000).unwrap();
-        for protocol in [
-            crate::config::ModelProtocol::OpenaiChat,
-            crate::config::ModelProtocol::OpenaiResponses,
-            crate::config::ModelProtocol::AnthropicMessages,
-            crate::config::ModelProtocol::Gemini,
-            crate::config::ModelProtocol::OllamaChat,
-        ] {
-            let config=serde_json::from_value(json!({"id":"fixture","name":"fixture","model":"fixture","protocol":protocol,"baseUrl":"https://example.invalid/v1"})).unwrap();
-            let body = ProtocolModel::new(config)
-                .body(&[reference.clone()], &[])
-                .unwrap();
-            let role = match protocol {
-                crate::config::ModelProtocol::OpenaiResponses => &body["input"][0]["role"],
-                crate::config::ModelProtocol::Gemini => &body["contents"][0]["role"],
-                _ => &body["messages"][0]["role"],
-            };
-            assert_eq!(role, "user");
-        }
-    }
-}
-
 impl super::Supervisor {
     pub(super) fn remember_observed_route(&self, run: &super::types::Run) -> Result<usize> {
         if matches!(run.source, super::types::RunSource::SavedWorkflow { .. }) {
@@ -1419,5 +1122,302 @@ impl super::Supervisor {
             )?;
         }
         Ok((count, input, output))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        extension::{ToolDefinition, ToolExecution},
+        model::{ProtocolModel, Role, ToolCall},
+        runtime::context::message,
+    };
+
+    fn definitions() -> Vec<ToolDefinition> {
+        ["fixture.read", "fixture.write"]
+            .into_iter()
+            .map(|name| ToolDefinition {
+                name: name.into(),
+                label: name.into(),
+                description: name.into(),
+                input_schema: json!({"type":"object","properties":{},"additionalProperties":false}),
+                output_schema: None,
+                source: "fixture".into(),
+                provider_version: Some("1".into()),
+                execution: ToolExecution::read_only(),
+            })
+            .collect()
+    }
+    fn experience() -> Experience {
+        Experience {
+            intent: "配置地图追踪脚本".into(),
+            summary: "先读取当前目录和契约，再创建配置组并回读有效配置".into(),
+            keywords: vec!["地图追踪".into(), "脚本".into()],
+            conditions: vec!["本次目标是地图路线，且当前宿主提供配置组构造能力".into()],
+            steps: vec![
+                ExperienceStep {
+                    tool: "fixture.read".into(),
+                    method_id: None,
+                    action: "读取本次现场对象".into(),
+                    input_roles: BTreeMap::new(),
+                },
+                ExperienceStep {
+                    tool: "fixture.write".into(),
+                    method_id: Some("bgi.prepare_pathing_group".into()),
+                    action: "用原生构造器创建组".into(),
+                    input_roles: BTreeMap::from([("path".into(), "本次已核对的路线目录".into())]),
+                },
+            ],
+            verification: vec!["回读实际生效配置，不以启动交接当作完成".into()],
+            pitfalls: vec!["入口不适用就重新定位".into()],
+            anchors: vec![],
+        }
+    }
+    fn run() -> super::super::types::Run {
+        let supervisor =
+            crate::runtime::record_result_tests::interrupt_supervisor("experience-memory");
+        supervisor
+            .journal
+            .create("配置脚本", "conversation", "client", 3600, None)
+            .unwrap()
+    }
+    fn store() -> MemoryStore {
+        MemoryStore::open(Path::new(":memory:")).unwrap()
+    }
+
+    #[test]
+    fn durable_chinese_recall_keeps_relations_instead_of_old_parameters() {
+        let root = crate::test_root("experience-reopen");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("memory.db");
+        let store = MemoryStore::open(&path).unwrap();
+        let run = run();
+        let experience = experience();
+        let schemas = tool_schemas(&experience, &definitions()).unwrap();
+        store
+            .remember(vec![(experience, schemas)], &run, 0)
+            .unwrap();
+        drop(store);
+        let reopened = MemoryStore::open(&path).unwrap();
+        let entries = reopened.recall("帮另一个脚本配置地图追踪", 4).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].experience.steps[1].method_id.as_deref(),
+            Some("bgi.prepare_pathing_group")
+        );
+        assert_eq!(
+            entries[0].experience.steps[1].input_roles["path"],
+            "本次已核对的路线目录"
+        );
+        assert!(reopened.recall("播放音乐", 4).unwrap().is_empty());
+        assert_eq!(reopened.recall(&entries[0].id, 1).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn changed_schema_or_unavailable_native_entry_is_not_compatible() {
+        let store = store();
+        let run = run();
+        let experience = experience();
+        let definitions = definitions();
+        store
+            .remember(
+                vec![(
+                    experience.clone(),
+                    tool_schemas(&experience, &definitions).unwrap(),
+                )],
+                &run,
+                0,
+            )
+            .unwrap();
+        let id = experience.id();
+        assert!(store.get(&id).unwrap().compatible(&definitions));
+        let mut upgraded = definitions.clone();
+        upgraded[0].provider_version = Some("2".into());
+        assert!(store.get(&id).unwrap().compatible(&upgraded));
+        upgraded[0].input_schema =
+            json!({"type":"object","properties":{"newArgument":{"type":"string"}}});
+        assert!(!store.get(&id).unwrap().compatible(&upgraded));
+        store
+            .observe_lookup(
+                "bgi.api.describe",
+                &json!({"methodId":"bgi.prepare_pathing_group"}),
+                &json!({"ok":false,"error":{"message":"HTTP 404 METHOD_NOT_FOUND"}}),
+            )
+            .unwrap();
+        assert!(!store.get(&id).unwrap().compatible(&definitions));
+        store
+            .observe_lookup(
+                "bgi.api.describe",
+                &json!({"methodId":"bgi.prepare_pathing_group"}),
+                &json!({"ok":true,"value":{"callable":true}}),
+            )
+            .unwrap();
+        assert!(store.get(&id).unwrap().compatible(&definitions));
+        store
+            .observe_lookup(
+                "bgi.api.describe",
+                &json!({"methodId":"bgi.prepare_pathing_group"}),
+                &json!({"ok":false,"error":{"message":"connection refused"}}),
+            )
+            .unwrap();
+        assert!(store.get(&id).unwrap().compatible(&definitions));
+    }
+
+    #[test]
+    fn corrections_and_forgetting_evict_context_and_block_stale_learning() {
+        let store = store();
+        let run = run();
+        let experience = experience();
+        let definitions = definitions();
+        let schemas = tool_schemas(&experience, &definitions).unwrap();
+        store
+            .remember(vec![(experience.clone(), schemas.clone())], &run, 0)
+            .unwrap();
+        let entry = store.get(&experience.id()).unwrap();
+        let reference = reference_message(std::slice::from_ref(&entry), 4000).unwrap();
+        assert_eq!(reference.role, Role::Context);
+        assert_eq!(
+            store
+                .project_contexts(std::slice::from_ref(&reference), &definitions)
+                .unwrap()[0]
+                .content,
+            reference.content
+        );
+        let mut corrected = experience.clone();
+        corrected.summary = "当前版本优先使用已核对的新契约".into();
+        store
+            .edit(&entry.id, entry.revision, &corrected, &schemas)
+            .unwrap();
+        assert!(
+            store
+                .project_contexts(&[reference], &definitions)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .remember(vec![(experience.clone(), schemas.clone())], &run, 0)
+                .unwrap(),
+            0
+        );
+        assert!(store.forget(&entry.id, entry.revision).is_err());
+        let edited = store.get(&entry.id).unwrap();
+        store.enqueue(&run).unwrap();
+        store.forget(&entry.id, edited.revision).unwrap();
+        assert!(store.pending().unwrap().is_none());
+        assert_eq!(
+            store
+                .remember(vec![(experience, schemas)], &run, 1)
+                .unwrap(),
+            0
+        );
+        assert!(store.list(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn late_old_learning_cannot_replace_a_newer_experience() {
+        let store = store();
+        let mut run = run();
+        let mut experience = experience();
+        let schemas = tool_schemas(&experience, &definitions()).unwrap();
+        run.message_boundary = 10;
+        store
+            .remember(vec![(experience.clone(), schemas.clone())], &run, 0)
+            .unwrap();
+        run.message_boundary = 20;
+        experience.summary = "新版本已验证的参数关系".into();
+        store
+            .remember(vec![(experience.clone(), schemas.clone())], &run, 0)
+            .unwrap();
+        run.message_boundary = 10;
+        experience.summary = "较早结果".into();
+        assert_eq!(
+            store
+                .remember(vec![(experience.clone(), schemas)], &run, 0)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store.get(&experience.id()).unwrap().experience.summary,
+            "新版本已验证的参数关系"
+        );
+    }
+
+    #[test]
+    fn learning_source_uses_tool_observations_and_removes_credentials() {
+        let mut assistant = message(Role::Assistant, "not evidence");
+        assistant.tool_calls = vec![
+            ToolCall {
+                id: "read".into(),
+                name: "fixture.read".into(),
+                arguments: json!({}),
+            },
+            ToolCall {
+                id: "write".into(),
+                name: "fixture.write".into(),
+                arguments: json!({"methodId":"bgi.prepare_pathing_group"}),
+            },
+        ];
+        let mut read=message(Role::Tool,json!({"ok":true,"value":{"content":"{\"apiKey\":\"private-fixture\",\"path\":\"route\"}"}}).to_string());
+        read.tool_call_id = Some("read".into());
+        let mut write = message(
+            Role::Tool,
+            json!({"ok":true,"value":{"verified":true}}).to_string(),
+        );
+        write.tool_call_id = Some("write".into());
+        let source = source_trace(
+            &[assistant, read, write],
+            "密码: private-fixture",
+            &definitions(),
+        )
+        .unwrap();
+        assert!(!source.data.to_string().contains("private-fixture"));
+        assert!(source.methods.contains("bgi.prepare_pathing_group"));
+        let mut unsafe_memory = experience();
+        unsafe_memory.summary = "apiKey=private-fixture".into();
+        assert!(unsafe_memory.validate().is_err());
+        assert!(
+            serde_json::from_value::<Experience>(json!({"done":["配好了"],"remaining":[]}))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn context_messages_use_valid_provider_roles_and_complete_budgeted_records() {
+        let store = store();
+        let run = run();
+        let experience = experience();
+        store
+            .remember(
+                vec![(
+                    experience.clone(),
+                    tool_schemas(&experience, &definitions()).unwrap(),
+                )],
+                &run,
+                0,
+            )
+            .unwrap();
+        let entry = store.get(&experience.id()).unwrap();
+        assert!(reference_message(std::slice::from_ref(&entry), 50).is_none());
+        let reference = reference_message(&[entry], 4000).unwrap();
+        for protocol in [
+            crate::config::ModelProtocol::OpenaiChat,
+            crate::config::ModelProtocol::OpenaiResponses,
+            crate::config::ModelProtocol::AnthropicMessages,
+            crate::config::ModelProtocol::Gemini,
+            crate::config::ModelProtocol::OllamaChat,
+        ] {
+            let config=serde_json::from_value(json!({"id":"fixture","name":"fixture","model":"fixture","protocol":protocol,"baseUrl":"https://example.invalid/v1"})).unwrap();
+            let body = ProtocolModel::new(config)
+                .body(std::slice::from_ref(&reference), &[])
+                .unwrap();
+            let role = match protocol {
+                crate::config::ModelProtocol::OpenaiResponses => &body["input"][0]["role"],
+                crate::config::ModelProtocol::Gemini => &body["contents"][0]["role"],
+                _ => &body["messages"][0]["role"],
+            };
+            assert_eq!(role, "user");
+        }
     }
 }

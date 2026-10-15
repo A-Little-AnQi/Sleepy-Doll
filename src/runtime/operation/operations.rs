@@ -1054,15 +1054,73 @@ impl OperationEngine {
                     _ => None,
                 })
                 .ok_or_else(|| Error::Conflict("缺少已提交资源的 staged artifact".into()))?;
-            let staged_hash = format!("{:x}", Sha256::digest(self.artifacts.get(staged_artifact)?));
-            if current_hash != staged_hash {
-                return Err(Error::Conflict("资源在提交后再次变化，不能安全回退".into()));
-            }
-            let content = self.artifacts.get(&snapshot.content_artifact)?;
+            let staged = self.artifacts.get(staged_artifact)?;
+            let staged_hash = format!("{:x}", Sha256::digest(&staged));
+            let original = self.artifacts.get(&snapshot.content_artifact)?;
+            let content = if current_hash == staged_hash {
+                original
+            } else {
+                restore_json_changes(&original, &staged, &current)?
+            };
             broker.replace(&resource, &current_hash, &content)?;
         }
         Ok(())
     }
+}
+
+/// Undo our JSON changes only; preserve independent edits made afterwards.
+fn restore_json_changes(original: &[u8], applied: &[u8], current: &[u8]) -> Result<Vec<u8>> {
+    fn merge(
+        base: Option<&Value>,
+        applied: Option<&Value>,
+        current: Option<&Value>,
+        path: &str,
+    ) -> Result<Option<Value>> {
+        if base == applied {
+            return Ok(current.cloned());
+        }
+        if current == applied {
+            return Ok(base.cloned());
+        }
+        if let (Some(Value::Object(after)), Some(Value::Object(now))) = (applied, current)
+            && (base.is_none() || base.is_some_and(Value::is_object))
+        {
+            let before = base.and_then(Value::as_object);
+            let mut output = now.clone();
+            let keys = after
+                .keys()
+                .chain(before.into_iter().flat_map(|o| o.keys()))
+                .collect::<std::collections::BTreeSet<_>>();
+            for key in keys {
+                let child = format!("{path}/{}", key.replace('~', "~0").replace('/', "~1"));
+                match merge(
+                    before.and_then(|o| o.get(key)),
+                    after.get(key),
+                    now.get(key),
+                    &child,
+                )? {
+                    Some(value) => {
+                        output.insert(key.clone(), value);
+                    }
+                    None => {
+                        output.remove(key);
+                    }
+                }
+            }
+            return Ok(Some(Value::Object(output)));
+        }
+        Err(Error::Conflict(format!(
+            "回退目标 {path} 在提交后又被修改，已保留较新内容"
+        )))
+    }
+    let parse = |bytes: &[u8]| {
+        serde_json::from_slice::<Value>(bytes)
+            .map_err(|_| Error::Conflict("资源在提交后再次变化，且不支持字段级回退；未覆盖".into()))
+    };
+    let (base, after, now) = (parse(original)?, parse(applied)?, parse(current)?);
+    let merged = merge(Some(&base), Some(&after), Some(&now), "")?
+        .ok_or_else(|| Error::Conflict("无法回退整个资源".into()))?;
+    Ok(serde_json::to_vec_pretty(&merged)?)
 }
 
 fn validate_plan(plan: &MutationPlan) -> Result<()> {
@@ -1105,4 +1163,34 @@ fn read_payloads<T: serde::de::DeserializeOwned>(
     rows.into_iter()
         .map(|payload| serde_json::from_str(&payload).map_err(Error::from))
         .collect()
+}
+
+#[cfg(test)]
+mod rollback_merge_tests {
+    use super::*;
+    #[test]
+    fn undo_keeps_later_independent_fields_and_missing_distinct_from_null() {
+        let before = json!({"team":"a","nested":{"x":1},"removed":null});
+        let applied = json!({"team":"b","nested":{"x":1,"new":true}});
+        let current = json!({"team":"b","nested":{"x":2,"new":true},"later":42});
+        let restored = restore_json_changes(
+            &serde_json::to_vec(&before).unwrap(),
+            &serde_json::to_vec(&applied).unwrap(),
+            &serde_json::to_vec(&current).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&restored).unwrap(),
+            json!({"team":"a","nested":{"x":2},"removed":null,"later":42})
+        );
+    }
+    #[test]
+    fn overlapping_changes_are_reported_without_overwriting() {
+        assert!(
+            restore_json_changes(br#"{"team":"a"}"#, br#"{"team":"b"}"#, br#"{"team":"c"}"#)
+                .unwrap_err()
+                .to_string()
+                .contains("/team")
+        );
+    }
 }

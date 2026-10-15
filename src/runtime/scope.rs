@@ -8,6 +8,36 @@ complete：当前原生观测已经完整回答本次目标，后续调用无必
 例如只问游戏是否开着，拿到进程状态后应 complete；明确要求没开就启动再运行已有任务，不能因查到未开就 complete。不得把普通查询扩成配置修改或主动运行。"#;
 
 impl Supervisor {
+    pub(super) fn check_progress(&self, run: &Run, call: &ToolCall) -> Result<()> {
+        if !matches!(run.source, RunSource::Agent) {
+            return Ok(());
+        }
+        let Some(goal) = self.journal.goal(&run.id)? else {
+            return Ok(());
+        };
+        let receipts = self.journal.goal_receipts(&run.id, goal.revision)?;
+        let signature = hash(&call.arguments);
+        let matching = receipts
+            .iter()
+            .rev()
+            .filter(|r| r.tool == call.name && r.arguments_hash == signature)
+            .take(2)
+            .collect::<Vec<_>>();
+        if matching.len() == 2
+            && contracts::progress_value(&matching[0].evidence)
+                == contracts::progress_value(&matching[1].evidence)
+        {
+            self.journal.conclude_goal(
+                run,
+                goal.revision,
+                false,
+                "连续两次操作没有获得新的结果，已停止重复尝试。已有结果保留在执行过程中。",
+                &matching.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
+            )?;
+            return Err(Error::Tool("相同操作没有带来进展，未再次执行".into()));
+        }
+        Ok(())
+    }
     pub(super) async fn check_observation_scope(
         &self,
         run: &mut Run,

@@ -562,6 +562,7 @@ impl Journal {
             model_id: model_id.map(str::to_owned),
             discovered: Vec::new(),
             loaded_tools: Vec::new(),
+            goal_revision: None,
         };
         tx.execute("INSERT OR IGNORE INTO conversations(id,title,created_at,updated_at) VALUES(?1,?2,?3,?3)",params![conversation,prompt.chars().take(120).collect::<String>(),stamp])?;
         tx.execute(
@@ -657,6 +658,19 @@ impl Journal {
         payload
             .map(|s| serde_json::from_str(&s).map_err(Into::into))
             .transpose()
+    }
+    pub fn ensure_current_goal(&self, run: &Run) -> Result<()> {
+        if let Some(expected) = run.goal_revision
+            && self.goal(&run.id)?.is_none_or(|g| g.revision != expected)
+        {
+            return Err(Error::Stale(
+                "用户要求在本次决策后已变化，旧决策未执行；请按最新输入重新判断".into(),
+            ));
+        }
+        if self.goal_conclusion(&run.id)?.is_some() {
+            return Err(Error::Tool("本次目标已经结束，未执行额外操作".into()));
+        }
+        Ok(())
     }
     pub fn record_evidence(&self, run: &Run, receipt: &EvidenceReceipt) -> Result<()> {
         let mut db = self.connection.lock().unwrap();

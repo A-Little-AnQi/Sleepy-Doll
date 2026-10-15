@@ -1301,10 +1301,13 @@ impl Supervisor {
         for mut a in attempts {
             if matches!(a.outcome.as_str(), "running" | "submitting" | "unknown") {
                 let info = bridge.get("/bridge/v1/info", cancel).await?;
-                if info["instanceId"] != a.instance_id || a.job_id.is_none() {
+                if info["instanceId"] != a.instance_id {
                     return Err(Error::Conflict(
                         "无法确定旧调用结果；保留执行锁并等待核对".into(),
                     ));
+                }
+                if a.job_id.is_none() {
+                    bridge.recover_ack(&self.journal, &mut a, cancel).await?;
                 }
                 self.journal.save(run, RunState::WaitingJob)?;
                 bridge.wait(&self.journal, run, &mut a, cancel).await?;
@@ -1563,6 +1566,7 @@ impl Supervisor {
                 let m = message(Role::User, input);
                 history.push(m);
             }
+            run.goal_revision = self.journal.goal(&run.id)?.map(|g| g.revision);
             let epoch = self.memory.edit_epoch()?;
             if epoch != memory_epoch {
                 history = self
@@ -2563,7 +2567,7 @@ impl Supervisor {
                 &contracts::EvidenceReceipt {
                     id: uuid::Uuid::new_v4().to_string(),
                     run_id: run.id.clone(),
-                    goal_revision: goal.revision,
+                    goal_revision: run.goal_revision.unwrap_or(goal.revision),
                     call_id: call.id.clone(),
                     tool: call.name.clone(),
                     arguments_hash: hash(&call.arguments),
@@ -2571,11 +2575,12 @@ impl Supervisor {
                         .definition(&call.name, &run.discovered.iter().cloned().collect())
                         .map(|d| d.execution.effect)
                         .unwrap_or(ToolEffect::Unknown),
-                    state: if value["ok"] == true {
-                        contracts::ReceiptState::Observed
-                    } else {
-                        contracts::ReceiptState::Failed
-                    },
+                    state: contracts::receipt_state(
+                        &value,
+                        self.definition(&call.name, &run.discovered.iter().cloned().collect())
+                            .map(|d| d.execution.effect)
+                            .unwrap_or(ToolEffect::Unknown),
+                    ),
                     observed_at: now(),
                     evidence: context::tool_evidence(&value),
                 },
@@ -3016,28 +3021,26 @@ impl Supervisor {
         cancel: &CancellationToken,
     ) -> Result<Value> {
         let mut previous = None;
-        if matches!(call.name.as_str(), "bgi.user.write" | "workspace.write") {
-            if let (Some(reader), Some(target), Some(expected)) = (
+        if matches!(call.name.as_str(), "bgi.user.write" | "workspace.write")
+            && let (Some(reader), Some(target), Some(expected)) = (
                 definition.execution.scope_reader.as_deref(),
                 definition.execution.scope_target.as_deref(),
                 call.arguments["expectedSha256"].as_str(),
-            ) {
-                if let Some(path) = call.arguments[target].as_str() {
-                    let result = self
-                        .tools()
-                        .call_async(reader, &json!({"path": path}), cancel.clone())
-                        .await;
-                    if matches!(&result, Err(Error::Cancelled)) {
-                        return Err(Error::Cancelled);
-                    }
-                    if cancel.is_cancelled() {
-                        return Err(Error::Cancelled);
-                    }
-                    if let Ok(value) = result {
-                        previous =
-                            approval::checked_previous(&value, Some(expected)).map(str::to_owned);
-                    }
-                }
+            )
+            && let Some(path) = call.arguments[target].as_str()
+        {
+            let result = self
+                .tools()
+                .call_async(reader, &json!({"path": path}), cancel.clone())
+                .await;
+            if matches!(&result, Err(Error::Cancelled)) {
+                return Err(Error::Cancelled);
+            }
+            if cancel.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            if let Ok(value) = result {
+                previous = approval::checked_previous(&value, Some(expected)).map(str::to_owned);
             }
         }
         if cancel.is_cancelled() {
@@ -3162,6 +3165,8 @@ impl Supervisor {
         let a = &call.arguments;
         let current = self.config.read().unwrap().clone();
         let definitions = self.definitions(exposed);
+        self.journal.ensure_current_goal(run)?;
+        self.check_progress(run, call)?;
         self.check_observation_scope(run, call, &definitions, cancel)
             .await?;
         let definition = definitions
@@ -3956,6 +3961,7 @@ impl Supervisor {
             | "workspace.environment" => {
                 let registry = self.tools().clone();
                 let call = call.clone();
+                self.journal.ensure_current_goal(run)?;
                 registry
                     .call_async(&call.name, &call.arguments, cancel.clone())
                     .await
@@ -4214,6 +4220,7 @@ impl Supervisor {
                 }
                 let definition = &current_definition;
                 let instance = request["instanceId"].as_str().unwrap();
+                self.journal.ensure_current_goal(run)?;
                 let mut attempt = self
                     .journal
                     .prepare(run, &call.id, request.clone(), instance)?;

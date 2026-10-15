@@ -45,9 +45,9 @@ impl StepResult {
     /// 落库的尝试结果转为步骤结果；未确认的结果归为 unknown。
     fn from_attempt(outcome: &str) -> Self {
         match outcome {
-            "verifiedSucceeded" | "completed" => Self::Succeeded,
+            "verifiedSucceeded" => Self::Succeeded,
             "skipped" => Self::Skipped,
-            "unknown" | "running" | "submitting" | "prepared" => Self::Unknown,
+            "unknown" | "running" | "submitting" | "prepared" | "completed" => Self::Unknown,
             _ => Self::Failed,
         }
     }

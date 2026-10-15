@@ -169,7 +169,7 @@ pub struct ToolExecution {
     /// 读取目标当前内容所用的只读工具；与 `Fields` 搭配。
     #[serde(default)]
     pub scope_reader: Option<String>,
-    pub goal_observation: Option<GoalObservationSpec>,
+    pub goal_observation: Option<Box<GoalObservationSpec>>,
 }
 
 /// Typed native evidence for an information goal, declared by the adapter.

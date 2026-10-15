@@ -83,3 +83,58 @@ pub struct EvidenceReceipt {
     pub observed_at: String,
     pub evidence: Value,
 }
+
+pub fn receipt_state(value: &Value, effect: crate::extension::ToolEffect) -> ReceiptState {
+    if value["ok"] != true {
+        return ReceiptState::Failed;
+    }
+    let body = &value["value"];
+    if matches!(
+        body["outcome"].as_str(),
+        Some("verifiedFailed" | "failed" | "cancelled")
+    ) || body
+        .pointer("/verification/status")
+        .is_some_and(|s| s == "failed")
+    {
+        return ReceiptState::Failed;
+    }
+    if matches!(
+        body["outcome"].as_str(),
+        Some("unknown" | "submitting" | "running")
+    ) {
+        return ReceiptState::Unknown;
+    }
+    if crate::runtime::operation::executor::launch_submitted(body) {
+        return ReceiptState::Accepted;
+    }
+    if body["outcome"] == "verifiedSucceeded"
+        || body
+            .pointer("/verification/status")
+            .is_some_and(|s| s == "succeeded")
+    {
+        return ReceiptState::Verified;
+    }
+    if effect != crate::extension::ToolEffect::ReadOnly {
+        return ReceiptState::Unknown;
+    }
+    ReceiptState::Observed
+}
+
+pub fn progress_value(value: &Value) -> Value {
+    match value {
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .filter(|(key, _)| {
+                    !matches!(
+                        key.as_str(),
+                        "observedAt" | "elapsedMs" | "snapshotId" | "callId" | "requestId"
+                    )
+                })
+                .map(|(key, value)| (key.clone(), progress_value(value)))
+                .collect(),
+        ),
+        Value::Array(values) => Value::Array(values.iter().map(progress_value).collect()),
+        other => other.clone(),
+    }
+}

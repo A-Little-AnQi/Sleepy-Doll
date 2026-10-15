@@ -168,8 +168,11 @@ fn read_request(stream: &mut TcpStream) -> Value {
                         .strip_prefix("content-length:")
                         .and_then(|value| value.trim().parse::<usize>().ok())
                 })
-                .unwrap();
+                .unwrap_or(0);
             if bytes.len() >= end + 4 + length {
+                if length == 0 {
+                    return Value::Null;
+                }
                 return serde_json::from_slice(&bytes[end + 4..end + 4 + length]).unwrap();
             }
         }
@@ -334,12 +337,12 @@ fn install_status_slice(supervisor: &Supervisor, changes: Arc<std::sync::atomic:
     let mut execution = crate::extension::ToolExecution::read_only();
     execution.deferred = false;
     execution.always_load = true;
-    execution.goal_observation = Some(crate::extension::GoalObservationSpec {
+    execution.goal_observation = Some(Box::new(crate::extension::GoalObservationSpec {
         pointer: "/value/running".into(),
         meaning: "游戏进程是否运行".into(),
         when_true: "游戏开着".into(),
         when_false: "游戏没开".into(),
-    });
+    }));
     registry
         .register(
             crate::extension::FunctionTool::new(
@@ -375,6 +378,128 @@ fn install_status_slice(supervisor: &Supervisor, changes: Arc<std::sync::atomic:
         )
         .unwrap();
     supervisor.extensions.write().unwrap().tools = Arc::new(registry);
+}
+
+#[tokio::test]
+async fn unchanged_tool_observations_converge_without_another_model_round() {
+    let fixture =
+        ModelFixture::new(|_| (200, tool_calls(vec![("workspace.environment", json!({}))])));
+    let supervisor = supervisor(&fixture);
+    let mut run = supervisor
+        .journal
+        .create("查看当前环境", "no-progress", "no-progress", 600, None)
+        .unwrap();
+    supervisor
+        .session(&mut run, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(run.state, RunState::NeedsReview);
+    assert_eq!(fixture.requests.lock().unwrap().len(), 3);
+    let results = supervisor.journal.goal_receipts(&run.id, 1).unwrap();
+    assert_eq!(
+        results
+            .iter()
+            .filter(|r| r.state == contracts::ReceiptState::Observed)
+            .count(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn changed_human_goal_blocks_an_already_generated_write() {
+    let target = Arc::new(Mutex::new(None::<(Arc<Journal>, String)>));
+    let input_target = target.clone();
+    let fixture = ModelFixture::new(move |request| {
+        if request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["role"] == "tool")
+        {
+            return (200, answer("已按新要求停止"));
+        }
+        let (journal, id) = input_target.lock().unwrap().clone().unwrap();
+        journal
+            .input_once(&id, "supplement", "只查看，不要修改", Some("steer"))
+            .unwrap();
+        (200, tool_calls(vec![("fixture.change", json!({}))]))
+    });
+    let supervisor = supervisor(&fixture);
+    let writes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    install_status_slice(&supervisor, writes.clone());
+    let mut run = supervisor
+        .journal
+        .create("修改配置", "revision", "revision", 600, None)
+        .unwrap();
+    *target.lock().unwrap() = Some((supervisor.journal.clone(), run.id.clone()));
+    supervisor
+        .session(&mut run, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
+    let receipts = supervisor.journal.goal_receipts(&run.id, 1).unwrap();
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].state, contracts::ReceiptState::Failed);
+    assert!(
+        supervisor
+            .journal
+            .goal_receipts(&run.id, 2)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn ack_recovery_reuses_exact_wire_only_in_the_original_idempotent_instance() {
+    for (idempotent, same_instance) in [(true, true), (false, true), (true, false)] {
+        let fixture = ModelFixture::new(move |body| {
+            (
+                200,
+                if body.is_null() {
+                    json!({"instanceId":if same_instance {"instance-1"} else {"instance-2"},"protocolVersion":"1","features":["jobs","idempotency"]})
+                } else {
+                    json!({"jobId":"original-job","replayed":true})
+                },
+            )
+        });
+        let supervisor = supervisor(&fixture);
+        let mut run = supervisor
+            .journal
+            .create("运行已有任务", "ack", "ack", 600, None)
+            .unwrap();
+        supervisor
+            .journal
+            .save(&mut run, RunState::Deciding)
+            .unwrap();
+        supervisor
+            .journal
+            .save(&mut run, RunState::Executing)
+            .unwrap();
+        let mut attempt = supervisor
+            .journal
+            .prepare(&run, "lost-call", json!({}), "instance-1")
+            .unwrap();
+        let wire = json!({"requestId":attempt.id,"instanceId":"instance-1","catalogVersion":"v1","methodId":"run","arguments":{"name":"task"}});
+        attempt.request = json!({"wire":wire,"bridgeFeatures":if idempotent {json!(["idempotency"])} else {json!([])}});
+        attempt.request_hash = hash(&wire);
+        attempt.outcome = "unknown".into();
+        supervisor.journal.attempt(&attempt).unwrap();
+        let bridge=host::bridge::Bridge::for_transport_tests(serde_json::from_value(json!({"enabled":true,"baseUrl":fixture.url.trim_end_matches("/v1"),"timeoutMs":2000})).unwrap()).unwrap();
+        let result = bridge
+            .recover_ack(&supervisor.journal, &mut attempt, &CancellationToken::new())
+            .await;
+        let sent = fixture.requests.lock().unwrap();
+        if idempotent && same_instance {
+            result.unwrap();
+            assert_eq!(sent.len(), 2);
+            assert_eq!(sent[1], wire);
+            assert_eq!(attempt.job_id.as_deref(), Some("original-job"));
+        } else {
+            assert!(result.is_err());
+            assert_eq!(sent.len(), 1);
+            assert_eq!(attempt.outcome, "unknown");
+        }
+    }
 }
 
 #[tokio::test]

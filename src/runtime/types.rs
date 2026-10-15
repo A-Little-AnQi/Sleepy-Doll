@@ -175,6 +175,9 @@ pub struct Run {
     /// 支持调用白名单的协议保留已加载定义，仅调整本轮可调用集合。
     #[serde(default)]
     pub loaded_tools: Vec<String>,
+    /// Goal revision captured before the model decision/native shortcut dispatch.
+    #[serde(default)]
+    pub goal_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

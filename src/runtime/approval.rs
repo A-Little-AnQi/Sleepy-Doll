@@ -192,16 +192,15 @@ fn field_label(path: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut i = 0;
     while i + 1 < segs.len() {
-        if segs[i] == "projects" {
-            if let Some(idx) = segs[i + 1]
+        if segs[i] == "projects"
+            && let Some(idx) = segs[i + 1]
                 .strip_prefix('[')
                 .and_then(|s| s.strip_suffix(']'))
                 .and_then(|s| s.parse::<usize>().ok())
-            {
-                parts.push(format!("任务{}", idx + 1));
-                i += 2;
-                continue;
-            }
+        {
+            parts.push(format!("任务{}", idx + 1));
+            i += 2;
+            continue;
         }
         i += 1;
     }
@@ -1076,7 +1075,7 @@ mod tests {
     // BOM 前缀的 JSON 仍按结构化 diff 展示（仅解析层面，不改原 args 与 sha）
     #[test]
     fn bom_prefixed_json_parses_for_display() {
-        let old = format!("\u{feff}{}", json!({"partyName": "一队"}).to_string());
+        let old = format!("\u{feff}{}", json!({"partyName": "一队"}));
         let new = json!({"partyName": "二队"});
         let args = json!({"path": "bom.json", "content": new.to_string()});
         let snapshot = args.clone();
