@@ -118,9 +118,7 @@ mod tests {
     };
 
     fn fixture(name: &str) -> PathBuf {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target/.tmp/uninstall-verification")
-            .join(name);
+        let root = crate::test_root(name);
         fs::create_dir_all(&root).unwrap();
         root
     }

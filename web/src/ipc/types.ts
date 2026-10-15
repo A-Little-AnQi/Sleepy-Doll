@@ -55,8 +55,33 @@ export interface ToolInfo {
   description: string;
   source: string;
 }
+export interface MemoryExperience {
+  intent: string;
+  summary: string;
+  keywords: string[];
+  conditions: string[];
+  steps: {
+    tool: string;
+    methodId: string | null;
+    action: string;
+    inputRoles: Record<string, string>;
+  }[];
+  verification: string[];
+  pitfalls: string[];
+  anchors: string[];
+}
+
+export interface MemoryEntry {
+  id: string;
+  experience: MemoryExperience;
+  revision: number;
+  userEdited: boolean;
+  sourceConversationId: string;
+  updatedAt: string;
+}
+
 export interface MessageInfo {
-  role: "system" | "user" | "assistant" | "tool";
+  role: "system" | "user" | "assistant" | "tool" | "context";
   content: string;
   createdAt?: string;
   /** Persisted assistant text replaces deltas through this event sequence. */

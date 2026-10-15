@@ -793,7 +793,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
     ]);
     for (name, label, description, schema, function) in definitions {
-        let execution = if matches!(
+        let mut execution = if matches!(
             name,
             "bgi.capability.invoke" | "bgi.job.cancel" | "bgi.api.invoke"
         ) {
@@ -846,6 +846,19 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
                 search_hint: Some("检索或观测 BGI 状态与能力".into()),
                 ..ToolExecution::read_only()
             }
+        };
+        execution.exposure = match name {
+            "bgi.user.resolve" | "bgi.user.list" | "bgi.user.read" | "bgi.repo.search"
+            | "bgi.repo.read" | "bgi.feature.search" | "bgi.feature.read" | "bgi.api.describe" => {
+                crate::extension::ToolExposure::Always
+            }
+            "bgi.state.get" | "bgi.job.get" | "bgi.job.cancel" => {
+                crate::extension::ToolExposure::AfterWrite
+            }
+            "bgi.capability.search" | "bgi.capability.describe" | "bgi.capability.invoke" => {
+                crate::extension::ToolExposure::OnDemand
+            }
+            _ => crate::extension::ToolExposure::AfterRead,
         };
         registry.register(
             FunctionTool::new(name, description, schema, "core:bgi", move |arguments| {
@@ -919,10 +932,9 @@ mod user_write_tests {
         sha256(bytes)
     }
 
-    /// 临时数据统一放 target/.tmp/task-write-recovery（不写系统 Temp，也不
-    /// 删除既有内容：固定文件每次覆写复位，一次性文件用唯一名）。
+    /// 每次使用独立的项目内测试目录，不改写其他运行的夹具。
     fn user_dir(name: &str) -> PathBuf {
-        let dir = PathBuf::from("target/.tmp/task-write-recovery").join(name);
+        let dir = crate::test_root(name);
         std::fs::create_dir_all(dir.join("settings")).unwrap();
         std::fs::write(
             dir.join("settings").join("groups.json"),

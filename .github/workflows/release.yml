@@ -43,7 +43,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-dotnet@v4
         with:
@@ -51,22 +50,22 @@ jobs:
       - name: Resolve version
         env:
           RELEASE_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.channel || '' }}
-        run: node installer/release-version.mjs --github
-      - run: npm ci
+        run: node scripts/release-version.mjs --github
+      - run: npm install
       - name: Build product
         shell: cmd
-        run: build-desktop.cmd
+        run: npm run dist
       - name: Upload and verify R2 files
         env:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: node installer/publish-r2.mjs
+        run: node scripts/publish-r2.mjs
       - name: Deploy distribution service
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
           GA_API_SECRET: ${{ secrets.GA_API_SECRET }}
-        run: node installer/deploy-cloudflare.mjs
+        run: node scripts/deploy-cloudflare.mjs
       - name: Publish GitHub release
         shell: pwsh
         env:
@@ -90,7 +89,7 @@ jobs:
         env:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: node installer/publish-r2.mjs --promote
+        run: node scripts/publish-r2.mjs --promote
       - name: Verify published manifest
         shell: pwsh
         run: |

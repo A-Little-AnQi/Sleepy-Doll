@@ -12,7 +12,6 @@ import re
 from pathlib import Path
 import shutil
 import subprocess
-import tempfile
 import threading
 import time
 import urllib.error
@@ -21,7 +20,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[2]
-TEMP = Path(tempfile.gettempdir()) / "sleepy-doll-bgi-disclosure-validation"
+TEMP = ROOT / "target/.tmp/bgi-disclosure"
 TERMINAL = {"answered", "succeeded", "partial", "failed", "cancelled", "needsReview", "blocked", "awaitingUser", "awaitingApproval"}
 
 
@@ -41,7 +40,8 @@ def main():
         raise SystemExit("当前验收代理只支持 anthropic-messages")
     if TEMP.exists():
         raise SystemExit("验收目录已存在；先核对并清理上次任务，不能覆盖未知文件")
-    TEMP.mkdir()
+    TEMP.mkdir(parents=True)
+    os.environ.update(TEMP=str(TEMP), TMP=str(TEMP), TMPDIR=str(TEMP))
     process = None
     servers = []
     requests = []
@@ -271,9 +271,12 @@ def main():
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)
-        # 仅删除此调用明确创建且解析在系统临时目录下的固定目录。
-        if TEMP.resolve().parent == Path(tempfile.gettempdir()).resolve():
-            shutil.rmtree(TEMP)
+        # 仅删除本次调用创建的项目内夹具。
+        if TEMP.resolve().parent == (ROOT / "target/.tmp").resolve():
+            subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                            r"E:\tools\Remove-Directory.ps1", "-Path", str(TEMP)], check=True)
+            if TEMP.exists():
+                raise RuntimeError(f"Fixture cleanup failed: {TEMP}")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,0 @@
-{
-  "extends": "../tsconfig.json",
-  "compilerOptions": {
-    "exactOptionalPropertyTypes": false,
-    "allowJs": true
-  },
-  "include": ["./main.tsx", "./vite.config.ts", "../web/src/vite-env.d.ts"]
-}

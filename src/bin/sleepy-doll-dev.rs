@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 use sleepy_doll::app::AppController;
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
-const CONFIG: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/.sleepy-doll/dev/config.json");
-const IPC_PORT_FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/.sleepy-doll/dev/ipc.port");
+const CONFIG: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/dev/user/config.json");
+const IPC_PORT_FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/dev/ipc.port");
 const IPC_PORT: u16 = 47124;
 const IPC_SPAN: u16 = 32;
 
@@ -45,7 +45,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    let config = env::var_os("SLEEPY_DOLL_DEV_CONFIG")
+    let explicit = env::var_os("SLEEPY_DOLL_DEV_CONFIG");
+    if explicit.is_none() {
+        sleepy_doll::config::migrate_developer_configuration(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/.sleepy-doll/dev/config.json"
+            )),
+            std::path::Path::new(CONFIG),
+        )?;
+    }
+    let config = explicit
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(CONFIG));
     sleepy_doll::config::seed(&config)?;
@@ -56,6 +66,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let controller = Arc::new(AppController::load(&config)?);
     let (server, port) = bind_ipc()?;
+    if let Some(parent) = std::path::Path::new(IPC_PORT_FILE).parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(IPC_PORT_FILE, format!("{port}\n"))?;
     println!("Sleepy Doll dev backend: http://127.0.0.1:{port}/ipc");
     println!("UI preview: Vite 默认 http://127.0.0.1:5173/ ，占用则顺延");

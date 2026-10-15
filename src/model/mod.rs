@@ -24,7 +24,7 @@ pub struct ToolCall {
 ///
 /// Anthropic 的 `thinking` 块连同 `signature`、Gemini 的 `thoughtSignature`、
 /// Responses 的 `reasoning` 项连同 `encrypted_content` 都必须带回，否则下一轮
-/// 被拒；OpenAI Chat 与 Ollama 只返回可读文本，不需要回传。
+/// 被拒；GLM 的 OpenAI Chat 接口也需要原始 `reasoning_content`，Ollama 只展示。
 ///
 /// 各协议的块形态与签名语义互不兼容，所以载荷带协议标签。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -68,6 +68,7 @@ pub struct Message {
 pub enum Role {
     System,
     User,
+    Context,
     Assistant,
     Tool,
 }
@@ -241,8 +242,8 @@ impl ProtocolModel {
         headers
     }
 
-    pub(crate) fn body(&self, messages: &[Message], tools: &[ToolDefinition]) -> Value {
-        match self.config.protocol {
+    pub(crate) fn body(&self, messages: &[Message], tools: &[ToolDefinition]) -> Result<Value> {
+        let mut body = match self.config.protocol {
             ModelProtocol::OpenaiChat => protocol::openai_chat_body(&self.config, messages, tools),
             ModelProtocol::OpenaiResponses => {
                 protocol::responses_body(&self.config, messages, tools)
@@ -252,7 +253,9 @@ impl ProtocolModel {
             }
             ModelProtocol::Gemini => protocol::gemini_body(&self.config, messages, tools),
             ModelProtocol::OllamaChat => protocol::ollama_body(&self.config, messages, tools),
-        }
+        };
+        protocol::apply_reasoning_options(&self.config, &mut body)?;
+        Ok(body)
     }
 }
 
@@ -261,7 +264,7 @@ impl Model for ProtocolModel {
         let raw = self.transport.post(
             &self.endpoint(),
             &self.headers(),
-            &self.body(messages, tools),
+            &self.body(messages, tools)?,
             Duration::from_millis(self.config.options.timeout_ms),
         )?;
         protocol::parse_response(self.config.protocol, &raw)

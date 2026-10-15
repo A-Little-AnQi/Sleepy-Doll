@@ -323,7 +323,7 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
     let read = ToolExecution {
         deferred: false,
         always_load: true,
-        max_result_chars: 1_000_000,
+        max_result_chars: 32_000,
         search_hint: Some("读取文件".into()),
         ..ToolExecution::read_only()
     };
@@ -348,7 +348,7 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
     registry.register(
         FunctionTool::new(
             "workspace.read",
-            "读取一个文本文件。默认按 524288 字符预算返回（maxChars 可调最大 8388608），支持 startLine/maxLines/tailLines 分页；返回总行数、nextLine、截断标记与全文件 sha256。分页可能漏看内容时，改用 workspace.search 做全文件统计。",
+            "读取一个文本文件。默认按 16384 字符预算返回（maxChars 可调最大 8388608），支持 startLine/maxLines/tailLines 分页；返回总行数、nextLine、截断标记与全文件 sha256。跟随 nextLine 继续读取；全文件统计优先 workspace.search。",
             json!({"type":"object","properties":{
                 "path":{"type":"string"},
                 "startLine":{"type":"integer","minimum":1,"description":"从第几行开始，1 起算"},
@@ -366,7 +366,7 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
     registry.register(
         FunctionTool::new(
             "workspace.read_many",
-            "批量读取最多 64 个文本文件，单次总文本默认 524288 字符、最大 8388608；单个文件失败只记录错误，不影响其余文件。",
+            "批量读取最多 64 个文本文件，单次总文本默认 32768 字符、最大 8388608；单个文件失败只记录错误，不影响其余文件。按截断标记继续定向读取。",
             json!({"type":"object","properties":{
                 "paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":64},
                 "maxChars":{"type":"integer","minimum":1,"maximum":8388608,"description":"单文件文本字符上限"},
@@ -376,7 +376,10 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
             move |arguments| workspace_io::read_many(&files.root, arguments),
         )
         .with_label("批量读取文件")
-        .with_execution(read.clone()),
+        .with_execution(ToolExecution {
+            exposure: crate::extension::ToolExposure::AfterRead,
+            ..read.clone()
+        }),
     )?;
     let files = workspace.clone();
     registry.register(
@@ -423,6 +426,7 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
         .with_label("写入文件")
         .with_execution(ToolExecution {
             effect: ToolEffect::LocalWrite,
+            exposure: crate::extension::ToolExposure::AfterRead,
             risk: RiskLevel::Standard,
             concurrency_safe: false,
             deferred: false,
@@ -447,6 +451,7 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
         .with_label("删除文件")
         .with_execution(ToolExecution {
             effect: ToolEffect::LocalWrite,
+            exposure: crate::extension::ToolExposure::AfterRead,
             risk: RiskLevel::High,
             concurrency_safe: false,
             deferred: false,
@@ -509,6 +514,7 @@ impl Tool for WorkspaceShellTool {
             provider_version: None,
             execution: ToolExecution {
                 effect: ToolEffect::LocalWrite,
+                exposure: crate::extension::ToolExposure::OnDemand,
                 risk: RiskLevel::High,
                 concurrency_safe: false,
                 deferred: false,
@@ -516,7 +522,7 @@ impl Tool for WorkspaceShellTool {
                 // 外层运行时按这个预算包住调用（runtime/mod.rs 的写路径 timeout），
                 // 因此取最大值，让 shell 自身的 timeoutMs 决定真实超时。
                 timeout_ms: MAX_TIMEOUT_MS,
-                max_result_chars: 1_000_000,
+                max_result_chars: 32_000,
                 search_hint: Some("执行 PowerShell".into()),
                 cancellation: crate::extension::CancellationMode::Reliable,
                 verification: crate::extension::VerificationMode::None,
@@ -723,11 +729,7 @@ mod tests {
 
     impl Scratch {
         fn new(name: &str) -> Self {
-            let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("target")
-                .join(".tmp")
-                .join("general-tools")
-                .join(name);
+            let dir = crate::test_root(name);
             fs::create_dir_all(dir.join("user")).expect("创建夹具目录");
             Self(dir)
         }

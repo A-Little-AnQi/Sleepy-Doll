@@ -17,6 +17,30 @@ var routeDir = Path.Combine(userRoot, "AutoPathing", "兽怪暴徒");
 Directory.CreateDirectory(groupDir);
 Directory.CreateDirectory(routeDir);
 
+var bridgeDir = Path.Combine(root, $"bridge-{id}");
+var legacyRecords = Path.Combine(bridgeDir, "user", ".sleepy-doll", "config-changes");
+Directory.CreateDirectory(legacyRecords);
+File.WriteAllText(Path.Combine(legacyRecords, "record.json"), "original recovery");
+var migratedRecords = BgiBridge.InstallPaths.ChangeRecordDirectory(bridgeDir);
+Require(migratedRecords == Path.Combine(bridgeDir, "user", "data", "config-changes"), "visible data directory");
+Require(File.ReadAllText(Path.Combine(migratedRecords, "record.json")) == "original recovery", "recovery records survive migration");
+Require(!Directory.Exists(Path.Combine(bridgeDir, "user", ".sleepy-doll")), "legacy directory moved");
+Require(BgiBridge.InstallPaths.ChangeRecordDirectory(bridgeDir) == migratedRecords, "migration is idempotent");
+
+var lockedBridge = Path.Combine(root, $"bridge-locked-{id}");
+var lockedLegacy = Path.Combine(lockedBridge, "user", ".sleepy-doll");
+Directory.CreateDirectory(lockedLegacy);
+using (var active = new FileStream(Path.Combine(lockedLegacy, "sleepy-doll.runtime.lock"),
+    FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
+{
+    active.Lock(0, 1);
+    var blocked = false;
+    try { BgiBridge.InstallPaths.DataDirectory(lockedBridge); } catch (IOException) { blocked = true; }
+    Require(blocked && Directory.Exists(lockedLegacy), "active client blocks migration");
+    Require(!Directory.Exists(Path.Combine(lockedBridge, "user", "data")), "blocked migration leaves no second data directory");
+    active.Unlock(0, 1);
+}
+
 // ---- requirements aggregation over real route files (production path) ----
 File.WriteAllText(Path.Combine(routeDir, "01.json"), """
 {"info":{"name":"01"},"positions":[

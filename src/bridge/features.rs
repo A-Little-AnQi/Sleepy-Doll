@@ -174,8 +174,10 @@ mod tests {
     #[test]
     fn all_source_features_have_progressive_cards() {
         let index = FeatureIndex::bundled().unwrap();
-        let audit: Value =
-            serde_json::from_str(include_str!("../../docs/bgi/feature-coverage.json")).unwrap();
+        let audit: Value = serde_json::from_str(include_str!(
+            "../../bgi-bridge/dev/fixtures/host-features.json"
+        ))
+        .unwrap();
         for item in audit["commands"]
             .as_array()
             .unwrap()
@@ -463,8 +465,10 @@ mod tests {
     ///声明域、skill 引用真实可读。
     #[test]
     fn user_scenarios_route_through_the_real_feature_index() {
-        let scenarios: Value =
-            serde_json::from_str(include_str!("../../docs/bgi/user-scenarios.json")).unwrap();
+        let scenarios: Value = serde_json::from_str(include_str!(
+            "../../bgi-bridge/dev/fixtures/user-scenarios.json"
+        ))
+        .unwrap();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut skills = crate::extension::skills::SkillRegistry::default();
         skills

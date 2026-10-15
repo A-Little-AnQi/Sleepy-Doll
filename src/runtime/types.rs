@@ -172,6 +172,9 @@ pub struct Run {
     /// 本轮已经发现、允许直接调用的工具与桥接口，崩溃恢复后从这里还原。
     #[serde(default)]
     pub discovered: Vec<String>,
+    /// 支持调用白名单的协议保留已加载定义，仅调整本轮可调用集合。
+    #[serde(default)]
+    pub loaded_tools: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -204,6 +207,20 @@ pub enum RunSource {
         #[serde(alias = "workflow_revision")]
         workflow_revision: u64,
     },
+}
+
+impl RunSource {
+    /// 已保存任务按固定修订执行，对话审批级别不参与它的运行流程。
+    pub fn execution_permission_mode(
+        &self,
+        dialogue_mode: crate::runtime::operation::permissions::PermissionMode,
+    ) -> crate::runtime::operation::permissions::PermissionMode {
+        if matches!(self, Self::SavedWorkflow { .. }) {
+            crate::runtime::operation::permissions::PermissionMode::FullAccess
+        } else {
+            dialogue_mode
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

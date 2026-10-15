@@ -180,6 +180,35 @@ impl AppController {
             None
         };
         match method {
+            "memory.list" => {
+                let definitions = self.supervisor.memory_definitions();
+                let entries = self.supervisor.memory.list(200)?;
+                Ok(
+                    json!({"entries":entries.iter().map(|entry| json!({"entry":entry,"compatible":entry.compatible(&definitions)})).collect::<Vec<_>>() }),
+                )
+            }
+            "memory.update" => {
+                let experience: crate::runtime::memory::Experience =
+                    serde_json::from_value(params["experience"].clone())?;
+                let schemas = crate::runtime::memory::tool_schemas(
+                    &experience,
+                    &self.supervisor.memory_definitions(),
+                )?;
+                self.supervisor.memory.edit(
+                    required(&params, "id")?,
+                    params["revision"].as_u64().unwrap_or(0),
+                    &experience,
+                    &schemas,
+                )?;
+                Ok(json!({"updated":true}))
+            }
+            "memory.delete" => {
+                self.supervisor.memory.forget(
+                    required(&params, "id")?,
+                    params["revision"].as_u64().unwrap_or(0),
+                )?;
+                Ok(json!({"deleted":true}))
+            }
             "release.state" => Ok(self.distribution.state()),
             "release.check" => {
                 let result = self.distribution.check();
@@ -1537,9 +1566,7 @@ mod bridge_auto_start_tests {
 
     #[test]
     fn auto_start_preferences_persist_and_keep_connection_settings() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target/.tmp/bridge-auto-start")
-            .join(format!("rpc-{}", uuid::Uuid::new_v4().simple()));
+        let root = crate::test_root("bridge-auto-start");
         let path = root.join("config.json");
         crate::config::seed(&path).unwrap();
         let mut bridge = AppConfig::load(&path).unwrap().bridge;
@@ -1654,12 +1681,59 @@ mod question_rpc_tests {
     use serde_json::{Value, json};
 
     #[test]
-    fn conversation_snapshot_and_answer_rpc_roundtrip() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target/.tmp/shortcut-runtime/app-question-rpc");
+    fn startup_recovery_finishes_before_accepting_new_runs() {
+        use crate::runtime::{store::journal::Journal, types::RunState};
+        let root = crate::test_root("startup-recovery");
         let config_path = root.join("config.json");
-        // 每次全新开始：client_key 唯一，残留库会让 create 冲突。
-        let _ = std::fs::remove_dir_all(&root);
+        crate::config::seed(&config_path).unwrap();
+        let config = AppConfig::load(&config_path).unwrap();
+        let journal = Journal::open(&config.storage.database).unwrap();
+        let mut interrupted = journal.create("旧请求", "old", "old", 3600, None).unwrap();
+        for state in [
+            RunState::Preflighting,
+            RunState::Deciding,
+            RunState::AwaitingUser,
+        ] {
+            journal.save(&mut interrupted, state).unwrap();
+        }
+        drop(journal);
+        let controller = AppController::load(&config_path).unwrap();
+        assert_eq!(
+            controller
+                .supervisor
+                .journal
+                .get(&interrupted.id)
+                .unwrap()
+                .state,
+            RunState::NeedsReview
+        );
+        let mut fresh = controller
+            .supervisor
+            .journal
+            .create("新请求", "fresh", "fresh", 3600, None)
+            .unwrap();
+        for state in [
+            RunState::Preflighting,
+            RunState::Deciding,
+            RunState::AwaitingUser,
+        ] {
+            controller
+                .supervisor
+                .journal
+                .save(&mut fresh, state)
+                .unwrap();
+        }
+        assert_eq!(
+            controller.supervisor.journal.get(&fresh.id).unwrap().state,
+            RunState::AwaitingUser
+        );
+        controller.shutdown();
+    }
+
+    #[test]
+    fn conversation_snapshot_and_answer_rpc_roundtrip() {
+        let root = crate::test_root("app-question-rpc");
+        let config_path = root.join("config.json");
         crate::config::seed(&config_path).unwrap();
         let controller = Arc::new(AppController::load(&config_path).unwrap());
         // 直接经真实 Journal 造一个等待回答的运行，再走 RPC 全链路。

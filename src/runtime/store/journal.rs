@@ -560,6 +560,7 @@ impl Journal {
             source: RunSource::Agent,
             model_id: model_id.map(str::to_owned),
             discovered: Vec::new(),
+            loaded_tools: Vec::new(),
         };
         tx.execute("INSERT OR IGNORE INTO conversations(id,title,created_at,updated_at) VALUES(?1,?2,?3,?3)",params![conversation,prompt.chars().take(120).collect::<String>(),stamp])?;
         tx.execute(
@@ -1529,8 +1530,72 @@ impl Journal {
             .as_ref()
             .map(|summary| vec![crate::runtime::context::summary_message(&summary.content)])
             .unwrap_or_default();
+        if let Some(summary) = &summary {
+            // 被摘要覆盖的最新用户指令仍以原始角色和原文保留，摘要不能代替授权。
+            if !entries.iter().any(|entry| {
+                entry.message.role == crate::model::Role::User
+                    && entry.message.content == run.prompt
+            }) {
+                messages.push(crate::runtime::context::message(
+                    crate::model::Role::User,
+                    &run.prompt,
+                ));
+            }
+            let latest = self.connection.lock().unwrap().query_row(
+                "SELECT COALESCE(json_extract(r.payload,'$.messageBoundary'),m.id),m.id,m.content
+                 FROM messages m
+                 LEFT JOIN runtime_message_owners o ON o.message_id=m.id
+                 LEFT JOIN runtime_runs r ON r.id=o.run_id
+                 WHERE m.conversation_id=?1 AND m.role='user'
+                   AND COALESCE(json_extract(r.payload,'$.messageBoundary'),m.id)<=?2
+                 ORDER BY COALESCE(json_extract(r.payload,'$.messageBoundary'),m.id) DESC,m.id DESC
+                 LIMIT 1",
+                params![run.conversation_id, run.message_boundary],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?)),
+            ).optional()?;
+            if let Some((sort_key, id, content)) = latest
+                && (sort_key, id) <= (summary.through_sort_key, summary.through_message_id)
+                && content != run.prompt
+            {
+                messages.push(crate::runtime::context::message(
+                    crate::model::Role::User,
+                    content,
+                ));
+            }
+        }
         messages.extend(entries.into_iter().map(|entry| entry.message));
         Ok(messages)
+    }
+
+    /// 本次运行的原始观测，不受模型上下文压缩影响。
+    pub fn run_history(&self, run: &Run) -> Result<Vec<crate::model::Message>> {
+        let db = self.connection.lock().unwrap();
+        let mut query = db.prepare(
+            "SELECT m.role,m.content,m.tool_call_id,m.tool_calls_json
+            FROM messages m JOIN runtime_message_owners o ON o.message_id=m.id
+            WHERE o.run_id=?1 ORDER BY m.id",
+        )?;
+        let rows = query
+            .query_map([&run.id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter()
+            .map(|(role, content, tool_call_id, calls)| {
+                Ok(crate::model::Message {
+                    role: serde_json::from_value(json!(role))?,
+                    content,
+                    tool_call_id,
+                    tool_calls: serde_json::from_str(calls.as_deref().unwrap_or("[]"))?,
+                    reasoning: None,
+                })
+            })
+            .collect()
     }
 
     pub fn history_window(
@@ -2225,17 +2290,9 @@ mod question_request_tests {
 
     fn journal(name: &str) -> (Journal, PathBuf) {
         // 统一放本任务登记的 target/.tmp/shortcut-runtime 根内。
-        let dir = PathBuf::from("target/.tmp/shortcut-runtime/question-journal-tests");
+        let dir = crate::test_root("question-journal");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(format!("{name}.db"));
-        // Journal::open 首次建表会写 VACUUM 备份，按前缀一并清掉上次残留。
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                if entry.file_name().to_string_lossy().starts_with(name) {
-                    let _ = std::fs::remove_file(entry.path());
-                }
-            }
-        }
         (Journal::open(&path).unwrap(), path)
     }
 
@@ -2655,12 +2712,9 @@ mod question_request_tests {
 
     #[test]
     fn legacy_single_pk_table_migrates_with_data() {
-        let dir = PathBuf::from("target/.tmp/shortcut-runtime/question-journal-tests");
+        let dir = crate::test_root("question-journal-migration");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("legacy-migrate.db");
-        for suffix in ["", "-wal", "-shm"] {
-            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
-        }
         // 先用正常 open 建全库，再把问题请求表降级回旧形状（单列主键）。
         let legacy_run_id;
         {

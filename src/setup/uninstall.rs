@@ -235,8 +235,7 @@ mod tests {
 
     #[test]
     fn uninstall_cleanup_preflight_detects_loaded_cached_bridge() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target/.tmp/uninstall-verification/cached-lock");
+        let root = crate::test_root("cached-lock");
         fs::create_dir_all(root.join("bridge-cache/hash")).unwrap();
         let path = root.join("bridge-cache/hash/BgiBridge.dll");
         fs::write(&path, b"bridge").unwrap();

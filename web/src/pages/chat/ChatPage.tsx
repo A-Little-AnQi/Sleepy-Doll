@@ -767,9 +767,7 @@ export function ChatPage({
               <ContextMeter
                 used={contextUsed}
                 window={contextWindow}
-                cacheHit={
-                  task?.promptCacheHit ? (task.promptCacheHitTokens ?? 0) : 0
-                }
+                cacheHit={task?.cacheReadTokens ?? 0}
               />
               <div className="composer-menu composer-model">
                 <Select

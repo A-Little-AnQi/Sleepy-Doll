@@ -12,6 +12,7 @@ import {
 import { Select } from "../../components/controls/Select";
 import { ThemeSwitch } from "../../components/controls/ThemeSwitch";
 import { ModelsPage } from "./ModelsPage";
+import { MemoryPanel } from "./MemoryPanel";
 import { AboutPage } from "./AboutPage";
 import { BridgePage } from "../bridge/BridgePage";
 /** 更新弹窗的指南链接要跳到的设置页（跨页面打开）。 */
@@ -155,6 +156,7 @@ export function SettingsPage({
                   />
                 </SettingRow>
               </section>
+              <MemoryPanel />
               {trayEnabled !== null ? (
                 <section className="settings-group">
                   <h3>{t.settings.tray}</h3>

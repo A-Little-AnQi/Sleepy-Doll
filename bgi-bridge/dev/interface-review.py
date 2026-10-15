@@ -16,7 +16,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("contracts", type=Path)
     args = parser.parse_args()
-    source = json.loads((ROOT / "docs/bgi/feature-coverage.json").read_text(encoding="utf-8"))
+    source = json.loads((ROOT / "bgi-bridge/dev/fixtures/host-features.json").read_text(encoding="utf-8"))
     contracts = json.loads(args.contracts.read_text(encoding="utf-8"))
     native = {"cmd." + item["Name"]: item for item in contracts["commands"]}
     stable = {item["Id"]: item for item in contracts["stable"]}
@@ -39,7 +39,8 @@ def main():
               "stableInterfaces": [stable[key] for key in sorted(stable)], "nativeCommands": [native[key] for key in sorted(native)],
               "removedCommands": removed, "settings": source["settings"], "scriptApis": source["scriptApis"],
               "resourceModels": source["resourceModels"], "views": source["views"],"uiDeclarations":source["uiDeclarations"],"scriptBindings":source["scriptBindings"],"scriptTypes":source["scriptTypes"],"jsContracts":contracts.get("jsContracts",[])}
-    doc = ROOT / "docs/bgi/interface-review.md"
+    doc = ROOT / "target/reports/bgi/interface-review.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
     (doc.with_suffix(".json")).write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
     lines = ["# BGI 全部接口审阅表", "", "审阅范围是 Sleepy Doll 的 BGI 插件与桥。BGI 本体源码保持原样；删除的是插件补造的旧实现及公开接口，宿主原有用户配置文件不迁移、不删字段。",
              "", f"源码版本：`{source['sourceRevision']}`。真实类型检查：`{contracts['sourceAssembly']}`。", "",
@@ -86,7 +87,7 @@ def main():
         bindings="；".join(b["property"]+"="+b["binding"] for b in item["bindings"])
         events="；".join(e["name"]+"="+e["handler"] for e in item["events"])
         lines.append("| "+" | ".join(map(cell,[item["id"],item.get("label") or item.get("name") or item["control"],bindings+("；"+events if events else ""),"open_page／打开命令 → ui.read/write/options/invoke/respond → ui.operation＋结果核验"]))+" |")
-    lines += ["", "## 脚本 API、资源字段与页面", "", "JS 契约包括 OCR、ImageRegion/Region 的继承方法、RecognitionObject、BvPage/BvLocator、OpenCV 导出类型以及输入／任务／文件／模块接口。构造器、静态／实例成员、默认参数、Task/Promise、ref/out 与生命周期在 js_api.read 按需读取。源码包装 API、资源模型与页面全量盘点仍保留在 [源码功能清单](feature-coverage.md)。", "",
+    lines += ["", "## 脚本 API、资源字段与页面", "", "JS 契约包括 OCR、ImageRegion/Region 的继承方法、RecognitionObject、BvPage/BvLocator、OpenCV 导出类型以及输入／任务／文件／模块接口。构造器、静态／实例成员、默认参数、Task/Promise、ref/out 与生命周期在 js_api.read 按需读取。源码包装 API、资源模型与页面全量盘点仍保留在 [源码功能基准](../../../bgi-bridge/dev/fixtures/host-features.json)。", "",
               "[当前完整调用链路图](agent-chain.md)已同步删除旧补接实现。"]
     doc.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(json.dumps({"agentTools": len(tools), "stable": len(stable), "nativeCommands": len(native), "removedSourceCommands": len(removed), "removedSettings": len(retired_settings)}))

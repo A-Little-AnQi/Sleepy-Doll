@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["cloudflare/**", "installer/deploy-cloudflare.mjs", ".github/workflows/deploy-service.yml"]
+    paths: ["cloudflare/**", "scripts/deploy-cloudflare.mjs", ".github/workflows/deploy-service.yml"]
 permissions:
   contents: read
 concurrency:
@@ -27,15 +27,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test cloudflare/worker.test.mjs installer/r2-budget.test.mjs installer/release-version.test.mjs
+      - run: node --test cloudflare/worker.test.mjs scripts/r2-budget.test.mjs scripts/release-version.test.mjs
       - name: Audit R2 storage budget
         env:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: node installer/publish-r2.mjs --audit
+        run: node scripts/publish-r2.mjs --audit
       - name: Deploy API and analytics
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
           GA_API_SECRET: ${{ secrets.GA_API_SECRET }}
-        run: node installer/deploy-cloudflare.mjs
+        run: node scripts/deploy-cloudflare.mjs

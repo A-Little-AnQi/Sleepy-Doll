@@ -382,7 +382,7 @@ impl<'a> TaskExecutor<'a> {
                     let detail = if submitted {
                         format!("已提交「{}」运行", node.title)
                     } else {
-                        detail_of(result)
+                        verification_detail(result, &output)
                     };
                     self.scope.record(&node.id, output);
                     return if submitted {
@@ -889,6 +889,88 @@ fn detail_of(result: StepResult) -> String {
     }
 }
 
+fn verification_detail(result: StepResult, output: &Value) -> String {
+    if !matches!(result, StepResult::Failed | StepResult::Unknown) {
+        return detail_of(result);
+    }
+    let expected = if result == StepResult::Failed {
+        "failed"
+    } else {
+        "unknown"
+    };
+    let verification_reason = [
+        "/verification",
+        "/evidence/verification",
+        "/evidence/result/verification",
+    ]
+    .into_iter()
+    .filter_map(|path| output.pointer(path))
+    .filter(|verification| {
+        verification["status"]
+            .as_str()
+            .is_some_and(|status| normalize_status(status) == expected)
+    })
+    .find_map(|verification| {
+        verification["reason"]
+            .as_str()
+            .filter(|reason| !reason.trim().is_empty())
+    });
+    let reason = {
+        [
+            "/error",
+            "/error/message",
+            "/evidence/error",
+            "/evidence/error/message",
+            "/evidence/result/error",
+            "/evidence/result/error/message",
+        ]
+        .into_iter()
+        .find_map(|path| {
+            output
+                .pointer(path)
+                .and_then(Value::as_str)
+                .filter(|reason| !reason.trim().is_empty())
+        })
+    }
+    .or(verification_reason);
+    match reason {
+        Some(reason) => format!(
+            "{}：{}",
+            detail_of(result),
+            reason.trim().chars().take(800).collect::<String>()
+        ),
+        None => detail_of(result),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn failure_detail_uses_failed_layer_instead_of_successful_layer() {
+    let output = json!({"jobId":"j","outcome":"unknown","evidence":{
+        "verification":{"status":"succeeded","reason":"启动已接收"},
+        "result":{"verification":{"status":"failed","reason":"缺少脚本文件"}}}});
+    assert_eq!(verification_of(&output), StepResult::Failed);
+    assert_eq!(
+        verification_detail(StepResult::Failed, &output),
+        "工具报告核验失败：缺少脚本文件"
+    );
+    assert_eq!(
+        verification_detail(StepResult::Failed, &json!({"error":"桥连接中断"})),
+        "工具报告核验失败：桥连接中断"
+    );
+    assert_eq!(
+        verification_detail(
+            StepResult::Unknown,
+            &json!({"verification":{"status":"unknown","reason":"等待任务结束"}})
+        ),
+        "结果未确认：等待任务结束"
+    );
+    assert_eq!(
+        verification_detail(StepResult::Succeeded, &output),
+        "已核验"
+    );
+}
+
 fn summary(
     reports: &[NodeReport],
     succeeded: usize,
@@ -1046,7 +1128,7 @@ mod tests {
     }
 
     /// 仅验证收尾结果聚合；步骤是否真的没有执行由
-    /// bgi-bridge/dev/task-workflow-check.py 的真实驱动集成用例负责。
+    /// tests/runtime/task-workflow-check.py 的真实驱动集成用例负责。
     #[test]
     fn shortcut_outcome_aggregates_failure_unknown_and_incomplete() {
         // 第二步失败后第三步不执行（记为跳过）：整体失败，错误取失败步骤。

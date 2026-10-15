@@ -35,7 +35,7 @@ use wry::{
     http::{Request, Response, header::CONTENT_TYPE},
 };
 
-/// 由 `installer/pack-payload.ps1` 在构建期生成，路径相对本文件所在目录。
+/// 由 `scripts/pack-payload.ps1` 在构建期生成，路径相对本文件所在目录。
 const MANIFEST: &[u8] = include_bytes!("../../target/setup/payload.json");
 const PAYLOAD: &[u8] = include_bytes!("../../target/setup/payload.bin");
 

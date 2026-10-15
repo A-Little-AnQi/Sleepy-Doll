@@ -131,6 +131,17 @@ impl ModelUsage {
     }
 }
 
+/// 模型可见性由本次运行的真实观测决定，执行权限仍在调用边界检查。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolExposure {
+    #[default]
+    Always,
+    AfterRead,
+    AfterWrite,
+    OnDemand,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct ToolExecution {
@@ -148,6 +159,7 @@ pub struct ToolExecution {
     pub max_result_chars: usize,
     pub deferred: bool,
     pub always_load: bool,
+    pub exposure: ToolExposure,
     pub search_hint: Option<String>,
     pub model_usage: ModelUsage,
     pub scope: ScopeKind,
@@ -176,6 +188,7 @@ impl Default for ToolExecution {
             max_result_chars: default_result_limit(),
             deferred: true,
             always_load: false,
+            exposure: ToolExposure::Always,
             search_hint: None,
             model_usage: ModelUsage::Unknown,
             scope: ScopeKind::Unknown,

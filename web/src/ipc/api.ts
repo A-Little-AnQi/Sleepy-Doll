@@ -14,6 +14,8 @@ import type {
   TaskValidation,
   WorkflowDetail,
   QuestionAnswers,
+  MemoryEntry,
+  MemoryExperience,
 } from "./types";
 import type { GroupLayout } from "../session/conversation-groups";
 import { withPermission } from "./types";
@@ -194,6 +196,14 @@ function sendWindow(method: string) {
 }
 
 export const api = {
+  memories: () =>
+    invoke<{ entries: { entry: MemoryEntry; compatible: boolean }[] }>(
+      "memory.list",
+    ),
+  memoryUpdate: (id: string, revision: number, experience: MemoryExperience) =>
+    invoke("memory.update", { id, revision, experience }),
+  memoryDelete: (id: string, revision: number) =>
+    invoke("memory.delete", { id, revision }),
   releaseState: () => invoke<ReleaseState>("release.state"),
   releaseCheck: () => invoke<ReleaseState>("release.check"),
   releaseConfigure: (analyticsEnabled: boolean, channel: string) =>

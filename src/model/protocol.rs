@@ -19,7 +19,15 @@ pub(super) fn openai_message(message: &Message) -> Value {
             "role":"assistant", "content": if message.content.is_empty() { Value::Null } else { json!(message.content) },
             "tool_calls": message.tool_calls.iter().map(|call| json!({"id":call.id,"type":"function","function":{"name":call.name,"arguments":call.arguments.to_string()}})).collect::<Vec<_>>()
         }),
-        _ => json!({"role":message.role,"content":message.content}),
+        _ => json!({"role":wire_role(message.role),"content":message.content}),
+    }
+}
+
+fn wire_role(role: Role) -> Role {
+    if role == Role::Context {
+        Role::User
+    } else {
+        role
     }
 }
 
@@ -32,7 +40,39 @@ pub(super) fn openai_chat_body(
     messages: &[Message],
     tools: &[ToolDefinition],
 ) -> Value {
-    let mut body = json!({"model":config.model,"messages":messages.iter().map(openai_message).collect::<Vec<_>>(),"tools":tools.iter().map(tool_schema).collect::<Vec<_>>()});
+    let converted = messages
+        .iter()
+        .map(|message| {
+            let mut converted = openai_message(message);
+            // GLM 的思考工具轮需要原样回传；普通 OpenAI Chat 不接受此扩展字段。
+            if openai_model_stem(&config.model)
+                .to_ascii_lowercase()
+                .starts_with("glm-")
+                && message.role == Role::Assistant
+                && let Some(reasoning) = message
+                    .reasoning
+                    .as_ref()
+                    .filter(|r| r.matches(ModelProtocol::OpenaiChat))
+            {
+                let original = reasoning
+                    .blocks
+                    .iter()
+                    .find_map(|block| block["reasoning_content"].as_str())
+                    .or_else(|| {
+                        reasoning
+                            .blocks
+                            .is_empty()
+                            .then_some(reasoning.text.as_str())
+                            .filter(|text| !text.is_empty())
+                    });
+                if let Some(original) = original {
+                    converted["reasoning_content"] = json!(original);
+                }
+            }
+            converted
+        })
+        .collect::<Vec<_>>();
+    let mut body = json!({"model":config.model,"messages":converted,"tools":tools.iter().map(tool_schema).collect::<Vec<_>>()});
     let stem = openai_model_stem(&config.model);
     if let Some(value) = config.options.temperature
         && !is_openai_o_series(stem)
@@ -47,7 +87,40 @@ pub(super) fn openai_chat_body(
         };
         body[field] = json!(value);
     }
+    if let Some(value) = &config.options.reasoning_effort {
+        body["reasoning_effort"] = json!(value);
+    }
     body
+}
+
+pub(super) fn apply_reasoning_options(config: &ModelConfig, body: &mut Value) -> Result<()> {
+    let Some(effort) = &config.options.reasoning_effort else {
+        return Ok(());
+    };
+    match config.protocol {
+        ModelProtocol::OpenaiChat | ModelProtocol::OpenaiResponses => Ok(()),
+        ModelProtocol::AnthropicMessages => {
+            let model = openai_model_stem(&config.model).to_ascii_lowercase();
+            let adaptive = [
+                "claude-sonnet-4-6",
+                "claude-opus-4-6",
+                "claude-opus-4-7",
+                "claude-opus-4-8",
+            ]
+            .iter()
+            .any(|stem| model == *stem || model.starts_with(&format!("{stem}-")));
+            if !adaptive {
+                return Err(Error::Config("此模型的 Anthropic 接口尚未支持推理强度设置；请清空 reasoningEffort，或使用支持该设置的 OpenAI Chat / Responses 接口".into()));
+            }
+            body["thinking"] = json!({"type":"adaptive"});
+            body["output_config"] = json!({"effort":effort});
+            Ok(())
+        }
+        _ => Err(Error::Config(format!(
+            "{} 接口尚未支持推理强度设置，请清空 reasoningEffort",
+            config.protocol
+        ))),
+    }
 }
 
 pub(super) fn responses_body(
@@ -75,7 +148,7 @@ pub(super) fn responses_body(
                     input.extend(message.tool_calls.iter().map(|call| json!({"type":"function_call","call_id":call.id,"name":call.name,"arguments":call.arguments.to_string()})));
                 }
             }
-            _ => input.push(json!({"role":message.role,"content":message.content})),
+            _ => input.push(json!({"role":wire_role(message.role),"content":message.content})),
         }
     }
     let response_tools = tools.iter().map(|tool| json!({"type":"function","name":tool.name,"description":tool.description,"parameters":tool.input_schema})).collect::<Vec<_>>();
@@ -506,14 +579,33 @@ fn gemini_reasoning(parts: &[Value]) -> Option<Reasoning> {
     })
 }
 
-/// 只收集可读文本，用于界面展示。这两个协议不要求回传推理内容，回传会被多数
-/// 提供方拒绝。
+/// Ollama 的思考文本只用于展示。
 fn display_reasoning(protocol: ModelProtocol, text: Option<&str>) -> Option<Reasoning> {
     let text = text.unwrap_or_default();
     (!text.is_empty()).then(|| Reasoning {
         protocol,
         blocks: vec![],
         text: text.to_owned(),
+    })
+}
+
+fn chat_reasoning(message: &Value) -> Option<Reasoning> {
+    let mut original = serde_json::Map::new();
+    for field in ["reasoning_content", "reasoning"] {
+        if let Some(text) = message[field].as_str() {
+            original.insert(field.into(), json!(text));
+        }
+    }
+    let text = original
+        .get("reasoning_content")
+        .or_else(|| original.get("reasoning"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    (!original.is_empty()).then_some(Reasoning {
+        protocol: ModelProtocol::OpenaiChat,
+        blocks: vec![Value::Object(original)],
+        text,
     })
 }
 
@@ -597,12 +689,7 @@ pub(crate) fn parse_response(protocol: ModelProtocol, raw: &Value) -> Result<Mod
                 tool_calls: calls,
                 finish_reason: choice["finish_reason"].as_str().map(str::to_owned),
                 usage: usage_from_openai_chat(&raw["usage"]),
-                reasoning: display_reasoning(
-                    ModelProtocol::OpenaiChat,
-                    message["reasoning_content"]
-                        .as_str()
-                        .or_else(|| message["reasoning"].as_str()),
-                ),
+                reasoning: chat_reasoning(message),
             })
         }
         ModelProtocol::OpenaiResponses => {
@@ -731,4 +818,97 @@ pub(crate) fn parse_response(protocol: ModelProtocol, raw: &Value) -> Result<Mod
 
 fn string(value: &Value) -> String {
     value.as_str().unwrap_or_default().to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::ProtocolModel;
+
+    fn config(model: &str, protocol: ModelProtocol) -> ModelConfig {
+        serde_json::from_value(json!({"id":"fixture","name":"fixture","model":model,
+            "protocol":protocol,"baseUrl":"https://example.invalid/v1"}))
+        .unwrap()
+    }
+
+    #[test]
+    fn glm_tool_round_preserves_original_reasoning_after_storage() {
+        let original = "\n先核对状态。  \n";
+        let response = parse_response(
+            ModelProtocol::OpenaiChat,
+            &json!({"choices":[{
+            "message":{"content":null,"reasoning_content":original,"reasoning":"display alias",
+                "tool_calls":[{"id":"call-1","function":{"name":"read","arguments":"{}"}}]},
+            "finish_reason":"tool_calls"}]}),
+        )
+        .unwrap();
+        let message = Message {
+            role: Role::Assistant,
+            content: response.text,
+            tool_call_id: None,
+            tool_calls: response.tool_calls,
+            reasoning: response.reasoning,
+        };
+        let stored: Message =
+            serde_json::from_str(&serde_json::to_string(&message).unwrap()).unwrap();
+        let result = Message {
+            role: Role::Tool,
+            content: "result".into(),
+            tool_call_id: Some("call-1".into()),
+            tool_calls: vec![],
+            reasoning: None,
+        };
+        let messages = [stored.clone(), result];
+        let glm = ProtocolModel::new(config("z-ai/GLM-5.3-Flash", ModelProtocol::OpenaiChat))
+            .body(&messages, &[])
+            .unwrap();
+        assert_eq!(glm["messages"][0]["reasoning_content"], original);
+        assert!(glm["messages"][0].get("reasoning").is_none());
+        assert_eq!(glm["messages"][1]["tool_call_id"], "call-1");
+        let normal = ProtocolModel::new(config("gpt-5", ModelProtocol::OpenaiChat))
+            .body(&messages, &[])
+            .unwrap();
+        assert!(normal["messages"][0].get("reasoning_content").is_none());
+        let mut wrong_protocol = stored;
+        wrong_protocol.reasoning.as_mut().unwrap().protocol = ModelProtocol::AnthropicMessages;
+        let glm = ProtocolModel::new(config("glm-5.3-flash", ModelProtocol::OpenaiChat))
+            .body(&[wrong_protocol], &[])
+            .unwrap();
+        assert!(glm["messages"][0].get("reasoning_content").is_none());
+    }
+
+    #[test]
+    fn reasoning_effort_is_translated_or_explicitly_rejected() {
+        for (protocol, model) in [
+            (ModelProtocol::OpenaiChat, "glm-5.3-flash"),
+            (ModelProtocol::OpenaiResponses, "gpt-5"),
+            (ModelProtocol::AnthropicMessages, "claude-sonnet-4-6"),
+        ] {
+            let mut config = config(model, protocol);
+            config.options.reasoning_effort = Some("low".into());
+            let body = ProtocolModel::new(config).body(&[], &[]).unwrap();
+            match protocol {
+                ModelProtocol::OpenaiChat => assert_eq!(body["reasoning_effort"], "low"),
+                ModelProtocol::OpenaiResponses => assert_eq!(body["reasoning"]["effort"], "low"),
+                _ => {
+                    assert_eq!(body["thinking"]["type"], "adaptive");
+                    assert_eq!(body["output_config"]["effort"], "low");
+                }
+            }
+        }
+        for (protocol, model) in [
+            (ModelProtocol::AnthropicMessages, "glm-5.3-flash"),
+            (ModelProtocol::AnthropicMessages, "claude-sonnet-4-5"),
+            (ModelProtocol::Gemini, "gemini"),
+            (ModelProtocol::OllamaChat, "local"),
+        ] {
+            let mut config = config(model, protocol);
+            assert!(ProtocolModel::new(config.clone()).body(&[], &[]).is_ok());
+            config.options.reasoning_effort = Some("low".into());
+            assert!(matches!(
+                ProtocolModel::new(config).body(&[], &[]),
+                Err(Error::Config(_))
+            ));
+        }
+    }
 }

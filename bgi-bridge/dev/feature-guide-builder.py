@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-AUDIT = ROOT / "docs/bgi/feature-coverage.json"
+AUDIT = ROOT / "bgi-bridge/dev/fixtures/host-features.json"
 OUTPUT = ROOT / "plugins/bgi/resources/feature-index.json"
 
 

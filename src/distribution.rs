@@ -127,7 +127,7 @@ fn validate_release(release: &Release, channel: &str) -> Result<()> {
 
 impl Distribution {
     pub fn load(user_directory: &Path) -> Result<Self> {
-        let root = user_directory.join(".sleepy-doll").join("updates");
+        let root = crate::data_directory::path(user_directory).join("updates");
         fs::create_dir_all(&root)?;
         let path = root.join("preferences.json");
         let preferences = if path.exists() {
@@ -514,7 +514,7 @@ mod tests {
             .join("ga-direct")
             .join(tag);
         // 幂等复位：覆写固定偏好内容（默认关闭），不删除目录。
-        let preferences = root.join(".sleepy-doll").join("updates");
+        let preferences = crate::data_directory::path(&root).join("updates");
         std::fs::create_dir_all(&preferences).unwrap();
         std::fs::write(
             preferences.join("preferences.json"),

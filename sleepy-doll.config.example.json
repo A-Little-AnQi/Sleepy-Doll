@@ -27,7 +27,7 @@
     "disabled": []
   },
   "storage": {
-    "database": "./.sleepy-doll/sleepy-doll.db"
+    "database": "./data/sleepy-doll.db"
   },
   "runtime": {
     "catalogDirectory": "./catalog",

@@ -1,6 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 
+cd /d "%~dp0.."
+
 rem BgiBridge build script.
 rem   native/  -> MSVC (cl.exe), needs VS 2022 or Build Tools with the C++ workload
 rem   managed/ -> dotnet SDK
@@ -18,6 +20,13 @@ set "DIST=%ROOT%\..\target\bridge"
 set "SCRATCH=%ROOT%\..\target\dotnet"
 set "NATIVE=%ROOT%\native"
 set "MANAGED=%ROOT%\managed"
+set "TEMP=%ROOT%\..\target\tmp"
+set "TMP=%TEMP%"
+if not exist "%TEMP%" mkdir "%TEMP%"
+if errorlevel 1 exit /b 1
+set "NOBJ=%SCRATCH%\native"
+if not exist "%NOBJ%" mkdir "%NOBJ%"
+if errorlevel 1 exit /b 1
 
 rem An existing bridge.config.json contains credentials and group settings and is
 rem preserved. The tool-root config is only a seed for the first build.
@@ -52,7 +61,7 @@ if errorlevel 1 exit /b 1
 
 echo [2/4] Building native bootstrap DLL...
 pushd "%NATIVE%"
-cl /nologo /utf-8 /std:c++17 /O2 /MT /LD /EHsc /W3 /guard:cf /Fo"%DIST%\\" /Fe"%DIST%\BgiBridge.Bootstrap.dll" bootstrap.cpp /link /INCREMENTAL:NO
+cl /nologo /utf-8 /std:c++17 /O2 /MT /LD /EHsc /W3 /guard:cf /Fo"%NOBJ%\\" /Fe"%DIST%\BgiBridge.Bootstrap.dll" bootstrap.cpp /link /INCREMENTAL:NO /IMPLIB:"%NOBJ%\BgiBridge.Bootstrap.lib"
 set "RC=%errorlevel%"
 popd
 if not "%RC%"=="0" (
@@ -62,7 +71,7 @@ if not "%RC%"=="0" (
 
 echo [3/4] Building injector...
 pushd "%NATIVE%"
-cl /nologo /utf-8 /std:c++17 /O2 /MT /EHsc /W3 /guard:cf /Fo"%DIST%\\" /Fe"%DIST%\BgiBridge.Injector.exe" injector.cpp /link /INCREMENTAL:NO Advapi32.lib Shell32.lib
+cl /nologo /utf-8 /std:c++17 /O2 /MT /EHsc /W3 /guard:cf /Fo"%NOBJ%\\" /Fe"%DIST%\BgiBridge.Injector.exe" injector.cpp /link /INCREMENTAL:NO Advapi32.lib Shell32.lib
 set "RC=%errorlevel%"
 popd
 if not "%RC%"=="0" (
@@ -76,7 +85,7 @@ rem and the platform segment varies with the environment - which once made this
 rem script silently copy a stale DLL from a path the build no longer used.
 set "MROOT=%SCRATCH%\managed"
 pushd "%MANAGED%"
-dotnet build -c Release -v quiet --nologo -o "%MROOT%"
+dotnet build -c Release -v quiet --nologo -p:UseSharedCompilation=false -o "%MROOT%"
 set "RC=%errorlevel%"
 popd
 if not "%RC%"=="0" (
@@ -93,14 +102,8 @@ copy /y "%MBIN%\BgiBridge.deps.json" "%DIST%\" >nul
 if errorlevel 1 exit /b 1
 
 echo Building offline recovery helper...
-dotnet build "%ROOT%\recovery\Recovery.csproj" -c Release -v quiet --nologo -o "%DIST%"
+dotnet build "%ROOT%\recovery\Recovery.csproj" -c Release -v quiet --nologo -p:UseSharedCompilation=false -o "%DIST%"
 if errorlevel 1 exit /b 1
-
-rem Intermediate and debug-only files never ship.
-del /q "%DIST%\*.obj" 2>nul
-del /q "%DIST%\*.exp" 2>nul
-del /q "%DIST%\*.lib" 2>nul
-del /q "%DIST%\*.pdb" 2>nul
 
 if not exist "%DIST%\bridge.config.json" (
   if not exist "%CFG%" copy /y "%ROOT%\bridge.config.example.json" "%CFG%" >nul

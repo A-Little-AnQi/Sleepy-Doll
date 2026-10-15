@@ -20,7 +20,7 @@
 
 ## 发布步骤
 
-1. 同步修改 `Cargo.toml`、`package.json` 和 `package-lock.json` 的产品版本。
+1. 同步修改 `Cargo.toml` 和 `package.json` 的产品版本。
    在 `release-channel.json` 选择 `stable` 或 `test`；带 Alpha、Beta、RC 后缀的版本必须选择 `test`。
 2. 添加 `web/src/app/release-notes/changelog-<版本>.md`，并更新 `UpdateDialog.tsx` 引用。
 3. 提交源码，推送分支，等待检查成功。
@@ -34,7 +34,7 @@ GitHub Actions Secrets：`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`CLOUDFLA
 
 ## 客户端行为
 
-桌面程序启动后后台检查更新，手动检查与通道选择位于设置页「关于」标签（UI 入口：`web/src/pages/settings/AboutPage.tsx` + `web/src/app/ReleaseSettings.tsx`）。只接受 HTTPS 固定下载域名、正确版本路径和 SHA-256。下载安装包位于用户目录的 `.sleepy-doll/updates/`；安装前再次校验。
+桌面程序启动后后台检查更新，手动检查与通道选择位于设置页「关于」标签（UI 入口：`web/src/pages/settings/AboutPage.tsx` + `web/src/app/ReleaseSettings.tsx`）。只接受 HTTPS 固定下载域名、正确版本路径和 SHA-256。下载安装包位于用户目录的 `data/updates/`；安装前再次校验。
 
 当前版本同时显示构建的正式／测试属性，与用户选择的更新通道分开。新安装默认使用构建自身的通道，已有用户保存的通道选择保留。正式通道只读取 `channels/stable.json`，测试通道只读取 `channels/test.json`；两者不静默互换。官网的主下载选择正式版，测试版使用独立入口，正式版缺失时不会悄悄改下载测试包。
 

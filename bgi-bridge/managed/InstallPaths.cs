@@ -17,7 +17,37 @@ public static class InstallPaths
 
     /// <summary>宿主配置改动记录，放在 user\ 下。</summary>
     public static string ChangeRecordDirectory(string bridgeDir) =>
-        Path.Combine(UserRoot(bridgeDir), ".sleepy-doll", "config-changes");
+        Path.Combine(DataDirectory(bridgeDir), "config-changes");
+
+    public static string DataDirectory(string bridgeDir)
+    {
+        var root = UserRoot(bridgeDir);
+        var previous = Path.Combine(root, ".sleepy-doll");
+        var destination = Path.Combine(root, "data");
+        if (ExistingAttributes(previous) is { } attributes)
+        {
+            using var migration = new FileStream(Path.Combine(root, "data-migration.lock"),
+                FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+            migration.Lock(0, 1);
+            if ((attributes & FileAttributes.ReparsePoint) != 0 || (attributes & FileAttributes.Directory) == 0)
+                throw new IOException("旧数据目录不是普通目录，未迁移。");
+            if (ExistingAttributes(destination) is not null)
+                throw new IOException("发现 .sleepy-doll 与 data 两份数据目录，未覆盖任何内容。");
+            using (var guard = new FileStream(Path.Combine(previous, "sleepy-doll.runtime.lock"),
+                FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
+            { guard.Lock(0, 1); guard.Unlock(0, 1); }
+            Directory.Move(previous, destination);
+            migration.Unlock(0, 1);
+        }
+        return destination;
+    }
+
+    private static FileAttributes? ExistingAttributes(string path)
+    {
+        try { return File.GetAttributes(path); }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
+    }
 
     /// <summary>建好运行期目录。失败只吞掉：日志另有兜底路径，记录写不进去时调用方会自己报错。</summary>
     public static void Ensure(string bridgeDir)

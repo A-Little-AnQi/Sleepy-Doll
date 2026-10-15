@@ -20,9 +20,9 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 
-const DEFAULT_READ_MAX_CHARS: usize = 524_288;
+const DEFAULT_READ_MAX_CHARS: usize = 16_384;
 const MAX_READ_CHARS: usize = 8 * 1024 * 1024;
-const DEFAULT_BATCH_BUDGET: usize = 524_288;
+const DEFAULT_BATCH_BUDGET: usize = 32_768;
 const MAX_BATCH_BUDGET: usize = 8 * 1024 * 1024;
 const DEFAULT_LIST_LIMIT: usize = 2000;
 const READ_MANY_MAX_PATHS: usize = 64;
@@ -865,9 +865,7 @@ mod tests {
     use std::fs;
 
     fn fixture(sub: &str) -> PathBuf {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target/.tmp/general-tools/fixtures")
-            .join(sub);
+        let dir = crate::test_root(sub);
         fs::create_dir_all(&dir).unwrap();
         dir
     }

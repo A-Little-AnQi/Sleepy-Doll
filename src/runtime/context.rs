@@ -57,6 +57,32 @@ pub fn estimate_messages_tokens(messages: &[Message]) -> u64 {
     messages.iter().map(estimate_message_tokens).sum()
 }
 
+pub fn estimate_tool_tokens(tools: &[ToolDefinition]) -> u64 {
+    estimate_tokens(
+        &json!(tools.iter().map(|tool| json!({
+        "name": tool.name, "description": tool.description, "parameters": tool.input_schema,
+    })).collect::<Vec<_>>())
+        .to_string(),
+    )
+}
+
+pub fn tool_evidence(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(fields) => serde_json::Value::Object(
+            fields
+                .iter()
+                .filter_map(|(key, value)| {
+                    let evidence = tool_evidence(value);
+                    (!evidence.is_null()).then(|| (key.clone(), evidence))
+                })
+                .collect(),
+        ),
+        serde_json::Value::Array(_) if value.to_string().len() > 2048 => serde_json::Value::Null,
+        serde_json::Value::String(text) if text.len() > 2048 => serde_json::Value::Null,
+        other => other.clone(),
+    }
+}
+
 /// 一次模型请求能否复用上一轮的完整提示前缀。
 ///
 /// 这里的“命中”是 Agent 自己维护的结构事实：缓存关键配置必须相同，且上一轮
@@ -80,9 +106,16 @@ pub fn prompt_cache_decision(
 ) -> Result<PromptCacheDecision> {
     let model_key = cache_model_key(model)?;
     let system_key = digest(system.as_bytes());
-    let mut stable_tools = tools.to_vec();
-    stable_tools.sort_by(|left, right| left.name.cmp(&right.name));
-    let tools_key = digest(&serde_json::to_vec(&stable_tools)?);
+    let tools_key = digest(&serde_json::to_vec(
+        &tools
+            .iter()
+            .map(|tool| {
+                json!({
+                    "name":tool.name,"description":tool.description,"parameters":tool.input_schema,
+                })
+            })
+            .collect::<Vec<_>>(),
+    )?);
     let prefix_key = digest(&serde_json::to_vec(messages)?);
     let next = PromptCacheSnapshot {
         model_key: model_key.clone(),
@@ -222,6 +255,43 @@ pub fn summary_message(content: &str) -> Message {
     message(Role::User, format!("{SUMMARY_PREFIX}\n{content}"))
 }
 
+/// 历史作为资料分段交给摘要模型，不把旧 tool_calls 当成新的协议调用。
+pub fn compaction_transcript(source: &[Message]) -> Result<String> {
+    source
+        .iter()
+        .map(|entry| {
+            serde_json::to_string(&json!({
+                "role": entry.role,
+                "content": entry.content,
+                "toolCalls": entry.tool_calls,
+                "toolCallId": entry.tool_call_id,
+            }))
+            .map_err(crate::error::Error::from)
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(|entries| entries.join("\n"))
+}
+
+pub fn split_compaction_text(text: &str, token_limit: u64) -> Vec<String> {
+    let limit = token_limit.max(1).saturating_mul(4);
+    let mut chunks = Vec::new();
+    let mut chunk = String::new();
+    let mut cost = 0;
+    for ch in text.chars() {
+        let next = if ch.is_ascii() { 1 } else { 4 };
+        if cost + next > limit && !chunk.is_empty() {
+            chunks.push(std::mem::take(&mut chunk));
+            cost = 0;
+        }
+        chunk.push(ch);
+        cost += next;
+    }
+    if !chunk.is_empty() {
+        chunks.push(chunk);
+    }
+    chunks
+}
+
 impl PackedContext {
     pub fn compacted(&self) -> bool {
         self.cleared_results > 0
@@ -259,6 +329,9 @@ fn reobtainable(name: &str) -> bool {
             | "resource.search"
             | "workspace.list"
             | "workspace.read"
+            | "workspace.read_many"
+            | "workspace.search"
+            | "workspace.environment"
     )
 }
 
@@ -355,13 +428,13 @@ pub fn plan_compaction(
     budget: ContextBudget,
 ) -> Option<CompactionPlan> {
     let groups = grouped_entries(history);
-    if groups.len() < 3 {
+    if groups.is_empty() || (groups.len() == 1 && groups[0][0].message.role == Role::User) {
         return None;
     }
     let protected_budget = (budget.limit() / 2).max(budget.margin());
     let mut protected_cost = 0usize;
     let mut split = groups.len();
-    // 至少保留最近两个完整轮次；如果还有预算，继续向前保留。
+    // 至少保留最后一个完整轮次；大结果不能强迫保留两个超窗轮次。
     while split > 1 {
         let next = budget.message_cost(
             &groups[split - 1]
@@ -370,7 +443,7 @@ pub fn plan_compaction(
                 .collect::<Vec<_>>(),
         );
         let protected = groups.len() - split;
-        if protected >= 2 && protected_cost + next > protected_budget {
+        if protected >= 1 && protected_cost + next > protected_budget {
             break;
         }
         protected_cost += next;
@@ -390,7 +463,7 @@ pub fn plan_compaction(
                 .map(|entry| entry.message.clone())
                 .collect::<Vec<_>>(),
         );
-        if source_cost + next > source_budget {
+        if source_end > 0 && source_cost + next > source_budget {
             break;
         }
         source_cost += next;
@@ -399,7 +472,10 @@ pub fn plan_compaction(
     if source_end == 0 {
         return None;
     }
-    let boundary = groups[source_end - 1].last()?;
+    let boundary = groups[..source_end]
+        .iter()
+        .flatten()
+        .max_by_key(|entry| (entry.sort_key, entry.id))?;
     source.extend(
         groups[..source_end]
             .iter()
@@ -491,7 +567,7 @@ pub fn build(
         cleared_results += 1;
     }
 
-    let needs_model_compaction = total + budget.margin() > budget.limit() && groups.len() > 2;
+    let needs_model_compaction = total + budget.margin() > budget.limit() && groups.len() > 1;
     if total + budget.margin() > budget.limit() && !needs_model_compaction {
         return Err(Error::Conflict(format!(
             "当前消息超过上下文预算（可用 {} {}），请缩短内容或调整模型上下文设置",
@@ -511,4 +587,132 @@ pub fn build(
         cleared_results,
         needs_model_compaction,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::ToolCall;
+
+    #[test]
+    fn cache_identity_tracks_wire_order_but_not_local_exposure_metadata() {
+        use crate::extension::{FunctionTool, Tool, ToolExposure};
+        let model: ModelConfig = serde_json::from_value(json!({"id":"m","name":"m",
+            "protocol":"openai-chat","model":"m","baseUrl":"http://localhost"}))
+        .unwrap();
+        let make = |name| {
+            FunctionTool::new(name, "工具", json!({"type":"object"}), "core", |_| {
+                Ok(json!({}))
+            })
+            .definition()
+        };
+        let mut tools = vec![make("a"), make("b")];
+        let history = vec![message(Role::User, "目标")];
+        let first = prompt_cache_decision(None, &model, "规则", &tools, &history, 2000).unwrap();
+        tools[0].execution.exposure = ToolExposure::AfterRead;
+        assert!(
+            prompt_cache_decision(Some(&first.next), &model, "规则", &tools, &history, 2000)
+                .unwrap()
+                .hit
+        );
+        tools.reverse();
+        assert_eq!(
+            prompt_cache_decision(Some(&first.next), &model, "规则", &tools, &history, 2000)
+                .unwrap()
+                .reason,
+            "toolsChanged"
+        );
+    }
+
+    fn entry(id: i64, role: Role, content: &str) -> HistoryEntry {
+        HistoryEntry {
+            id,
+            sort_key: id,
+            message: message(role, content),
+        }
+    }
+
+    #[test]
+    fn oversized_oldest_group_still_gets_a_compaction_plan() {
+        let history = vec![
+            entry(1, Role::User, &"历史".repeat(20_000)),
+            entry(2, Role::Assistant, "旧答复"),
+            entry(3, Role::User, "当前目标"),
+        ];
+        let plan = plan_compaction(&history, None, ContextBudget::Tokens(4000)).unwrap();
+        assert_eq!(plan.through_message_id, 1);
+        assert!(plan.source[0].content.contains("历史"));
+        assert!(
+            build(
+                "规则".into(),
+                history.into_iter().map(|entry| entry.message).collect(),
+                ContextBudget::Tokens(4000)
+            )
+            .unwrap()
+            .needs_model_compaction
+        );
+    }
+
+    #[test]
+    fn a_single_remaining_tool_round_can_be_summarized() {
+        let mut assistant = entry(2, Role::Assistant, "");
+        assistant.message.tool_calls.push(ToolCall {
+            id: "call".into(),
+            name: "write".into(),
+            arguments: json!({}),
+        });
+        let mut reply = entry(3, Role::Tool, &"执行证据".repeat(3000));
+        reply.message.tool_call_id = Some("call".into());
+        let prior = StoredSummary {
+            through_sort_key: 1,
+            through_message_id: 1,
+            content: "已确认用户目标".into(),
+        };
+        let plan = plan_compaction(
+            &[assistant, reply],
+            Some(&prior),
+            ContextBudget::Tokens(4000),
+        )
+        .unwrap();
+        assert_eq!(plan.through_message_id, 3);
+        assert_eq!(plan.source.len(), 3);
+        assert!(plan.source[0].content.contains("已确认用户目标"));
+    }
+
+    #[test]
+    fn chunking_keeps_every_character_and_does_not_emit_old_tool_calls() {
+        let mut source = message(Role::Assistant, "中文😀abc".repeat(100));
+        source.tool_calls.push(ToolCall {
+            id: "call".into(),
+            name: "write".into(),
+            arguments: json!({"path":"保留"}),
+        });
+        let transcript = compaction_transcript(&[source]).unwrap();
+        let chunks = split_compaction_text(&transcript, 37);
+        assert!(chunks.len() > 1);
+        assert_eq!(chunks.concat(), transcript);
+        assert!(chunks.iter().all(|chunk| estimate_tokens(chunk) <= 38));
+        assert!(transcript.contains("toolCalls"));
+    }
+
+    #[test]
+    fn compaction_does_not_absorb_an_unpaired_tool_call() {
+        let mut pending = entry(2, Role::Assistant, "pending");
+        pending.message.tool_calls.push(ToolCall {
+            id: "missing".into(),
+            name: "write".into(),
+            arguments: json!({}),
+        });
+        let plan = plan_compaction(
+            &[
+                entry(1, Role::User, "old"),
+                pending,
+                entry(3, Role::User, "new"),
+            ],
+            None,
+            ContextBudget::Tokens(4000),
+        )
+        .unwrap();
+        assert_eq!(plan.through_message_id, 1);
+    }
 }

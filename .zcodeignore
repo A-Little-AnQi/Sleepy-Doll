@@ -1,14 +1,20 @@
+# Build, delivery and validation output
 node_modules/
-target/
-# Shipping output assembled by build-desktop.cmd
+/target/
 /dist/
-.sleepy-doll/
-.retired/
-.staging-*/
-*.runtime.lock
-# User configuration belongs in <installation>/user/ and must never be committed.
-# The rules below only stop accidental commits of local copies.
+/.tmp/
+coverage/
+__pycache__/
+*.py[cod]
+
+# Local dependency resolution
+/package-lock.json
+/Cargo.lock
+
+# Application data and credentials
+/.sleepy-doll/
 /user/
+*.runtime.lock
 sleepy-doll*.config.json
 !sleepy-doll.config.example.json
 sleepy-doll.config.*.tmp
@@ -25,26 +31,23 @@ sleepy-doll.config.*.tmp
 *.pem
 *.key
 *.pfx
+
+# Editor state
 .idea/
 .vscode/
 .cursor/
 .dev-vite.sh
 *.swp
 *~
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-coverage/
 .DS_Store
 Thumbs.db
 
-# 发布片产物
-video/out/
-video/dist/
-video/audio/*.wav
-video/output/
+# Video deliverables and legacy output
+/video/
 .video-build.lock
+/bgi-bridge/target-check/
+/.retired/
+/.staging-*/
 
 # ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
 .git/

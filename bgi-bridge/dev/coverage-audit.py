@@ -203,7 +203,7 @@ def render(data):
              f"源码事实源：`{data['source']}`；提交：`{data['sourceRevision']}`。", "",
              f"全量索引：{count['commands']} 个源码命令、{count['settings']} 个 AllConfig 设置叶节点、{count['views']} 个 XAML 页面／窗口、{count['scriptApis']} 个脚本 API 方法、{count['resourceProperties']} 个脚本资源模型字段；只读快照中有 {count['liveMethods']} 个桥接口。", "",
              "本清单区分源码功能、当前运行桥的登记结果与实际验证。可调用只表示契约可提交，不代表游戏任务已完成；当前桥未登记可能是版本差异、对象未注册或真实缺口。源码中的内部事件和编辑器命令也列出，不将它们包装成普通自动化能力。", "",
-             "审计判断与修复记录见 [链路审计](integration-audit.md)。完整结构化数据见 [feature-coverage.json](feature-coverage.json)。", "",
+             "完整结构化数据见 [feature-coverage.json](feature-coverage.json)。", "",
              "## 源码命令", "",
              "源码链路分类（非实机通过数量）：`" + json.dumps(data["chainAssessments"], ensure_ascii=False) + "`。", "",
              "| 功能／界面标签 | 源码对象与位置 | 参数 | 桥入口／状态 | 输入与选择依赖 | 链路审查／替代 |",
@@ -239,8 +239,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
     parser.add_argument("--live-config", type=Path)
+    parser.add_argument("--update-fixture", action="store_true", help="更新功能索引生成器与覆盖测试使用的源码基准")
     args = parser.parse_args()
-    cache = ROOT / "target/bgi-coverage/catalog.json"
+    cache = ROOT / "target/reports/bgi/catalog.json"
     live = {"items": []}
     if args.live_config:
         try:
@@ -251,9 +252,13 @@ def main():
         live = json.loads(cache.read_text(encoding="utf-8"))
     metadata = json.loads((ROOT / "bgi-bridge/managed/generated/host-documentation.json").read_text(encoding="utf-8"))
     data = make_inventory(args.source.resolve(), metadata, live)
-    output = ROOT / "docs/bgi"
+    output = ROOT / "target/reports/bgi"
+    output.mkdir(parents=True, exist_ok=True)
     (output / "feature-coverage.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     (output / "feature-coverage.md").write_text(render(data), encoding="utf-8")
+    if args.update_fixture:
+        fixture = ROOT / "bgi-bridge/dev/fixtures/host-features.json"
+        fixture.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(data["counts"], ensure_ascii=False))
 
 

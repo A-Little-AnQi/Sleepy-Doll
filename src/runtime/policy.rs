@@ -50,44 +50,37 @@ pub struct Grant {
     pub resource_binding_hash: String,
     pub expires_at: i64,
 }
-/// 给输出留的余量上限。
-const MAX_OUTPUT_RESERVE: u64 = 20_000;
-
 /// 触发修剪前留的缓冲。
 const THRESHOLD_BUFFER: u64 = 13_000;
+
+pub fn output_reserve(model: &crate::config::ModelConfig) -> u64 {
+    model
+        .options
+        .max_output_tokens
+        .unwrap_or_else(|| 8_192.min(model.options.context_window.max(8_192) / 4))
+}
+
+fn window(policy: &RuntimeConfig, model: &crate::config::ModelConfig) -> u64 {
+    let model_window = model.options.context_window.max(8_192);
+    policy.max_tokens.unwrap_or(model_window).min(model_window)
+}
 
 /// 上下文预算：字符预算与 token 上限。
 ///
 /// 按当前模型自己的窗口推导：窗口减去给输出留的余量，再留一段缓冲。显式配置了
 /// `contextChars` / `maxTokens` 时以配置为准。
 pub fn budget(policy: &RuntimeConfig, model: &crate::config::ModelConfig) -> (usize, u64) {
-    let window = model.options.context_window.max(8_192);
-    let reserve = model
-        .options
-        .max_output_tokens
-        .unwrap_or(8_192)
-        .min(MAX_OUTPUT_RESERVE);
-    let derived = window
-        .saturating_sub(reserve)
-        .saturating_sub(THRESHOLD_BUFFER);
-    (
-        policy.context_chars.unwrap_or(derived as usize),
-        policy.max_tokens.unwrap_or(window),
-    )
+    let window = window(policy, model);
+    let derived = input_token_budget(policy, model);
+    (policy.context_chars.unwrap_or(derived as usize), window)
 }
 
 pub fn input_token_budget(policy: &RuntimeConfig, model: &crate::config::ModelConfig) -> u64 {
-    let window = policy
-        .max_tokens
-        .unwrap_or(model.options.context_window.max(8_192));
-    let reserve = model
-        .options
-        .max_output_tokens
-        .unwrap_or(8_192)
-        .min(MAX_OUTPUT_RESERVE);
+    let window = window(policy, model);
+    let reserve = output_reserve(model);
     window
         .saturating_sub(reserve)
-        .saturating_sub(THRESHOLD_BUFFER)
+        .saturating_sub(THRESHOLD_BUFFER.min(window / 8))
 }
 
 impl RuntimeConfig {
@@ -124,5 +117,34 @@ impl RuntimeConfig {
                 && request["arguments"] == g.arguments
                 && crate::runtime::types::hash(&request["resources"]) == g.resource_binding_hash
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn model(window: u64) -> crate::config::ModelConfig {
+        serde_json::from_value(
+            serde_json::json!({"id":"m","name":"m","protocol":"openai-chat",
+            "model":"m","baseUrl":"http://localhost","options":{"contextWindow":window}}),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn small_windows_have_room_for_input_and_output() {
+        let model = model(8192);
+        assert_eq!(output_reserve(&model), 2048);
+        assert_eq!(input_token_budget(&RuntimeConfig::default(), &model), 5120);
+    }
+
+    #[test]
+    fn configured_budget_cannot_expand_the_model_window() {
+        let policy = RuntimeConfig {
+            max_tokens: Some(100_000),
+            ..RuntimeConfig::default()
+        };
+        assert_eq!(budget(&policy, &model(8192)).1, 8192);
     }
 }

@@ -334,7 +334,8 @@ impl Bridge {
         let (latest_mode, latest_grants) = {
             let latest = authorization.read().unwrap();
             (
-                latest.runtime.permission_mode,
+                run.source
+                    .execution_permission_mode(latest.runtime.permission_mode),
                 latest.runtime.trust_grants.clone(),
             )
         };
@@ -626,9 +627,10 @@ impl Bridge {
                 {
                     return Err(Error::Tool("Bridge 配置已变化，请重新发起操作".into()));
                 }
-                // 提交前最终复核：任何路径（级别直通或审批放行）下，最新级别已
-                // 切为只读就不再提交本次写入；已发出的动作不假称撤回。
-                if latest.runtime.permission_mode
+                // 对话写入复核最新审批级别；已保存任务不使用对话审批设置。
+                if run
+                    .source
+                    .execution_permission_mode(latest.runtime.permission_mode)
                     == crate::runtime::operation::permissions::PermissionMode::PlanOnly
                 {
                     return Err(Error::Tool(
@@ -637,7 +639,8 @@ impl Bridge {
                 }
                 if allowed_by_mode {
                     if crate::runtime::operation::permissions::PermissionEngine::decide(
-                        latest.runtime.permission_mode,
+                        run.source
+                            .execution_permission_mode(latest.runtime.permission_mode),
                         &current_permission,
                         &latest.runtime.trust_grants,
                     ) != crate::runtime::operation::permissions::PermissionDecision::Allow
@@ -1011,6 +1014,20 @@ mod invoke_protocol_tests {
     use std::net::TcpListener;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+    struct ServerGuard {
+        stopped: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Drop for ServerGuard {
+        fn drop(&mut self) {
+            self.stopped.store(true, Ordering::SeqCst);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
     /// 传输层协议静态测试：本地 HTTP 假服务器实现真实桥协议
     /// （写接口强制 requestId → 返回 Job → GET Job 到终态），
     /// 不加载 native/游戏；来源预检按测试缝跳过，生产路径不受影响。
@@ -1022,17 +1039,28 @@ mod invoke_protocol_tests {
             .unwrap();
         runtime.block_on(async {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
             let port = listener.local_addr().unwrap().port();
             let ready = Arc::new(AtomicBool::new(false));
             let missing_request_id = Arc::new(AtomicUsize::new(0));
             let invokes_seen = Arc::new(AtomicUsize::new(0));
-            {
+            let stopped = Arc::new(AtomicBool::new(false));
+            let server = {
                 let ready = ready.clone();
                 let missing_request_id = missing_request_id.clone();
                 let invokes_seen = invokes_seen.clone();
+                let stopped = stopped.clone();
                 std::thread::spawn(move || {
-                    for stream in listener.incoming() {
-                        let Ok(mut stream) = stream else { break };
+                    while !stopped.load(Ordering::SeqCst) {
+                        let mut stream = match listener.accept() {
+                            Ok((stream, _)) => stream,
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                                std::thread::sleep(Duration::from_millis(5));
+                                continue;
+                            }
+                            Err(_) => break,
+                        };
+                        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
                         let mut head = Vec::new();
                         let mut buffer = [0u8; 8192];
                         loop {
@@ -1065,8 +1093,9 @@ mod invoke_protocol_tests {
                         let _ = stream.write_all(head.as_bytes());
                         let _ = stream.write_all(json.as_bytes());
                     }
-                });
-            }
+                })
+            };
+            let _server = ServerGuard { stopped, thread: Some(server) };
 
             let base_url = format!("http://127.0.0.1:{port}");
             let bridge = Bridge::for_transport_tests(BridgeConfig {
@@ -1087,6 +1116,10 @@ mod invoke_protocol_tests {
             let mut run = journal
                 .create("跑一下兽怪暴徒", "conv-1", "key", 600, None)
                 .unwrap();
+            run.source = RunSource::SavedWorkflow {
+                workflow_id: "one-dragon-shortcut".into(),
+                workflow_revision: 1,
+            };
             // 生产 invoke 在运行中的 Run 上执行；按真实状态机推进 Queued→Preflighting→Executing。
             journal.save(&mut run, RunState::Preflighting).unwrap();
             journal.save(&mut run, RunState::Executing).unwrap();
@@ -1094,7 +1127,7 @@ mod invoke_protocol_tests {
             let capability = Capability {
                 id: "cap-run".into(),
                 description: "运行配置组".into(),
-                method_id: "bgi.run_script_groups".into(),
+                method_id: "bgi.run_one_dragon".into(),
                 catalog_version: "v1".into(),
                 aliases: vec![],
                 resource_fields: vec![],
@@ -1107,7 +1140,7 @@ mod invoke_protocol_tests {
                 "version": 4, "activeModel": "", "models": [],
                 "agent": {"systemPrompt": ""},
                 "bridge": {"enabled": true, "baseUrl": base_url, "token": "test-token"},
-                "runtime": {"permissionMode": "fullAccess"},
+                "runtime": {"permissionMode": "askEach"},
                 "storage": {"database": "unused.db"}
             }))
             .unwrap();
@@ -1115,14 +1148,14 @@ mod invoke_protocol_tests {
 
             let policy = crate::runtime::policy::RuntimeConfig {
                 permission_mode:
-                    crate::runtime::operation::permissions::PermissionMode::FullAccess,
+                    crate::runtime::operation::permissions::PermissionMode::AskEach,
                 ..Default::default()
             };
 
-            let arguments = json!({"groupNames":["挖矿讨伐"]});
+            let arguments = json!({"waitForCompletion":false});
             let (_, resources) = catalog.resolve("cap-run", &arguments).unwrap();
             let cancel = CancellationToken::new();
-            let result = bridge
+            let result = tokio::time::timeout(Duration::from_secs(3), bridge
                 .invoke(
                     &journal,
                     &mut run,
@@ -1136,9 +1169,10 @@ mod invoke_protocol_tests {
                     },
                     &policy,
                     &cancel,
-                )
-                .await
-                .expect("invoke must pass the old gate via the preparation job");
+                ))
+                .await;
+            let result = result.expect("saved task must not wait for dialogue approval")
+                .expect("saved task must prepare and submit the job");
 
             assert_eq!(result["outcome"], "verifiedSucceeded");
             assert_eq!(
@@ -1165,7 +1199,35 @@ mod invoke_protocol_tests {
                 .expect("preparation recorded as its own attempt");
             assert_eq!(prep.outcome, "verifiedSucceeded");
             assert_eq!(prep.job_id.as_deref(), Some("job-prep"));
-            let _ = std::fs::remove_file(&database);
+            assert_eq!(
+                authorization.read().unwrap().runtime.permission_mode,
+                crate::runtime::operation::permissions::PermissionMode::AskEach,
+                "shortcut execution must not change dialogue settings"
+            );
+            let submissions = invokes_seen.load(Ordering::SeqCst);
+            let mut dialogue = journal.create("运行一条龙", "dialogue", "dialogue", 600, None).unwrap();
+            journal.save(&mut dialogue, RunState::Preflighting).unwrap();
+            journal.save(&mut dialogue, RunState::Executing).unwrap();
+            let pending = tokio::time::timeout(Duration::from_millis(150), bridge.invoke(
+                &journal,
+                &mut dialogue,
+                Invocation {
+                    authorization: &authorization,
+                    call_id: "dialogue-call",
+                    binding: &capability,
+                    arguments: &arguments,
+                    resources: catalog.resolve("cap-run", &arguments).unwrap().1,
+                    catalog: &catalog,
+                },
+                &policy,
+                &cancel,
+            )).await;
+            assert!(pending.is_err(), "dialogue still waits for its own approval");
+            assert_eq!(dialogue.state, RunState::AwaitingApproval);
+            assert!(journal.events("dialogue", 0).unwrap().iter().any(|event| event.kind == "approval.requested"));
+            assert!(!journal.events("conv-1", 0).unwrap().iter().any(|event| event.kind == "approval.requested"));
+            assert_eq!(invokes_seen.load(Ordering::SeqCst), submissions);
+            // 数据库位于测试调用方登记的 TEMP；外层统一走专用删除脚本清理。
         });
     }
 
@@ -1217,10 +1279,10 @@ mod invoke_protocol_tests {
                 }),
                 "OK",
             ),
-            ("GET", "/bridge/v1/catalog/bgi.run_script_groups") => (
+            ("GET", "/bridge/v1/catalog/bgi.run_one_dragon") => (
                 200,
                 json!({
-                    "methodId": "bgi.run_script_groups", "instanceId": "test-instance",
+                    "methodId": "bgi.run_one_dragon", "instanceId": "test-instance",
                     "summary": "run groups", "callable": true, "catalogVersion": "v1",
                     "effect": "gameWrite", "preparation": "ensureGameReady",
                     "inputSchema": {"type": "object"}

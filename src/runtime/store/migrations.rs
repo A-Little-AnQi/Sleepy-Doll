@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub const LATEST_SCHEMA_VERSION: i64 = 15;
+pub const LATEST_SCHEMA_VERSION: i64 = 16;
 
 pub fn migrate(connection: &mut Connection) -> Result<()> {
     connection.execute_batch(
@@ -294,5 +294,35 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (
         15,
         "ALTER TABLE messages ADD COLUMN stream_boundary INTEGER;",
+    ),
+    (
+        16,
+        r#"
+        CREATE TABLE runtime_experiences(
+            id TEXT PRIMARY KEY, intent TEXT NOT NULL, keywords TEXT NOT NULL, body TEXT NOT NULL,
+            source_run_id TEXT NOT NULL, source_conversation_id TEXT NOT NULL, source_order INTEGER NOT NULL,
+            tool_schemas TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, user_edited INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE VIRTUAL TABLE runtime_experiences_fts USING fts5(intent,keywords,body,content='runtime_experiences',content_rowid='rowid',tokenize='trigram');
+        CREATE TRIGGER runtime_experiences_insert AFTER INSERT ON runtime_experiences BEGIN
+            INSERT INTO runtime_experiences_fts(rowid,intent,keywords,body) VALUES(new.rowid,new.intent,new.keywords,new.body);
+        END;
+        CREATE TRIGGER runtime_experiences_delete AFTER DELETE ON runtime_experiences BEGIN
+            INSERT INTO runtime_experiences_fts(runtime_experiences_fts,rowid,intent,keywords,body) VALUES('delete',old.rowid,old.intent,old.keywords,old.body);
+        END;
+        CREATE TRIGGER runtime_experiences_update AFTER UPDATE ON runtime_experiences BEGIN
+            INSERT INTO runtime_experiences_fts(runtime_experiences_fts,rowid,intent,keywords,body) VALUES('delete',old.rowid,old.intent,old.keywords,old.body);
+            INSERT INTO runtime_experiences_fts(rowid,intent,keywords,body) VALUES(new.rowid,new.intent,new.keywords,new.body);
+        END;
+        CREATE TABLE runtime_memory_meta(id INTEGER PRIMARY KEY CHECK(id=1),edit_epoch INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE runtime_memory_invalid_methods(entry_id TEXT NOT NULL REFERENCES runtime_experiences(id) ON DELETE CASCADE,method_id TEXT NOT NULL,PRIMARY KEY(entry_id,method_id));
+        INSERT INTO runtime_memory_meta(id) VALUES(1);
+        CREATE TABLE runtime_memory_learning(
+            run_id TEXT PRIMARY KEY,source_order INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'pending',
+            attempts INTEGER NOT NULL DEFAULT 0,next_attempt INTEGER NOT NULL DEFAULT 0,
+            input_tokens INTEGER NOT NULL DEFAULT 0,output_tokens INTEGER NOT NULL DEFAULT 0
+        );
+        "#,
     ),
 ];

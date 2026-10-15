@@ -325,21 +325,49 @@ impl AppConfig {
             atomic_write(path, &value)?;
             log::info!("配置已从 4 迁移到 5，运行轮次与工具上限默认不限制");
         }
-        expand_env(&mut value)?;
-        let mut config: Self = serde_json::from_value(value)?;
         let base = path
             .canonicalize()?
             .parent()
             .ok_or_else(|| Error::Config("configuration path has no parent".into()))?
             .to_path_buf();
-        for directory in &mut config.agent.skill_directories {
-            *directory = absolute(&base, directory);
+        let mut expanded = value.clone();
+        expand_env(&mut expanded)?;
+        let mut config: Self = serde_json::from_value(expanded)?;
+        config.validate()?;
+        let original_database = absolute(&base, &config.storage.database);
+        crate::data_directory::migrate(&base, &original_database)?;
+        let mut changed = relocate_data_path(
+            &base,
+            &mut value["storage"]["database"],
+            &mut config.storage.database,
+        );
+        changed |= relocate_data_path(
+            &base,
+            &mut value["runtime"]["catalogDirectory"],
+            &mut config.runtime.catalog_directory,
+        );
+        for (fields, directories) in [
+            (
+                "/agent/skillDirectories",
+                &mut config.agent.skill_directories,
+            ),
+            ("/plugins/directories", &mut config.plugins.directories),
+        ] {
+            for (index, directory) in directories.iter_mut().enumerate() {
+                if let Some(raw) = value
+                    .pointer_mut(fields)
+                    .and_then(serde_json::Value::as_array_mut)
+                    .and_then(|values| values.get_mut(index))
+                {
+                    changed |= relocate_data_path(&base, raw, directory);
+                } else {
+                    relocate_data_path(&base, &mut serde_json::Value::Null, directory);
+                }
+            }
         }
-        for directory in &mut config.plugins.directories {
-            *directory = absolute(&base, directory);
+        if changed {
+            atomic_write(path, &value)?;
         }
-        config.storage.database = absolute(&base, &config.storage.database);
-        config.runtime.catalog_directory = absolute(&base, &config.runtime.catalog_directory);
         config.validate()?;
         Ok(config)
     }
@@ -850,7 +878,12 @@ pub fn seed(path: &Path) -> Result<()> {
         .ok_or_else(|| Error::Config("configuration path has no parent".into()))?;
     fs::create_dir_all(directory)?;
     // 模板把技能、插件与目录根建在自己旁边。
-    for child in ["skills", "plugins", "catalog", ".sleepy-doll"] {
+    for child in ["skills", "plugins", "catalog", crate::data_directory::NAME] {
+        if child == crate::data_directory::NAME
+            && directory.join(crate::data_directory::LEGACY_NAME).exists()
+        {
+            continue;
+        }
         fs::create_dir_all(directory.join(child))?;
     }
     fs::write(path, TEMPLATE)?;
@@ -858,6 +891,117 @@ pub fn seed(path: &Path) -> Result<()> {
 }
 
 const TEMPLATE: &str = include_str!("../sleepy-doll.config.example.json");
+
+pub fn migrate_developer_configuration(previous: &Path, destination: &Path) -> Result<()> {
+    if destination.exists() || !previous.exists() {
+        return Ok(());
+    }
+    let source = previous
+        .parent()
+        .ok_or_else(|| Error::Config("旧开发配置没有目录".into()))?;
+    let target = destination
+        .parent()
+        .ok_or_else(|| Error::Config("开发配置没有目录".into()))?;
+    if target.exists() {
+        return Err(Error::Config(
+            "新开发数据目录已存在但没有配置，未覆盖旧开发数据".into(),
+        ));
+    }
+    let config = AppConfig::load(previous)?;
+    let lock_path = config.storage.database.with_extension("runtime.lock");
+    let _guard = if lock_path.parent().is_some_and(Path::is_dir) {
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_path)?;
+        file.try_lock()
+            .map_err(|_| Error::Conflict("旧开发后台正在运行，请关闭后重新启动".into()))?;
+        Some(file)
+    } else {
+        None
+    };
+    let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(previous)?)?;
+    for field in ["/storage/database", "/runtime/catalogDirectory"] {
+        if let Some(value) = raw.pointer_mut(field) {
+            rebase_moved_path(value, source, target)?;
+        }
+    }
+    for field in ["/agent/skillDirectories", "/plugins/directories"] {
+        if let Some(values) = raw
+            .pointer_mut(field)
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            for value in values {
+                rebase_moved_path(value, source, target)?;
+            }
+        }
+    }
+    atomic_write(previous, &raw)?;
+    fs::create_dir_all(
+        target
+            .parent()
+            .ok_or_else(|| Error::Config("开发目录没有父目录".into()))?,
+    )?;
+    drop(_guard);
+    fs::rename(source, target)?;
+    if let Some(legacy_root) = source.parent()
+        && legacy_root
+            .file_name()
+            .is_some_and(|name| name == crate::data_directory::LEGACY_NAME)
+        && fs::read_dir(legacy_root)?.next().is_none()
+    {
+        fs::remove_dir(legacy_root)?;
+    }
+    Ok(())
+}
+
+fn relocate_data_path(base: &Path, raw: &mut serde_json::Value, actual: &mut PathBuf) -> bool {
+    let absolute = absolute(base, actual);
+    let relocated = crate::data_directory::relocated_path(base, &absolute);
+    let changed = relocated != absolute && raw.as_str().is_some_and(|raw| !raw.contains("${ENV:"));
+    if changed {
+        let stored = if actual.is_absolute() {
+            relocated.clone()
+        } else {
+            crate::data_directory::relative_path(base, &relocated)
+                .unwrap_or_else(|| relocated.clone())
+        };
+        *raw = serde_json::json!(stored);
+    }
+    *actual = relocated;
+    changed
+}
+
+fn rebase_moved_path(value: &mut serde_json::Value, source: &Path, target: &Path) -> Result<()> {
+    let mut expanded = value.clone();
+    expand_env(&mut expanded)?;
+    let Some(raw) = expanded.as_str() else {
+        return Ok(());
+    };
+    let original = Path::new(raw);
+    let mut resolved = PathBuf::new();
+    for component in source.join(original).components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                resolved.pop();
+            }
+            _ => resolved.push(component.as_os_str()),
+        }
+    }
+    let resolved = resolved.canonicalize().unwrap_or(resolved);
+    if let Some(relative) = crate::data_directory::relative_path(&source.canonicalize()?, &resolved)
+    {
+        if original.is_absolute() {
+            *value = serde_json::json!(target.join(relative));
+        }
+    } else if !original.is_absolute() {
+        *value = serde_json::json!(resolved);
+    }
+    Ok(())
+}
 
 fn update_raw(
     path: &Path,

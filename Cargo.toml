@@ -6,6 +6,8 @@ description = "General desktop agent for game scripting tools, with a BetterGI p
 license = "MIT"
 
 [features]
+client-resources-test = ["client-protection"]
+client-protection = ["dep:obfstr"]
 default = ["desktop"]
 desktop = ["dep:tao", "dep:wry", "dep:rust-embed", "dep:mime_guess"]
 dev-ipc = ["dep:tiny_http"]
@@ -13,6 +15,7 @@ dev-ipc = ["dep:tiny_http"]
 setup = ["dep:flate2", "desktop"]
 
 [dependencies]
+obfstr = { version = "=0.4.6", optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.145"
 thiserror = "2.0.16"
@@ -108,14 +111,14 @@ required-features = ["setup"]
 
 [[test]]
 name = "desktop-startup"
-path = "bgi-bridge/dev/desktop-startup.rs"
+path = "tests/desktop/desktop-startup.rs"
 required-features = ["desktop"]
 
 [[test]]
 name = "tray-request"
-path = "bgi-bridge/dev/tray-request.rs"
+path = "tests/desktop/tray-request.rs"
 
 [[test]]
 name = "tray-popup-click"
-path = "bgi-bridge/dev/tray-popup-click.rs"
+path = "tests/desktop/tray-popup-click.rs"
 required-features = ["desktop"]

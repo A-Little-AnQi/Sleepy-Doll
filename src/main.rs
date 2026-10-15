@@ -17,6 +17,7 @@ use std::{
     time::Duration,
 };
 
+#[cfg(not(feature = "client-protection"))]
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -101,9 +102,14 @@ fn shell_icon(size: u32) -> Option<tao::window::Icon> {
     }
 }
 
+#[cfg(not(feature = "client-protection"))]
 #[derive(RustEmbed)]
 #[folder = "target/ui/"]
 struct UiAssets;
+#[cfg(feature = "client-protection")]
+mod protected_ui_assets;
+#[cfg(feature = "client-protection")]
+use protected_ui_assets::UiAssets;
 
 /// 界面靠这两个标记判断自己运行在桌面壳里、以及标题栏要不要自绘。
 #[cfg(target_os = "windows")]
@@ -858,13 +864,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 /// WebView2 的用户数据目录，与配置、日志同级。
 fn webview_data_directory(user_directory: &Path) -> std::path::PathBuf {
-    user_directory.join(".sleepy-doll").join("webview2")
+    sleepy_doll::data_directory::path(user_directory).join("webview2")
 }
 
 fn window_placement_path(user_directory: &Path) -> PathBuf {
-    user_directory
-        .join(".sleepy-doll")
-        .join("window-placement.json")
+    sleepy_doll::data_directory::path(user_directory).join("window-placement.json")
 }
 
 fn load_window_placement(path: &Path) -> Option<WindowPlacement> {

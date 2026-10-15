@@ -5,7 +5,7 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
 const IPC_PORT_FILE = fileURLToPath(
-  new URL("./.sleepy-doll/dev/ipc.port", import.meta.url),
+  new URL("./target/dev/ipc.port", import.meta.url),
 );
 
 function ipcPort() {
@@ -102,7 +102,12 @@ export default defineConfig({
   // 版本号唯一来源是 package.json：更新弹窗拿它和本地记录比对。
   define: {
     __APP_CHANNEL__: JSON.stringify(
-      JSON.parse(fs.readFileSync(fileURLToPath(new URL("./release-channel.json", import.meta.url)), "utf8")).channel,
+      JSON.parse(
+        fs.readFileSync(
+          fileURLToPath(new URL("./release-channel.json", import.meta.url)),
+          "utf8",
+        ),
+      ).channel,
     ),
     __APP_VERSION__: JSON.stringify(
       JSON.parse(

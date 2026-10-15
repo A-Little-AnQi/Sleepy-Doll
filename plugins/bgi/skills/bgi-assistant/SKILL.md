@@ -18,6 +18,7 @@ alwaysLoad: true
 - 战斗/特殊路线（partyConfirmationRequired=true）：缺配队 user.ask→inspect_group_effective 读生效配置与策略→file 策略读原文、auto 按队伍选可用→按角色与策略适配组并回读→run；=false 沿用已有配置不额外问。
 - 其他缺用户意图值：首轮只用 user.ask 问这一个值；意图值不从旧配置/名单/搜索结果推断。
 - 脚本参数或源码含义：本机 `bgi.user.inspect_script/read`，仓库 `bgi.repo.search/read`。写 JS／OCR／宿主 API 加载 `bgi-javascript`。
+- 检查配置、优化运行：读 [guide-workflow.md](references/guide-workflow.md) 的“配置诊断与运行优化”，结合实际生效配置、已安装脚本与运行证据判断；不把未开启的可选项当成缺陷。只检查的请求不修改或启动任务。
 - 原生界面交互：读 bgi-operator 的 references/native-ui.md。
 - 删除配置组：定位精确 name/sha256 后 describe/invoke `bgi.delete_script_group`，不操作界面。删除资源走 inspect_local_resource → delete_local_resource。
 - 停止任务：等待中的 Job 用 `bgi.job.cancel`；已交接启动 Job 已终态，用 `bgi.stop_current_task` 并核对原目标。

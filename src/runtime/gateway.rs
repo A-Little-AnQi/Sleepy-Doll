@@ -20,6 +20,35 @@ pub async fn complete(
     cancel: &CancellationToken,
     emit: impl FnMut(&str) -> Result<()>,
 ) -> Result<ModelResponse> {
+    complete_with_allowed(config, messages, tools, None, cancel, emit).await
+}
+
+pub(crate) fn supports_tool_mask(config: &ModelConfig) -> bool {
+    config.protocol == ModelProtocol::OpenaiResponses
+        && url::Url::parse(&config.base_url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .as_deref()
+            == Some("api.openai.com")
+}
+
+fn apply_allowed_tools(body: &mut Value, allowed: &[String]) {
+    body["tool_choice"] = if allowed.is_empty() {
+        json!("none")
+    } else {
+        json!({"type":"allowed_tools","mode":"auto","tools":allowed.iter()
+            .map(|name| json!({"type":"function","name":wire_name(name)})).collect::<Vec<_>>()})
+    };
+}
+
+pub async fn complete_with_allowed(
+    config: ModelConfig,
+    messages: &[Message],
+    tools: &[ToolDefinition],
+    allowed: Option<&[String]>,
+    cancel: &CancellationToken,
+    emit: impl FnMut(&str) -> Result<()>,
+) -> Result<ModelResponse> {
     let started = std::time::Instant::now();
     let logged = format!("{}（{}）", config.model, config.protocol);
     log::info!(
@@ -27,7 +56,7 @@ pub async fn complete(
         messages.len(),
         tools.len()
     );
-    let result = complete_inner(config, messages, tools, cancel, emit).await;
+    let result = complete_inner(config, messages, tools, allowed, cancel, emit).await;
     match &result {
         Ok(response) => log::info!(
             "模型 {logged} 返回：{} 字，{} 个调用，输入 {} / 输出 {} token，{:.1}s",
@@ -49,10 +78,15 @@ async fn complete_inner(
     mut config: ModelConfig,
     messages: &[Message],
     tools: &[ToolDefinition],
+    allowed: Option<&[String]>,
     cancel: &CancellationToken,
     mut emit: impl FnMut(&str) -> Result<()>,
 ) -> Result<ModelResponse> {
-    config.options.max_output_tokens.get_or_insert(8192);
+    let output_reserve = super::policy::output_reserve(&config);
+    config
+        .options
+        .max_output_tokens
+        .get_or_insert(output_reserve);
     let model = ProtocolModel::new(config.clone());
     let names = tools
         .iter()
@@ -76,7 +110,10 @@ async fn complete_inner(
             m
         })
         .collect::<Vec<_>>();
-    let mut body = model.body(&wire_messages, &wire_tools);
+    let mut body = model.body(&wire_messages, &wire_tools)?;
+    if let Some(allowed) = allowed {
+        apply_allowed_tools(&mut body, allowed);
+    }
     let mut endpoint = model.endpoint();
     if config.protocol == ModelProtocol::Gemini {
         endpoint = endpoint.replace(":generateContent", ":streamGenerateContent?alt=sse");
@@ -116,30 +153,49 @@ async fn complete_inner(
         if !retry || attempt >= 2 {
             break result?;
         }
-        let delay = result
-            .as_ref()
-            .ok()
-            .and_then(|response| response.headers().get("retry-after"))
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.parse::<u64>().ok())
-            .map(|seconds| Duration::from_secs(seconds.clamp(1, 5)))
-            .unwrap_or(Duration::from_millis(500 * (1 << attempt)));
+        let response = result.as_ref().ok();
+        let Some(delay) = retry_delay(
+            response.map(|response| response.status().as_u16()),
+            response
+                .and_then(|response| response.headers().get("retry-after"))
+                .and_then(|value| value.to_str().ok()),
+            attempt,
+            time::OffsetDateTime::now_utc(),
+        ) else {
+            break result?;
+        };
         attempt += 1;
         tokio::select! { _ = cancel.cancelled() => return Err(Error::Cancelled), _ = tokio::time::sleep(delay) => {} }
     };
     if !response.status().is_success() {
         let status = response.status().as_u16();
+        let cooldown = retry_after_duration(
+            response
+                .headers()
+                .get("retry-after")
+                .and_then(|value| value.to_str().ok()),
+            time::OffsetDateTime::now_utc(),
+        )
+        .map(|duration| {
+            format!(
+                "；服务端建议至少等待 {} 秒",
+                duration
+                    .as_secs()
+                    .saturating_add(u64::from(duration.subsec_nanos() != 0))
+            )
+        })
+        .unwrap_or_default();
         let message = match status {
             401 | 403 => "模型服务拒绝鉴权，请检查 API Key 和访问权限",
-            429 => "模型服务限流，重试后仍不可用",
+            429 => "模型服务限流",
             404 => "模型或 API 地址不存在，请检查模型配置",
             _ => "模型服务返回错误",
         };
         let detail = read_error_detail(response, cancel).await;
         return Err(Error::Http(if detail.is_empty() {
-            format!("{message}（HTTP {status}）")
+            format!("{message}（HTTP {status}）{cooldown}")
         } else {
-            format!("{message}（HTTP {status}）：{detail}")
+            format!("{message}（HTTP {status}）：{detail}{cooldown}")
         }));
     }
     let content_type = response
@@ -200,6 +256,41 @@ async fn complete_inner(
         }
     }
     Ok(result)
+}
+
+fn retry_delay(
+    status: Option<u16>,
+    retry_after: Option<&str>,
+    attempt: u32,
+    now: time::OffsetDateTime,
+) -> Option<Duration> {
+    let instructed = retry_after_duration(retry_after, now);
+    let delay = instructed.unwrap_or_else(|| {
+        if status == Some(429) {
+            Duration::from_secs(5 * (1 << attempt.min(2)))
+        } else {
+            Duration::from_millis(500 * (1 << attempt.min(2)))
+        }
+    });
+    // 更长的服务端冷却期直接交给用户；不能缩短等待时间继续撞限流。
+    (delay <= Duration::from_secs(60)).then_some(delay)
+}
+
+fn retry_after_duration(retry_after: Option<&str>, now: time::OffsetDateTime) -> Option<Duration> {
+    retry_after.and_then(|value| {
+        let value = value.trim();
+        if let Ok(seconds) = value.parse::<u64>() {
+            return Some(Duration::from_secs(seconds));
+        }
+        let format = time::format_description::parse_borrowed::<2>(
+            "[weekday repr:short], [day] [month repr:short] [year] [hour]:[minute]:[second] GMT",
+        )
+        .ok()?;
+        let deadline = time::PrimitiveDateTime::parse(value, &format)
+            .ok()?
+            .assume_utc();
+        Some(Duration::try_from(deadline - now).unwrap_or_default())
+    })
 }
 
 async fn read_error_detail(response: reqwest::Response, cancel: &CancellationToken) -> String {
@@ -372,6 +463,7 @@ enum Pending {
     },
     /// 只有可读文本，不需要回传。
     Text(String),
+    Chat(BTreeMap<String, String>),
 }
 
 impl Pending {
@@ -384,7 +476,8 @@ impl Pending {
                 text: String::new(),
                 signatures: BTreeMap::new(),
             },
-            ModelProtocol::OpenaiChat | ModelProtocol::OllamaChat => Self::Text(String::new()),
+            ModelProtocol::OpenaiChat => Self::Chat(BTreeMap::new()),
+            ModelProtocol::OllamaChat => Self::Text(String::new()),
         }
     }
 
@@ -399,6 +492,7 @@ impl Pending {
                 text.len() + signatures.values().map(String::len).sum::<usize>()
             }
             Self::Text(text) => text.len(),
+            Self::Chat(fields) => fields.values().map(String::len).sum(),
         }
     }
 
@@ -438,6 +532,16 @@ impl Pending {
                     .collect();
             }
             Self::Text(text) => display = text,
+            Self::Chat(fields) => {
+                display = fields
+                    .get("reasoning_content")
+                    .or_else(|| fields.get("reasoning"))
+                    .cloned()
+                    .unwrap_or_default();
+                if !fields.is_empty() {
+                    blocks.push(json!(fields));
+                }
+            }
         }
         (!blocks.is_empty() || !display.is_empty()).then_some(Reasoning {
             protocol,
@@ -486,6 +590,7 @@ impl Decoder {
             Pending::Text(display) => display.push_str(text),
             Pending::Gemini { text: display, .. } => display.push_str(text),
             Pending::Blocks(_) => {}
+            Pending::Chat(_) => {}
         }
     }
 
@@ -509,12 +614,12 @@ impl Decoder {
             ModelProtocol::OpenaiChat => {
                 let c = &v["choices"][0];
                 delta = c["delta"]["content"].as_str().unwrap_or("").into();
-                // 只为界面：多数提供方拒绝回传该字段。
-                if let Some(thinking) = c["delta"]["reasoning_content"]
-                    .as_str()
-                    .or_else(|| c["delta"]["reasoning"].as_str())
-                {
-                    self.push_reasoning_text(thinking);
+                if let Pending::Chat(fields) = &mut self.pending {
+                    for field in ["reasoning_content", "reasoning"] {
+                        if let Some(thinking) = c["delta"][field].as_str() {
+                            fields.entry(field.into()).or_default().push_str(thinking);
+                        }
+                    }
                 }
                 if !c["delta"]["refusal"].is_null() {
                     return Err(Error::ModelProtocol("model refused".into()));
@@ -721,5 +826,85 @@ impl Decoder {
         };
         validate(&result)?;
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tool_mask_tests {
+    use super::*;
+
+    #[test]
+    fn streamed_chat_reasoning_keeps_native_field_and_whitespace() {
+        let mut decoder = Decoder::new(ModelProtocol::OpenaiChat);
+        for delta in [
+            json!({"reasoning_content":"\n核对"}),
+            json!({"reasoning":"alias"}),
+            json!({"reasoning_content":"状态。 \n"}),
+        ] {
+            decoder.push(json!({"choices":[{"delta":delta}]})).unwrap();
+        }
+        decoder
+            .push(json!({"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}))
+            .unwrap();
+        let result = decoder.finish().unwrap();
+        let reasoning = result.reasoning.unwrap();
+        assert_eq!(reasoning.text, "\n核对状态。 \n");
+        assert_eq!(reasoning.blocks[0]["reasoning_content"], "\n核对状态。 \n");
+        assert_eq!(reasoning.blocks[0]["reasoning"], "alias");
+    }
+
+    #[test]
+    fn rate_limit_backoff_respects_seconds_dates_and_long_cooldowns() {
+        let now = time::OffsetDateTime::from_unix_timestamp(1_445_412_470).unwrap();
+        assert_eq!(
+            retry_delay(Some(429), Some("30"), 0, now),
+            Some(Duration::from_secs(30))
+        );
+        assert_eq!(
+            retry_delay(Some(429), Some("Wed, 21 Oct 2015 07:28:00 GMT"), 0, now),
+            Some(Duration::from_secs(10))
+        );
+        assert_eq!(retry_delay(Some(429), Some("120"), 0, now), None);
+        assert_eq!(
+            retry_delay(Some(429), Some("garbage"), 0, now),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(
+            retry_delay(Some(429), None, 1, now),
+            Some(Duration::from_secs(10))
+        );
+        assert_eq!(
+            retry_delay(Some(503), None, 0, now),
+            Some(Duration::from_millis(500))
+        );
+    }
+
+    #[test]
+    fn restricting_calls_keeps_declared_tool_bytes_unchanged() {
+        let definitions = json!([
+            {"type":"function","name":wire_name("read"),"parameters":{"type":"object"}},
+            {"type":"function","name":wire_name("write"),"parameters":{"type":"object"}},
+        ]);
+        let mut body = json!({"tools":definitions});
+        apply_allowed_tools(&mut body, &["read".into()]);
+        assert_eq!(body["tools"], definitions);
+        assert_eq!(body["tool_choice"]["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(body["tool_choice"]["tools"][0]["name"], wire_name("read"));
+        apply_allowed_tools(&mut body, &[]);
+        assert_eq!(body["tool_choice"], "none");
+        assert_eq!(body["tools"], definitions);
+    }
+
+    #[test]
+    fn compatibility_endpoints_do_not_receive_unprobed_mask_fields() {
+        let mut config: ModelConfig = serde_json::from_value(json!({"id":"m","name":"m",
+            "model":"m","protocol":"openai-responses","baseUrl":"https://api.openai.com/v1"}))
+        .unwrap();
+        assert!(supports_tool_mask(&config));
+        config.base_url = "https://example.com/v1".into();
+        assert!(!supports_tool_mask(&config));
+        config.protocol = ModelProtocol::OpenaiChat;
+        config.base_url = "https://api.openai.com/v1".into();
+        assert!(!supports_tool_mask(&config));
     }
 }
