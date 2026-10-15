@@ -1,5 +1,6 @@
 pub mod approval;
 pub mod context;
+pub mod contracts;
 pub mod gateway;
 pub mod host;
 pub mod memory;
@@ -2026,7 +2027,7 @@ impl Supervisor {
             self.journal.emit(
                 run,
                 "assistant.completed",
-                json!({"text":response.text,"turn":run.decisions}),
+                json!({"text":response.text,"turn":run.decisions,"finishReason":response.finish_reason}),
             )?;
             if gateway::output_truncated(response.finish_reason.as_deref())
                 && calls.is_empty()
@@ -2040,8 +2041,8 @@ impl Supervisor {
                 }
                 truncation_recoveries += 1;
                 let nudge = message(
-                    Role::User,
-                    "上一轮回复在输出长度上限处被截断。从截断处继续写完，不要重复已经给出的内容。",
+                    Role::Context,
+                    "[运行时续写提示，不是用户的新要求] 上一轮回复在输出长度上限处被截断。从截断处继续写完，不要重复已经给出的内容。",
                 );
                 self.journal.append_message(run, &nudge)?;
                 history.push(nudge);
@@ -2529,6 +2530,30 @@ impl Supervisor {
         // 不写进 system——那会改写缓存前缀，让整段历史重新计费。
         let observed = observed_at(run);
         let value = tool_outcome(result, &observed, &call.name)?;
+        if let Some(goal) = self.journal.goal(&run.id)? {
+            self.journal.record_evidence(
+                run,
+                &contracts::EvidenceReceipt {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    run_id: run.id.clone(),
+                    goal_revision: goal.revision,
+                    call_id: call.id.clone(),
+                    tool: call.name.clone(),
+                    arguments_hash: hash(&call.arguments),
+                    effect: self
+                        .definition(&call.name, &run.discovered.iter().cloned().collect())
+                        .map(|d| d.execution.effect)
+                        .unwrap_or(ToolEffect::Unknown),
+                    state: if value["ok"] == true {
+                        contracts::ReceiptState::Observed
+                    } else {
+                        contracts::ReceiptState::Failed
+                    },
+                    observed_at: observed.clone(),
+                    evidence: context::tool_evidence(&value),
+                },
+            )?;
+        }
         if let Err(error) = self
             .memory
             .observe_lookup(&call.name, &call.arguments, &value)

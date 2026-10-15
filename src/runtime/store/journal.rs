@@ -1,5 +1,6 @@
 use crate::error::{Error, Result};
 use crate::model::ToolCall;
+use crate::runtime::contracts::{EvidenceReceipt, Goal, InputOrigin};
 use crate::runtime::types::*;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -596,6 +597,7 @@ impl Journal {
                 params![model_id, conversation],
             )?;
         }
+        Self::write_goal(&tx, &run, &Goal::new(prompt))?;
         Self::insert_event(&tx, &run, "run.created", &public_run(&run))?;
         Self::insert_checkpoint(&tx, &run)?;
         tx.commit()?;
@@ -603,10 +605,66 @@ impl Journal {
         Ok(run)
     }
     fn insert_event(db: &Connection, run: &Run, kind: &str, data: &Value) -> Result<()> {
+        let revision: Option<u64> = db
+            .query_row(
+                "SELECT revision FROM runtime_goals WHERE run_id=?1",
+                [&run.id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let mut data = data.clone();
+        if let Some(fields) = data.as_object_mut() {
+            fields.insert("goalRevision".into(), json!(revision));
+            fields.insert("contractVersion".into(), json!(1));
+        }
         db.execute(
             "INSERT INTO runtime_events(conversation_id,run_id,kind,data) VALUES(?1,?2,?3,?4)",
             params![run.conversation_id, run.id, kind, data.to_string()],
         )?;
+        Ok(())
+    }
+    fn write_goal(db: &Connection, run: &Run, goal: &Goal) -> Result<()> {
+        db.execute("INSERT INTO runtime_goals(run_id,revision,payload) VALUES(?1,?2,?3) ON CONFLICT(run_id) DO UPDATE SET revision=excluded.revision,payload=excluded.payload",
+            params![run.id, goal.revision, serde_json::to_string(goal)?])?;
+        Self::insert_event(db, run, "goal.accepted", &json!(goal))
+    }
+    fn revise_goal(db: &Connection, run: &Run, origin: InputOrigin, text: &str) -> Result<()> {
+        let payload: Option<String> = db
+            .query_row(
+                "SELECT payload FROM runtime_goals WHERE run_id=?1",
+                [&run.id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let mut goal = payload
+            .map(|s| serde_json::from_str(&s))
+            .transpose()?
+            .unwrap_or_else(|| Goal::new(&run.prompt));
+        goal.revise(origin, text);
+        Self::write_goal(db, run, &goal)
+    }
+    pub fn goal(&self, run: &str) -> Result<Option<Goal>> {
+        let payload: Option<String> = self
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT payload FROM runtime_goals WHERE run_id=?1",
+                [run],
+                |r| r.get(0),
+            )
+            .optional()?;
+        payload
+            .map(|s| serde_json::from_str(&s).map_err(Into::into))
+            .transpose()
+    }
+    pub fn record_evidence(&self, run: &Run, receipt: &EvidenceReceipt) -> Result<()> {
+        let mut db = self.connection.lock().unwrap();
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute("INSERT INTO runtime_goal_evidence(id,run_id,goal_revision,call_id,payload) VALUES(?1,?2,?3,?4,?5)",
+            params![receipt.id,run.id,receipt.goal_revision,receipt.call_id,serde_json::to_string(receipt)?])?;
+        Self::insert_event(&tx, run, "evidence.recorded", &json!(receipt))?;
+        tx.commit()?;
         Ok(())
     }
     pub fn get(&self, id: &str) -> Result<Run> {
@@ -963,6 +1021,7 @@ impl Journal {
             "INSERT INTO runtime_message_owners VALUES(?1,?2)",
             params![tx.last_insert_rowid(), run],
         )?;
+        Self::revise_goal(&tx, &current, InputOrigin::HumanSupplement, content)?;
         Self::insert_event(&tx, &current, "input.received", &json!({"content":content}))?;
         if let Some(key) = key {
             tx.execute("INSERT INTO runtime_input_keys(run_id,client_key,kind,content) VALUES(?1,?2,?3,?4)", params![run,key,kind,content])?;
@@ -1117,6 +1176,14 @@ impl Journal {
         tx.execute(
             "UPDATE runtime_question_requests SET status='answered',answers=?2,answer_key=?3,answered_at=?4 WHERE run_id=?5 AND id=?1 AND status='open'",
             params![request_id, normalized.to_string(), key, now(), run_id],
+        )?;
+        Self::revise_goal(
+            &tx,
+            &current,
+            InputOrigin::HumanAnswer {
+                request_id: request_id.into(),
+            },
+            &normalized.to_string(),
         )?;
         Self::insert_event(
             &tx,
@@ -2275,6 +2342,15 @@ impl Journal {
             workflow_id: task_id.to_owned(),
             workflow_revision: revision,
         };
+        {
+            let db = self.connection.lock().unwrap();
+            let mut goal = Goal::new(&run.prompt);
+            goal.inputs[0].origin = InputOrigin::ShortcutClick {
+                task_id: task_id.into(),
+                revision,
+            };
+            Self::write_goal(&db, &run, &goal)?;
+        }
         self.connection.lock().unwrap().execute(
             "UPDATE runtime_runs SET payload=?1 WHERE id=?2",
             params![serde_json::to_string(&run)?, run.id],

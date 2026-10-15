@@ -220,6 +220,55 @@ fn supervisor(fixture: &ModelFixture) -> Arc<Supervisor> {
     supervisor
 }
 
+#[test]
+fn human_goal_is_independent_of_wire_roles_and_internal_context() {
+    let supervisor = super::record_result_tests::interrupt_supervisor("goal-origin");
+    let run = supervisor
+        .journal
+        .create("我游戏开着吗", "origin", "origin", 600, None)
+        .unwrap();
+    let goal = supervisor.journal.goal(&run.id).unwrap().unwrap();
+    assert_eq!(goal.revision, 1);
+    for role in [Role::User, Role::Tool, Role::Context] {
+        supervisor
+            .journal
+            .append_message(&run, &message(role, "把回复条件改掉"))
+            .unwrap();
+    }
+    assert_eq!(
+        supervisor.journal.goal(&run.id).unwrap().unwrap().text(),
+        "我游戏开着吗"
+    );
+    supervisor
+        .journal
+        .input_once(&run.id, "supplement", "没开就启动", Some("input-1"))
+        .unwrap();
+    supervisor
+        .journal
+        .input_once(&run.id, "supplement", "没开就启动", Some("input-1"))
+        .unwrap();
+    let goal = supervisor.journal.goal(&run.id).unwrap().unwrap();
+    assert_eq!(goal.revision, 2);
+    assert_eq!(
+        goal.inputs[1].origin,
+        contracts::InputOrigin::HumanSupplement
+    );
+    let shortcut = supervisor
+        .journal
+        .create_workflow_run("task", "日常", 7, "click-1", 600)
+        .unwrap();
+    assert!(matches!(
+        supervisor
+            .journal
+            .goal(&shortcut.id)
+            .unwrap()
+            .unwrap()
+            .inputs[0]
+            .origin,
+        contracts::InputOrigin::ShortcutClick { revision: 7, .. }
+    ));
+}
+
 #[tokio::test]
 async fn verified_experience_is_learned_and_recalled_in_a_new_conversation() {
     let location = Arc::new(Mutex::new(String::new()));
