@@ -1,3 +1,5 @@
+import { SearchField } from "@sleepy-doll/ui";
+import { IconButton } from "@sleepy-doll/ui";
 import {
   useEffect,
   useLayoutEffect,
@@ -21,24 +23,24 @@ import {
 import type { Bootstrap, ConversationInfo } from "../../ipc/types";
 import { hostPluginEnabled } from "../../ipc/providers";
 import {
+  HistoryIcon,
   BridgeIcon,
   EditIcon,
   FolderIcon,
   PanelIcon,
   PluginIcon,
   PlusIcon,
-  SearchIcon,
   SidebarIcon,
   ToolIcon,
   TrashIcon,
   Wordmark,
-} from "../icons";
+} from "@sleepy-doll/ui/icons";
 import { SidebarAccount } from "./SidebarAccount";
 import { TitleBar } from "./TitleBar";
-import { InlineRename } from "../controls/InlineRename";
-import { DisclosureChevron } from "../controls/DisclosureChevron";
-import { Toast } from "../overlay/Toast";
-import { ConfirmDialog } from "../overlay/ConfirmDialog";
+import { InlineRename } from "@sleepy-doll/ui/controls/InlineRename";
+import { DisclosureChevron } from "@sleepy-doll/ui/controls/DisclosureChevron";
+import { Toast } from "@sleepy-doll/ui/overlay/Toast";
+import { ConfirmDialog } from "@sleepy-doll/ui/overlay/ConfirmDialog";
 import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
@@ -66,6 +68,7 @@ import { useT } from "../../i18n";
 
 const NAV = [
   { page: "tasks", labelKey: "tasks" as const, Icon: ToolIcon },
+  { page: "memory", labelKey: "memory" as const, Icon: HistoryIcon },
   { page: "extensions", labelKey: "extensions" as const, Icon: PluginIcon },
 ] as const;
 
@@ -580,14 +583,13 @@ export function AppShell({
         }}
       >
         <Wordmark />
-        <button
-          className="icon-button"
+        <IconButton
           title={wide ? t.nav.collapseSidebar : t.nav.closeSidebar}
           aria-label={wide ? t.nav.collapseSidebar : t.nav.closeSidebar}
           onClick={foldSidebar}
         >
           <SidebarIcon className="button-icon" />
-        </button>
+        </IconButton>
       </div>
       <button className="app-new" onClick={() => startNew(null)}>
         <PlusIcon className="button-icon" />
@@ -614,8 +616,7 @@ export function AppShell({
       <div className="app-sidebar-tools">
         <div className="app-section-head">
           <span>{t.app.recent}</span>
-          <button
-            className="icon-button"
+          <IconButton
             title={t.nav.newGroup}
             aria-label={t.nav.newGroup}
             onClick={() => {
@@ -627,17 +628,15 @@ export function AppShell({
             }}
           >
             <FolderIcon className="button-icon" />
-          </button>
+          </IconButton>
         </div>
-        <label className="search-field is-compact">
-          <SearchIcon />
-          <input
-            aria-label={t.nav.searchConversations}
-            placeholder={t.nav.searchPlaceholder}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
+        <SearchField
+          compact
+          aria-label={t.nav.searchConversations}
+          placeholder={t.nav.searchPlaceholder}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
       </div>
       <div className="app-conversations">
         <ul
@@ -771,24 +770,22 @@ export function AppShell({
               <div className="app-header-title">
                 {/* 常驻并随侧栏滑动渐现，按钮增减不再跳。 */}
                 <div className="app-header-fold" data-collapsed={collapsed}>
-                  <button
-                    className="icon-button"
+                  <IconButton
                     title={t.nav.expandSidebar}
                     aria-label={t.nav.expandSidebar}
                     tabIndex={collapsed ? 0 : -1}
                     onClick={pinSidebar}
                   >
                     <SidebarIcon className="button-icon" />
-                  </button>
-                  <button
-                    className="icon-button"
+                  </IconButton>
+                  <IconButton
                     title={t.nav.newChat}
                     aria-label={t.nav.newChat}
                     tabIndex={collapsed ? 0 : -1}
                     onClick={() => startNew(null)}
                   >
                     <PlusIcon className="button-icon" />
-                  </button>
+                  </IconButton>
                 </div>
                 {page === "chat" ? (
                   <h1>{conversation?.title ?? t.nav.newConversation}</h1>
@@ -796,8 +793,7 @@ export function AppShell({
               </div>
               {detailsToggle ? (
                 <div className="app-header-actions">
-                  <button
-                    className="icon-button"
+                  <IconButton
                     aria-pressed={detailsOpen}
                     data-details-trigger=""
                     aria-label={
@@ -807,7 +803,7 @@ export function AppShell({
                     onClick={onToggleDetails}
                   >
                     <PanelIcon className="button-icon" />
-                  </button>
+                  </IconButton>
                 </div>
               ) : null}
             </header>
@@ -1044,14 +1040,13 @@ function GroupRow({
             <small aria-hidden="true">{items.length}</small>
           </button>
           <div className="app-conversation-actions">
-            <button
-              className="icon-button"
+            <IconButton
               aria-label={t.app.newChatInGroup}
               title={t.app.newChatInGroup}
               onClick={onNew}
             >
               <PlusIcon className="button-icon" />
-            </button>
+            </IconButton>
           </div>
         </div>
       )}
@@ -1192,16 +1187,14 @@ function ConversationRow({
           <span className="app-conversation-title">{entry.title}</span>
         </button>
         <div className="app-conversation-actions">
-          <button
-            className="icon-button"
+          <IconButton
             aria-label={t.app.rename}
             title={t.app.rename}
             onClick={() => setEditing(true)}
           >
             <EditIcon className="button-icon" />
-          </button>
-          <button
-            className="icon-button"
+          </IconButton>
+          <IconButton
             aria-label={t.app.deleteConversation}
             title={t.app.deleteConversation}
             disabled={previewingDelete}
@@ -1223,7 +1216,7 @@ function ConversationRow({
             }}
           >
             <TrashIcon className="button-icon" />
-          </button>
+          </IconButton>
         </div>
       </li>
       <ConfirmDialog

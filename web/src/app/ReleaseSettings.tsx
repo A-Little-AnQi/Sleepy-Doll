@@ -1,9 +1,10 @@
+import { Button } from "@sleepy-doll/ui";
 import { useEffect, useState } from "react";
 import { api, type ReleaseState } from "../ipc/api";
-import { Select } from "../components/controls/Select";
-import { SettingRow } from "../components/controls/SettingRow";
-import { Dialog } from "../components/overlay/Dialog";
-import { Toast } from "../components/overlay/Toast";
+import { Select } from "@sleepy-doll/ui/controls/Select";
+import { SettingRow } from "@sleepy-doll/ui/controls/SettingRow";
+import { Dialog } from "@sleepy-doll/ui/overlay/Dialog";
+import { Toast } from "@sleepy-doll/ui/overlay/Toast";
 import { useLocale } from "../appearance/locale";
 import { readError } from "../session";
 import "./ReleaseSettings.css";
@@ -58,9 +59,9 @@ function ReleaseActions({
         </strong>
         <p className="release-notes">{state.release.notes}</p>
       </div>
-      <button
+      <Button
         type="button"
-        className="primary-action"
+        variant="primary"
         disabled={busy}
         onClick={async () => {
           setBusy(true);
@@ -82,8 +83,12 @@ function ReleaseActions({
           : state.downloaded
             ? text.install
             : text.download}
-      </button>
-      {error && <p className="release-error" role="alert">{error}</p>}
+      </Button>
+      {error && (
+        <p className="release-error" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -121,9 +126,9 @@ export function ReleaseSettings() {
           label={text.current}
           hint={`${state?.currentVersion ?? __APP_VERSION__} · ${text[state?.currentChannel ?? __APP_CHANNEL__]}`}
         >
-          <button
+          <Button
             type="button"
-            className="secondary-action"
+            variant="secondary"
             disabled={busy}
             onClick={async () => {
               setBusy(true);
@@ -140,7 +145,7 @@ export function ReleaseSettings() {
             }}
           >
             {busy ? text.checking : text.check}
-          </button>
+          </Button>
         </SettingRow>
         {state && (
           <SettingRow label={text.channel}>
@@ -157,9 +162,7 @@ export function ReleaseSettings() {
         )}
         {state && <ReleaseActions state={state} onState={setState} />}
       </section>
-      {message && (
-        <Toast message={message} onDismiss={() => setMessage("")} />
-      )}
+      {message && <Toast message={message} onDismiss={() => setMessage("")} />}
     </>
   );
 }

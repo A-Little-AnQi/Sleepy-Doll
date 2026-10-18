@@ -1,0 +1,8 @@
+.app-wordmark {
+  display: block;
+  height: 30px;
+  width: auto;
+  flex: 0 0 auto;
+  overflow: visible;
+  color: var(--text);
+}

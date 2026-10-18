@@ -6,7 +6,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { HistoryIcon, PlusIcon, ToolIcon } from "../icons";
+import { HistoryIcon, PlusIcon, ToolIcon } from "@sleepy-doll/ui/icons";
 import type { SkillInfo } from "../../ipc/types";
 import "./SkillMenu.css";
 

@@ -24,7 +24,7 @@
   justify-content: center;
   width: 18px;
   height: 18px;
-  border: 1px solid var(--border-strong);
+  border: var(--border-width, 1px) solid var(--border-strong);
   border-radius: 5px;
   background: var(--surface);
   color: var(--inverse);

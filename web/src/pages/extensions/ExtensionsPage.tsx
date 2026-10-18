@@ -1,19 +1,16 @@
+import { ExtensionList, ExtensionRow } from "@sleepy-doll/ui";
+import { SearchField, EmptyState, FormField } from "@sleepy-doll/ui";
+import { Button, IconButton } from "@sleepy-doll/ui";
 import { useEffect, useRef, useState } from "react";
 import "./ExtensionsPage.css";
 import { api } from "../../ipc/api";
-import { Toast } from "../../components/overlay/Toast";
-import { ConfirmDialog } from "../../components/overlay/ConfirmDialog";
-import {
-  CloseIcon,
-  PluginIcon,
-  SearchIcon,
-  PlusIcon,
-} from "../../components/icons";
+import { Toast } from "@sleepy-doll/ui/overlay/Toast";
+import { ConfirmDialog } from "@sleepy-doll/ui/overlay/ConfirmDialog";
+import { CloseIcon, PluginIcon, PlusIcon } from "@sleepy-doll/ui/icons";
 import { readError } from "../../session";
 import type { Bootstrap } from "../../ipc/types";
-import { MotionSwitch } from "../../components/controls/MotionSwitch";
-import { SlidingTabs } from "../../components/controls/SlidingTabs";
-import { Switch } from "../../components/controls/Switch";
+import { MotionSwitch } from "@sleepy-doll/ui/controls/MotionSwitch";
+import { SlidingTabs } from "@sleepy-doll/ui/controls/SlidingTabs";
 import { providerOfTool } from "../../ipc/providers";
 import { useT } from "../../i18n";
 export function ExtensionsPage({
@@ -132,8 +129,8 @@ export function ExtensionsPage({
     <div className="page-sheet extensions-page">
       <div className="page-title">
         <h2>{t.extensions.installed}</h2>
-        <button
-          className="secondary-action"
+        <Button
+          variant="secondary"
           onClick={() => {
             setInstall(true);
             setError("");
@@ -144,7 +141,7 @@ export function ExtensionsPage({
           {currentTab === "skills"
             ? t.extensions.importSkills
             : t.extensions.importPlugins}
-        </button>
+        </Button>
       </div>
       <div className="list-toolbar">
         <SlidingTabs
@@ -174,68 +171,56 @@ export function ExtensionsPage({
             },
           ]}
         />
-        <label className="search-field">
-          <SearchIcon />
-          <input
-            aria-label={t.extensions.search}
-            placeholder={t.common.search}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
+        <SearchField
+          aria-label={t.extensions.search}
+          placeholder={t.common.search}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
       </div>
       {error && !dialog.current?.open && (
         <Toast message={error} onDismiss={() => setError("")} />
       )}
       <MotionSwitch viewKey={currentTab} kind="panel">
         {filtered.length ? (
-          <div className="extension-list">
+          <ExtensionList>
             {filtered.map((item) => (
-              <div className="extension-row" key={item.id}>
-                <div className="extension-glyph">
-                  <PluginIcon />
-                </div>
-                <button
-                  className="extension-summary"
-                  onClick={() => {
-                    setSelected(item.id);
-                    setInstall(false);
-                    setError("");
-                    dialog.current?.showModal();
-                  }}
-                >
-                  <strong>{item.name}</strong>
-                  <span className="extension-meta">{item.meta}</span>
-                  {item.description && <p>{item.description}</p>}
-                  {item.error && <p>{t.extensions.loadFailed}</p>}
-                  {item.enabled &&
-                    !item.available &&
-                    item.unavailableReason && (
-                      <p className="extension-flag">
-                        当前未生效：{item.unavailableReason}
-                      </p>
-                    )}
-                </button>
-                <Switch
-                  label={item.name}
-                  checked={item.enabled}
-                  disabled={busy}
-                  onChange={(enabled) => void toggle(item.id, enabled)}
-                />
-              </div>
+              <ExtensionRow
+                key={item.id}
+                name={item.name}
+                meta={item.meta}
+                description={item.description}
+                error={item.error ? t.extensions.loadFailed : ""}
+                flag={
+                  item.enabled && !item.available && item.unavailableReason
+                    ? "当前未生效：" + item.unavailableReason
+                    : ""
+                }
+                enabled={item.enabled}
+                disabled={busy}
+                onOpen={() => {
+                  setSelected(item.id);
+                  setInstall(false);
+                  setError("");
+                  dialog.current?.showModal();
+                }}
+                onChange={(enabled) => void toggle(item.id, enabled)}
+              />
             ))}
-          </div>
+          </ExtensionList>
         ) : (
-          <div className="empty-state">
-            <PluginIcon />
-            <h3>
-              {query
-                ? t.extensions.noMatch
-                : currentTab === "skills"
-                  ? t.extensions.noSkills
-                  : t.extensions.noPlugins}
-            </h3>
-          </div>
+          <EmptyState
+            icon={<PluginIcon />}
+            title={
+              <>
+                {query
+                  ? t.extensions.noMatch
+                  : currentTab === "skills"
+                    ? t.extensions.noSkills
+                    : t.extensions.noPlugins}
+              </>
+            }
+          ></EmptyState>
         )}
       </MotionSwitch>
       <dialog
@@ -261,13 +246,12 @@ export function ExtensionsPage({
                 : t.extensions.importPlugins
               : current?.name}
           </h2>
-          <button
-            className="icon-button"
+          <IconButton
             aria-label={t.common.close}
             onClick={() => dialog.current?.close()}
           >
             <CloseIcon className="button-icon" />
-          </button>
+          </IconButton>
         </div>
         <div className="dialog-body">
           {error && <Toast message={error} onDismiss={() => setError("")} />}
@@ -288,18 +272,21 @@ export function ExtensionsPage({
                 });
               }}
             >
-              <label>
-                <span>
-                  {currentTab === "skills"
-                    ? t.extensions.skillsDir
-                    : t.extensions.pluginsDir}
-                </span>
+              <FormField
+                label={
+                  <>
+                    {currentTab === "skills"
+                      ? t.extensions.skillsDir
+                      : t.extensions.pluginsDir}
+                  </>
+                }
+              >
                 <input
                   placeholder={t.extensions.dirHint}
                   value={path}
                   onChange={(event) => setPath(event.target.value)}
                 />
-              </label>
+              </FormField>
               {currentTab === "skills" && (
                 <p className="field-help">
                   所选目录须包含
@@ -307,12 +294,9 @@ export function ExtensionsPage({
                 </p>
               )}
               <div>
-                <button
-                  className="primary-action"
-                  disabled={busy || !path.trim()}
-                >
+                <Button variant="primary" disabled={busy || !path.trim()}>
                   {currentTab === "skills" ? "导入技能" : "导入插件"}
-                </button>
+                </Button>
               </div>
             </form>
           ) : (
@@ -337,36 +321,36 @@ export function ExtensionsPage({
                   current.enabled &&
                   !current.available && (
                     <div className="detail-actions">
-                      <button
-                        className="secondary-action"
+                      <Button
+                        variant="secondary"
                         onClick={() => {
                           dialog.current?.close();
                           setTab("plugins");
                         }}
                       >
                         查看插件
-                      </button>
+                      </Button>
                     </div>
                   )}
                 {currentTab === "plugins" &&
                   current.host &&
                   current.enabled && (
                     <div className="detail-actions">
-                      <button
-                        className="secondary-action"
+                      <Button
+                        variant="secondary"
                         onClick={() => {
                           dialog.current?.close();
                           onOpenHost?.();
                         }}
                       >
                         打开设置
-                      </button>
+                      </Button>
                     </div>
                   )}
                 {currentTab === "plugins" && !current.host && (
                   <div className="detail-actions">
-                    <button
-                      className="secondary-action"
+                    <Button
+                      variant="secondary"
                       disabled={busy || current.enabled}
                       title={
                         current.enabled ? t.extensions.disableFirst : undefined
@@ -377,7 +361,7 @@ export function ExtensionsPage({
                       }}
                     >
                       移除插件
-                    </button>
+                    </Button>
                   </div>
                 )}
               </>

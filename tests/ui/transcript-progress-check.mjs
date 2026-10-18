@@ -1,4 +1,4 @@
-import "./runtime.mjs";
+import { uiStylesheetUrl, uiMotionStylesheetUrl } from "./runtime.mjs";
 // Exercise the real transcript with in-memory messages, without an Agent or BGI.
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -16,8 +16,8 @@ import ReactDOM from 'react-dom/client';
 const {useState}=React;
 const {createRoot}=ReactDOM;
 import {Transcript} from '/src/components/chat/Transcript.tsx';
-import '/src/product.css';
-import '/src/motion.css';
+import '${uiStylesheetUrl}';
+import '${uiMotionStylesheetUrl}';
 function Fixture(){
  const [state,setState]=useState({messages:[],stream:'',phase:'等待模型响应',seconds:1,toolLabels:{},tasks:[],running:true});
  const [generation,setGeneration]=useState(0);
@@ -45,7 +45,10 @@ try {
   console.log(
     JSON.stringify({ port, cleanup: "finally closes Vite and Chromium" }),
   );
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
+  });
   const page = await browser.newPage();
   page.on("pageerror", (error) => console.error(error.message));
   page.on("response", (response) => {
@@ -133,7 +136,10 @@ try {
   );
   state = { ...state, phase: undefined };
   await update();
-  assert((await status.textContent()).includes("思考中"), "missing phase must retain the generic indicator");
+  assert(
+    (await status.textContent()).includes("思考中"),
+    "missing phase must retain the generic indicator",
+  );
   state = { ...state, phase: processState.phase };
   await update();
   assert.equal(
@@ -356,8 +362,131 @@ try {
     false,
     "a plain answer should not show an empty process header",
   );
+  // Actual BetterGI metadata supplies the action title; internal IDs stay in details.
+  state = {
+    ...processState,
+    messages: [
+      messages[0],
+      message("", [
+        {
+          id: "describe-group",
+          name: "bgi.api.describe",
+          arguments: { methodId: "bgi.run_script_group" },
+        },
+      ]),
+      {
+        role: "tool",
+        toolCallId: "describe-group",
+        content: JSON.stringify({
+          ok: true,
+          value: { displayName: "运行配置组" },
+        }),
+        runId: "run",
+      },
+      message("", [
+        {
+          id: "run-group",
+          name: "bgi.api.invoke",
+          arguments: {
+            methodId: "bgi.run_script_group",
+            arguments: { groupName: "千星" },
+          },
+        },
+      ]),
+    ],
+    toolLabels: {
+      "bgi.api.describe": "查看操作说明",
+      "bgi.api.invoke": "执行 BetterGI 操作",
+    },
+    running: true,
+  };
+  await update(true);
+  await page
+    .locator(".activity-label")
+    .filter({ hasText: "运行配置组" })
+    .waitFor();
+  assert.equal(await page.locator(".activity-subject").textContent(), "千星");
+  assert(
+    !(await page
+      .locator(".activity-summary")
+      .textContent()
+      .then((text) => text.includes("bgi.run_script_group"))),
+  );
+  await page.locator(".activity-summary").click();
+  assert(
+    (await page.locator(".activity-detail").textContent()).includes(
+      "运行配置组",
+    ) ||
+      (await page.locator(".activity-detail").textContent()).includes(
+        "执行 BetterGI 操作",
+      ),
+  );
+  await page.getByRole("button", { name: "参数", exact: true }).last().click();
+  const actualArguments = page
+    .locator(".activity-item")
+    .last()
+    .locator("pre")
+    .first();
+  await actualArguments.waitFor();
+  assert(
+    (await actualArguments.textContent()).includes("bgi.run_script_group"),
+  );
+  // Searches, detail reads and revisions share one quiet line, never raw contents.
+  state = {
+    ...processState,
+    messages: [
+      messages[0],
+      message("", [
+        {
+          id: "memory-search",
+          name: "memory.search",
+          arguments: { query: "private-memory" },
+        },
+      ]),
+      {
+        role: "tool",
+        toolCallId: "memory-search",
+        content: '{"ok":true,"value":{"secret":"must-not-render"}}',
+        runId: "run",
+      },
+      message("", [
+        {
+          id: "memory-revise",
+          name: "memory.revise",
+          arguments: { experience: { summary: "must-not-render" } },
+        },
+      ]),
+    ],
+    running: true,
+  };
+  await update(true);
+  await page.locator(".memory-activity").waitFor();
+  assert.equal(await page.locator(".memory-activity").count(), 1);
+  assert.equal(await page.locator(".activity-group").count(), 0);
+  assert.equal(
+    await page.getByText("must-not-render", { exact: false }).count(),
+    0,
+  );
+  assert.equal(await page.locator("[data-answer]").isVisible(), false);
+  state = {
+    ...state,
+    messages: [
+      ...state.messages,
+      {
+        role: "tool",
+        toolCallId: "memory-revise",
+        content: '{"ok":true,"value":{"staged":true}}',
+        runId: "run",
+      },
+    ],
+  };
+  await update();
+  assert.equal(await page.locator(".memory-activity").count(), 1);
+  assert.equal(await page.locator(".memory-activity button").count(), 0);
   console.log(
     JSON.stringify({
+      bgiOperationUsesRealNameAndTarget: true,
+      memoryMaintenanceIsOneQuietLine: true,
       liveProgressVisible: true,
       independentThinkingIndicator: true,
       reasoningOnlyFeedback: true,

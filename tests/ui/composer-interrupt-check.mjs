@@ -1,4 +1,4 @@
-import "./runtime.mjs";
+import { uiStylesheetUrl, uiMotionStylesheetUrl } from "./runtime.mjs";
 // Real ChatPage/Session/API with controllable IPC. Owned server/browser/cache:
 // target/.tmp/composer-interrupt; finally closes processes, root cleans cache.
 import assert from "node:assert/strict";
@@ -26,8 +26,8 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { ChatPage } from '/src/pages/chat/ChatPage.tsx';
 import { PREVIEW_PERMISSION } from '/src/ipc/types.ts';
-import '/src/product.css';
-import '/src/motion.css';
+import '${uiStylesheetUrl}';
+import '${uiMotionStylesheetUrl}';
 const bootstrap = {models:[{id:'m',name:'Model',model:'fixture',active:true}],
 conversations:${JSON.stringify([...states, "failure", "switch", "accepted"].map((id) => ({ id, title: id })))},
 tools:[], skills:[{name:'create-shortcut',description:'创建快捷任务',enabled:true,available:true}], tasks:[],permission:PREVIEW_PERMISSION,runtimeToolLabels:{}};

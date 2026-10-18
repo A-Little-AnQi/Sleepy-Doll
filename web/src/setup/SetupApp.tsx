@@ -1,3 +1,4 @@
+import { Button } from "@sleepy-doll/ui";
 import { useEffect, useState } from "react";
 import { api, framelessWindow } from "../ipc/api";
 import { readError } from "../session";
@@ -7,7 +8,7 @@ import {
   BrandIcon,
   CheckIcon,
   FolderIcon,
-} from "../components/icons";
+} from "@sleepy-doll/ui/icons";
 import { setupApi, type SetupInfo, type SetupState } from "./api";
 import "./setup.css";
 import { useT } from "../i18n";
@@ -215,15 +216,15 @@ export function SetupApp() {
                         setDirectory(event.target.value);
                       }}
                     />
-                    <button
+                    <Button
                       type="button"
-                      className="secondary-action"
+                      variant="secondary"
                       disabled={busy || !ready}
                       onClick={() => void browse()}
                     >
                       <FolderIcon className="button-icon" />
                       浏览
-                    </button>
+                    </Button>
                   </div>
                   {target ? (
                     <p className="setup-note">
@@ -335,50 +336,50 @@ export function SetupApp() {
                   关闭
                 </button>
                 {uninstall ? null : (
-                  <button
+                  <Button
                     type="button"
-                    className="primary-action"
+                    variant="primary"
                     onClick={() => void launch()}
                   >
                     启动
-                  </button>
+                  </Button>
                 )}
               </>
             ) : view === "failed" ? (
               <>
-                <button
+                <Button
                   type="button"
-                  className="subtle-action"
+                  variant="subtle"
                   onClick={() => void api.windowClose()}
                 >
                   关闭
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="primary-action"
+                  variant="primary"
                   onClick={() => setRetry(true)}
                 >
                   返回重试
-                </button>
+                </Button>
               </>
             ) : (
               <>
-                <button
+                <Button
                   type="button"
-                  className="subtle-action"
+                  variant="subtle"
                   disabled={busy}
                   onClick={() => void api.windowClose()}
                 >
                   取消
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="primary-action"
+                  variant="primary"
                   disabled={busy || !ready || (!uninstall && !target)}
                   onClick={() => void start()}
                 >
                   {action}
-                </button>
+                </Button>
               </>
             )}
           </footer>

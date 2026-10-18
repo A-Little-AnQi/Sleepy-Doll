@@ -1,13 +1,14 @@
+import { Button } from "@sleepy-doll/ui";
 import { useEffect, useState } from "react";
 import { api } from "../../ipc/api";
-import { BridgeIcon, ChevronIcon, HistoryIcon } from "../../components/icons";
+import { BridgeIcon, ChevronIcon, HistoryIcon } from "@sleepy-doll/ui/icons";
 import { readError } from "../../session";
 import type { Bootstrap } from "../../ipc/types";
 import { BridgeApiExplorer } from "../../components/bridge/BridgeApiExplorer";
 import { BridgeRecovery } from "../../components/bridge/BridgeRecovery";
-import { Toast } from "../../components/overlay/Toast";
-import { Select } from "../../components/controls/Select";
-import { SettingRow } from "../../components/controls/SettingRow";
+import { Toast } from "@sleepy-doll/ui/overlay/Toast";
+import { Select } from "@sleepy-doll/ui/controls/Select";
+import { SettingRow } from "@sleepy-doll/ui/controls/SettingRow";
 import "./BridgePage.css";
 import { useT } from "../../i18n";
 export function BridgePage({
@@ -95,8 +96,8 @@ export function BridgePage({
             <strong>{connection.title}</strong>
             <span>{connection.detail}</span>
           </div>
-          <button
-            className="primary-action"
+          <Button
+            variant="primary"
             disabled={busy}
             onClick={() => void toggle(true)}
           >
@@ -105,7 +106,7 @@ export function BridgePage({
               : bridge.connected
                 ? t.bridge.reconnect
                 : t.bridge.connectButton}
-          </button>
+          </Button>
         </div>
         <div className="bridge-endpoint">
           <span>{t.bridge.addrLabel}</span>

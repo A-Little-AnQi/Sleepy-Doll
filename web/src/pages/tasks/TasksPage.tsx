@@ -1,12 +1,14 @@
+import { SearchField, EmptyState } from "@sleepy-doll/ui";
+import { Button, Badge } from "@sleepy-doll/ui";
 import { useMemo, useState } from "react";
 import { api } from "../../ipc/api";
-import { HistoryIcon, SearchIcon } from "../../components/icons";
+import { HistoryIcon } from "@sleepy-doll/ui/icons";
 import { TaskCard, type TaskActions } from "../../components/tasks/TaskCard";
 import { taskRun, taskError } from "../../components/tasks/task-display";
 import { isRunning, readError, taskLabels } from "../../session";
-import { Toast } from "../../components/overlay/Toast";
-import { ConfirmDialog } from "../../components/overlay/ConfirmDialog";
-import { SlidingTabs } from "../../components/controls/SlidingTabs";
+import { Toast } from "@sleepy-doll/ui/overlay/Toast";
+import { ConfirmDialog } from "@sleepy-doll/ui/overlay/ConfirmDialog";
+import { SlidingTabs } from "@sleepy-doll/ui/controls/SlidingTabs";
 import type { Bootstrap, TaskSummary } from "../../ipc/types";
 import "./TasksPage.css";
 
@@ -121,31 +123,28 @@ export function TasksPage({
       </div>
       {error && <Toast message={error} onDismiss={() => setError("")} />}
       <div className="list-toolbar tasks-filter-toolbar">
-        <label className="search-field">
-          <SearchIcon />
-          <input
-            aria-label={tab === "tasks" ? "搜索快捷任务" : "搜索运行记录"}
-            placeholder="搜索任务名称或应用"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
+        <SearchField
+          aria-label={tab === "tasks" ? "搜索快捷任务" : "搜索运行记录"}
+          placeholder="搜索任务名称或应用"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
         {tab === "tasks" && (
           <div className="filter-row">
-            <button
-              className="subtle-action"
+            <Button
+              variant="subtle"
               aria-pressed={!archived}
               onClick={() => setArchived(false)}
             >
               已保存
-            </button>
-            <button
-              className="subtle-action"
+            </Button>
+            <Button
+              variant="subtle"
               aria-pressed={archived}
               onClick={() => setArchived(true)}
             >
               已归档
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -164,50 +163,53 @@ export function TasksPage({
               ))}
             </div>
           ) : (
-            <div className="empty-state">
-              <HistoryIcon />
-              <h3>
-                {needle
-                  ? "没有匹配的任务"
-                  : archived
-                    ? "还没有归档任务"
-                    : "还没有快捷任务"}
-              </h3>
-              <p>
-                {needle
-                  ? "换个名称或清除筛选。"
-                  : archived
-                    ? "暂时不用的入口可以归档，随时恢复。"
-                    : "在对话里输入「创建快捷任务」，描述要加入的已有项，也可以点输入框左下角的 + 选择它。"}
-              </p>
+            <EmptyState
+              icon={<HistoryIcon />}
+              title={
+                <>
+                  {needle
+                    ? "没有匹配的任务"
+                    : archived
+                      ? "还没有归档任务"
+                      : "还没有快捷任务"}
+                </>
+              }
+              description={
+                <>
+                  {needle
+                    ? "换个名称或清除筛选。"
+                    : archived
+                      ? "暂时不用的入口可以归档，随时恢复。"
+                      : "在对话里输入「创建快捷任务」，描述要加入的已有项，也可以点输入框左下角的 + 选择它。"}
+                </>
+              }
+            >
               {needle && (
-                <button
-                  className="secondary-action"
+                <Button
+                  variant="secondary"
                   onClick={() => {
                     setQuery("");
                     setArchived(false);
                   }}
                 >
                   清除筛选
-                </button>
+                </Button>
               )}
-            </div>
+            </EmptyState>
           )}
           {legacy.length > 0 && !needle && !archived && (
             <details className="tasks-legacy">
               <summary>旧版流程 · {legacy.length} 项</summary>
               <p>
-                原有内容已保留。在对话里说要转换哪一项，让 AI 把它改成可直接运行的入口。
+                原有内容已保留。在对话里说要转换哪一项，让 AI
+                把它改成可直接运行的入口。
               </p>
               {legacy.map((task) => (
                 <div key={task.id}>
                   <span>{task.name}</span>
-                  <button
-                    className="subtle-action"
-                    onClick={() => setRemoving(task)}
-                  >
+                  <Button variant="subtle" onClick={() => setRemoving(task)}>
                     删除
-                  </button>
+                  </Button>
                 </div>
               ))}
             </details>
@@ -234,27 +236,22 @@ export function TasksPage({
                     </small>
                   )}
                 </div>
-                <span className="tag">
-                  {taskLabels[run.state] ?? run.state}
-                </span>
+                <Badge>{taskLabels[run.state] ?? run.state}</Badge>
                 {isRunning(run) ? (
-                  <button
-                    className="subtle-action"
+                  <Button
+                    variant="subtle"
                     disabled={busy === run.id || run.state === "cancelling"}
                     onClick={() =>
                       void act(run.id, () => api.cancelTask(run.id))
                     }
                   >
                     {run.state === "cancelling" ? "正在停止" : "停止"}
-                  </button>
+                  </Button>
                 ) : (
                   task?.shortcut && (
-                    <button
-                      className="subtle-action"
-                      onClick={() => onOpenTask?.(task)}
-                    >
+                    <Button variant="subtle" onClick={() => onOpenTask?.(task)}>
                       查看任务
-                    </button>
+                    </Button>
                   )
                 )}
               </div>
@@ -262,11 +259,11 @@ export function TasksPage({
           })}
         </div>
       ) : (
-        <div className="empty-state">
-          <HistoryIcon />
-          <h3>{needle ? "没有匹配的记录" : "还没有运行记录"}</h3>
-          <p>快捷任务的运行结果会显示在这里。</p>
-        </div>
+        <EmptyState
+          icon={<HistoryIcon />}
+          title={<>{needle ? "没有匹配的记录" : "还没有运行记录"}</>}
+          description={<>快捷任务的运行结果会显示在这里。</>}
+        ></EmptyState>
       )}
       <ConfirmDialog
         open={removing != null}

@@ -1,3 +1,4 @@
+import { Button } from "@sleepy-doll/ui";
 import {
   useEffect,
   useId,
@@ -15,9 +16,9 @@ import {
   SendIcon,
   SettingsIcon,
   StopIcon,
-} from "../../components/icons";
+} from "@sleepy-doll/ui/icons";
 import { SkillMenu, filterSkills } from "../../components/chat/SkillMenu";
-import { Select } from "../../components/controls/Select";
+import { Select } from "@sleepy-doll/ui/controls/Select";
 import {
   isRunning,
   phaseLabel,
@@ -26,19 +27,19 @@ import {
   taskLabels,
   useSession,
 } from "../../session";
-import { Toast } from "../../components/overlay/Toast";
+import { Toast } from "@sleepy-doll/ui/overlay/Toast";
 import type {
   Bootstrap,
   QuestionAnswers,
   QuestionRequestInfo,
   RunApproval,
 } from "../../ipc/types";
-import { MotionSwitch } from "../../components/controls/MotionSwitch";
-import { DisclosureChevron } from "../../components/controls/DisclosureChevron";
+import { MotionSwitch } from "@sleepy-doll/ui/controls/MotionSwitch";
+import { DisclosureChevron } from "@sleepy-doll/ui/controls/DisclosureChevron";
 import { resolveConversationModel } from "../../models";
 import { ContextMeter } from "../../components/chat/ContextMeter";
-import { ComposerDeck } from "../../components/chat/ComposerDeck";
-import { ComposerField } from "../../components/chat/ComposerField";
+import { ComposerDeck } from "@sleepy-doll/ui/chat/ComposerDeck";
+import { ComposerField } from "@sleepy-doll/ui/chat/ComposerField";
 import { PendingRequestLayer } from "../../components/chat/QuestionCard";
 import { estimateMessagesTokens } from "../../session/context-usage";
 import { useT } from "../../i18n";
@@ -431,8 +432,8 @@ export function ChatPage({
   const waitingForUser = Boolean(
     question || questionRequests.length || approval,
   );
-  // 等待时把交互区可用高度写进 CSS 变量：min(320px, 工作区高度 50%,
-  // 扣除 composer/等待行/padding 并给历史至少留 100px)。只算高度，无循环。
+  // 问答按真实剩余空间伸展，保留输入框和至少 112px 历史；不再固定卡死 320px。
+  // 仅观察工作区/输入框高度，避免问答面板自身尺寸反馈造成抖动。
   useLayoutEffect(() => {
     const ws = workspace.current;
     const dk = dock.current;
@@ -443,11 +444,17 @@ export function ChatPage({
       const waitH =
         ws.querySelector(".composer-waiting")?.getBoundingClientRect().height ??
         0;
-      const dkPad = parseFloat(getComputedStyle(dk).paddingTop) || 0;
-      const avail = wsH - dkH - waitH - dkPad - 100;
+      const requestDock = ws.querySelector(".pending-request-dock");
+      const requestPad = requestDock
+        ? parseFloat(getComputedStyle(requestDock).paddingTop) || 0
+        : 0;
+      const historyReserve = Math.min(
+        160,
+        Math.max(112, Math.floor(wsH * 0.18)),
+      );
       const max = Math.max(
         0,
-        Math.min(320, Math.floor(wsH * 0.5), Math.floor(avail)),
+        Math.floor(wsH - dkH - waitH - requestPad - historyReserve),
       );
       ws.style.setProperty("--pending-request-max-height", `${max}px`);
     };
@@ -523,20 +530,16 @@ export function ChatPage({
               <h2>{t.chat.startNew}</h2>
               {!bootstrap.models.length &&
                 (onOpenModels ? (
-                  <button
-                    type="button"
-                    className="subtle-action"
-                    onClick={onOpenModels}
-                  >
+                  <Button type="button" variant="subtle" onClick={onOpenModels}>
                     <SettingsIcon className="button-icon" />
                     {t.chat.addModelFirst}
-                  </button>
+                  </Button>
                 ) : (
                   <p className="muted">{t.chat.addModelFirst}</p>
                 ))}
-              <button
+              <Button
                 type="button"
-                className="subtle-action"
+                variant="subtle"
                 onClick={() =>
                   window.dispatchEvent(
                     new CustomEvent("sleepy-doll:open-release-notes", {
@@ -547,7 +550,7 @@ export function ChatPage({
               >
                 <HelpIcon className="button-icon" />
                 {t.account.help}
-              </button>
+              </Button>
             </div>
           ) : (
             <div className="conversation-scene">
@@ -583,22 +586,22 @@ export function ChatPage({
                       <p>{task.error || task.result}</p>
                       {task.state === "blocked" && (
                         <div className="detail-actions">
-                          <button
-                            className="primary-action"
+                          <Button
+                            variant="primary"
                             onClick={() =>
                               void act(() => api.resumeTask(task.id))
                             }
                           >
                             重试任务
-                          </button>
-                          <button
-                            className="secondary-action"
+                          </Button>
+                          <Button
+                            variant="secondary"
                             onClick={() =>
                               void act(() => api.cancelTask(task.id))
                             }
                           >
                             停止任务
-                          </button>
+                          </Button>
                         </div>
                       )}
                     </section>

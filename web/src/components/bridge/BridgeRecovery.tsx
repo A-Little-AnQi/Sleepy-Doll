@@ -1,11 +1,13 @@
+import { SearchField } from "@sleepy-doll/ui";
+import { Button } from "@sleepy-doll/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../ipc/api";
 import { readError } from "../../session";
-import { Dialog } from "../overlay/Dialog";
-import { Toast } from "../overlay/Toast";
-import { SlidingTabs } from "../controls/SlidingTabs";
-import { Checkbox } from "../controls/Checkbox";
-import { ChevronIcon, SearchIcon } from "../icons";
+import { Dialog } from "@sleepy-doll/ui/overlay/Dialog";
+import { Toast } from "@sleepy-doll/ui/overlay/Toast";
+import { SlidingTabs } from "@sleepy-doll/ui/controls/SlidingTabs";
+import { Checkbox } from "@sleepy-doll/ui/controls/Checkbox";
+import { ChevronIcon } from "@sleepy-doll/ui/icons";
 import type { RecoveryRecord, RecoveryPreview } from "../../ipc/types";
 import { useT, type Text } from "../../i18n";
 import { useLocale, type LocaleId } from "../../appearance/locale";
@@ -238,27 +240,27 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
         <div>
           <h2>{t.bridge.recoveryHeading}</h2>
         </div>
-        <button
-          className="secondary-action"
+        <Button
+          variant="secondary"
           disabled={loading || restoring}
           onClick={() => void refresh()}
         >
           {loading
             ? t.bridgeRecovery.loadingShort
             : t.bridgeRecovery.refreshRecords}
-        </button>
+        </Button>
       </div>
       {notice && (
         <div className="recovery-success" role="status">
           <span>{notice}</span>
           {undoRecord && (
-            <button className="subtle-action" onClick={() => open(undoRecord)}>
+            <Button variant="subtle" onClick={() => open(undoRecord)}>
               {t.bridgeRecovery.viewUndoRestore}
-            </button>
+            </Button>
           )}
-          <button className="subtle-action" onClick={() => setNotice("")}>
+          <Button variant="subtle" onClick={() => setNotice("")}>
             {t.bridgeRecovery.dismissNotice}
-          </button>
+          </Button>
         </div>
       )}
       {error && <Toast message={error} onDismiss={() => setError("")} />}
@@ -284,15 +286,12 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
             },
           ]}
         />
-        <label className="search-field">
-          <SearchIcon />
-          <input
-            aria-label={t.bridgeRecovery.searchRecords}
-            placeholder={t.bridgeRecovery.searchPlaceholder}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
+        <SearchField
+          aria-label={t.bridgeRecovery.searchRecords}
+          placeholder={t.bridgeRecovery.searchPlaceholder}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
       </div>
       {visible.length ? (
         <div className="recovery-list">
@@ -318,13 +317,13 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
                 )}
                 {record.reason && <p>{record.reason}</p>}
               </div>
-              <button
-                className="secondary-action"
+              <Button
+                variant="secondary"
                 disabled={record.canPreview === false || restoring}
                 onClick={() => open(record)}
               >
                 {t.bridgeRecovery.viewAndRestore}
-              </button>
+              </Button>
             </article>
           ))}
         </div>
@@ -362,15 +361,11 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
                   ? t.bridgeRecovery.maxPerRestore
                   : ""}
             </span>
-            <button
-              className="subtle-action"
-              disabled={restoring}
-              onClick={close}
-            >
+            <Button variant="subtle" disabled={restoring} onClick={close}>
               {t.common.cancel}
-            </button>
-            <button
-              className="primary-action"
+            </Button>
+            <Button
+              variant="primary"
               disabled={
                 restoring || previewing || !matches || !preview?.canApply
               }
@@ -381,28 +376,28 @@ export function BridgeRecovery({ onBack }: { onBack(): void }) {
                 : mode === "full"
                   ? t.bridgeRecovery.restoreFullAction
                   : t.bridgeRecovery.restoreCount(paths.length)}
-            </button>
+            </Button>
           </>
         }
       >
         {selected?.paths.length ? (
           <div className="recovery-mode">
-            <button
-              className="subtle-action"
+            <Button
+              variant="subtle"
               aria-pressed={mode === "fields"}
               disabled={restoring}
               onClick={() => setMode("fields")}
             >
               {t.bridgeRecovery.modeFields}
-            </button>
-            <button
-              className="subtle-action"
+            </Button>
+            <Button
+              variant="subtle"
               aria-pressed={mode === "full"}
               disabled={restoring}
               onClick={() => setMode("full")}
             >
               {t.bridgeRecovery.modeFull}
-            </button>
+            </Button>
           </div>
         ) : null}
         {selected?.configPath && (

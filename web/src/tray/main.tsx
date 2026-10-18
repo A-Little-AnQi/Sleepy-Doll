@@ -9,10 +9,10 @@ import {
   SettingsIcon,
   SidebarIcon,
   StopIcon,
-} from "../components/icons";
-import { Switch } from "../components/controls/Switch";
+} from "@sleepy-doll/ui/icons";
+import { Switch } from "@sleepy-doll/ui/controls/Switch";
 import { ContextMenu } from "../components/shell/ContextMenu";
-import "../product.css";
+import "@sleepy-doll/ui/styles.css";
 import "./tray.css";
 
 interface TrayState {

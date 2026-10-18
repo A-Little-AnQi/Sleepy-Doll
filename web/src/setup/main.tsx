@@ -1,10 +1,11 @@
+import { ProductUiProvider } from "../appearance/UiProvider";
 import { Component, StrictMode, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { SetupApp } from "./SetupApp";
 import { ContextMenu } from "../components/shell/ContextMenu";
 import { DesktopReady } from "../components/shell/DesktopReady";
-import "../product.css";
-import "../motion.css";
+import "@sleepy-doll/ui/styles.css";
+import "@sleepy-doll/ui/motion.css";
 import "./setup.css";
 
 /** 出错时显示错误信息。 */
@@ -37,10 +38,12 @@ class ErrorBoundary extends Component<
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ErrorBoundary>
-      <SetupApp />
-    </ErrorBoundary>
-    <ContextMenu />
-    <DesktopReady />
+    <ProductUiProvider>
+      <ErrorBoundary>
+        <SetupApp />
+      </ErrorBoundary>
+      <ContextMenu />
+      <DesktopReady />
+    </ProductUiProvider>
   </StrictMode>,
 );

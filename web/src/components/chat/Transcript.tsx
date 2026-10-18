@@ -10,8 +10,14 @@ import {
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
-import { AlertIcon, CheckIcon, CopyIcon, HelpIcon } from "../icons";
-import { DisclosureChevron } from "../controls/DisclosureChevron";
+import {
+  AlertIcon,
+  CheckIcon,
+  CopyIcon,
+  HelpIcon,
+  HistoryIcon,
+} from "@sleepy-doll/ui/icons";
+import { DisclosureChevron } from "@sleepy-doll/ui/controls/DisclosureChevron";
 import type { ContextActivity, MessageInfo, TaskInfo } from "../../ipc/types";
 import "./Transcript.css";
 import { useT } from "../../i18n";
@@ -22,6 +28,8 @@ import { prepareCjkStrong, remarkCjkStrong } from "./remarkCjkStrong";
 type Call = NonNullable<MessageInfo["toolCalls"]>[number];
 interface Activity extends Call {
   result?: string;
+  displayLabel?: string;
+  displaySubject?: string;
 }
 type Part =
   | {
@@ -35,6 +43,7 @@ type Part =
   | { kind: "reasoning"; text: string }
   | { kind: "stream"; text: string; visibleText: string }
   | { kind: "activities"; activities: Activity[] }
+  | { kind: "memory"; activities: Activity[] }
   | { kind: "context"; activity: ContextActivity };
 export interface Turn {
   key: string;
@@ -73,6 +82,33 @@ function subjectOf(args: unknown) {
   return "";
 }
 
+/** Use actual BetterGI contract titles; never infer an action from a method ID. */
+function bgiActivityLabel(value: string | undefined) {
+  return value &&
+    value.length <= 80 &&
+    !/宿主|注入|反射|程序集|桥接|原生构造器|(?:bgi|cmd)\./.test(value)
+    ? value
+    : undefined;
+}
+function bgiActivitySubject(call: Call) {
+  if (call.name === "bgi.api.describe") return "";
+  if (call.name !== "bgi.api.invoke") return subjectOf(call.arguments);
+  const args = call.arguments as Record<string, unknown> | undefined;
+  const target = args?.arguments as Record<string, unknown> | undefined;
+  if (!target || typeof target !== "object") return "";
+  const groups = target.groupNames;
+  if (
+    Array.isArray(groups) &&
+    groups.every((name) => typeof name === "string")
+  ) {
+    return subjectOf({ name: groups.join("、") });
+  }
+  return subjectOf({
+    name: target.groupName ?? target.scriptGroupName ?? target.name,
+    path: target.path ?? target.relativePath,
+  });
+}
+
 function pushReasoning(turn: Turn, text: string) {
   // 每条消息的思考放在该消息正文之前，保留跨消息的真实执行顺序。
   turn.parts.push({ kind: "reasoning", text });
@@ -94,6 +130,23 @@ export function buildTurns(
       .filter((message) => message.role === "tool")
       .map((message) => [message.toolCallId, message.content]),
   );
+  const bgiLabels = new Map<string, string>();
+  for (const message of messages) {
+    for (const call of message.toolCalls ?? []) {
+      if (call.name !== "bgi.api.describe") continue;
+      try {
+        const detail = JSON.parse(results.get(call.id) ?? "null");
+        const name = bgiActivityLabel(
+          detail?.ok === true ? detail.value?.displayName : undefined,
+        );
+        const method = (call.arguments as Record<string, unknown>)?.methodId;
+        if (name && typeof method === "string")
+          bgiLabels.set(`${message.runId ?? ""}:${method}`, name);
+      } catch {
+        /* Missing or incomplete metadata keeps the ordinary tool label. */
+      }
+    }
+  }
   const turns: Turn[] = [];
   const counts = new Map<string, number>();
   const keyFor = (role: string, owner: string) => {
@@ -142,18 +195,32 @@ export function buildTurns(
           ? { boundary: message.streamBoundary }
           : {}),
       });
-    if (calls.length) {
-      let part = turn.parts.at(-1);
-      if (part?.kind !== "activities") {
-        part = { kind: "activities", activities: [] };
+    for (const call of calls) {
+      const memory = call.name.startsWith("memory.");
+      let part = memory
+        ? turn.parts.find((part) => part.kind === "memory")
+        : turn.parts.at(-1);
+      if (memory ? part?.kind !== "memory" : part?.kind !== "activities") {
+        part = memory
+          ? { kind: "memory", activities: [] }
+          : { kind: "activities", activities: [] };
         turn.parts.push(part);
       }
-      part.activities.push(
-        ...calls.map((call) => ({
+      if (part?.kind === "activities" || part?.kind === "memory") {
+        const method = (call.arguments as Record<string, unknown>)?.methodId;
+        const displayLabel =
+          call.name === "bgi.api.invoke" && typeof method === "string"
+            ? bgiLabels.get(`${message.runId ?? ""}:${method}`)
+            : undefined;
+        part.activities.push({
           ...call,
+          ...(displayLabel ? { displayLabel } : {}),
+          ...(call.name.startsWith("bgi.")
+            ? { displaySubject: bgiActivitySubject(call) }
+            : {}),
           ...(results.has(call.id) ? { result: results.get(call.id)! } : {}),
-        })),
-      );
+        });
+      }
     }
   }
   for (const activity of contextActivities) {
@@ -264,13 +331,25 @@ function ActivityGroup({
   const failed = activities.some((activity) => outcome(activity) === "failed");
   const label = [
     ...new Set(
-      activities.map((activity) => labels[activity.name] ?? activity.name),
+      activities.map(
+        (activity) =>
+          activity.displayLabel ?? labels[activity.name] ?? activity.name,
+      ),
     ),
   ]
     .slice(0, 3)
     .join(" · ");
-  const subject =
-    activities.length === 1 ? subjectOf(activities[0]!.arguments) : "";
+  const subjects = [
+    ...new Set(
+      activities
+        .map(
+          (activity) =>
+            activity.displaySubject ?? subjectOf(activity.arguments),
+        )
+        .filter(Boolean),
+    ),
+  ];
+  const subject = subjects.length === 1 ? subjects[0] : "";
   return (
     <section className="activity-group" data-expanded={expanded}>
       <button
@@ -706,6 +785,11 @@ export const Transcript = memo(function Transcript({
                             active={active}
                             waiting={waiting}
                           />
+                        ) : part.kind === "memory" ? (
+                          <div key="memory" className="memory-activity">
+                            <HistoryIcon className="activity-icon" />
+                            <span>{t.transcript.memoryActivity}</span>
+                          </div>
                         ) : part.kind === "context" ? (
                           <div
                             className="context-activity"
@@ -767,9 +851,7 @@ export const Transcript = memo(function Transcript({
               !active &&
               isRunLast[index] &&
               task?.state === "cancelled" && (
-                <div className="turn-outcome-note">
-                  {t.transcript.stopped}
-                </div>
+                <div className="turn-outcome-note">{t.transcript.stopped}</div>
               )}
             <div
               className={`message-actions${turn.role === "user" ? " is-user" : ""}`}

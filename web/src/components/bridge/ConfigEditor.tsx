@@ -1,7 +1,8 @@
+import { Button } from "@sleepy-doll/ui";
 import { useEffect, useState } from "react";
 import { api } from "../../ipc/api";
-import { Dialog } from "../overlay/Dialog";
-import { TextField } from "../controls/TextField";
+import { Dialog } from "@sleepy-doll/ui/overlay/Dialog";
+import { TextField } from "@sleepy-doll/ui/controls/TextField";
 import { useT } from "../../i18n";
 
 export function ConfigEditor({
@@ -63,17 +64,17 @@ export function ConfigEditor({
       subtitle={filePath || path}
       footer={
         <>
-          <button type="button" className="subtle-action" onClick={onClose}>
+          <Button type="button" variant="subtle" onClick={onClose}>
             {t.common.cancel}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="primary-action"
+            variant="primary"
             disabled={saving}
             onClick={() => void save()}
           >
             {saving ? t.configEditor.saving : t.common.save}
-          </button>
+          </Button>
         </>
       }
     >

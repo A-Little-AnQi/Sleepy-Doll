@@ -22,7 +22,12 @@ export function SlidingTabs<T extends string>({
   const pill = useRef<HTMLSpanElement>(null);
   // 选中指示条按按钮本地 CSS 像素对齐（offsetParent 是 nav）：屏幕 rect 在
   // NativeScene 嵌套缩放祖先下会被二次换算导致灰底错位/错尺寸。
-  const box = useRef<{ left: number; width: number; top: number; height: number } | null>(null);
+  const box = useRef<{
+    left: number;
+    width: number;
+    top: number;
+    height: number;
+  } | null>(null);
   const last = useRef(value);
 
   const place = (animate: boolean) => {

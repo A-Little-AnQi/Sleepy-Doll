@@ -1,4 +1,4 @@
-import "./runtime.mjs";
+import { uiStylesheetUrl, uiMotionStylesheetUrl } from "./runtime.mjs";
 // 结构化问答独立 dock 验收：真实 ChatPage/Session/API，fake IPC 不启动模型或 BetterGI。
 // 资源登记：本地 vite 服务、Chromium 与缓存/截图目录 target/.tmp/chat-interaction
 // 均属本任务（运行时 TEMP/TMP 亦指向 target/.tmp/chat-interaction）；
@@ -15,7 +15,9 @@ const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
-const tmpDir = path.join(root, "target", ".tmp", "chat-interaction");
+const tmpDir =
+  process.env.SLEEPY_DOLL_UI_CAPTURE_DIR ??
+  path.join(root, "target", ".tmp", "chat-interaction");
 fs.mkdirSync(tmpDir, { recursive: true });
 process.env.TEMP = tmpDir;
 process.env.TMP = tmpDir;
@@ -25,8 +27,8 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import {ChatPage} from '/src/pages/chat/ChatPage.tsx';
 import {PREVIEW_PERMISSION} from '/src/ipc/types.ts';
-import '/src/product.css';
-import '/src/motion.css';
+import '${uiStylesheetUrl}';
+import '${uiMotionStylesheetUrl}';
 const bootstrap={models:[{id:'fixture-model',name:'Fixture Model',model:'fixture',active:true,contextWindow:256000}],
  conversations:[{id:'q-a',title:'A'},{id:'q-b',title:'B'},{id:'q-c',title:'C'},{id:'q-d',title:'D'},{id:'q-e',title:'E'},{id:'q-f',title:'F'},{id:'q-g',title:'G'},{id:'q-h',title:'H'},{id:'q-i',title:'I'},{id:'q-z',title:'Z'}],
  tools:[],skills:[],tasks:[],permission:PREVIEW_PERMISSION,runtimeToolLabels:{}};
@@ -60,19 +62,21 @@ const convOfRun = {
   "run-h": "q-h",
   "run-i": "q-i",
 };
-const request = (requestId, runId, questions) => ({ requestId, runId, questions });
+const request = (requestId, runId, questions) => ({
+  requestId,
+  runId,
+  questions,
+});
 // 事件 data.request 只有 requestId/questions；runId 以事件归属为权威。
 const eventRequest = (requestId, questions) => ({ requestId, questions });
-const longText = "请描述脚本要放在哪个目录，包括盘符、各级目录名与文件名，并说明为什么选择这个路径，方便我们排查。";
+const longText =
+  "请描述脚本要放在哪个目录，包括盘符、各级目录名与文件名，并说明为什么选择这个路径，方便我们排查。";
 const multiQuestion = [
   {
     id: "mode",
     header: "运行方式",
     question: "现在**启动**还是只做检查？",
-    options: [
-      { label: "启动", description: "立即运行" },
-      { label: "检查" },
-    ],
+    options: [{ label: "启动", description: "立即运行" }, { label: "检查" }],
   },
   { id: "path", header: "路径", question: longText },
 ];
@@ -108,7 +112,11 @@ const teamQuestion = [
     id: "team",
     header: "出战队伍",
     question: "这次用哪支队伍？可以填写队伍名，或写出四位角色名字。",
-    options: [{ label: "精英队" }, { label: "采集队" }],
+    options: [
+      { label: "精英队", description: "使用已有的精英讨伐队伍" },
+      { label: "采集队", description: "使用已有的采集与赶路队伍" },
+      { label: "日常队", description: "使用已有的日常任务队伍" },
+    ],
   },
 ];
 // 长题：短窗下单卡 body 必须内部滚动，footer 主按钮不被裁。
@@ -186,7 +194,11 @@ const runsFor = (conv) =>
 // 压力会话依赖两个唯一且真实等待用户的 run；id 缺失/重复会让后面断言失真。
 assert.equal(runById("run-d1").id, "run-d1");
 assert.equal(runById("run-d2").id, "run-d2");
-assert.notDeepEqual(runById("run-d1"), runById("run-d2"), "run-d1/d2 必须是两条记录");
+assert.notDeepEqual(
+  runById("run-d1"),
+  runById("run-d2"),
+  "run-d1/d2 必须是两条记录",
+);
 assert.equal(runById("run-d1").state, "awaitingUser");
 assert.equal(runById("run-d2").state, "awaitingUser");
 // 独立 dock 几何：pending dock 与 composer 左右对齐、互不重叠、都不遮 chat-scroll。
@@ -205,7 +217,9 @@ const dockGeometry = (page) =>
     };
     const q = (sel) => document.querySelector(sel);
     return {
-      pending: q(".pending-request-dock") ? rect(q(".pending-request-dock")) : null,
+      pending: q(".pending-request-dock")
+        ? rect(q(".pending-request-dock"))
+        : null,
       composer: rect(q(".composer-dock")),
       scroll: rect(q(".chat-scroll")),
       flow: q(".conversation-flow") ? rect(q(".conversation-flow")) : null,
@@ -264,7 +278,9 @@ const convMessages = (conv) =>
             runId: "run-i",
             streamBoundary: 0,
             createdAt: "2026-10-01T00:00:02Z",
-            toolCalls: [{ id: "t1", name: "bridge.call", arguments: { target: "tmp" } }],
+            toolCalls: [
+              { id: "t1", name: "bridge.call", arguments: { target: "tmp" } },
+            ],
           },
         ]
       : [];
@@ -275,7 +291,11 @@ pushEvent("q-c", "approval.requested", "run-c", {
   runId: "run-c",
   request: {
     methodId: "bgi.set_pathing_party",
-    arguments: { groupName: "兽怪暴徒", partyName: "精英", hurryAvatar: "玛薇卡" },
+    arguments: {
+      groupName: "兽怪暴徒",
+      partyName: "精英",
+      hurryAvatar: "玛薇卡",
+    },
     binding: { description: "修改任务设置" },
     presentation: {
       title: "修改任务设置",
@@ -310,7 +330,10 @@ try {
   const domUrl = entry.code.match(
     /from "([^"]*\/react-dom_client\.js\?[^"]*)"/,
   )[1];
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
+  });
   const page = await browser.newPage({
     viewport: { width: 1100, height: 850 },
   });
@@ -334,7 +357,9 @@ try {
       /^WebSocket connection to 'ws:\/\/127\.0\.0\.1[:/]/.test(text);
     if (!isViteHmrNoise) consoleErrors.push(text);
   });
-  await page.addInitScript(() => localStorage.setItem("sleepy-doll-locale", "zh"));
+  await page.addInitScript(() =>
+    localStorage.setItem("sleepy-doll-locale", "zh"),
+  );
   const answerCalls = () =>
     calls.filter((call) => call.method === "run.question.answer");
   const cardCount = () => page.locator(".pending-request-card").count();
@@ -347,7 +372,7 @@ try {
     if (request.method === "conversation.get") {
       const source =
         staleConvs.has(conv) || (staleSnapshot && conv === "q-a")
-          ? openRequests[conv] ?? []
+          ? (openRequests[conv] ?? [])
           : (openRequests[conv] ?? []).filter(
               (entry) => !answered.has(`${entry.runId}:${entry.requestId}`),
             );
@@ -382,9 +407,14 @@ try {
         answerDelayMs = 0;
       }
       answered.add(`${request.params.id}:${request.params.requestId}`);
-      pushEvent(convOfRun[request.params.id] ?? "q-z", "question.answered", request.params.id, {
-        requestId: request.params.requestId,
-      });
+      pushEvent(
+        convOfRun[request.params.id] ?? "q-z",
+        "question.answered",
+        request.params.id,
+        {
+          requestId: request.params.requestId,
+        },
+      );
       result = { accepted: true, recorded: true };
     }
     if (request.method === "approval.respond") {
@@ -451,10 +481,26 @@ try {
   await cardA.waitFor();
   const after = await geometry();
   // dock 出现会把 composer 往下推（normal flow），但左右位置与宽度必须不变。
-  assert.equal(after.composer.left, before.composer.left, "composer 左边线不得漂移");
-  assert.equal(after.composer.width, before.composer.width, "composer 宽度不得改变");
-  assert.equal(after.dock.left, before.dock.left, "composer-dock 左边线不得漂移");
-  assert.equal(after.dock.width, before.dock.width, "composer-dock 宽度不得改变");
+  assert.equal(
+    after.composer.left,
+    before.composer.left,
+    "composer 左边线不得漂移",
+  );
+  assert.equal(
+    after.composer.width,
+    before.composer.width,
+    "composer 宽度不得改变",
+  );
+  assert.equal(
+    after.dock.left,
+    before.dock.left,
+    "composer-dock 左边线不得漂移",
+  );
+  assert.equal(
+    after.dock.width,
+    before.dock.width,
+    "composer-dock 宽度不得改变",
+  );
   assertDockGeometry(await dockGeometry(page), "q-a");
   // 等待提示行出现，composer 保持普通输入提示且可编辑（发送即打断上一轮）。
   await page.getByText("等待你的回答，提交后继续").waitFor();
@@ -479,30 +525,52 @@ try {
     return {
       header: header - text,
       desc: desc ? left(desc) - left(label) : null,
-      radioSize: Math.max(Math.abs(radio.width - 16), Math.abs(radio.height - 16)),
+      radioSize: Math.max(
+        Math.abs(radio.width - 16),
+        Math.abs(radio.height - 16),
+      ),
       probe: `${radio.width}x${radio.height}/${getComputedStyle(radioNode).boxSizing}`,
       radioCenter: radio.top + radio.height / 2 - (labelBox.top + 10),
     };
   });
   assert.ok(Math.abs(alignA.header) <= 1, "标题与正文必须共享左边线");
-  assert.ok(alignA.desc === null || Math.abs(alignA.desc) <= 1, "description 必须与 label 左对齐");
-  assert.ok(alignA.radioSize <= 0.5, `radio 必须是 16x16，实际 ${alignA.probe} 偏差 ${alignA.radioSize}`);
-  assert.ok(Math.abs(alignA.radioCenter) <= 1, "radio 圆点必须对齐首行文本行盒中心");
   assert.ok(
-    await page.getByRole("button", { name: "快捷命令", exact: true }).isDisabled(),
+    alignA.desc === null || Math.abs(alignA.desc) <= 1,
+    "description 必须与 label 左对齐",
+  );
+  assert.ok(
+    alignA.radioSize <= 0.5,
+    `radio 必须是 16x16，实际 ${alignA.probe} 偏差 ${alignA.radioSize}`,
+  );
+  assert.ok(
+    Math.abs(alignA.radioCenter) <= 1,
+    "radio 圆点必须对齐首行文本行盒中心",
+  );
+  assert.ok(
+    await page
+      .getByRole("button", { name: "快捷命令", exact: true })
+      .isDisabled(),
     "busy 时技能菜单必须禁用，避免插入运行中草稿",
   );
   // MarkdownText 渲染块级元素：容器必须是 DIV，且不允许 p 内嵌块级。
   assert.equal(
-    await cardA.locator(".pending-request-text").evaluate((node) => node.tagName),
+    await cardA
+      .locator(".pending-request-text")
+      .evaluate((node) => node.tagName),
     "DIV",
   );
   assert.equal(await cardA.locator("p div, p ol, p ul, p p").count(), 0);
   // 第一题：两个建议选项（没有「其他」），且选项题也直接显示文字输入。
   const optionsA = cardA.locator("label.pending-request-option");
-  assert.equal(await optionsA.count(), 2, "选项数必须等于真实选项数（无「其他」）");
   assert.equal(
-    await cardA.locator('label.pending-request-option:has-text("其他")').count(),
+    await optionsA.count(),
+    2,
+    "选项数必须等于真实选项数（无「其他」）",
+  );
+  assert.equal(
+    await cardA
+      .locator('label.pending-request-option:has-text("其他")')
+      .count(),
     0,
     "不得再有「其他」单选",
   );
@@ -523,8 +591,11 @@ try {
   // 等待期间停止按钮文案是「取消任务」。
   const stopA = page.locator(".composer-submit .send-action");
   assert.ok(await stopA.isVisible(), "busy 会话停止按钮可见");
-  assert.equal(await stopA.getAttribute("aria-label"), "取消任务",
-    "等待用户期间的停止按钮必须是「取消任务」");
+  assert.equal(
+    await stopA.getAttribute("aria-label"),
+    "取消任务",
+    "等待用户期间的停止按钮必须是「取消任务」",
+  );
   // 直接输入文字（不选任何选项）也能作答进下一题。
   await freeQ1.fill("直接文字作答");
   assert.ok(await nextA.isEnabled(), "直接输入文字也必须能进下一题");
@@ -539,7 +610,10 @@ try {
   await freeA.fill("自定义");
   // 独立 dock 不遮 composer：pending dock 在 composer 上方且不相交。
   const geoA2 = await dockGeometry(page);
-  assert.ok(geoA2.pending.bottom <= geoA2.composer.top + 1, "dock 不得遮挡 composer");
+  assert.ok(
+    geoA2.pending.bottom <= geoA2.composer.top + 1,
+    "dock 不得遮挡 composer",
+  );
   // 草稿与题序跨会话切换恢复。
   await page.evaluate(() => window.showConv("q-z"));
   await sleep(200);
@@ -555,12 +629,12 @@ try {
     const r = node.getBoundingClientRect();
     return { left: r.left, right: r.right };
   });
-  const layerBox = await page.locator(".pending-request-layer").evaluate(
-    (node) => {
+  const layerBox = await page
+    .locator(".pending-request-layer")
+    .evaluate((node) => {
       const r = node.getBoundingClientRect();
       return { left: r.left, right: r.right };
-    },
-  );
+    });
   assert.ok(
     Math.abs(chipBox.left - layerBox.left) <= 1 &&
       Math.abs(chipBox.right - layerBox.right) <= 1,
@@ -597,9 +671,15 @@ try {
     "切走再回来同内容重试仍必须同 key",
   );
   await submitA.click();
-  await page.waitForFunction(() => !document.querySelector(".pending-request-card"));
+  await page.waitForFunction(
+    () => !document.querySelector(".pending-request-card"),
+  );
   assert.equal(answerCalls().length, 3);
-  assert.equal(answerCalls()[2].params.clientKey, failedKey, "同内容重试必须同 key");
+  assert.equal(
+    answerCalls()[2].params.clientKey,
+    failedKey,
+    "同内容重试必须同 key",
+  );
   // ACK 后迟到快照不复活。
   staleSnapshot = true;
   pushEvent("q-a", "run.changed", "run-a", { ...run("q-a"), revision: 2 });
@@ -617,11 +697,20 @@ try {
   await page.evaluate(() => window.showConv("q-b"));
   const cardB = page.locator(".pending-request-card");
   await cardB.waitFor();
-  await cardB.locator("label.pending-request-option").filter({ hasText: "快速" }).click();
+  await cardB
+    .locator("label.pending-request-option")
+    .filter({ hasText: "快速" })
+    .click();
   await cardB.getByRole("button", { name: "发送回复", exact: true }).click();
-  await page.waitForFunction(() => !document.querySelector(".pending-request-card"));
+  await page.waitForFunction(
+    () => !document.querySelector(".pending-request-card"),
+  );
   assert.equal(answerCalls().length, 4);
-  assert.equal(answerCalls()[3].params.id, "run-b", "专用 answer RPC 的 id 必须等于事件归属 runId");
+  assert.equal(
+    answerCalls()[3].params.id,
+    "run-b",
+    "专用 answer RPC 的 id 必须等于事件归属 runId",
+  );
   assert.equal(answerCalls()[3].params.requestId, "call-b1");
   // 同文本、新 requestId 可以再次回答（快照与事件同时可见也不重复出卡）。
   // run-b 维持 awaitingUser（终态不可重开；handoff→task.submit 由独立
@@ -634,7 +723,11 @@ try {
   await cardB.waitFor();
   assert.equal(await cardCount(), 1, "同一请求不得因快照+事件重复出卡");
   const optionsB = cardB.locator("label.pending-request-option");
-  assert.equal(await optionsB.count(), 2, "label=__free__ 只是普通选项（无「其他」）");
+  assert.equal(
+    await optionsB.count(),
+    2,
+    "label=__free__ 只是普通选项（无「其他」）",
+  );
   await optionsB.filter({ hasText: "__free__" }).click();
   await cardB.getByRole("button", { name: "下一题" }).click();
   const freeB = cardB.getByRole("textbox", { name: "填写回复" });
@@ -647,11 +740,15 @@ try {
   const changedKey = answerCalls()[4].params.clientKey;
   assert.deepEqual(
     answerCalls()[4].params.answers,
-    JSON.parse('{"constructor":{"answers":["__free__"]},"__proto__":{"answers":["参数描述文字"]}}'),
+    JSON.parse(
+      '{"constructor":{"answers":["__free__"]},"__proto__":{"answers":["参数描述文字"]}}',
+    ),
   );
   await freeB.fill("参数描述文字二");
   await submitB.click();
-  await page.waitForFunction(() => !document.querySelector(".pending-request-card"));
+  await page.waitForFunction(
+    () => !document.querySelector(".pending-request-card"),
+  );
   assert.equal(answerCalls().length, 6);
   assert.notEqual(
     answerCalls()[5].params.clientKey,
@@ -667,7 +764,10 @@ try {
   });
   await cardB.waitFor();
   answerDelayMs = 1200;
-  await cardB.locator("label.pending-request-option").filter({ hasText: "快速" }).click();
+  await cardB
+    .locator("label.pending-request-option")
+    .filter({ hasText: "快速" })
+    .click();
   const submitB3 = cardB.getByRole("button", { name: "发送回复", exact: true });
   await submitB3.click();
   // 发送中选项禁用，payload 不会变。
@@ -681,7 +781,9 @@ try {
   assert.equal(await cardCount(), 0, "切换后不得出现问题卡");
   await page.waitForTimeout(1500);
   assert.equal(await cardCount(), 0, "切换后不得出现问题卡");
-  const b3 = answerCalls().filter((call) => call.params.requestId === "call-b3");
+  const b3 = answerCalls().filter(
+    (call) => call.params.requestId === "call-b3",
+  );
   assert.equal(b3.length, 1, "迟到的回调不得重复提交");
   await page.evaluate(() => window.showConv("q-b"));
   await sleep(1200);
@@ -701,15 +803,26 @@ try {
   await page.locator(".pending-request-card").waitFor();
   await sleep(800);
   const geoAfterEvent = await geometry();
-  assert.equal(geoAfterEvent.composer.left, geoBeforeEvent.composer.left,
-    "同一会话请求事件出现前后 composer 左边线不得改变");
-  assert.equal(geoAfterEvent.composer.width, geoBeforeEvent.composer.width,
-    "同一会话请求事件出现前后 composer 宽度不得改变");
+  assert.equal(
+    geoAfterEvent.composer.left,
+    geoBeforeEvent.composer.left,
+    "同一会话请求事件出现前后 composer 左边线不得改变",
+  );
+  assert.equal(
+    geoAfterEvent.composer.width,
+    geoBeforeEvent.composer.width,
+    "同一会话请求事件出现前后 composer 宽度不得改变",
+  );
   assertDockGeometry(await dockGeometry(page), "q-e");
   const cardE = page.locator(".pending-request-card");
-  await cardE.locator("label.pending-request-option").filter({ hasText: "完整" }).click();
+  await cardE
+    .locator("label.pending-request-option")
+    .filter({ hasText: "完整" })
+    .click();
   await cardE.getByRole("button", { name: "发送回复", exact: true }).click();
-  await page.waitForFunction(() => !document.querySelector(".pending-request-card"));
+  await page.waitForFunction(
+    () => !document.querySelector(".pending-request-card"),
+  );
 
   // ---- B3. 取消运行后：过期快照 / 重放 question 事件都不得恢复面板 ----
   await page.evaluate(() => window.showConv("q-f"));
@@ -733,7 +846,9 @@ try {
   });
   // 取消像真实后端一样先持久化 cancelling，随后落终态。
   runState["run-f"] = "cancelling";
-  await page.waitForFunction(() => !document.querySelector(".pending-request-card"));
+  await page.waitForFunction(
+    () => !document.querySelector(".pending-request-card"),
+  );
   // 过期快照仍带 open 请求，重放 question 事件：停止后的题不能复活。
   staleConvs.add("q-f");
   pushEvent("q-f", "question", "run-f", {
@@ -757,8 +872,11 @@ try {
   await page.evaluate(() => window.showConv("q-c"));
   const approvalCard = page.locator(".pending-approval-card");
   await approvalCard.waitFor();
-  assert.equal(await page.locator(".conversation-flow .run-approval").count(), 0,
-    "审批不得留在消息流里");
+  assert.equal(
+    await page.locator(".conversation-flow .run-approval").count(),
+    0,
+    "审批不得留在消息流里",
+  );
   // presentation 摘要：标题、说明、业务变更值清楚展示（不含任务目标，
   // 也不承诺立即运行）。
   await approvalCard.locator("h3").getByText("修改任务设置").waitFor();
@@ -770,23 +888,34 @@ try {
   assert.equal(await changes.nth(1).locator("dt").innerText(), "赶路角色");
   assert.equal(await changes.nth(1).locator("dd").innerText(), "玛薇卡");
   // 不显示裸 methodId；详情默认折叠。
-  assert.equal(await approvalCard.getByText("bgi.set_pathing_party", { exact: true }).count(), 0,
-    "不得 fallback 展示裸 methodId");
+  assert.equal(
+    await approvalCard
+      .getByText("bgi.set_pathing_party", { exact: true })
+      .count(),
+    0,
+    "不得 fallback 展示裸 methodId",
+  );
   // footer 同排按钮必须垂直居中于同一行；拒绝在允许左侧，允许最右。
   const rowSpread = await approvalCard.evaluate((card) => {
-    const centers = [...card.querySelectorAll(".pending-request-footer button")].map(
-      (button) => {
-        const box = button.getBoundingClientRect();
-        return box.top + box.height / 2;
-      },
-    );
+    const centers = [
+      ...card.querySelectorAll(".pending-request-footer button"),
+    ].map((button) => {
+      const box = button.getBoundingClientRect();
+      return box.top + box.height / 2;
+    });
     return Math.max(...centers) - Math.min(...centers);
   });
   assert.ok(rowSpread <= 1, `footer 按钮必须同一行垂直对齐，偏差 ${rowSpread}`);
-  const denyBox = await approvalCard.getByRole("button", { name: "拒绝" }).boundingBox();
-  const allowBox = await approvalCard.getByRole("button", { name: "允许" }).boundingBox();
+  const denyBox = await approvalCard
+    .getByRole("button", { name: "拒绝" })
+    .boundingBox();
+  const allowBox = await approvalCard
+    .getByRole("button", { name: "允许" })
+    .boundingBox();
   assert.ok(denyBox.x < allowBox.x, "拒绝必须在允许左侧");
-  const cardRight = await approvalCard.evaluate((node) => node.getBoundingClientRect().right);
+  const cardRight = await approvalCard.evaluate(
+    (node) => node.getBoundingClientRect().right,
+  );
   assert.ok(
     Math.abs(allowBox.x + allowBox.width - (cardRight - 16)) <= 1,
     "允许按钮必须贴卡片右缘（primary 统一右侧）",
@@ -795,8 +924,11 @@ try {
   assert.ok(await composer.isEditable(), "审批期间主输入可编辑");
   const stopC = page.locator(".composer-submit .send-action");
   assert.ok(await stopC.isVisible());
-  assert.equal(await stopC.getAttribute("aria-label"), "取消任务",
-    "等待审批期间的停止按钮必须是「取消任务」");
+  assert.equal(
+    await stopC.getAttribute("aria-label"),
+    "取消任务",
+    "等待审批期间的停止按钮必须是「取消任务」",
+  );
   await page.getByText("等待你确认这项操作").waitFor();
   // 截图在详情默认折叠时拍；原参数展开测试放在截图之后。
   await sleep(500);
@@ -811,9 +943,13 @@ try {
   await sleep(600);
   const decision = calls.find((call) => call.method === "approval.respond");
   assert.equal(decision.params.approved, false);
-  // 旧数据回退：没有 presentation 的审批只展示 binding.description。
+  // 旧数据回退：接口说明不进入用户摘要，未知方法按真实参数展示。
   runState["run-c"] = "awaitingApproval";
-  pushEvent("q-c", "run.changed", "run-c", { ...run("q-c"), state: "awaitingApproval", revision: 5 });
+  pushEvent("q-c", "run.changed", "run-c", {
+    ...run("q-c"),
+    state: "awaitingApproval",
+    revision: 5,
+  });
   pushEvent("q-c", "approval.requested", "run-c", {
     id: "appr-2",
     runId: "run-c",
@@ -824,9 +960,21 @@ try {
     },
     expiresAt: Math.floor(Date.now() / 1000) + 600,
   });
-  await approvalCard.getByText("删除临时文件", { exact: true }).waitFor();
-  assert.equal(await approvalCard.getByText("bridge.call", { exact: true }).count(), 0,
-    "无 presentation 时也不得展示裸 methodId");
+  await approvalCard
+    .locator("h3")
+    .getByText("执行操作", { exact: true })
+    .waitFor();
+  await approvalCard.getByText("执行以下操作。", { exact: true }).waitFor();
+  assert.equal(
+    await approvalCard.getByText("删除临时文件", { exact: true }).count(),
+    0,
+    "binding.description 不进入用户摘要",
+  );
+  assert.equal(
+    await approvalCard.getByText("bridge.call", { exact: true }).count(),
+    0,
+    "无 presentation 时也不得展示裸 methodId",
+  );
   await approvalCard.getByRole("button", { name: "允许" }).click();
   await sleep(600);
   assert.equal(
@@ -837,19 +985,37 @@ try {
   // revision 必须高于上面 awaitingApproval 的 5：真实 Session 按版本忽略旧事件，
   // 权威快照也同步 runState 持久化各状态，不靠低版本事件欺骗。
   runState["run-c"] = "needsReview";
-  pushEvent("q-c", "run.changed", "run-c", { ...run("q-c"), state: "needsReview", revision: 6 });
+  pushEvent("q-c", "run.changed", "run-c", {
+    ...run("q-c"),
+    state: "needsReview",
+    revision: 6,
+  });
   await sleep(1500);
-  assert.equal(await page.locator(".turn-outcome-note").count(), 0,
-    "needsReview 不得出现末尾标注");
-  assert.equal(await page.locator(".run-error").count(), 0,
-    "needsReview 不得出现结果 footer");
+  assert.equal(
+    await page.locator(".turn-outcome-note").count(),
+    0,
+    "needsReview 不得出现末尾标注",
+  );
+  assert.equal(
+    await page.locator(".run-error").count(),
+    0,
+    "needsReview 不得出现结果 footer",
+  );
   runState["run-c"] = "cancelled";
-  pushEvent("q-c", "run.changed", "run-c", { ...run("q-c"), state: "cancelled", revision: 7 });
+  pushEvent("q-c", "run.changed", "run-c", {
+    ...run("q-c"),
+    state: "cancelled",
+    revision: 7,
+  });
   await sleep(1500);
   const notes = page.locator(".turn-outcome-note");
   assert.equal(await notes.count(), 1, "cancelled 保留一条末尾标注");
   assert.equal(await notes.first().innerText(), "已停止");
-  assert.equal(await page.locator(".run-error").count(), 0, "cancelled 不得出现 footer");
+  assert.equal(
+    await page.locator(".run-error").count(),
+    0,
+    "cancelled 不得出现 footer",
+  );
 
   // ---- D. 直接文字输入配队：无预选、不选选项、按输入文本作答 ----
   await page.evaluate(() => window.showConv("q-h"));
@@ -857,7 +1023,7 @@ try {
   await cardH.waitFor();
   assert.equal(
     await cardH.locator("label.pending-request-option").count(),
-    2,
+    3,
     "配队题只有真实选项",
   );
   assert.equal(
@@ -877,7 +1043,22 @@ try {
     const b = body.getBoundingClientRect();
     return i.top >= b.top - 1 && i.bottom <= b.bottom + 1;
   });
-  assert.ok(hInputVisible, "配队题文字输入必须完整可见于卡片 body，无需滚动发现");
+  assert.ok(
+    hInputVisible,
+    "配队题文字输入必须完整可见于卡片 body，无需滚动发现",
+  );
+  assert.ok(
+    await cardH
+      .locator(".pending-request-body")
+      .evaluate((node) => node.scrollHeight <= node.clientHeight + 1),
+    "正常高度的三选项问题应完整展示，不应因为 320px 上限滚动",
+  );
+  assert.ok(
+    await cardH.evaluate(
+      (node) => parseFloat(getComputedStyle(node).maxHeight) > 320,
+    ),
+    "询问面板应利用高窗口中的剩余空间",
+  );
   // desktop/narrow 截图拍真正的配队题（可直接填队伍名或四角色）。
   await sleep(500);
   await page.screenshot({ path: path.join(shotDir, "questions-desktop.png") });
@@ -885,8 +1066,12 @@ try {
   await sleep(500);
   assert.ok(
     await cardH.evaluate((card) => {
-      const i = card.querySelector(".pending-request-freeform").getBoundingClientRect();
-      const b = card.querySelector(".pending-request-body").getBoundingClientRect();
+      const i = card
+        .querySelector(".pending-request-freeform")
+        .getBoundingClientRect();
+      const b = card
+        .querySelector(".pending-request-body")
+        .getBoundingClientRect();
       return i.top >= b.top - 1 && i.bottom <= b.bottom + 1;
     }),
     "窄窗下配队题文字输入也必须完整可见，无需滚动发现",
@@ -904,17 +1089,21 @@ try {
   const teamText = "钟离、行秋、夜兰、芙宁娜（夜兰速切队）";
   await cardH.getByRole("textbox", { name: "填写回复" }).fill(teamText);
   await submitH.click();
-  await page.waitForFunction(() => !document.querySelector(".pending-request-card"));
-  const hCalls = answerCalls().filter((call) => call.params.requestId === "call-h1");
-  assert.equal(hCalls.length, 1);
-  assert.deepEqual(hCalls[0].params.answers, {
-    team: { answers: [teamText] },
-  }, "直接输入的配队文字必须原样作答");
-  assert.equal(
-    await cardH.count(),
-    0,
-    "提交后卡片消失",
+  await page.waitForFunction(
+    () => !document.querySelector(".pending-request-card"),
   );
+  const hCalls = answerCalls().filter(
+    (call) => call.params.requestId === "call-h1",
+  );
+  assert.equal(hCalls.length, 1);
+  assert.deepEqual(
+    hCalls[0].params.answers,
+    {
+      team: { answers: [teamText] },
+    },
+    "直接输入的配队文字必须原样作答",
+  );
+  assert.equal(await cardH.count(), 0, "提交后卡片消失");
 
   // ---- D2. 等待用户期间 pending 工具无 spinner + 长题短窗内部滚动 ----
   await page.evaluate(() => window.showConv("q-i"));
@@ -977,7 +1166,9 @@ try {
   // 问题卡 footer：secondary 在左、primary（发送回复）贴右。
   const submitG = cardG.getByRole("button", { name: "发送回复", exact: true });
   const submitGBox = await submitG.boundingBox();
-  const cardGRight = await cardG.evaluate((node) => node.getBoundingClientRect().right);
+  const cardGRight = await cardG.evaluate(
+    (node) => node.getBoundingClientRect().right,
+  );
   assert.ok(
     Math.abs(submitGBox.x + submitGBox.width - (cardGRight - 16)) <= 1,
     "发送回复必须贴卡片右缘（primary 统一右侧）",
@@ -999,7 +1190,11 @@ try {
     revision: 3,
   });
   await cardG.waitFor();
-  assert.equal(await cardCount(), 1, "blocked 重试回 awaitingUser 后题目必须恢复");
+  assert.equal(
+    await cardCount(),
+    1,
+    "blocked 重试回 awaitingUser 后题目必须恢复",
+  );
 
   // ---- F. 压力几何：短窗大草稿双请求（坐标检查 + short 截图） ----
   // q-d 是两个 awaitingUser run 各持一个 open 请求：主输入 busy 禁用，
@@ -1022,14 +1217,20 @@ try {
   await sleep(400);
   assertDockGeometry(await dockGeometry(page), "q-d 窄窗");
   const boxNarrow = await page.locator(".pending-request-layer").boundingBox();
-  assert.ok(boxNarrow.x >= 0 && boxNarrow.x + boxNarrow.width <= 360.5, "窄窗浮层不得横向溢出");
+  assert.ok(
+    boxNarrow.x >= 0 && boxNarrow.x + boxNarrow.width <= 360.5,
+    "窄窗浮层不得横向溢出",
+  );
   assert.ok(boxNarrow.y >= 0, "窄窗浮层不得越出顶部");
   await page.setViewportSize({ width: 1100, height: 520 });
   await sleep(500);
   assertDockGeometry(await dockGeometry(page), "q-d 短窗");
   // 短窗下交互区内部滚动，历史可视（chat-scroll 有高度）与输入框仍保留。
   const shortGeo = await dockGeometry(page);
-  assert.ok(shortGeo.scroll.height > 100, "短窗下 chat-scroll 必须保留可视历史区");
+  assert.ok(
+    shortGeo.scroll.height > 100,
+    `短窗下 chat-scroll 必须保留可视历史区: ${JSON.stringify(shortGeo)}`,
+  );
   assert.ok(shortGeo.composer.height > 40, "短窗下 composer 不得被挤没");
   await sleep(400);
   await page.screenshot({ path: path.join(shotDir, "questions-short.png") });
@@ -1043,20 +1244,19 @@ try {
     "浮层不得横向溢出",
   );
   for (let i = 0; i < 2; i += 1) {
-    await cardsD.nth(i).getByRole("button", { name: "发送回复", exact: true })
+    await cardsD
+      .nth(i)
+      .getByRole("button", { name: "发送回复", exact: true })
       .scrollIntoViewIfNeeded();
     assert.ok(
-      await cardsD.nth(i)
+      await cardsD
+        .nth(i)
         .getByRole("button", { name: "发送回复", exact: true })
         .isVisible(),
       `第 ${i + 1} 个请求的 footer 必须可达`,
     );
   }
-  assert.equal(
-    await composer.inputValue(),
-    bigDraft,
-    "浮层交互不得修改主草稿",
-  );
+  assert.equal(await composer.inputValue(), bigDraft, "浮层交互不得修改主草稿");
 
   assert.deepEqual(errors, [], "无页面错误");
   assert.deepEqual(consoleErrors, [], "无控制台错误");

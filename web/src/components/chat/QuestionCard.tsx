@@ -1,5 +1,6 @@
+import { Button } from "@sleepy-doll/ui";
 import { useEffect, useRef, useState } from "react";
-import { CheckIcon, HelpIcon } from "../icons";
+import { CheckIcon, HelpIcon } from "@sleepy-doll/ui/icons";
 import { readError } from "../../session";
 import { useT } from "../../i18n";
 import { MarkdownText } from "./Transcript";
@@ -9,7 +10,10 @@ import type {
   QuestionRequestInfo,
   RunApproval,
 } from "../../ipc/types";
-import { approvalPresentation, safeApprovalArguments } from "./approval-display";
+import {
+  approvalPresentation,
+  safeApprovalArguments,
+} from "./approval-display";
 import "./QuestionCard.css";
 
 /** 自由文字的选择值：选择按选项下标结构化存储，-1 表示自由文字，
@@ -42,12 +46,13 @@ function sanitizeRecord<T extends string | number>(
   const out = Object.assign(Object.create(null) as Record<string, T>);
   if (value && typeof value === "object")
     for (const [key, entry] of Object.entries(value as object))
-      if (accept(entry)) Object.defineProperty(out, key, {
-        value: entry,
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      });
+      if (accept(entry))
+        Object.defineProperty(out, key, {
+          value: entry,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
   return out;
 }
 const isString = (v: unknown): v is string => typeof v === "string";
@@ -62,7 +67,8 @@ function loadDraft(key: string): DraftState {
       if (typeof parsed.clientKey === "string")
         return {
           clientKey: parsed.clientKey,
-          signature: typeof parsed.signature === "string" ? parsed.signature : "",
+          signature:
+            typeof parsed.signature === "string" ? parsed.signature : "",
           index: typeof parsed.index === "number" ? parsed.index : 0,
           collapsed: parsed.collapsed === true,
           picks: sanitizeRecord(parsed.picks, isFiniteNumber),
@@ -300,24 +306,24 @@ function QuestionRequestCard({
       )}
       <footer className="pending-request-footer">
         {questions.length > 1 && (
-          <button
+          <Button
             type="button"
-            className="secondary-action"
+            variant="secondary"
             disabled={index === 0 || sending}
             onClick={() => patch({ index: index - 1 })}
           >
             {t.chat.prevQuestion}
-          </button>
+          </Button>
         )}
         {index < questions.length - 1 && (
-          <button
+          <Button
             type="button"
-            className="secondary-action"
+            variant="secondary"
             disabled={!answerText(question, draft) || sending}
             onClick={() => patch({ index: index + 1 })}
           >
             {t.chat.nextQuestion}
-          </button>
+          </Button>
         )}
         <button
           type="button"
@@ -363,7 +369,10 @@ function ApprovalCard({
         <div className="pending-request-text">{presentation.summary}</div>
         <dl className="pending-approval-changes">
           {presentation.changes.map((change, index) => (
-            <div key={`${index}:${change.label}`} className="pending-approval-change">
+            <div
+              key={`${index}:${change.label}`}
+              className="pending-approval-change"
+            >
               <dt>{change.label}</dt>
               <dd>{change.value}</dd>
             </div>
@@ -372,18 +381,22 @@ function ApprovalCard({
         <details>
           <summary>{t.chat.approvalDetails}</summary>
           <pre>
-            {JSON.stringify(safeApprovalArguments(approval.request.arguments), null, 2)}
+            {JSON.stringify(
+              safeApprovalArguments(approval.request.arguments),
+              null,
+              2,
+            )}
           </pre>
         </details>
       </div>
       <footer className="pending-request-footer">
-        <button
-          className="secondary-action"
+        <Button
+          variant="secondary"
           disabled={confirming || expired}
           onClick={() => decide(false)}
         >
           {t.chat.deny}
-        </button>
+        </Button>
         <button
           className="primary-action pending-request-submit"
           disabled={confirming || expired}

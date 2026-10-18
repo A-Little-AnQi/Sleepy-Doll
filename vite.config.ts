@@ -63,10 +63,10 @@ function ipcProxy(): Plugin {
 }
 
 /**
- * 主程序的组件样式是按「product.css 排在最后」写的，同权重时由它盖过组件样式。
+ * 主程序的组件样式按「@sleepy-doll/ui/styles.css 排在最后」覆盖同权重的组件样式。
  * 两个窗口共用这份样式后它落进共享 chunk，先于入口 chunk 加载，覆盖关系会反过来。
  * 这里把主窗口的共享样式移回入口样式之后；安装窗口不用动，它的样式本来就压在
- * product.css 上面。
+ * 共享基础样式上面。
  */
 function designCssLast(): Plugin {
   const own = (chunk: unknown) =>

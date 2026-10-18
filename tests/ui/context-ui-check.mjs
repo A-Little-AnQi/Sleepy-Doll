@@ -1,4 +1,4 @@
-import "./runtime.mjs";
+import { uiStylesheetUrl } from "./runtime.mjs";
 // Real session, transcript and model settings, with fake IPC and no model calls.
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -20,7 +20,7 @@ import {Transcript} from '/src/components/chat/Transcript.tsx';
 import {ContextMeter} from '/src/components/chat/ContextMeter.tsx';
 import {ModelsPage} from '/src/pages/settings/ModelsPage.tsx';
 import {suggestedContextWindow} from '/src/models/presets.ts';
-import '/src/product.css';
+import '${uiStylesheetUrl}';
 function Fixture(){
  const [models,setModels]=useState(null);
  window.showModels=setModels;

@@ -196,6 +196,9 @@ function sendWindow(method: string) {
 }
 
 export const api = {
+  memoryState: () => invoke<{ enabled: boolean }>("memory.state"),
+  setMemoryEnabled: (enabled: boolean) =>
+    invoke<{ enabled: boolean }>("memory.setEnabled", { enabled }),
   memories: () =>
     invoke<{ entries: { entry: MemoryEntry; compatible: boolean }[] }>(
       "memory.list",

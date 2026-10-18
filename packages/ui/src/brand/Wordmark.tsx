@@ -1,5 +1,6 @@
 import markup from "./wordmark.svg?raw";
 import { SvgAsset } from "./SvgAsset";
+import "./Wordmark.css";
 
 type IconProps = { className?: string };
 

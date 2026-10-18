@@ -5,7 +5,7 @@
   gap: 16px;
   min-height: 58px;
   padding: 14px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--border-width, 1px) solid var(--border);
 }
 
 .setting-row.is-compact {

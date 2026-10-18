@@ -3,7 +3,7 @@
   flex-direction: column;
   gap: 8px;
   padding: 14px 16px;
-  border: 1px solid var(--border);
+  border: var(--border-width, 1px) solid var(--border);
   border-radius: 10px;
   background: var(--surface);
   min-width: 0;
@@ -81,7 +81,7 @@ button.task-card-name:focus-visible {
   display: grid;
   gap: 1px;
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: var(--border-width, 1px) solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
@@ -119,7 +119,7 @@ button.task-card-name:focus-visible {
 .task-card-state {
   padding: 2px 8px;
   border-radius: 999px;
-  border: 1px solid var(--border);
+  border: var(--border-width, 1px) solid var(--border);
   background: var(--subtle);
   color: var(--secondary);
   font-size: 12px;

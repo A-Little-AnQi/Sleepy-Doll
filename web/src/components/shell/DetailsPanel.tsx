@@ -1,13 +1,15 @@
+import { SearchField } from "@sleepy-doll/ui";
+import { IconButton } from "@sleepy-doll/ui";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../ipc/api";
 import { isRunning, readError, taskLabels } from "../../session";
 import type { Bootstrap, TaskSummary } from "../../ipc/types";
-import { CloseIcon, HistoryIcon, SearchIcon } from "../icons";
+import { CloseIcon, HistoryIcon } from "@sleepy-doll/ui/icons";
 import { TaskCard, type TaskActions } from "../tasks/TaskCard";
 import { taskRun, taskError } from "../tasks/task-display";
 import { taskPlan } from "../tasks/task-plan";
-import { ConfirmDialog } from "../overlay/ConfirmDialog";
-import { Toast } from "../overlay/Toast";
+import { ConfirmDialog } from "@sleepy-doll/ui/overlay/ConfirmDialog";
+import { Toast } from "@sleepy-doll/ui/overlay/Toast";
 import "./details-panel.css";
 
 export function DetailsPanel({
@@ -124,13 +126,9 @@ export function DetailsPanel({
         </span>
         <h2>{selected ? "任务详情" : "快捷任务"}</h2>
         {!selected && <span className="details-count">{tasks.length}</span>}
-        <button
-          className="icon-button"
-          aria-label="关闭快捷任务侧栏"
-          onClick={onClose}
-        >
+        <IconButton aria-label="关闭快捷任务侧栏" onClick={onClose}>
           <CloseIcon className="button-icon" />
-        </button>
+        </IconButton>
       </header>
       {error && <Toast message={error} onDismiss={() => setError("")} />}
       <div className="details-body">
@@ -205,15 +203,12 @@ export function DetailsPanel({
               </div>
             )}
             {tasks.length > 4 && (
-              <label className="search-field">
-                <SearchIcon />
-                <input
-                  aria-label="搜索快捷任务"
-                  placeholder="搜索任务"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                />
-              </label>
+              <SearchField
+                aria-label="搜索快捷任务"
+                placeholder="搜索任务"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
             )}
             {visible.length ? (
               <div className="shortcut-shelf-list">

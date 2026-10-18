@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { CheckIcon } from "../icons";
 import { DisclosureChevron } from "./DisclosureChevron";
 import styles from "./Select.module.css";
-import { useT } from "../../i18n";
+import { useT } from "../i18n";
 
 interface Props {
   value: string;
@@ -283,7 +283,9 @@ export function Select({
           }
         }}
       >
-        <span>{selected?.label ?? placeholder ?? t.controls.selectPlaceholder}</span>
+        <span>
+          {selected?.label ?? placeholder ?? t.controls.selectPlaceholder}
+        </span>
         <DisclosureChevron expanded={open} />
       </button>
       {open &&

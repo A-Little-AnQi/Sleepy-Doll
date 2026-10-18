@@ -625,3 +625,13 @@
 .turn-separator time {
   font-variant-numeric: tabular-nums;
 }
+
+/* Memory maintenance is one quiet line per run, without exposing its contents. */
+.memory-activity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}

@@ -1,3 +1,4 @@
+import { IconButton } from "../Button";
 import {
   useEffect,
   useLayoutEffect,
@@ -9,7 +10,7 @@ import {
 import { createPortal } from "react-dom";
 import { CloseIcon } from "../icons";
 import "./Dialog.css";
-import { useT } from "../../i18n";
+import { useT } from "../i18n";
 
 export function Dialog({
   title,
@@ -122,15 +123,14 @@ export function Dialog({
             <h2 id={titleId}>{title}</h2>
             {subtitle ? <p className="sd-dialog-path">{subtitle}</p> : null}
           </div>
-          <button
+          <IconButton
             type="button"
-            className="icon-button"
             aria-label={t.common.close}
             title={t.common.close}
             onClick={onClose}
           >
             <CloseIcon className="button-icon" />
-          </button>
+          </IconButton>
         </header>
         <div className="sd-dialog-body">{children}</div>
         {footer ? <footer className="sd-dialog-foot">{footer}</footer> : null}

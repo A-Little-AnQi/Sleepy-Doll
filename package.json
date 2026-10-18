@@ -4,6 +4,9 @@
   "description": "Desktop agent for game scripting tools, with a BetterGI plugin",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "vite",
     "backend": "cargo run --no-default-features --features dev-ipc --bin sleepy-doll-dev",
@@ -13,8 +16,8 @@
     "dist": "cmd /c scripts\\build.cmd",
     "clean:rust": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/clean-rust.ps1",
     "test": "node --test cloudflare/worker.test.mjs scripts/r2-budget.test.mjs scripts/release-version.test.mjs",
-    "format": "prettier --write \"web/**/*.{ts,tsx,css,html}\" \"*.{json,ts}\" \"!package-lock.json\"",
-    "format:check": "prettier --check \"web/**/*.{ts,tsx,css,html}\" \"*.{json,ts}\" \"!package-lock.json\"",
+    "format": "prettier --write \"web/**/*.{ts,tsx,css,html}\" \"packages/ui/**/*.{ts,tsx,css,json}\" \"*.{json,ts}\" \"!package-lock.json\"",
+    "format:check": "prettier --check \"web/**/*.{ts,tsx,css,html}\" \"packages/ui/**/*.{ts,tsx,css,json}\" \"*.{json,ts}\" \"!package-lock.json\"",
     "video:dev": "vite --config video/vite.config.ts",
     "video:build": "tsc -p video/tsconfig.json --noEmit && vite build --config video/vite.config.ts",
     "video:film": "node video/make-video.mjs",
@@ -25,6 +28,7 @@
     "node": ">=22.13"
   },
   "dependencies": {
+    "@sleepy-doll/ui": "*",
     "@vitejs/plugin-react": "^6.1.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

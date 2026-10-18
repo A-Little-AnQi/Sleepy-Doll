@@ -1,4 +1,6 @@
+import { Button } from "@sleepy-doll/ui";
 import { useEffect, useState } from "react";
+import { SettingsScope } from "@sleepy-doll/ui";
 import "./SettingsPage.css";
 import type { Bootstrap } from "../../ipc/types";
 import { hostPluginEnabled } from "../../ipc/providers";
@@ -8,17 +10,17 @@ import {
   SettingsIcon,
   BrandIcon,
   HelpIcon,
-} from "../../components/icons";
-import { Select } from "../../components/controls/Select";
-import { ThemeSwitch } from "../../components/controls/ThemeSwitch";
+} from "@sleepy-doll/ui/icons";
+import { Select } from "@sleepy-doll/ui/controls/Select";
+import { ThemeSwitch } from "@sleepy-doll/ui/controls/ThemeSwitch";
 import { ModelsPage } from "./ModelsPage";
-import { MemoryPanel } from "./MemoryPanel";
+import { MemorySettings } from "../memory/MemoryControls";
 import { AboutPage } from "./AboutPage";
 import { BridgePage } from "../bridge/BridgePage";
 /** 更新弹窗的指南链接要跳到的设置页（跨页面打开）。 */
-export type HelpOpen = "models" | "bridge" | "extensions" | "tasks";
-import { SettingRow } from "../../components/controls/SettingRow";
-import { SlidingTabs } from "../../components/controls/SlidingTabs";
+export type HelpOpen = "models" | "bridge" | "extensions" | "tasks" | "memory";
+import { SettingRow } from "@sleepy-doll/ui/controls/SettingRow";
+import { SlidingTabs } from "@sleepy-doll/ui/controls/SlidingTabs";
 import { ConfigEditor } from "../../components/bridge/ConfigEditor";
 import { api, framelessWindow } from "../../ipc/api";
 import { useTheme, writeTheme } from "../../appearance";
@@ -72,7 +74,7 @@ export function SettingsPage({
       .catch(() => undefined);
   }, [bootstrap.configPath]);
   return (
-    <div className="settings-layout">
+    <SettingsScope className="settings-layout">
       <div className="settings-column">
         <div className="settings-nav">
           <SlidingTabs
@@ -156,7 +158,7 @@ export function SettingsPage({
                   />
                 </SettingRow>
               </section>
-              <MemoryPanel />
+              <MemorySettings onManage={() => onSection("memory")} />
               {trayEnabled !== null ? (
                 <section className="settings-group">
                   <h3>{t.settings.tray}</h3>
@@ -185,12 +187,9 @@ export function SettingsPage({
               <section className="settings-group">
                 <h3>{t.settings.configHeading}</h3>
                 <SettingRow label={t.settings.configFile} hint={configPath}>
-                  <button
-                    className="subtle-action"
-                    onClick={() => setEditing(true)}
-                  >
+                  <Button variant="subtle" onClick={() => setEditing(true)}>
                     {t.configEditor.editConfig}
-                  </button>
+                  </Button>
                 </SettingRow>
               </section>
             </div>
@@ -204,7 +203,7 @@ export function SettingsPage({
         onSaved={reload}
         onPath={setConfigPath}
       />
-    </div>
+    </SettingsScope>
   );
 }
 

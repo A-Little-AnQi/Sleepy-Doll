@@ -9,7 +9,7 @@ import {
 } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Dialog } from "../components/overlay/Dialog";
+import { Dialog } from "@sleepy-doll/ui/overlay/Dialog";
 import { useT, type Text } from "../i18n";
 import "./UpdateDialog.css";
 import changelogSource from "./release-notes/changelog-0.1.0.md?raw";

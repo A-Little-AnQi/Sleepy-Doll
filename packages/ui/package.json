@@ -1,0 +1,20 @@
+{
+  "name": "@sleepy-doll/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./icons": "./src/icons/index.ts",
+    "./controls/*": "./src/controls/*.tsx",
+    "./overlay/*": "./src/overlay/*.tsx",
+    "./chat/*": "./src/chat/*.tsx",
+    "./brand/*": "./src/brand/*.tsx",
+    "./styles.css": "./src/styles.css",
+    "./motion.css": "./src/motion.css"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

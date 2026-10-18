@@ -1,9 +1,11 @@
+import { SearchField } from "@sleepy-doll/ui";
+import { Badge } from "@sleepy-doll/ui";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../ipc/api";
 import { readError } from "../../session";
-import { Toast } from "../overlay/Toast";
-import { Select } from "../controls/Select";
-import { ChevronIcon, SearchIcon } from "../icons";
+import { Toast } from "@sleepy-doll/ui/overlay/Toast";
+import { Select } from "@sleepy-doll/ui/controls/Select";
+import { ChevronIcon } from "@sleepy-doll/ui/icons";
 import type {
   BridgeCatalog,
   BridgeMethod,
@@ -126,7 +128,9 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
             <h2>{selected.displayName}</h2>
             <code>{selected.methodId}</code>
             <p>{guide?.purpose ?? selected.summary}</p>
-            <span className="tag">{selected.callable ? t.bridge.available : t.bridge.unavailable}</span>
+            <Badge>
+              {selected.callable ? t.bridge.available : t.bridge.unavailable}
+            </Badge>
             {selected.unavailableReason && (
               <p className="muted">{selected.unavailableReason}</p>
             )}
@@ -245,15 +249,13 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
             <h2>{t.bridge.methodCatalog}</h2>
           </div>
           <div className="list-toolbar">
-            <label className="search-field is-compact">
-              <SearchIcon />
-              <input
-                aria-label={t.bridge.searchMethods}
-                placeholder={t.common.search}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              />
-            </label>
+            <SearchField
+              compact
+              aria-label={t.bridge.searchMethods}
+              placeholder={t.common.search}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
             <div className="bridge-api-group">
               <Select
                 label={t.bridge.methodCategory}
@@ -263,7 +265,8 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                   { value: "", label: t.bridge.allCategories },
                   ...(catalog?.groups ?? []).map((entry) => ({
                     value: entry.id,
-                    label: (groups(t)[entry.id] ?? entry.id) + " · " + entry.count,
+                    label:
+                      (groups(t)[entry.id] ?? entry.id) + " · " + entry.count,
                   })),
                 ]}
               />
@@ -286,13 +289,13 @@ export function BridgeApiExplorer({ onBack }: { onBack(): void }) {
                     </small>
                   )}
                 </span>
-                <span className="tag">
+                <Badge>
                   {item.callable
                     ? item.effect === "readOnly"
                       ? t.bridge.readOnly
                       : t.bridge.mutating
                     : t.bridge.unavailable}
-                </span>
+                </Badge>
               </button>
             ))}
           </div>

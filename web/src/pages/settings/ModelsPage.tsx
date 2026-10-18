@@ -1,13 +1,15 @@
+import { FormField } from "@sleepy-doll/ui";
+import { Button, Badge } from "@sleepy-doll/ui";
 import { useRef, useState } from "react";
 import { api } from "../../ipc/api";
 import { readError } from "../../session";
-import { Toast } from "../../components/overlay/Toast";
-import { ConfirmDialog } from "../../components/overlay/ConfirmDialog";
-import { PlusIcon, TrashIcon } from "../../components/icons";
-import { Select } from "../../components/controls/Select";
-import { MotionSwitch } from "../../components/controls/MotionSwitch";
-import { DisclosureChevron } from "../../components/controls/DisclosureChevron";
-import { Switch } from "../../components/controls/Switch";
+import { Toast } from "@sleepy-doll/ui/overlay/Toast";
+import { ConfirmDialog } from "@sleepy-doll/ui/overlay/ConfirmDialog";
+import { PlusIcon, TrashIcon } from "@sleepy-doll/ui/icons";
+import { Select } from "@sleepy-doll/ui/controls/Select";
+import { MotionSwitch } from "@sleepy-doll/ui/controls/MotionSwitch";
+import { DisclosureChevron } from "@sleepy-doll/ui/controls/DisclosureChevron";
+import { Switch } from "@sleepy-doll/ui/controls/Switch";
 import type { Bootstrap, ModelInfo } from "../../ipc/types";
 import {
   MODEL_PRESETS,
@@ -316,10 +318,10 @@ export function ModelsPage({
     <div className="model-settings">
       <header className="model-page-head">
         <h2>{t.settings.models}</h2>
-        <button className="secondary-action" type="button" onClick={add}>
+        <Button variant="secondary" type="button" onClick={add}>
           <PlusIcon className="button-icon" />
           {t.models.addModel}
-        </button>
+        </Button>
       </header>
       <div className="model-workspace">
         <nav className="model-list" aria-label={t.models.configured}>
@@ -351,9 +353,7 @@ export function ModelsPage({
                   {model.model ? ` · ${model.model}` : ""}
                 </small>
               </span>
-              {model.active && (
-                <span className="tag tag-active">{t.models.default}</span>
-              )}
+              {model.active && <Badge active>{t.models.default}</Badge>}
             </button>
           ))}
           {!bootstrap.models.length && !creating && (
@@ -379,11 +379,9 @@ export function ModelsPage({
                     ? t.models.addModel
                     : (selected?.name ?? t.settings.models)}
                 </h3>
-                {dirty && <span className="tag">{t.models.unsaved}</span>}
+                {dirty && <Badge>{t.models.unsaved}</Badge>}
                 {selected?.active && (
-                  <span className="tag tag-active">
-                    {t.models.defaultModel}
-                  </span>
+                  <Badge active>{t.models.defaultModel}</Badge>
                 )}
               </header>
               {error && (
@@ -393,8 +391,7 @@ export function ModelsPage({
                 <Toast message={notice} onDismiss={() => setNotice("")} />
               )}
               <section className="form-section">
-                <label>
-                  <span>{t.models.provider}</span>
+                <FormField label={<>{t.models.provider}</>}>
                   <Select
                     label={t.models.provider}
                     placeholder={t.models.pickProvider}
@@ -402,7 +399,7 @@ export function ModelsPage({
                     options={presetOptions(locale)}
                     onChange={applyPreset}
                   />
-                </label>
+                </FormField>
                 {(preset?.platformUrl || preset?.keyUrl) && (
                   <div className="model-provider-links">
                     {preset?.platformUrl && (
@@ -427,17 +424,15 @@ export function ModelsPage({
                     )}
                   </div>
                 )}
-                <label>
-                  <span>{t.models.nameLabel}</span>
+                <FormField label={<>{t.models.nameLabel}</>}>
                   <input
                     required
                     value={form.name}
                     placeholder={t.models.providerExample}
                     onChange={(event) => change("name", event.target.value)}
                   />
-                </label>
-                <label>
-                  <span>{t.models.protocol}</span>
+                </FormField>
+                <FormField label={<>{t.models.protocol}</>}>
                   <Select
                     label={t.models.protocol}
                     placeholder={t.models.pickProtocol}
@@ -445,9 +440,8 @@ export function ModelsPage({
                     options={protocols(t)}
                     onChange={(value) => change("protocol", value)}
                   />
-                </label>
-                <label>
-                  <span>{t.models.apiAddr}</span>
+                </FormField>
+                <FormField label={<>{t.models.apiAddr}</>}>
                   <input
                     type="url"
                     required
@@ -455,10 +449,9 @@ export function ModelsPage({
                     value={form.baseUrl}
                     onChange={(event) => change("baseUrl", event.target.value)}
                   />
-                </label>
+                </FormField>
                 {needsKey && (
-                  <label>
-                    <span>API Key</span>
+                  <FormField label={<>API Key</>}>
                     <div className="key-field">
                       <input
                         type={showKey ? "text" : "password"}
@@ -515,7 +508,7 @@ export function ModelsPage({
                         )}
                       </button>
                     </div>
-                  </label>
+                  </FormField>
                 )}
                 <div className="model-field">
                   <span>{t.models.modelLabel}</span>
@@ -539,9 +532,9 @@ export function ModelsPage({
                         }
                       />
                     )}
-                    <button
+                    <Button
                       type="button"
-                      className="secondary-action"
+                      variant="secondary"
                       disabled={
                         listing ||
                         busy ||
@@ -551,7 +544,7 @@ export function ModelsPage({
                       onClick={() => void fetchModels()}
                     >
                       {listing ? t.models.fetching : t.models.fetchModels}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </section>
@@ -587,8 +580,7 @@ export function ModelsPage({
                         />
                       </>
                     )}
-                    <label>
-                      <span>{t.models.timeoutLabel}</span>
+                    <FormField label={<>{t.models.timeoutLabel}</>}>
                       <input
                         type="number"
                         min={1}
@@ -602,11 +594,10 @@ export function ModelsPage({
                           }))
                         }
                       />
-                    </label>
+                    </FormField>
                     <h4>{t.models.window}</h4>
                     <div className="form-grid">
-                      <label>
-                        <span>{t.models.contextLabel}</span>
+                      <FormField label={<>{t.models.contextLabel}</>}>
                         <input
                           type="number"
                           min={8192}
@@ -621,9 +612,8 @@ export function ModelsPage({
                             }))
                           }
                         />
-                      </label>
-                      <label>
-                        <span>{t.models.maxOutputLabel}</span>
+                      </FormField>
+                      <FormField label={<>{t.models.maxOutputLabel}</>}>
                         <input
                           type="number"
                           min={256}
@@ -637,7 +627,7 @@ export function ModelsPage({
                             }))
                           }
                         />
-                      </label>
+                      </FormField>
                     </div>
                     <div className="model-context-suggestion">
                       <span>
@@ -647,9 +637,9 @@ export function ModelsPage({
                             ? t.models.contextLocalFallback
                             : t.models.contextFallback}
                       </span>
-                      <button
+                      <Button
                         type="button"
-                        className="subtle-action"
+                        variant="subtle"
                         onClick={() =>
                           updateForm((draft) => ({
                             ...draft,
@@ -666,7 +656,7 @@ export function ModelsPage({
                           contextSuggestion(form, contextWindows) / 1000,
                         )}
                         k
-                      </button>
+                      </Button>
                     </div>
                     {form.protocol === "anthropic-messages" && (
                       <label className="toggle-row">
@@ -689,9 +679,9 @@ export function ModelsPage({
             </div>
             <footer className="detail-actions">
               {selected && !selected.active && (
-                <button
+                <Button
                   type="button"
-                  className="secondary-action"
+                  variant="secondary"
                   disabled={busy}
                   onClick={() => {
                     setBusy(true);
@@ -703,22 +693,22 @@ export function ModelsPage({
                   }}
                 >
                   {t.models.setDefaultModel}
-                </button>
+                </Button>
               )}
               {selected && (
-                <button
+                <Button
                   type="button"
-                  className="secondary-action"
+                  variant="secondary"
                   disabled={busy}
                   onClick={() => setAskingDelete(true)}
                 >
                   <TrashIcon className="button-icon" />
                   {t.models.deleteConfig}
-                </button>
+                </Button>
               )}
-              <button className="primary-action" disabled={busy}>
+              <Button variant="primary" disabled={busy}>
                 {busy ? t.models.saving : t.common.save}
-              </button>
+              </Button>
             </footer>
           </form>
         </MotionSwitch>

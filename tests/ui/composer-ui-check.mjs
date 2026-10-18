@@ -1,6 +1,6 @@
-import "./runtime.mjs";
+import { uiStylesheetUrl, uiMotionStylesheetUrl } from "./runtime.mjs";
 // 主输入收尾语义检查：真实 ChatPage/Session/API，fake IPC 不启动模型或 BetterGI。
-// 覆盖：busy 主 composer 禁用且草稿保留、只有停止可点、技能菜单同样禁用；
+// 覆盖：busy 主 composer 与技能菜单可用、草稿保留、停止和打断发送可点；
 // run.succeeded 交接后恢复输入，发送只走 task.submit（不再 run.input 补充）；
 // 失败同内容重试同 clientKey；legacy 问答内部 run.input 兼容保留。
 // 资源登记：本地 vite 服务与 Chromium profile 仅属本任务，临时文件限
@@ -20,8 +20,8 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import {ChatPage} from '/src/pages/chat/ChatPage.tsx';
 import {PREVIEW_PERMISSION} from '/src/ipc/types.ts';
-import '/src/product.css';
-import '/src/motion.css';
+import '${uiStylesheetUrl}';
+import '${uiMotionStylesheetUrl}';
 const bootstrap={models:[{id:'fixture-model',name:'智谱 GLM 很长的模型名称',model:'fixture',active:true,contextWindow:256000}],
  conversations:[{id:'composer-fixture',title:'Fixture',modelId:'fixture-model'},{id:'busy-fixture',title:'Busy',modelId:'fixture-model'}],
  tools:[],skills:[{name:'check',label:'检查',enabled:true,available:true}],
@@ -45,7 +45,7 @@ try {
     root: path.join(root, "web"),
     configFile: path.join(root, "vite.config.ts"),
     logLevel: "silent",
-    server: { host: "127.0.0.1", port: 0, hmr: false },
+    server: { host: "127.0.0.1", port: 0, hmr: false, forwardConsole: false },
   });
   await server.listen();
   console.error(
@@ -231,8 +231,7 @@ try {
   await input.waitFor();
   await page.waitForFunction(
     () =>
-      document.querySelector("textarea")?.placeholder ===
-      "告诉我你想完成什么",
+      document.querySelector("textarea")?.placeholder === "告诉我你想完成什么",
   );
   const geometry = () =>
     input.evaluate((node) => {
@@ -328,26 +327,25 @@ try {
   assert.ok(retries[0].params.clientKey);
   assert.equal(retries[0].params.clientKey, retries[1].params.clientKey);
 
-  // ---- busy：主输入禁用、草稿保留、只有停止；技能菜单同样禁用 ----
+  // ---- busy：可继续编辑草稿和选择技能，停止与打断发送均可用 ----
   await page.evaluate(() =>
     localStorage.setItem("sleepy-doll-draft:busy-fixture", "忙碌时的草稿"),
   );
   await page.evaluate(() => window.showBusy());
-  await page.waitForFunction(() =>
-    document.querySelector("textarea").disabled,
-  );
+  await page.getByRole("button", { name: "停止任务", exact: true }).waitFor();
+  assert.ok(await input.isEnabled(), "运行中仍可编辑下一条草稿");
   assert.equal(await input.inputValue(), "忙碌时的草稿", "busy 必须保留草稿");
   assert.equal(
     await page.locator(".composer-submit .send-action").count(),
-    1,
-    "busy 只有一个操作按钮",
+    2,
+    "busy 有草稿时保留停止和打断发送",
   );
-  const stop = page.getByRole("button", { name: "停止" });
+  const stop = page.getByRole("button", { name: "停止任务", exact: true });
   assert.ok(await stop.isVisible());
   assert.ok(await stop.isEnabled(), "busy 时停止必须可点");
   assert.ok(
-    await page.getByRole("button", { name: "选择技能" }).isDisabled(),
-    "busy 时技能菜单必须禁用",
+    await page.getByRole("button", { name: "快捷命令" }).isEnabled(),
+    "busy 时仍可选择技能准备下一条消息",
   );
   assert.equal(
     await page.getByText(/排队发送|取消排队|补充说明/).count(),
@@ -395,14 +393,11 @@ try {
     "主聊天发送不得走 run.input",
   );
 
-  // ---- legacy 问答（run.input 兼容）：浮层可填写，主输入 busy 禁用 ----
+  // ---- legacy 问答（run.input 兼容）：浮层可填写，主输入可编辑 ----
   await page.evaluate(() => window.showQuestion());
   const card = page.locator(".pending-request-card");
   await card.waitFor();
-  assert.ok(
-    await input.isDisabled(),
-    "等待回答期间主输入保持禁用",
-  );
+  assert.ok(await input.isEnabled(), "等待回答期间仍可编辑主输入草稿");
   assert.equal(await card.locator("strong").innerText(), "挖矿配置");
   const questionText = await card.locator(".pending-request-text").innerText();
   assert.match(questionText, /①.*②.*③/s, "三个问题项都要渲染");
@@ -477,17 +472,14 @@ try {
   await page.waitForFunction(
     () => !document.querySelector("textarea").disabled,
   );
-  assert.ok(
-    await input.isEnabled(),
-    "问答结束后主输入恢复可用",
-  );
+  assert.ok(await input.isEnabled(), "问答结束后主输入恢复可用");
   assert.deepEqual(errors, [], "无页面错误");
   assert.deepEqual(consoleErrors, [], "无控制台错误");
   report = {
     passed: true,
     empty,
     checks:
-      "font/baseline, multiline/resize/limit, no queue, idle submit + retry same clientKey, busy composer+skillmenu disabled draft kept stop clickable, handoff restores input submit-only, legacy question run.input compat, mobile overflow",
+      "font/baseline, multiline/resize/limit, no queue, idle submit + retry same clientKey, busy composer+skillmenu editable draft kept stop clickable, handoff preserves input submit-only, legacy question run.input compat, mobile overflow",
     images,
   };
 } finally {

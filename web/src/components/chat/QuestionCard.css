@@ -9,7 +9,7 @@
   gap: 10px;
   width: 100%;
   /* 等待时宿主按真实可用空间写入变量；无变量（非等待/未挂载）用兜底。 */
-  max-height: var(--pending-request-max-height, min(50dvh, 320px));
+  max-height: var(--pending-request-max-height, 70dvh);
   overflow-y: auto;
 }
 
@@ -22,7 +22,7 @@
      长题短窗也不会把 footer 主按钮截掉。 */
   display: flex;
   flex-direction: column;
-  max-height: var(--pending-request-max-height, min(50dvh, 320px));
+  max-height: var(--pending-request-max-height, 70dvh);
   padding: 14px 16px;
   border: 1px solid var(--border-strong);
   border-radius: var(--layout-radius);
@@ -310,4 +310,9 @@
   .pending-request-submit {
     flex: 1;
   }
+}
+
+/* 单个问题只保留正文的一个滚动容器，避免外层也出现细小滚动条。 */
+.pending-request-layer:has(> .pending-request-card:only-child) {
+  overflow-y: clip;
 }

@@ -1,6 +1,7 @@
+import { Button } from "../Button";
 import type { ReactNode } from "react";
 import { Dialog } from "./Dialog";
-import { useT } from "../../i18n";
+import { useT } from "../i18n";
 
 export function ConfirmDialog({
   open,
@@ -32,22 +33,22 @@ export function ConfirmDialog({
       title={title}
       footer={
         <>
-          <button
+          <Button
             type="button"
-            className="subtle-action"
+            variant="subtle"
             disabled={busy}
             onClick={onClose}
           >
             {t.common.cancel}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="primary-action"
+            variant="primary"
             disabled={busy}
             onClick={onConfirm}
           >
             {busy ? (busyLabel ?? confirmLabel) : confirmLabel}
-          </button>
+          </Button>
         </>
       }
     >

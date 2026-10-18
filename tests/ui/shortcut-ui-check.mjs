@@ -242,11 +242,10 @@ try {
   const composer = page.locator(".sd-composer-field");
   await composer.fill("把血斛采集加入快捷任务");
   await page.locator(".skill-menu-trigger").click();
-  const option = page.locator(".skill-menu-popover button", {
-    hasText: "create-shortcut",
-  });
+  const option = page.getByRole("menuitem", { name: "创建快捷任务", exact: true });
   await option.waitFor();
   await option.click();
+  await page.locator(".skill-menu-popover").waitFor({ state: "detached" });
   assert.equal(
     await composer.inputValue(),
     "把血斛采集加入快捷任务$create-shortcut ",

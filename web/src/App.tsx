@@ -1,14 +1,16 @@
+import { Button } from "@sleepy-doll/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, subscribeNativeEvents } from "./ipc/api";
-import { Wordmark } from "./components/icons";
+import { Wordmark } from "@sleepy-doll/ui/icons";
 import { AppShell } from "./components/shell/AppShell";
 import { DetailsPanel } from "./components/shell/DetailsPanel";
-import { Toast } from "./components/overlay/Toast";
-import { MotionSwitch } from "./components/controls/MotionSwitch";
+import { Toast } from "@sleepy-doll/ui/overlay/Toast";
+import { MotionSwitch } from "@sleepy-doll/ui/controls/MotionSwitch";
 import { ChatPage } from "./pages/chat/ChatPage";
 import { ExtensionsPage } from "./pages/extensions/ExtensionsPage";
 import { SettingsPage } from "./pages/settings/SettingsPage";
+import { MemoryPage } from "./pages/memory/MemoryPage";
 import { TasksPage } from "./pages/tasks/TasksPage";
 import { UpdateDialog } from "./app/UpdateDialog";
 import { ReleaseNotifications } from "./app/ReleaseSettings";
@@ -23,6 +25,7 @@ import { applyBridgeStatus, watchBridgeStatus } from "./session/bridge-status";
 export type Page =
   | "chat"
   | "tasks"
+  | "memory"
   | "models"
   | "extensions"
   | "bridge"
@@ -177,13 +180,9 @@ export default function App() {
         </h1>
         <p>{error || t.app.loading}</p>
         {error && (
-          <button
-            type="button"
-            className="primary-action"
-            onClick={() => void reload()}
-          >
+          <Button type="button" variant="primary" onClick={() => void reload()}>
             重试
-          </button>
+          </Button>
         )}
       </div>
     );
@@ -248,7 +247,9 @@ export default function App() {
               ? "tasks"
               : visiblePage === "extensions"
                 ? "extensions"
-                : "settings"
+                : visiblePage === "memory"
+                  ? "memory"
+                  : "settings"
         }
       >
         {visiblePage === "chat" ? (
@@ -271,6 +272,8 @@ export default function App() {
             }}
             onConnectTools={openConnect}
           />
+        ) : visiblePage === "memory" ? (
+          <MemoryPage />
         ) : visiblePage === "extensions" ? (
           <ExtensionsPage
             bootstrap={bootstrap}

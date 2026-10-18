@@ -1,0 +1,283 @@
+import { IconButton, Button } from "./Button";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
+
+import { MoreIcon, PinIcon } from "./icons";
+import "./task-card.css";
+import { useT } from "./i18n";
+
+export interface TaskCardData {
+  id: string;
+  name: string;
+  description: string;
+  state: string;
+  stateLabel: string;
+  actionLabel: string;
+  runnable: boolean;
+  pinned: boolean;
+  zeroToken: boolean;
+  sourceDeleted: boolean;
+  shortcut?: { applicationName: string; targetName: string } | null;
+  sourceConversationId?: string | null;
+  issue?: string | null;
+}
+type CardRun = { state: string; error?: string | null };
+
+export interface TaskActions<T extends TaskCardData = TaskCardData> {
+  stop?(task: T): void;
+  run(task: T): void;
+  rename?(task: T): void;
+  pin?(task: T, pinned: boolean): void;
+  archive?(task: T, archived: boolean): void;
+  copy?(task: T): void;
+  remove?(task: T): void;
+  openSource?(task: T): void;
+  askAi?(task: T): void;
+  connect?(task: T): void;
+  open?(task: T): void;
+}
+
+/**
+ * 快捷任务卡：名称、描述、就绪状态、一个主按钮。
+ */
+export function TaskCard<T extends TaskCardData>({
+  task,
+  busy,
+  actions,
+  showSource,
+  showDescription = true,
+  activeRun,
+  running = false,
+  runStateLabel,
+  issueText,
+  runErrorText,
+}: {
+  task: T;
+  busy?: boolean;
+  actions: TaskActions<T>;
+  showSource?: boolean;
+  showDescription?: boolean;
+  activeRun?: CardRun | undefined;
+  running?: boolean;
+  runStateLabel?: string | undefined;
+  issueText?: string;
+  runErrorText?: string;
+}) {
+  const t = useT();
+  const [menu, setMenu] = useState(false);
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const close = (event: MouseEvent) => {
+      if (!container.current?.contains(event.target as Node)) setMenu(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenu(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [menu]);
+  const primary = task.runnable
+    ? () => actions.run(task)
+    : task.state === "archived"
+      ? () => actions.archive?.(task, false)
+      : task.state === "unavailable"
+        ? () => actions.connect?.(task)
+        : () => actions.open?.(task);
+  const openable = Boolean(actions.open);
+  // 整卡点击打开详情：按钮/菜单等交互元素与正在选择的文本都不误触。
+  const openFromCard = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (
+      target?.closest(
+        "button, a, input, textarea, select, label, .task-card-menu",
+      )
+    )
+      return;
+    if (window.getSelection()?.toString()) return;
+    actions.open?.(task);
+  };
+  return (
+    <article
+      className="task-card"
+      data-state={task.state}
+      data-running={running}
+      data-openable={openable || undefined}
+      onClick={openable ? openFromCard : undefined}
+    >
+      <div className="task-card-head">
+        {actions.open ? (
+          <button
+            className="task-card-name"
+            onClick={() => actions.open?.(task)}
+          >
+            {task.name}
+          </button>
+        ) : (
+          <span className="task-card-name">{task.name}</span>
+        )}
+        {task.pinned && (
+          <span className="task-card-pinned" title={t.taskCard.pinned}>
+            <PinIcon />
+          </span>
+        )}
+        <div className="task-card-menu" ref={container}>
+          <IconButton
+            aria-label={`${task.name} 的更多操作`}
+            aria-expanded={menu}
+            aria-haspopup="menu"
+            onClick={() => setMenu(!menu)}
+          >
+            <MoreIcon className="button-icon" />
+          </IconButton>
+          {menu && (
+            <div className="task-menu" role="menu">
+              {actions.rename && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    actions.rename?.(task);
+                  }}
+                >
+                  重命名
+                </button>
+              )}
+              {actions.pin && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    actions.pin?.(task, !task.pinned);
+                  }}
+                >
+                  {task.pinned ? t.taskCard.unpin : t.taskCard.pin}
+                </button>
+              )}
+              {actions.copy && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    actions.copy?.(task);
+                  }}
+                >
+                  复制
+                </button>
+              )}
+              {actions.askAi && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    actions.askAi?.(task);
+                  }}
+                >
+                  调整入口
+                </button>
+              )}
+              {showSource &&
+                actions.openSource &&
+                task.sourceConversationId && (
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setMenu(false);
+                      actions.openSource?.(task);
+                    }}
+                  >
+                    查看来源对话
+                  </button>
+                )}
+              {actions.archive && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    actions.archive?.(task, task.state !== "archived");
+                  }}
+                >
+                  {task.state === "archived"
+                    ? t.taskCard.restore
+                    : t.taskCard.archive}
+                </button>
+              )}
+              {actions.remove && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    actions.remove?.(task);
+                  }}
+                >
+                  删除任务
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      {showDescription && (
+        <p className="task-card-description">
+          {task.description || t.taskCard.noDescription}
+        </p>
+      )}
+      {task.shortcut && (
+        <span className="task-card-application">
+          {task.shortcut.applicationName} · {task.shortcut.targetName}
+        </span>
+      )}
+      <div className="task-card-foot">
+        <span className="task-card-state" data-state={task.state}>
+          {running ||
+          (activeRun &&
+            task.state !== "unavailable" &&
+            task.state !== "archived")
+            ? (runStateLabel ?? task.stateLabel)
+            : task.shortcut && task.runnable
+              ? "可运行"
+              : task.stateLabel}
+        </span>
+        {!task.shortcut && task.zeroToken && task.runnable && (
+          <span className="task-card-note" title={t.taskCard.offlineNote}>
+            {t.taskCard.offlineShort}
+          </span>
+        )}
+        {task.sourceDeleted && showSource && (
+          <span className="task-card-note">{t.taskCard.sourceDeleted}</span>
+        )}
+        <Button
+          variant="primary"
+          disabled={
+            busy ||
+            task.state === "deleted" ||
+            activeRun?.state === "cancelling"
+          }
+          onClick={running ? () => actions.stop?.(task) : primary}
+        >
+          {busy
+            ? "正在处理"
+            : running
+              ? activeRun?.state === "cancelling"
+                ? "正在停止"
+                : "停止"
+              : task.actionLabel || t.taskCard.open}
+        </Button>
+      </div>
+      {task.issue && task.state !== "archived" && (
+        <p className="task-card-issue">{issueText ?? task.issue}</p>
+      )}
+      {!running && activeRun?.error && task.state !== "archived" && (
+        <p className="task-card-issue">{runErrorText ?? activeRun.error}</p>
+      )}
+    </article>
+  );
+}

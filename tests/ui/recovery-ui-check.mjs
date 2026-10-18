@@ -1,4 +1,4 @@
-import "./runtime.mjs";
+import { uiStylesheetUrl, uiMotionStylesheetUrl } from "./runtime.mjs";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,14 +8,14 @@ const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
-const fixture = `import React from 'react';import ReactDOM from 'react-dom/client';import {BridgeRecovery} from '/src/components/bridge/BridgeRecovery.tsx';import '/src/product.css';import '/src/motion.css';ReactDOM.createRoot(document.getElementById('root')).render(React.createElement('div',{style:{padding:32,maxWidth:1000}},React.createElement(BridgeRecovery,{onBack:()=>{}})));`;
+const fixture = `import React from 'react';import ReactDOM from 'react-dom/client';import {BridgeRecovery} from '/src/components/bridge/BridgeRecovery.tsx';import '${uiStylesheetUrl}';import '${uiMotionStylesheetUrl}';ReactDOM.createRoot(document.getElementById('root')).render(React.createElement('div',{style:{padding:32,maxWidth:1000}},React.createElement(BridgeRecovery,{onBack:()=>{}})));`;
 let server, browser;
 try {
   server = await createServer({
     root: path.join(root, "web"),
     configFile: path.join(root, "vite.config.ts"),
     logLevel: "silent",
-    server: { host: "127.0.0.1", port: 0, hmr: false },
+    server: { host: "127.0.0.1", port: 0, hmr: false, forwardConsole: false },
   });
   await server.listen();
   const entry = await server.transformRequest("/src/main.tsx");
@@ -181,16 +181,29 @@ try {
   );
   await rows.first().getByRole("button", { name: "查看与恢复" }).click();
   let dialog = page.getByRole("dialog", { name: "恢复所选设置" });
-  await dialog.getByRole("button", { name: "恢复所选 2 项" }).waitFor();
+  const setField = async (name, checked) => {
+    const checkbox = dialog.getByRole("checkbox", { name, exact: true });
+    if ((await checkbox.isChecked()) !== checked)
+      await dialog.getByText(name, { exact: true }).click();
+    assert.equal(await checkbox.isChecked(), checked);
+  };
+  await dialog.getByRole("button", { name: "恢复 0 项" }).waitFor();
+  assert.equal(
+    previews.length,
+    0,
+    "Opening fields must not select or preview automatically",
+  );
+  await setField("原神启动参数", true);
+  await setField("日志遮罩开关", true);
   await page.waitForFunction(
-    () => document.querySelectorAll(".recovery-difference").length === 2,
+    () => document.querySelectorAll(".recovery-values").length === 2,
   );
   assert.equal(restoreCalls.length, 0, "Opening preview restored config");
-  await dialog.getByRole("checkbox", { name: "日志遮罩开关" }).uncheck();
+  await setField("日志遮罩开关", false);
   await page.waitForFunction(
-    () => document.querySelectorAll(".recovery-difference").length === 1,
+    () => document.querySelectorAll(".recovery-values").length === 1,
   );
-  await dialog.getByText("后来还改过，此次会替换", { exact: true }).waitFor();
+  await dialog.getByText("将覆盖后续修改", { exact: true }).waitFor();
   if (process.env.RECOVERY_VISUAL)
     console.log(
       "RECOVERY_IMAGE:" + (await page.screenshot()).toString("base64"),
@@ -200,18 +213,19 @@ try {
   assert.equal(restoreCalls.length, 0);
   await rows.first().getByRole("button", { name: "查看与恢复" }).click();
   dialog = page.getByRole("dialog", { name: "恢复所选设置" });
-  await dialog.getByRole("checkbox", { name: "日志遮罩开关" }).uncheck();
+  await setField("原神启动参数", true);
   await page.waitForFunction(
-    () => document.querySelectorAll(".recovery-difference").length === 1,
+    () => document.querySelectorAll(".recovery-values").length === 1,
   );
-  await dialog.getByRole("button", { name: "恢复所选 1 项" }).click();
+  await dialog.getByRole("button", { name: "恢复 1 项" }).click();
   await dialog.waitFor({ state: "hidden" });
   assert.deepEqual(restoreCalls[0].paths, [args]);
   assert.equal(restoreCalls[0].online, true);
   await page.getByRole("button", { name: "查看并撤销本次恢复" }).click();
   dialog = page.getByRole("dialog", { name: "恢复所选设置" });
+  await setField("原神启动参数", true);
   await page.waitForFunction(
-    () => document.querySelectorAll(".recovery-difference").length === 1,
+    () => document.querySelectorAll(".recovery-values").length === 1,
   );
   assert(previews.some((value) => value.changeId === "undo"));
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
@@ -230,7 +244,10 @@ try {
   await dialog
     .getByText("完整恢复需要退出 BetterGI，避免自动保存覆盖。", { exact: true })
     .waitFor();
-  const confirm = dialog.getByRole("button", { name: "确认恢复完整配置" });
+  const confirm = dialog.getByRole("button", {
+    name: "恢复完整配置",
+    exact: true,
+  });
   assert.equal(await confirm.isEnabled(), false);
   running = false;
   await page.waitForFunction(
@@ -253,7 +270,7 @@ try {
     false,
     "A failed restore left the stale preview executable",
   );
-  await dialog.getByRole("button", { name: "重新核对当前配置" }).click();
+  await dialog.getByRole("button", { name: "刷新预览" }).click();
   await page.waitForFunction(
     () =>
       document.querySelector(".recovery-preview-dialog .primary-action")

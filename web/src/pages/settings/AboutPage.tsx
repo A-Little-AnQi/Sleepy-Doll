@@ -1,4 +1,5 @@
-import { HelpIcon, Wordmark } from "../../components/icons";
+import { Button } from "@sleepy-doll/ui";
+import { HelpIcon, Wordmark } from "@sleepy-doll/ui/icons";
 import { useT } from "../../i18n";
 import { ReleaseSettings } from "../../app/ReleaseSettings";
 
@@ -10,9 +11,9 @@ export function AboutPage() {
       <h2>{t.settings.about}</h2>
       <div className="settings-about-brand">
         <Wordmark />
-        <button
+        <Button
           type="button"
-          className="subtle-action"
+          variant="subtle"
           onClick={() =>
             window.dispatchEvent(
               new CustomEvent("sleepy-doll:open-release-notes", {
@@ -23,7 +24,7 @@ export function AboutPage() {
         >
           <HelpIcon className="button-icon" />
           {t.account.help}
-        </button>
+        </Button>
       </div>
       <ReleaseSettings />
     </div>

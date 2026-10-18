@@ -14,7 +14,7 @@
   align-items: center;
   gap: 12px;
   transform: translateX(-50%);
-  border: 1px solid var(--border-strong);
+  border: var(--border-width, 1px) solid var(--border-strong);
   border-radius: var(--layout-radius);
   background: var(--surface);
   box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
@@ -32,7 +32,7 @@
 .toast-action {
   flex-shrink: 0;
   padding: 6px 12px;
-  border: 1px solid var(--border-strong);
+  border: var(--border-width, 1px) solid var(--border-strong);
   border-radius: 7px;
   background: var(--surface);
   color: var(--text);

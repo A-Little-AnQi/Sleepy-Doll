@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { BrandIcon, HelpIcon, SettingsIcon } from "../icons";
-import { ThemeSwitch } from "../controls/ThemeSwitch";
-import { SettingRow } from "../controls/SettingRow";
+import { BrandIcon, HelpIcon, SettingsIcon } from "@sleepy-doll/ui/icons";
+import { ThemeSwitch } from "@sleepy-doll/ui/controls/ThemeSwitch";
+import { SettingRow } from "@sleepy-doll/ui/controls/SettingRow";
 import { useTheme, writeTheme } from "../../appearance";
 import { useT } from "../../i18n";
 

@@ -1,6 +1,7 @@
 import { MoonIcon, SunIcon } from "../icons";
-import { useT } from "../../i18n";
-import type { ThemeId, ThemeOrigin } from "../../appearance";
+import { useT } from "../i18n";
+export type ThemeId = "light" | "dark";
+export type ThemeOrigin = { x: number; y: number };
 
 export function ThemeSwitch({
   theme,

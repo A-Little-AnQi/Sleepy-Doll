@@ -1,3 +1,4 @@
+import { ProductUiProvider } from "./appearance/UiProvider";
 import { Component, StrictMode, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
@@ -6,8 +7,8 @@ import { DesktopReady } from "./components/shell/DesktopReady";
 import { WindowResizeHandles } from "./components/shell/TitleBar";
 import { framelessWindow } from "./ipc/api";
 import { initAnalytics } from "./app/analytics";
-import "./product.css";
-import "./motion.css";
+import "@sleepy-doll/ui/styles.css";
+import "@sleepy-doll/ui/motion.css";
 
 initAnalytics();
 
@@ -40,11 +41,13 @@ class ErrorBoundary extends Component<
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {framelessWindow() && <WindowResizeHandles />}
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-    <ContextMenu />
-    <DesktopReady />
+    <ProductUiProvider>
+      {framelessWindow() && <WindowResizeHandles />}
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+      <ContextMenu />
+      <DesktopReady />
+    </ProductUiProvider>
   </StrictMode>,
 );

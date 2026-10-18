@@ -30,6 +30,7 @@ const zh = {
   },
 
   nav: {
+    memory: "记忆",
     tasks: "快捷任务",
     extensions: "工具与扩展",
     newChat: "新建对话",
@@ -143,6 +144,7 @@ const zh = {
   },
 
   transcript: {
+    memoryActivity: "记忆",
     stopped: "已停止",
     process: "执行过程",
     callFailed: "调用失败",
@@ -276,18 +278,32 @@ const zh = {
     qrLabel: "赞赏二维码",
     dialogHeading: "对话",
     configHeading: "配置",
-    memoryHeading: "操作经验",
+    memoryHeading: "记忆",
+    memoryEnabled: "启用记忆",
+    memoryManage: "管理记忆",
+    memoryDescription:
+      "保存可复用的操作经验。AI 会根据新的事实合并修订，使用时先核对当前情况。",
+    memoryToggleHint: "关闭后停止使用和学习，已有记忆仍可查看和编辑。",
+    memorySearch: "搜索记忆",
+    memoryNone: "还没有记忆",
+    memoryNoMatch: "没有找到相关记忆",
+    memoryDisabled: "记忆已关闭，已有内容会保留。",
+    memoryForgetTitle: "忘记这条记忆？",
+    memoryForgetHint: "删除后不再参考这条经验，也不会从原有记录自动恢复。",
+    memoryCount: (count: number) => `${count} 条记忆`,
+    memoryAdvanced: "入口与参数（高级）",
+
     memoryHint:
       "自动记住经过观测的实现链路。新任务先核对条件和当前接口，不照搬旧参数。",
-    memoryEmpty: "尚未形成操作经验。完成有工具操作的任务后会自动学习。",
+    memoryEmpty: "符合记忆触发条件、且有可复用的新事实时，才会在后台学习。",
     memoryChanged: "入口或契约已变化，暂不自动参考",
     memoryCandidate: "候选经验，使用前仍需核对目标和结果",
     memoryVerified: "该链路已有目标核验记录",
-    memoryEdit: "纠正经验",
-    memoryRefresh: "刷新经验",
+    memoryEdit: "编辑记忆",
+    memoryRefresh: "刷新",
     memoryDelete: "忘记这条",
     memoryIntent: "适用目标",
-    memorySummary: "核心关系",
+    memorySummary: "简介（最多 240 字）",
     memoryConditions: "适用条件（每行一项）",
     memorySteps: "实现步骤",
     memoryTool: "工具",
@@ -594,6 +610,7 @@ const en: Dict = {
   },
 
   nav: {
+    memory: "Memory",
     tasks: "Quick Tasks",
     extensions: "Tools & Extensions",
     newChat: "New chat",
@@ -710,6 +727,7 @@ const en: Dict = {
   },
 
   transcript: {
+    memoryActivity: "Memory",
     stopped: "Stopped",
     process: "Activity",
     callFailed: "Call failed",
@@ -847,10 +865,27 @@ const en: Dict = {
     qrLabel: "Tip QR code",
     dialogHeading: "Chat",
     configHeading: "Config",
-    memoryHeading: "Operation experience",
+    memoryHeading: "Memory",
+    memoryEnabled: "Enable memory",
+    memoryManage: "Manage memory",
+    memoryDescription:
+      "Reusable experience, revised by AI when new facts are observed. Current conditions are checked before use.",
+    memoryToggleHint:
+      "Turning this off pauses recall and learning. Existing memories remain available to manage.",
+    memorySearch: "Search memories",
+    memoryNone: "No memories yet",
+    memoryNoMatch: "No matching memories",
+    memoryDisabled: "Memory is off. Existing entries are kept.",
+    memoryForgetTitle: "Forget this memory?",
+    memoryForgetHint:
+      "This experience will no longer be used or automatically restored from its original record.",
+    memoryCount: (count: number) => `${count} memories`,
+    memoryAdvanced: "Tools and parameters (advanced)",
+
     memoryHint:
       "Automatically learns observed implementation chains. Checks current conditions and contracts before reusing them.",
-    memoryEmpty: "No experience yet. Tool-based work is learned automatically.",
+    memoryEmpty:
+      "Memory is learned quietly only when a meaningful, reusable discovery meets the memory criteria.",
     memoryChanged: "Entry or contract changed; excluded from automatic recall",
     memoryCandidate:
       "Candidate experience; check the goal and results before reuse",
@@ -859,7 +894,7 @@ const en: Dict = {
     memoryRefresh: "Refresh experience",
     memoryDelete: "Forget this",
     memoryIntent: "Applicable goal",
-    memorySummary: "Core relationships",
+    memorySummary: "Introduction (up to 240 characters)",
     memoryConditions: "Conditions (one per line)",
     memorySteps: "Implementation steps",
     memoryTool: "Tool",
