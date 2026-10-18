@@ -99,21 +99,8 @@ export function MemoryPage() {
           <h1>{t.settings.memoryHeading}</h1>
           <p className="memory-hint">{t.settings.memoryDescription}</p>
         </div>
-        <Button
-          variant="subtle"
-          disabled={busy || loading}
-          onClick={() => {
-            setLoading(true);
-            setError("");
-            void refresh()
-              .catch((reason: unknown) => setError(readError(reason)))
-              .finally(() => setLoading(false));
-          }}
-        >
-          {t.settings.memoryRefresh}
-        </Button>
+        <MemoryToggle compact />
       </header>
-      <MemoryToggle hint />
       <div className="memory-toolbar">
         <SearchField
           aria-label={t.settings.memorySearch}
@@ -121,101 +108,120 @@ export function MemoryPage() {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <span className="memory-hint">
-          {t.settings.memoryCount(rows.length)}
-        </span>
+        <div className="memory-toolbar-actions">
+          <span className="memory-hint">
+            {t.settings.memoryCount(rows.length)}
+          </span>
+          <Button
+            variant="subtle"
+            disabled={busy || loading}
+            onClick={() => {
+              setLoading(true);
+              setError("");
+              void refresh()
+                .catch((reason: unknown) => setError(readError(reason)))
+                .finally(() => setLoading(false));
+            }}
+          >
+            {t.settings.memoryRefresh}
+          </Button>
+        </div>
       </div>
       {error && (
         <p className="memory-error" role="alert">
           {error}
         </p>
       )}
-      {loading ? (
-        <p role="status">{t.common.loading}</p>
-      ) : rows.length === 0 && !error ? (
-        <EmptyState
-          icon={<HistoryIcon />}
-          title={t.settings.memoryNone}
-          description={
-            memoryState.enabled
-              ? t.settings.memoryEmpty
-              : t.settings.memoryDisabled
-          }
-        />
-      ) : filteredRows.length === 0 && !error ? (
-        <EmptyState icon={<HistoryIcon />} title={t.settings.memoryNoMatch} />
-      ) : null}
-      <div className="memory-list">
-        {filteredRows.map(({ entry, compatible }) => (
-          <details key={entry.id} className="memory-entry">
-            <summary>
-              <span className="memory-entry-title">
-                {entry.experience.intent}
-              </span>
-              <span className="memory-entry-intro">
-                {entry.experience.summary}
-              </span>
-            </summary>
-            <div className="memory-entry-body">
-              <p className="memory-hint">
-                {entry.validationState === "verified"
-                  ? t.settings.memoryVerified
-                  : t.settings.memoryCandidate}
-              </p>
-              {!compatible && (
-                <p className="memory-hint">{t.settings.memoryChanged}</p>
-              )}
-              <p className="memory-hint">
-                {entry.experience.conditions.join("；")}
-              </p>
-              <ol>
-                {entry.experience.steps.map((step, index) => (
-                  <li key={index}>
-                    <span>{step.action}</span>
-                  </li>
-                ))}
-              </ol>
-              <details className="memory-advanced">
-                <summary>{t.settings.memoryAdvanced}</summary>
-                {entry.experience.steps.map((step, index) => (
-                  <code key={index}>
-                    {step.tool}
-                    {step.methodId ? ` → ${step.methodId}` : ""}
-                  </code>
-                ))}
-              </details>
-              <p>{entry.experience.verification.join("；")}</p>
-              {entry.experience.pitfalls.length > 0 && (
+      <div className="memory-content">
+        {loading ? (
+          <p className="memory-loading" role="status">
+            {t.common.loading}
+          </p>
+        ) : rows.length === 0 && !error ? (
+          <EmptyState
+            icon={<HistoryIcon />}
+            title={t.settings.memoryNone}
+            description={
+              memoryState.enabled
+                ? t.settings.memoryEmpty
+                : t.settings.memoryDisabled
+            }
+          />
+        ) : filteredRows.length === 0 && !error ? (
+          <EmptyState icon={<HistoryIcon />} title={t.settings.memoryNoMatch} />
+        ) : null}
+        <div className="memory-list">
+          {filteredRows.map(({ entry, compatible }) => (
+            <details key={entry.id} className="memory-entry">
+              <summary>
+                <span className="memory-entry-title">
+                  {entry.experience.intent}
+                </span>
+                <span className="memory-entry-intro">
+                  {entry.experience.summary}
+                </span>
+              </summary>
+              <div className="memory-entry-body">
                 <p className="memory-hint">
-                  {entry.experience.pitfalls.join("；")}
+                  {entry.validationState === "verified"
+                    ? t.settings.memoryVerified
+                    : t.settings.memoryCandidate}
                 </p>
-              )}
-              <div className="memory-actions">
-                <Button
-                  variant="subtle"
-                  disabled={busy}
-                  onClick={() => {
-                    setError("");
-                    setEditing(entry);
-                    setDraft(structuredClone(entry.experience));
-                  }}
-                >
-                  {t.settings.memoryEdit}
-                </Button>
-                <Button
-                  variant="subtle"
-                  disabled={busy}
-                  onClick={() => {
-                    setError("");
-                    setForgetting(entry);
-                  }}
-                >
-                  {t.settings.memoryDelete}
-                </Button>
+                {!compatible && (
+                  <p className="memory-hint">{t.settings.memoryChanged}</p>
+                )}
+                <p className="memory-hint">
+                  {entry.experience.conditions.join("；")}
+                </p>
+                <ol>
+                  {entry.experience.steps.map((step, index) => (
+                    <li key={index}>
+                      <span>{step.action}</span>
+                    </li>
+                  ))}
+                </ol>
+                <details className="memory-advanced">
+                  <summary>{t.settings.memoryAdvanced}</summary>
+                  {entry.experience.steps.map((step, index) => (
+                    <code key={index}>
+                      {step.tool}
+                      {step.methodId ? ` → ${step.methodId}` : ""}
+                    </code>
+                  ))}
+                </details>
+                <p>{entry.experience.verification.join("；")}</p>
+                {entry.experience.pitfalls.length > 0 && (
+                  <p className="memory-hint">
+                    {entry.experience.pitfalls.join("；")}
+                  </p>
+                )}
+                <div className="memory-actions">
+                  <Button
+                    variant="subtle"
+                    disabled={busy}
+                    onClick={() => {
+                      setError("");
+                      setEditing(entry);
+                      setDraft(structuredClone(entry.experience));
+                    }}
+                  >
+                    {t.settings.memoryEdit}
+                  </Button>
+                  <Button
+                    variant="subtle"
+                    disabled={busy}
+                    onClick={() => {
+                      setError("");
+                      setForgetting(entry);
+                    }}
+                  >
+                    {t.settings.memoryDelete}
+                  </Button>
+                </div>
               </div>
-            </div>
-          </details>
-        ))}
+            </details>
+          ))}
+        </div>
       </div>
       {editing && draft && (
         <Dialog

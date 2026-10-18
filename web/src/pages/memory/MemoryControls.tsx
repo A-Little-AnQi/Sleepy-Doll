@@ -60,18 +60,24 @@ export function useMemoryState() {
 
 export function MemoryToggle({
   hint = false,
+  compact = false,
   children,
 }: {
   hint?: boolean;
+  compact?: boolean;
   children?: ReactNode;
 }) {
   const t = useT();
   const value = useMemoryState();
   return (
-    <div className="memory-toggle">
+    <div
+      className="memory-toggle"
+      title={compact ? t.settings.memoryToggleHint : undefined}
+    >
       <SettingRow
         label={t.settings.memoryEnabled}
         hint={hint ? t.settings.memoryToggleHint : undefined}
+        compact={compact}
       >
         {children}
         <Switch

@@ -192,6 +192,29 @@ try {
     window.__sleepyDollReceive({ kind: "event", id: "openSettings" }),
   );
   await page.getByRole("button", { name: "管理记忆", exact: true }).waitFor();
+  const memorySettingRow = page.locator(
+    ".settings-general .memory-toggle .setting-row",
+  );
+  const centers = await memorySettingRow.evaluate((row) => {
+    const center = (node) => {
+      const rect = node.getBoundingClientRect();
+      return rect.y + rect.height / 2;
+    };
+    return {
+      row: center(row),
+      label: center(row.querySelector(".setting-row-copy strong")),
+      manage: center(row.querySelector(".subtle-action")),
+      toggle: center(row.querySelector('[role="switch"]')),
+    };
+  });
+  for (const part of ["label", "manage", "toggle"])
+    assert.ok(
+      Math.abs(centers[part] - centers.row) <= 1,
+      `Memory setting ${part} is not vertically centered: ${JSON.stringify(centers)}`,
+    );
+  await memorySettingRow.screenshot({
+    path: path.join(captureRoot, "memory-setting-row.png"),
+  });
   assert.equal(
     await page.locator(".settings-general .memory-entry").count(),
     0,
@@ -309,6 +332,7 @@ try {
     JSON.stringify({
       navigation: true,
       settingsOnlyControls: true,
+      settingRowVerticallyCentered: true,
       persistedToggle: true,
       lateStateReadCannotRevertToggle: true,
       toggleFailureRollback: true,
