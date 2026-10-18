@@ -173,6 +173,7 @@ impl AppController {
                 | "run.question.answer"
                 | "workflow.extract"
                 | "permission.set"
+                | "memory.setEnabled"
                 | "config.write"
         ) {
             Some(self.config_edit.lock().unwrap())
@@ -180,6 +181,24 @@ impl AppController {
             None
         };
         match method {
+            "memory.state" => Ok(json!({"enabled":self.supervisor.memory_enabled()})),
+            "memory.setEnabled" => {
+                let enabled = params["enabled"]
+                    .as_bool()
+                    .ok_or_else(|| Error::Config("enabled 必须是布尔值".into()))?;
+                let previous = self.supervisor.memory_enabled();
+                AppConfig::set_memory_enabled(&self.config_path, enabled)?;
+                if let Err(error) = self.supervisor.update_memory_enabled(enabled) {
+                    if let Err(rollback) =
+                        AppConfig::set_memory_enabled(&self.config_path, previous)
+                    {
+                        log::error!("记忆开关回写失败：{rollback}");
+                    }
+                    return Err(error);
+                }
+                self.config.lock().unwrap().runtime.memory_enabled = enabled;
+                Ok(json!({"enabled":enabled}))
+            }
             "memory.list" => {
                 let definitions = self.supervisor.memory_definitions();
                 let entries = self.supervisor.memory.list(200)?;
@@ -1735,6 +1754,79 @@ mod question_rpc_tests {
             RunState::AwaitingUser
         );
         controller.shutdown();
+    }
+
+    #[test]
+    fn memory_switch_rpc_preserves_configuration_and_survives_restart() {
+        let root = crate::test_root("memory-setting-rpc");
+        let path = root.join("config.json");
+        crate::config::seed(&path).unwrap();
+        let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        config["bridge"]["enabled"] = json!(false);
+        config["runtime"]
+            .as_object_mut()
+            .unwrap()
+            .remove("memoryEnabled");
+        std::fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+        let controller = Arc::new(AppController::load(&path).unwrap());
+        assert_eq!(
+            controller
+                .handle("memory.state", json!({}), Arc::new(|_, _| {}))
+                .unwrap()["enabled"],
+            true
+        );
+        let before: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(
+            controller
+                .handle(
+                    "memory.setEnabled",
+                    json!({"enabled":"false"}),
+                    Arc::new(|_, _| {})
+                )
+                .is_err()
+        );
+        controller
+            .handle(
+                "memory.setEnabled",
+                json!({"enabled":false}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        let mut after: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(after["runtime"]["memoryEnabled"], false);
+        after["runtime"]
+            .as_object_mut()
+            .unwrap()
+            .remove("memoryEnabled");
+        assert_eq!(
+            after, before,
+            "Changing memory must preserve model, plugin and permission configuration"
+        );
+        assert!(!controller.supervisor.memory_enabled());
+        assert_eq!(
+            controller
+                .handle("memory.list", json!({}), Arc::new(|_, _| {}))
+                .unwrap()["entries"],
+            json!([])
+        );
+        controller.shutdown();
+        drop(controller);
+        let reopened = Arc::new(AppController::load(&path).unwrap());
+        assert_eq!(
+            reopened
+                .handle("memory.state", json!({}), Arc::new(|_, _| {}))
+                .unwrap()["enabled"],
+            false
+        );
+        reopened
+            .handle(
+                "memory.setEnabled",
+                json!({"enabled":true}),
+                Arc::new(|_, _| {}),
+            )
+            .unwrap();
+        assert!(reopened.supervisor.memory_enabled());
+        reopened.shutdown();
     }
 
     #[test]

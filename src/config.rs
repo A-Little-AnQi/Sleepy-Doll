@@ -479,6 +479,18 @@ impl AppConfig {
         })
     }
 
+    /// 仅更新记忆开关，保留配置中的其它字段。
+    pub fn set_memory_enabled(path: impl AsRef<Path>, enabled: bool) -> Result<()> {
+        update_raw(path.as_ref(), |value| {
+            if !value["runtime"].is_object() {
+                value["runtime"] =
+                    serde_json::to_value(crate::runtime::policy::RuntimeConfig::default())?;
+            }
+            value["runtime"]["memoryEnabled"] = serde_json::json!(enabled);
+            Ok(())
+        })
+    }
+
     /// 写入托盘开关，桌面壳据此显隐图标。
     pub fn set_tray_enabled(path: impl AsRef<Path>, enabled: bool) -> Result<()> {
         update_raw(path.as_ref(), |value| {

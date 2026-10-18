@@ -703,6 +703,7 @@ async fn discarded_memory_response_is_charged_without_blocking_foreground() {
             )
             .unwrap();
     }
+    admit_memory_learning(&supervisor, &run, &["read-0", "read-1"]);
     supervisor
         .journal
         .finish(&mut run, RunState::Answered)
@@ -854,6 +855,21 @@ async fn native_observation_does_not_finish_an_explicit_conditional_task() {
     );
 }
 
+fn admit_memory_learning(supervisor: &Supervisor, run: &Run, evidence: &[&str]) {
+    let args = json!({"trigger":"nonObviousConstraint","reason":"已验证一个稳定的参数来源约束，会改变今后同类任务取得参数的方式","evidenceCallIds":evidence});
+    let result = supervisor.request_memory_learning(run, &args).unwrap();
+    let mut call = message(Role::Assistant, "");
+    call.tool_calls = vec![ToolCall {
+        id: "learn-admission".into(),
+        name: "memory.learn".into(),
+        arguments: args,
+    }];
+    supervisor.journal.append_message(run, &call).unwrap();
+    let mut response = message(Role::Tool, json!({"ok":true,"value":result}).to_string());
+    response.tool_call_id = Some("learn-admission".into());
+    supervisor.journal.append_message(run, &response).unwrap();
+}
+
 #[tokio::test]
 async fn verified_experience_is_learned_and_recalled_in_a_new_conversation() {
     let location = Arc::new(Mutex::new(String::new()));
@@ -922,6 +938,20 @@ async fn verified_experience_is_learned_and_recalled_in_a_new_conversation() {
         .unwrap();
     supervisor.session(&mut first, &cancel).await.unwrap();
     assert_eq!(first.state, RunState::Answered);
+    let evidence = supervisor
+        .journal
+        .run_history(&first)
+        .unwrap()
+        .iter()
+        .flat_map(|m| m.tool_calls.clone())
+        .filter(|c| !c.name.starts_with("memory."))
+        .map(|c| c.id)
+        .collect::<Vec<_>>();
+    admit_memory_learning(
+        &supervisor,
+        &first,
+        &evidence.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
     let learned = supervisor
         .learn_experience(&first.id, &cancel, &CancellationToken::new())
         .await
@@ -944,6 +974,13 @@ async fn verified_experience_is_learned_and_recalled_in_a_new_conversation() {
         |message| message.role == Role::Context && message.content.contains("读取脚本当前配置")
     ));
     let requests = fixture.requests.lock().unwrap();
+    assert!(
+        requests[0]["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .starts_with(CORE_AGENT_POLICY),
+        "真实请求必须使用精简后的常驻指令"
+    );
     assert_eq!(
         requests[0]["messages"][0],
         requests.last().unwrap()["messages"][0]
@@ -956,6 +993,87 @@ async fn verified_experience_is_learned_and_recalled_in_a_new_conversation() {
             .contains(path.to_string_lossy().as_ref())
     );
     drop(requests);
+    supervisor.shutdown();
+}
+
+#[tokio::test]
+async fn disabling_memory_discards_an_inflight_result_but_keeps_its_usage() {
+    let target = Arc::new(Mutex::new(None::<std::sync::Weak<Supervisor>>));
+    let control = target.clone();
+    let fixture = ModelFixture::new(move |_| {
+        control
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .upgrade()
+            .unwrap()
+            .update_memory_enabled(false)
+            .unwrap();
+        (200, answer("{\"goalRelevant\":true,\"experiences\":[]}"))
+    });
+    let supervisor = supervisor(&fixture);
+    *target.lock().unwrap() = Some(Arc::downgrade(&supervisor));
+    let mut run = supervisor
+        .journal
+        .create("读取当前脚本配置", "memory-off", "memory-off", 600, None)
+        .unwrap();
+    supervisor
+        .journal
+        .save(&mut run, RunState::Deciding)
+        .unwrap();
+    let mut assistant = message(Role::Assistant, "");
+    assistant.tool_calls = vec![
+        ToolCall {
+            id: "env".into(),
+            name: "workspace.environment".into(),
+            arguments: json!({}),
+        },
+        ToolCall {
+            id: "read".into(),
+            name: "workspace.read".into(),
+            arguments: json!({"path":"current.json"}),
+        },
+    ];
+    supervisor.journal.append_message(&run, &assistant).unwrap();
+    for id in ["env", "read"] {
+        let mut result = message(
+            Role::Tool,
+            json!({"ok":true,"value":{"current":true}}).to_string(),
+        );
+        result.tool_call_id = Some(id.into());
+        supervisor.journal.append_message(&run, &result).unwrap();
+    }
+    admit_memory_learning(&supervisor, &run, &["env", "read"]);
+    supervisor
+        .journal
+        .save(&mut run, RunState::Answered)
+        .unwrap();
+    let result = supervisor
+        .learn_experience(
+            &run.id,
+            &CancellationToken::new(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, (0, 100, 30));
+    assert!(supervisor.memory.list(10).unwrap().is_empty());
+    let usage = supervisor.journal.model_usage(&run.id).unwrap();
+    assert_eq!(usage["byPurpose"][0]["purpose"], "memory");
+    assert_eq!(usage["byPurpose"][0]["requests"], 1);
+    assert_eq!(usage["byPurpose"][0]["inputTokens"], 100);
+    assert_eq!(fixture.requests.lock().unwrap().len(), 1);
+    let skipped = supervisor
+        .learn_experience(
+            &run.id,
+            &CancellationToken::new(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(skipped, (0, 0, 0));
+    assert_eq!(fixture.requests.lock().unwrap().len(), 1);
     supervisor.shutdown();
 }
 
@@ -1006,6 +1124,34 @@ fn observed_write_route_is_saved_before_background_refinement() {
         .journal
         .save(&mut run, RunState::Answered)
         .unwrap();
+    // Routine success, even after a write, must neither save nor enqueue learning.
+    assert_eq!(supervisor.remember_observed_route(&run).unwrap(), 0);
+    supervisor.enqueue_experience_learning(&run).unwrap();
+    assert!(!supervisor.memory_learning_requested(&run).unwrap());
+    assert!(
+        supervisor
+            .request_memory_learning(&run, &json!({"reason":"普通任务完成"}))
+            .is_err()
+    );
+    assert!(supervisor.request_memory_learning(&run,&json!({"trigger":"failureRecovery","reason":"从普通成功结果猜测故障已被解决并试图保存它","evidenceCallIds":["read","write"]})).is_err());
+    assert!(supervisor.request_memory_learning(&run,&json!({"trigger":"explicitRequest","reason":"用户明确要求记住已验证的配置方式以便后续复用","quote":"内部伪造的记住要求","evidenceCallIds":["read","write"]})).is_err());
+    let db =
+        rusqlite::Connection::open(&supervisor.config.read().unwrap().storage.database).unwrap();
+    let queued: u64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM runtime_memory_learning WHERE run_id=?1",
+            [&run.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        queued, 0,
+        "Ordinary successful work must not enter the learning queue"
+    );
+    drop(db);
+    admit_memory_learning(&supervisor, &run, &["read", "write"]);
+    let duplicate=supervisor.request_memory_learning(&run,&json!({"trigger":"nonObviousConstraint","reason":"同一发现不应在本轮再次申请提炼并增加额外消耗","evidenceCallIds":["read","write"]})).unwrap();
+    assert_eq!(duplicate["duplicate"], true);
     assert_eq!(supervisor.remember_observed_route(&run).unwrap(), 1);
     let memories = supervisor.recall_memories("修改另一个脚本配置").unwrap();
     assert_eq!(memories.len(), 1);
@@ -1060,7 +1206,7 @@ fn initial_builtin_tools_include_status_and_expand_with_provider_evidence() {
     }
     supervisor.extensions.write().unwrap().tools = Arc::new(registry);
     let definitions = supervisor.definitions(&HashSet::new());
-    assert_eq!(definitions.len(), 44);
+    assert_eq!(definitions.len(), 47);
     let policy = tool_policy::TurnTools::new(
         &definitions,
         &[],

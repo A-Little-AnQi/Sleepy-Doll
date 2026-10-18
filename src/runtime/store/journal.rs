@@ -774,7 +774,7 @@ impl Journal {
             )?;
             if expected != actual {
                 return Err(Error::Stale(
-                    "操作经验已由用户修改，旧上下文中的决定未执行；请重新读取当前目标".into(),
+                    "记忆或开关已变化，旧上下文中的决定未执行；请重新读取当前目标".into(),
                 ));
             }
         }

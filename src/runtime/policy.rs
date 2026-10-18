@@ -10,6 +10,7 @@ pub struct RuntimeConfig {
     pub max_tools: usize,
     pub max_replans: u64,
     pub max_stagnant_calls: usize,
+    pub memory_enabled: bool,
     pub duration_sec: i64,
     /// 上下文预算（字符）。留空则按当前模型的窗口推导。
     #[serde(default)]
@@ -30,6 +31,7 @@ impl Default for RuntimeConfig {
             max_tools: 0,
             max_replans: 2,
             max_stagnant_calls: 6,
+            memory_enabled: true,
             duration_sec: 1800,
             // 留空：按当前模型的窗口推导，见 `budget`。
             context_chars: None,
