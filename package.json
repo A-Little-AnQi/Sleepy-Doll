@@ -9,15 +9,25 @@
   ],
   "scripts": {
     "dev": "vite",
+    "frame": "node scripts/frame.mjs dev",
+    "frame:setup": "node scripts/frame.mjs setup",
+    "frame:typecheck": "node scripts/frame.mjs typecheck",
+    "frame:build": "node scripts/frame.mjs build",
+    "frame:serve": "node scripts/frame.mjs serve",
+    "test:frame": "node tests/ui/frame-ui-check.mjs",
+    "android:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action build",
+    "android:publish": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action publish",
+    "android:preview": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action preview",
+    "android:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action check",
     "backend": "cargo run --no-default-features --features dev-ipc --bin sleepy-doll-dev",
     "desktop": "npm run dist && powershell -NoProfile -Command \"Start-Process -WindowStyle Hidden -FilePath './dist/Sleepy-Doll/sleepy-doll.exe'\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "node scripts/release-version.mjs && npm run typecheck && vite build",
     "dist": "cmd /c scripts\\build.cmd",
     "clean:rust": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/clean-rust.ps1",
-    "test": "node --test cloudflare/worker.test.mjs scripts/r2-budget.test.mjs scripts/release-version.test.mjs",
-    "format": "prettier --write \"web/**/*.{ts,tsx,css,html}\" \"packages/ui/**/*.{ts,tsx,css,json}\" \"*.{json,ts}\" \"!package-lock.json\"",
-    "format:check": "prettier --check \"web/**/*.{ts,tsx,css,html}\" \"packages/ui/**/*.{ts,tsx,css,json}\" \"*.{json,ts}\" \"!package-lock.json\"",
+    "test": "node --test cloudflare/worker.test.mjs scripts/r2-budget.test.mjs scripts/release-version.test.mjs scripts/build-boundary.test.mjs",
+    "format": "prettier --write \"web/**/*.{ts,tsx,css,html}\" \"packages/ui/**/*.{ts,tsx,css,json}\" \"frame/**/*.{ts,tsx,css}\" \"*.{json,ts}\" \"!package-lock.json\"",
+    "format:check": "prettier --check \"web/**/*.{ts,tsx,css,html}\" \"packages/ui/**/*.{ts,tsx,css,json}\" \"frame/**/*.{ts,tsx,css}\" \"*.{json,ts}\" \"!package-lock.json\"",
     "video:dev": "vite --config video/vite.config.ts",
     "video:build": "tsc -p video/tsconfig.json --noEmit && vite build --config video/vite.config.ts",
     "video:film": "node video/make-video.mjs",
@@ -25,7 +35,7 @@
     "video:check": "node video/make-video.mjs --check"
   },
   "engines": {
-    "node": ">=22.13"
+    "node": ">=22.18"
   },
   "dependencies": {
     "@sleepy-doll/ui": "*",

@@ -10,6 +10,11 @@ __pycache__/
 # Local dependency resolution
 /package-lock.json
 /Cargo.lock
+/android/.gradle/
+/android/.kotlin/
+/android/local.properties
+/android/**/build/
+/packages/ui-android/build/
 
 # Application data and credentials
 /.sleepy-doll/

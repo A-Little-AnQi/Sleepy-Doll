@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.SleepyDoll.Preview.Base" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+    <style name="Theme.SleepyDoll.Preview" parent="Theme.SleepyDoll.Preview.Base" />
+</resources>

@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application android:label="Sleepy Doll Preview" android:icon="@drawable/ic_sleepy_doll" android:theme="@style/Theme.SleepyDoll.Preview" android:allowBackup="false" android:supportsRtl="true">
+        <activity android:name=".PreviewActivity" android:exported="true" android:resizeableActivity="true" android:configChanges="screenSize|smallestScreenSize|orientation|screenLayout|density|keyboardHidden|keyboard|uiMode" />
+    </application>
+</manifest>

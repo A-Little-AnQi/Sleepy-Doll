@@ -6,7 +6,7 @@
 
 ## 构建与运行
 
-Windows 构建需要 Rust stable、Node.js 22.13+、.NET 8 SDK 和 Visual Studio 2022 C++ Build Tools。桌面运行需要 WebView2 Runtime。
+Windows 构建需要 Rust stable、Node.js 22.18+、.NET 8 SDK 和 Visual Studio 2022 C++ Build Tools。桌面运行需要 WebView2 Runtime。
 
 ```powershell
 npm install
@@ -14,6 +14,8 @@ npm run dist
 ```
 
 完整构建生成 `dist/Sleepy-Doll/` 和 `dist/Sleepy-Doll-<版本>-setup.exe`。分发使用安装包；本机组装目录可能含用户数据，不能整目录打包。
+
+Web 与安卓组件库作为仓库内部模块维护。Moduloom 预览工具是本地可选依赖，正常安装和 GitHub 构建无需它；需要预览时按[开发文档](docs/development.md#浏览器预览)单独安装。
 
 安装后启动 Sleepy Doll，在设置中添加模型，并在 BetterGI 页面连接工具。程序启动时请求管理员权限。默认安装目录为固定 D 盘上的 `D:\Sleepy Doll`；没有固定 D 盘时使用 `%LOCALAPPDATA%\Programs\Sleepy Doll`。
 
@@ -25,6 +27,8 @@ npm run dist
 | --- | --- |
 | `src/` | Rust 桌面壳、Agent 运行时与安装引擎 |
 | `web/` | React 主程序、安装器与托盘界面 |
+| `packages/ui/` | 主程序与 Frame 共用的内部组件包 |
+| `frame/` | Loom 组件清单、渲染与主题适配 |
 | `plugins/` | 领域技能与工具接入清单 |
 | `bgi-bridge/` | BGI 进程内桥、源码索引与桥专项验证 |
 | `scripts/` | 构建、发布、更新验证与缓存清理 |

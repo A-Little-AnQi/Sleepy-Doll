@@ -2,7 +2,7 @@
 
 ## 环境与命令
 
-Windows 构建需要 Rust stable（edition 2024）、Node.js 22.13+、.NET 8 SDK、Visual Studio 2022 C++ Build Tools（x64）。桌面运行需要 WebView2 Runtime；Linux 桌面开发另需 GTK/WebKitGTK。
+Windows 构建需要 Rust stable（edition 2024）、Node.js 22.18+、.NET 8 SDK、Visual Studio 2022 C++ Build Tools（x64）。桌面运行需要 WebView2 Runtime；Linux 桌面开发另需 GTK/WebKitGTK。
 
 ```powershell
 npm install
@@ -12,6 +12,12 @@ npm run dist
 | 命令 | 用途 |
 | --- | --- |
 | `npm run dev` | Vite 界面开发服务器 |
+| `npm run frame` | Loom 组件与主题工作台，默认 `http://127.0.0.1:4321/` |
+| `npm run frame:setup -- <框架tgz路径> <安卓插件tgz路径>` | 独立安装可选的本地预览工具，不写入产品依赖 |
+| `npm run frame:typecheck` | 单独检查预览适配类型，需要先安装本地工具 |
+| `npm run frame:build` | 构建静态组件工作台至 `target/frame/` |
+| `npm run frame:serve` | 预览已构建的组件工作台 |
+| `npm run test:frame` | 本地产品页面、Frame 组件及两端视觉一致性检查 |
 | `npm run backend` | 本地开发 IPC 网关 |
 | `npm run desktop` | 完整构建并启动组装后的桌面程序 |
 | `npm run build` | 发布配置校验、前端类型检查与生产构建 |
@@ -63,6 +69,18 @@ CI 执行前端、发布脚本、Rust 格式／编译／库测试及功能索引
 `tests/ui/` 用 Playwright 验证实际 React 界面，`tests/desktop/` 验证窗口与托盘，`tests/runtime/` 验证运行时行为。`bgi-bridge/dev/` 保留桥专项 C# 检查、元数据生成器及宿主接口盘点工具。需要模型或真实宿主的验证必须单独说明环境与范围，不能算作游戏全流程通过。
 
 ## 浏览器预览
+
+通用控件、弹层、图标、品牌资源、输入容器、扩展条目和任务卡片位于内部 workspace 包 `packages/ui/`，主程序、安装器和托盘通过 `@sleepy-doll/ui` 导入。包不依赖产品 IPC 或会话状态；`ProductUiProvider` 提供产品文案，任务卡片的业务适配留在 `web/src/components/tasks/TaskCard.tsx`。CSS 和资源只有组件包中的一份实现，页面继续负责布局、数据和操作。
+
+组件库是仓库内的正式模块，正常 `npm install`、`npm run build` 和 GitHub 构建无需 Moduloom。Moduloom 是独立的本地可选工具，`frame/package.json` 不属于产品 workspace，也不记录未发布包或机器路径。需要预览时执行 `npm run frame:setup -- <loom-frame.tgz完整路径> <android-plugin.tgz完整路径>`：安装位置是被 Git 忽略的 `frame/node_modules/`，不会写入根依赖或根 lock 文件。普通 Web 预览可使用轻量安卓插件；需要自带模拟器时使用 Windows 完整包。工具安装不包含在产品或安装包里。
+
+根 `tsconfig.json` 只检查产品和内部组件库；预览适配单独使用 `frame/tsconfig.json`，通过 `npm run frame:typecheck` 检查。`npm test` 会检查产品依赖与实际 TypeScript 模块图，防止本地预览工具重新进入默认构建链路。
+
+组件和主题调整优先使用 `npm run frame`，无需运行开发后端。`frame/catalog.ts` 登记真实参数和基础依赖，`frame/renderer.tsx` 直接调用内部包，并将交互回写工作台。现有 57 个条目包括 28 个控件、组合、样式上下文和品牌条目，以及 29 个描边图标。`frame.config.ts` 从正式 CSS 读取默认配色；默认明暗、圆角和字号保持产品原值。强调色仅映射品牌金色，主按钮与用户消息保留各自语义。自定义设计变量使用正式 CSS 变量名；布局、字号、圆角、动效、边框与阴影只有使用对应变量的部位会响应。
+
+工作台设置默认存在当前浏览器 IndexedDB，端口与 namespace 共同决定存储范围。主题调整保存在工作台中；复制的主题 JSON 不会自动改写产品 CSS。组件结构、样式或资源修改则直接来自 workspace 包，两端会热更新。产品页面仍用于检查应用布局、业务状态和原生宿主行为，Frame 用于日常组件检查。
+
+`npm run test:frame` 使用演示 IPC 在独立临时端口运行真实产品和 Frame；不会访问模型或执行游戏操作。抽取前可用 `node tests/ui/frame-ui-check.mjs --baseline` 保存 56 个产品页面状态，之后检查图片差异；只容许少量边缘像素的 1 色阶栅格化差异。两端组件另行核对完整样式树、文字、逐项几何和非文字图像，避免把不同合成上下文中的文字抗锯齿当成设计变化。基准、截图及检查数据位于 `target/.tmp/frame-integration/`，完成核对后走删除脚本清理。Frame 启动脚本按命令隔离运行时目录 `target/tmp/frame/dev/`、`build/` 和 `serve/`，退出时清理各自目录；开发缓存位于 `node_modules/.cache/loom-frame/`。
 
 分别执行 `npm run backend` 与 `npm run dev`。网关优先使用 47124，端口写入 `target/dev/ipc.port`，开发配置和状态在 `target/dev/user`；旧 `.sleepy-doll/dev` 首次启动时自动迁移，目录外的自定义路径保持原指向。Vite 优先使用 5173，并按端口文件转发 `/ipc`。两端占用时均可顺延。浏览器预览调用真实 AppController，不自带模型或 BGI 模拟实现。
 

@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.SleepyDoll.Preview" parent="Theme.SleepyDoll.Preview.Base">
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/preview_splash_empty</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBrandingImage">@drawable/preview_splash_empty</item>
+        <item name="android:windowSplashScreenBackground">@android:color/white</item>
+        <item name="android:windowSplashScreenAnimationDuration">0</item>
+    </style>
+</resources>

@@ -1,0 +1,6 @@
+{
+  "name": "sleepy-doll-local-preview",
+  "private": true,
+  "type": "module",
+  "description": "Optional local preview tooling, outside the product npm workspaces"
+}
