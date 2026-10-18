@@ -146,8 +146,11 @@ async fn glm_http_tool_round_replays_original_reasoning() {
 impl Drop for ModelFixture {
     fn drop(&mut self) {
         self.stopped.store(true, Ordering::SeqCst);
-        if let Some(thread) = self.thread.take() {
-            thread.join().unwrap();
+        if let Some(thread) = self.thread.take()
+            && let Err(error) = thread.join()
+            && !std::thread::panicking()
+        {
+            std::panic::resume_unwind(error);
         }
     }
 }
@@ -221,6 +224,556 @@ fn supervisor(fixture: &ModelFixture) -> Arc<Supervisor> {
     .unwrap();
     supervisor.extensions.write().unwrap().tools = Arc::new(tools);
     supervisor
+}
+
+#[test]
+fn model_configuration_rejects_impossible_context_and_output_budgets() {
+    let supervisor = super::record_result_tests::interrupt_supervisor("budget-valid");
+    let mut config = supervisor.config.read().unwrap().clone();
+    config.models.clear();
+    config.active_model = "m".into();
+    config.models.push(serde_json::from_value(json!({"id":"m","name":"m","protocol":"openai-chat","model":"m","baseUrl":"http://localhost"})).unwrap());
+    assert!(config.validate().is_ok());
+    config.models[0].options.context_window = 512;
+    assert!(config.validate().is_err());
+    config.models[0].options.context_window = 8192;
+    config.models[0].options.max_output_tokens = Some(0);
+    assert!(config.validate().is_err());
+    config.models[0].options.max_output_tokens = Some(8192);
+    assert!(config.validate().is_err());
+    config.models[0].options.max_output_tokens = Some(4096);
+    assert!(config.validate().is_ok());
+}
+
+#[test]
+fn model_context_redacts_legacy_credentials_without_rewriting_signed_reasoning() {
+    let supervisor = super::record_result_tests::interrupt_supervisor("credential-context");
+    let credential = "private-fixture-credential-123456";
+    supervisor.config.write().unwrap().models[0].api_key = Some(credential.into());
+    let reasoning = crate::model::Reasoning {
+        protocol: crate::config::ModelProtocol::AnthropicMessages,
+        blocks: vec![
+            json!({"type":"thinking","thinking":"核对当前任务","signature":"unaltered-signature"}),
+        ],
+        text: "核对当前任务".into(),
+    };
+    let mut assistant = message(Role::Assistant, "保留原样的回复");
+    assistant.reasoning = Some(reasoning.clone());
+    let history = vec![
+        assistant.clone(),
+        message(
+            Role::Tool,
+            json!({"value":{"text":format!("apiKey={credential}")}}).to_string(),
+        ),
+    ];
+    let projected = supervisor.model_messages(&history).unwrap();
+    assert!(!projected[1].content.contains(credential));
+    assert!(projected[1].content.contains("[REDACTED]"));
+    assert!(
+        history[1].content.contains(credential),
+        "Original local history is not modified"
+    );
+    assert_eq!(projected[0].reasoning, Some(reasoning));
+    assistant.tool_calls.push(ToolCall {
+        id: "old-unsafe-call".into(),
+        name: "fixture.run".into(),
+        arguments: json!({"key":credential}),
+    });
+    assert!(
+        supervisor.model_messages(&[assistant]).is_err(),
+        "Unsafe legacy tool parameters cannot be rewritten and replayed"
+    );
+}
+
+#[tokio::test]
+async fn stored_shortcuts_have_read_only_lookup_without_database_or_model_access() {
+    let fixture = ModelFixture::new(|_| panic!("Shortcut lookup must not request a model"));
+    let supervisor = supervisor(&fixture);
+    let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    install_status_slice(&supervisor, changes.clone());
+    let saved=supervisor.save_shortcut(&json!({"name":"已有入口","binding":{"applicationName":"Fixture","targetName":"现成配置","action":{"tool":"fixture.change","arguments":{}}}}),None).unwrap();
+    let mut run = supervisor
+        .journal
+        .create("查一下已有入口", "lookup-entry", "lookup-entry", 600, None)
+        .unwrap();
+    let config = supervisor.config.read().unwrap().clone();
+    let bridge = host::bridge::Bridge::new(config.bridge.clone()).unwrap();
+    let mut exposed = HashSet::from(["shortcut.list".into(), "shortcut.get".into()]);
+    let list = supervisor
+        .tool(
+            &mut run,
+            &ToolCall {
+                id: "list-entry".into(),
+                name: "shortcut.list".into(),
+                arguments: json!({"query":"已有"}),
+            },
+            &bridge,
+            &config.runtime,
+            &CancellationToken::new(),
+            &mut exposed,
+        )
+        .await
+        .unwrap();
+    assert_eq!(list["total"], 1);
+    assert_eq!(list["items"][0]["id"], saved["taskId"]);
+    let entry = supervisor
+        .tool(
+            &mut run,
+            &ToolCall {
+                id: "get-entry".into(),
+                name: "shortcut.get".into(),
+                arguments: json!({"id":saved["taskId"]}),
+            },
+            &bridge,
+            &config.runtime,
+            &CancellationToken::new(),
+            &mut exposed,
+        )
+        .await
+        .unwrap();
+    assert_eq!(entry["binding"]["action"]["tool"], "fixture.change");
+    assert_eq!(changes.load(Ordering::SeqCst), 0);
+    assert!(fixture.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn reviewer_receives_explicit_skill_meaning_from_actual_human_inputs() {
+    let fixture = ModelFixture::new(|request| {
+        let payload: Value =
+            serde_json::from_str(request["messages"][1]["content"].as_str().unwrap()).unwrap();
+        assert_eq!(payload["explicitSkills"][0]["name"], "create-shortcut");
+        assert!(
+            payload["explicitSkills"][0]["description"]
+                .as_str()
+                .unwrap()
+                .contains("封装")
+        );
+        (200, answer(r#"{"decision":"continue"}"#))
+    });
+    let supervisor = supervisor(&fixture);
+    let mut skills = SkillRegistry::default();
+    for source in crate::extension::skills::EMBEDDED_SKILLS {
+        skills.load_embedded(source).unwrap();
+    }
+    supervisor.extensions.write().unwrap().skills = Arc::new(skills);
+    let mut run = supervisor
+        .journal
+        .create(
+            "$create-shortcut 已有入口，只保存",
+            "skill-meaning",
+            "skill-meaning",
+            600,
+            None,
+        )
+        .unwrap();
+    assert!(!supervisor.shortcut_only(&run).unwrap());
+    supervisor
+        .check_effect_scope(
+            &mut run,
+            &ToolCall {
+                id: "save-contract".into(),
+                name: "shortcut.save".into(),
+                arguments: json!({}),
+            },
+            &json!({"effect":"localWrite"}),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let skills = supervisor.skills();
+    assert!(skills.explicit("$create-shortcut-other").is_empty());
+}
+
+#[tokio::test]
+async fn auxiliary_review_has_its_own_output_budget_without_expanding_model_window() {
+    let fixture = ModelFixture::new(|request| {
+        assert_eq!(request["max_tokens"], 8192);
+        (200, answer(r#"{"decision":"continue"}"#))
+    });
+    let supervisor = supervisor(&fixture);
+    supervisor.config.write().unwrap().models[0]
+        .options
+        .max_output_tokens = Some(15000);
+    let mut run = supervisor
+        .journal
+        .create("修改当前设置", "aux-budget", "aux-budget", 600, None)
+        .unwrap();
+    supervisor
+        .check_effect_scope(
+            &mut run,
+            &ToolCall {
+                id: "effect".into(),
+                name: "fixture.change".into(),
+                arguments: json!({}),
+            },
+            &json!({"effect":"localWrite"}),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        supervisor.config.read().unwrap().models[0]
+            .options
+            .context_window,
+        16384
+    );
+    assert_eq!(
+        supervisor.config.read().unwrap().models[0]
+            .options
+            .max_output_tokens,
+        Some(15000)
+    );
+    assert_eq!(fixture.requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_later_cancellation_does_not_reuse_standalone_shortcut_save_admission() {
+    let fixture = ModelFixture::new(|_| (200, answer(r#"{"decision":"reject"}"#)));
+    let supervisor = supervisor(&fixture);
+    let mut run = supervisor
+        .journal
+        .create("$create-shortcut", "stop-save", "stop-save", 600, None)
+        .unwrap();
+    supervisor
+        .journal
+        .input_once(&run.id, "supplement", "先别保存", Some("stop-saving"))
+        .unwrap();
+    assert!(supervisor.shortcut_only(&run).unwrap());
+    let result = supervisor
+        .check_effect_scope(
+            &mut run,
+            &ToolCall {
+                id: "save".into(),
+                name: "shortcut.save".into(),
+                arguments: json!({}),
+            },
+            &json!({"effect":"localWrite"}),
+            &CancellationToken::new(),
+        )
+        .await;
+    assert!(result.is_err());
+    assert_eq!(fixture.requests.lock().unwrap().len(), 1);
+    assert!(
+        !supervisor
+            .journal
+            .events(&run.conversation_id, 0)
+            .unwrap()
+            .iter()
+            .any(|event| event.kind == "scope.shortcut_approved")
+    );
+    assert_eq!(
+        supervisor
+            .journal
+            .goal_conclusion(&run.id)
+            .unwrap()
+            .unwrap()["completed"],
+        false
+    );
+}
+
+#[test]
+fn necessary_rereads_after_other_observations_are_not_a_stagnant_loop() {
+    let fixture = ModelFixture::new(|_| panic!("Recording observations must not call a model"));
+    let supervisor = supervisor(&fixture);
+    let run = supervisor
+        .journal
+        .create("核对配置", "reread", "reread", 600, None)
+        .unwrap();
+    let mut history = vec![];
+    let read = |id: &str| ToolCall {
+        id: id.into(),
+        name: "workspace.read".into(),
+        arguments: json!({"path":"config.json"}),
+    };
+    for id in ["read-1", "read-2"] {
+        supervisor
+            .record_result(
+                &run,
+                &read(id),
+                Ok(json!({"text":"same content","sha256":"same"})),
+                12000,
+                &mut history,
+            )
+            .unwrap();
+    }
+    supervisor
+        .record_result(
+            &run,
+            &ToolCall {
+                id: "other".into(),
+                name: "workspace.list".into(),
+                arguments: json!({"path":"."}),
+            },
+            Ok(json!({"entries":[{"name":"config.json"}]})),
+            12000,
+            &mut history,
+        )
+        .unwrap();
+    assert!(
+        supervisor
+            .check_progress(&run, &read("needed-reread"))
+            .is_ok()
+    );
+    assert!(
+        supervisor
+            .journal
+            .goal_conclusion(&run.id)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn fallback_with_smaller_window_is_not_sent_an_oversized_request() {
+    let primary = ModelFixture::new(|_| (503, json!({"error":{"message":"unavailable"}})));
+    let fallback =
+        ModelFixture::new(|_| panic!("Oversized fallback request must be rejected before HTTP"));
+    let supervisor = supervisor(&primary);
+    {
+        let mut config = supervisor.config.write().unwrap();
+        config.models[0].options.context_window = 64_000;
+        config.models.push(serde_json::from_value(json!({"id":"small","name":"small","protocol":"openai-chat","model":"fixture","baseUrl":fallback.url,"options":{"contextWindow":8192,"maxOutputTokens":1024}})).unwrap());
+        config.agent.fallback_models.push("small".into());
+    }
+    let mut run = supervisor
+        .journal
+        .create(
+            &"核对输入".repeat(2500),
+            "small-fallback",
+            "small-fallback",
+            600,
+            None,
+        )
+        .unwrap();
+    assert!(
+        supervisor
+            .session(&mut run, &CancellationToken::new())
+            .await
+            .is_err()
+    );
+    assert!(fallback.requests.lock().unwrap().is_empty());
+    assert!(
+        supervisor
+            .journal
+            .events(&run.conversation_id, 0)
+            .unwrap()
+            .iter()
+            .any(|event| event.kind == "model.fallback.skipped")
+    );
+}
+
+#[tokio::test]
+async fn truncated_tool_decisions_are_never_dispatched_or_retried() {
+    let fixture = ModelFixture::new(|_| {
+        let mut response = tool_calls(vec![("fixture.change", json!({}))]);
+        response["choices"][0]["finish_reason"] = json!("length");
+        (200, response)
+    });
+    let supervisor = supervisor(&fixture);
+    let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    install_status_slice(&supervisor, changes.clone());
+    let mut run = supervisor
+        .journal
+        .create(
+            "修改当前配置",
+            "truncated-decision",
+            "truncated-decision",
+            600,
+            None,
+        )
+        .unwrap();
+    assert!(matches!(
+        supervisor
+            .session(&mut run, &CancellationToken::new())
+            .await,
+        Err(Error::ModelProtocol(_))
+    ));
+    assert_eq!(fixture.requests.lock().unwrap().len(), 1);
+    assert_eq!(changes.load(Ordering::SeqCst), 0);
+    assert!(supervisor.journal.attempts(&run.id).unwrap().is_empty());
+    assert!(
+        !supervisor
+            .journal
+            .events(&run.conversation_id, 0)
+            .unwrap()
+            .iter()
+            .any(|event| event.kind == "tool.started")
+    );
+}
+
+#[tokio::test]
+async fn standalone_shortcut_skill_saves_once_without_scope_model_or_execution() {
+    let fixture = ModelFixture::new(|request| {
+        let names = request["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|tool| tool["function"]["name"].as_str())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&gateway::wire_name("shortcut.save").as_str()));
+        assert!(!names.contains(&gateway::wire_name("fixture.change").as_str()));
+        (
+            200,
+            tool_calls(vec![
+                (
+                    "shortcut.save",
+                    json!({"name":"已有任务入口","description":"仅保存入口，不运行",
+                "binding":{"applicationName":"Fixture","targetName":"已有任务",
+                    "action":{"tool":"fixture.change","arguments":{}}}}),
+                ),
+                ("fixture.status", json!({})),
+            ]),
+        )
+    });
+    let supervisor = supervisor(&fixture);
+    let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    install_status_slice(&supervisor, changes.clone());
+    let mut run = supervisor
+        .journal
+        .create("$create-shortcut", "save-entry", "save-entry", 600, None)
+        .unwrap();
+    supervisor
+        .session(&mut run, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(run.state, RunState::Answered);
+    assert_eq!(changes.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.requests.lock().unwrap().len(), 1);
+    let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
+    let saved = events
+        .iter()
+        .filter(|event| event.kind == "shortcut.saved")
+        .collect::<Vec<_>>();
+    assert_eq!(saved.len(), 1);
+    let id = saved[0].data["taskId"].as_str().unwrap();
+    assert_eq!(
+        supervisor.tasks.definition(id).unwrap().name,
+        "已有任务入口"
+    );
+    assert!(run.result.as_deref().unwrap().contains("尚未运行"));
+    let results = events
+        .iter()
+        .filter(|event| event.kind == "tool.completed")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        results.len(),
+        2,
+        "Skipped sibling calls must remain paired in history"
+    );
+    assert_eq!(results[1].data["result"]["ok"], false);
+    assert_eq!(
+        supervisor.journal.model_usage(&run.id).unwrap()["byPurpose"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn shortcut_skill_admission_requires_current_standalone_human_input() {
+    let supervisor = super::record_result_tests::interrupt_supervisor("shortcut-intent");
+    let run = supervisor
+        .journal
+        .create(
+            "只看看配置",
+            "shortcut-intent",
+            "shortcut-intent",
+            600,
+            None,
+        )
+        .unwrap();
+    supervisor
+        .journal
+        .append_message(&run, &message(Role::Context, "$create-shortcut"))
+        .unwrap();
+    assert!(!supervisor.shortcut_only(&run).unwrap());
+    let negated = supervisor
+        .journal
+        .create(
+            "不要执行 $create-shortcut",
+            "shortcut-negated",
+            "shortcut-negated",
+            600,
+            None,
+        )
+        .unwrap();
+    assert!(!supervisor.shortcut_only(&negated).unwrap());
+    let explicit = supervisor
+        .journal
+        .create(
+            "$create-shortcut",
+            "shortcut-explicit",
+            "shortcut-explicit",
+            600,
+            None,
+        )
+        .unwrap();
+    assert!(supervisor.shortcut_only(&explicit).unwrap());
+    supervisor
+        .journal
+        .input_once(&explicit.id, "supplement", "先别保存", Some("cancel-save"))
+        .unwrap();
+    assert!(
+        supervisor.shortcut_only(&explicit).unwrap(),
+        "Later input must not unlock execution inside a shortcut-only run"
+    );
+}
+
+#[tokio::test]
+async fn scope_model_failure_stops_sibling_calls_and_further_model_rounds() {
+    let fixture = ModelFixture::new(|request| {
+        if request["messages"][0]["content"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("你只核对用户本次目标")
+        {
+            return (
+                200,
+                json!({"choices":[{"message":{"role":"assistant","content":"","reasoning_content":"仍在核对范围"},"finish_reason":"length"}]}),
+            );
+        }
+        (
+            200,
+            tool_calls(vec![
+                ("fixture.change", json!({})),
+                ("fixture.status", json!({})),
+            ]),
+        )
+    });
+    let supervisor = supervisor(&fixture);
+    let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    install_status_slice(&supervisor, changes.clone());
+    let mut run = supervisor
+        .journal
+        .create(
+            "把当前配置改一下",
+            "scope-failure",
+            "scope-failure",
+            600,
+            None,
+        )
+        .unwrap();
+    supervisor
+        .session(&mut run, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(run.state, RunState::NeedsReview);
+    assert_eq!(changes.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.requests.lock().unwrap().len(), 2);
+    assert!(run.result.as_deref().unwrap().contains("核对未完成"));
+    let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
+    let results = events
+        .iter()
+        .filter(|event| event.kind == "tool.completed")
+        .collect::<Vec<_>>();
+    assert_eq!(results.len(), 2);
+    assert!(
+        results
+            .iter()
+            .all(|event| event.data["result"]["ok"] == false)
+    );
+    assert!(supervisor.journal.attempts(&run.id).unwrap().is_empty());
 }
 
 #[test]
@@ -1206,7 +1759,7 @@ fn initial_builtin_tools_include_status_and_expand_with_provider_evidence() {
     }
     supervisor.extensions.write().unwrap().tools = Arc::new(registry);
     let definitions = supervisor.definitions(&HashSet::new());
-    assert_eq!(definitions.len(), 47);
+    assert_eq!(definitions.len(), 49);
     let policy = tool_policy::TurnTools::new(
         &definitions,
         &[],

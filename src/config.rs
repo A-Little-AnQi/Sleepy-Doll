@@ -409,6 +409,16 @@ impl AppConfig {
         }
         let mut ids = std::collections::HashSet::new();
         for model in &self.models {
+            if model.options.context_window < 1024
+                || model.options.max_output_tokens.is_some_and(|tokens| {
+                    tokens == 0 || tokens.saturating_add(1024) > model.options.context_window
+                })
+            {
+                return Err(Error::Config(
+                    "模型上下文至少需要 1024 token，最大输出必须为正数且为输入保留至少 1024 token"
+                        .into(),
+                ));
+            }
             if model.id.trim().is_empty()
                 || model.model.trim().is_empty()
                 || model.base_url.trim().is_empty()

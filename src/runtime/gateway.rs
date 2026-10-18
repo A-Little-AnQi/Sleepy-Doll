@@ -391,6 +391,11 @@ pub fn output_truncated(reason: Option<&str>) -> bool {
 
 pub fn validate(r: &ModelResponse) -> Result<()> {
     let truncated = output_truncated(r.finish_reason.as_deref());
+    if truncated && !r.tool_calls.is_empty() {
+        return Err(Error::ModelProtocol(
+            "工具调用所在的模型回复被截断，未执行任何调用".into(),
+        ));
+    }
     if !truncated
         && !matches!(
             r.finish_reason.as_deref(),

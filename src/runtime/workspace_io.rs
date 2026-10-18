@@ -581,7 +581,12 @@ fn scan_line(
     }
 }
 
+#[cfg(test)]
 pub fn search(root: &Path, args: &Value) -> Result<Value> {
+    search_excluding(root, args, &[])
+}
+
+pub fn search_excluding(root: &Path, args: &Value, excluded: &[PathBuf]) -> Result<Value> {
     let case_sensitive = args
         .get("caseSensitive")
         .and_then(Value::as_bool)
@@ -738,6 +743,20 @@ pub fn search(root: &Path, args: &Value) -> Result<Value> {
     let mut files_scanned = 0u64;
     let mut bytes_scanned = 0u64;
     for file in &files {
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.clone());
+        if excluded.iter().any(|path| {
+            let protected = path.canonicalize().unwrap_or_else(|_| path.clone());
+            if cfg!(windows) {
+                canonical
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&protected.to_string_lossy())
+            } else {
+                canonical == protected
+            }
+        }) {
+            skipped.push(file.display().to_string());
+            continue;
+        }
         match scan_file(file, &mut stats, &ctx, &mut bytes_scanned) {
             Ok(()) => files_scanned += 1,
             Err(e) => errors.push(json!({

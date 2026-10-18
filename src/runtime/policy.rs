@@ -15,7 +15,7 @@ pub struct RuntimeConfig {
     /// 上下文预算（字符）。留空则按当前模型的窗口推导。
     #[serde(default)]
     pub context_chars: Option<usize>,
-    /// 单次请求的输入 token 上限。留空则用模型窗口。
+    /// 单次请求的总窗口上限（输入与输出）。留空则用模型窗口。
     #[serde(default)]
     pub max_tokens: Option<u64>,
     pub grants: Vec<Grant>,
@@ -58,14 +58,48 @@ pub struct Grant {
 const THRESHOLD_BUFFER: u64 = 13_000;
 
 pub fn output_reserve(model: &crate::config::ModelConfig) -> u64 {
+    let window = model.options.context_window.max(1);
     model
         .options
         .max_output_tokens
-        .unwrap_or_else(|| 8_192.min(model.options.context_window.max(8_192) / 4))
+        .unwrap_or_else(|| 8_192.min((window / 4).max(1)))
+        .min(window.saturating_sub(512).max(1))
+}
+
+/// Auxiliary reasoning shares the user's output cap, not the whole main window.
+pub fn auxiliary_output_reserve(model: &crate::config::ModelConfig) -> u64 {
+    output_reserve(model).min(8192)
+}
+
+pub fn auxiliary_timeout(purpose: &str, remaining: i64) -> u64 {
+    let maximum = match purpose {
+        "scope" => 90,
+        "compaction" => 180,
+        _ => 120,
+    };
+    if purpose == "memory" {
+        maximum as u64
+    } else {
+        remaining.clamp(1, maximum) as u64
+    }
+}
+
+/// Observations correct an estimator bias once; repeated observations must not
+/// compound the same ratio and shrink a usable window on every turn.
+pub fn calibrated_scale(previous: usize, estimated: u64, observed: u64) -> usize {
+    if estimated == 0 || observed <= estimated {
+        return previous;
+    }
+    let correction = estimated
+        .saturating_mul(90)
+        .checked_div(observed)
+        .unwrap_or(1)
+        .clamp(1, 100) as usize;
+    previous.min(correction)
 }
 
 fn window(policy: &RuntimeConfig, model: &crate::config::ModelConfig) -> u64 {
-    let model_window = model.options.context_window.max(8_192);
+    let model_window = model.options.context_window.max(1);
     policy.max_tokens.unwrap_or(model_window).min(model_window)
 }
 
@@ -150,5 +184,40 @@ mod tests {
             ..RuntimeConfig::default()
         };
         assert_eq!(budget(&policy, &model(8192)).1, 8192);
+    }
+
+    #[test]
+    fn explicit_small_windows_and_output_caps_are_not_expanded() {
+        let policy = RuntimeConfig::default();
+        let mut model = model(2048);
+        assert_eq!(budget(&policy, &model).1, 2048);
+        assert_eq!(output_reserve(&model), 512);
+        assert_eq!(input_token_budget(&policy, &model), 1280);
+        model.options.max_output_tokens = Some(100_000);
+        assert_eq!(output_reserve(&model), 1536);
+    }
+
+    #[test]
+    fn calibration_does_not_repeatedly_shrink_for_the_same_estimator_error() {
+        let mut scale = 100;
+        for _ in 0..12 {
+            scale = calibrated_scale(scale, 1000, 2000);
+            assert_eq!(scale, 45);
+        }
+        assert_eq!(calibrated_scale(20, 1000, 2000), 20);
+        assert_eq!(calibrated_scale(45, 1000, 900), 45);
+        let mut model = model(256000);
+        model.options.max_output_tokens = Some(15000);
+        assert_eq!(auxiliary_output_reserve(&model), 8192);
+        model.options.max_output_tokens = Some(512);
+        assert_eq!(auxiliary_output_reserve(&model), 512);
+        assert_eq!(auxiliary_timeout("scope", 600), 90);
+        assert_eq!(auxiliary_timeout("compaction", 600), 180);
+        assert_eq!(auxiliary_timeout("scope", -1), 1);
+        assert_eq!(
+            auxiliary_timeout("memory", -600),
+            120,
+            "Background learning must not inherit an ended task deadline"
+        );
     }
 }

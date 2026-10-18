@@ -472,6 +472,10 @@ mod tests {
         // 连同插件入口一起真实装载、可检索。
         let shortcut = skills.get("create-shortcut").unwrap();
         assert!(!shortcut.body.trim().is_empty());
+        assert!(
+            !shortcut.body.contains("bgi."),
+            "Domain APIs belong to the BGI plugin, not the generic shortcut skill"
+        );
         assert!(!skills.search("创建快捷任务", 4).is_empty());
     }
 

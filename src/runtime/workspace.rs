@@ -49,6 +49,7 @@ pub fn software_root(config_path: &Path) -> PathBuf {
 #[derive(Clone)]
 pub struct Workspace {
     root: PathBuf,
+    config_path: PathBuf,
     bridge: Option<Arc<BgiClient>>,
     host_info: Arc<OnceLock<Value>>,
 }
@@ -57,9 +58,29 @@ impl Workspace {
     pub fn from_config(config_path: &Path, bridge: Option<Arc<BgiClient>>) -> Self {
         Self {
             root: software_root(config_path),
+            config_path: std::path::absolute(config_path)
+                .unwrap_or_else(|_| config_path.to_path_buf()),
             bridge,
             host_info: Arc::new(OnceLock::new()),
         }
+    }
+
+    fn check_business_path(&self, raw: &str) -> Result<()> {
+        let path = workspace_io::resolve(&self.root, raw)?;
+        let protected = self
+            .config_path
+            .canonicalize()
+            .unwrap_or_else(|_| self.config_path.clone());
+        let same = if cfg!(windows) {
+            path.to_string_lossy()
+                .eq_ignore_ascii_case(&protected.to_string_lossy())
+        } else {
+            path == protected
+        };
+        if same {
+            return Err(Error::Tool("本软件配置含连接凭据，请通过设置页管理；快捷任务请使用查找和读取入口的工具，不读取或覆盖内部配置文件。".into()));
+        }
+        Ok(())
     }
 
     /// 仅 environment 工具读一次宿主信息并缓存；read/list/search 不做桥 RPC。
@@ -80,6 +101,7 @@ impl Workspace {
     }
 
     fn write(&self, arguments: &Value) -> Result<Value> {
+        self.check_business_path(arguments["path"].as_str().unwrap_or_default())?;
         let content = arguments["content"].as_str().unwrap_or("");
         if content.len() > WRITE_LIMIT {
             return Err(Error::Tool("写入内容超过 2 MiB 上限".into()));
@@ -138,6 +160,7 @@ impl Workspace {
     }
 
     fn delete(&self, arguments: &Value) -> Result<Value> {
+        self.check_business_path(arguments["path"].as_str().unwrap_or_default())?;
         let path = workspace_io::resolve(&self.root, arguments["path"].as_str().unwrap_or(""))?;
         if path.parent().is_none_or(|parent| parent == path) {
             return Err(Error::Tool("拒绝删除盘符根目录".into()));
@@ -354,10 +377,13 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
                 "startLine":{"type":"integer","minimum":1,"description":"从第几行开始，1 起算"},
                 "maxLines":{"type":"integer","minimum":1},
                 "tailLines":{"type":"integer","minimum":1,"description":"只读末尾 N 行，优先于 startLine"},
-                "maxChars":{"type":"integer","minimum":1,"maximum":8388608,"description":"文本字符上限，默认 524288，最大 8388608"}
+                "maxChars":{"type":"integer","minimum":1,"maximum":8388608,"description":"文本字符上限，默认 16384，最大 8388608"}
             },"required":["path"],"additionalProperties":false}),
             "core:workspace",
-            move |arguments| workspace_io::read(&files.root, arguments),
+            move |arguments| {
+                files.check_business_path(arguments["path"].as_str().unwrap_or_default())?;
+                workspace_io::read(&files.root, arguments)
+            },
         )
         .with_label("读取文件")
         .with_execution(read.clone()),
@@ -370,10 +396,15 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
             json!({"type":"object","properties":{
                 "paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":64},
                 "maxChars":{"type":"integer","minimum":1,"maximum":8388608,"description":"单文件文本字符上限"},
-                "textBudget":{"type":"integer","minimum":1,"maximum":8388608,"description":"单次批量总文本字符预算，默认 524288，最大 8388608"}
+                "textBudget":{"type":"integer","minimum":1,"maximum":8388608,"description":"单次批量总文本字符预算，默认 32768，最大 8388608"}
             },"required":["paths"],"additionalProperties":false}),
             "core:workspace",
-            move |arguments| workspace_io::read_many(&files.root, arguments),
+            move |arguments| {
+                if let Some(paths)=arguments["paths"].as_array() {
+                    for path in paths {files.check_business_path(path.as_str().unwrap_or_default())?;}
+                }
+                workspace_io::read_many(&files.root, arguments)
+            },
         )
         .with_label("批量读取文件")
         .with_execution(ToolExecution {
@@ -405,7 +436,7 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
                 {"anyOf":[{"required":["pattern"]},{"required":["patterns"]}]}
             ],"additionalProperties":false}),
             "core:workspace",
-            move |arguments| workspace_io::search(&files.root, arguments),
+            move |arguments| workspace_io::search_excluding(&files.root, arguments, std::slice::from_ref(&files.config_path)),
         )
         .with_label("搜索文件内容")
         .with_execution(read),
@@ -744,6 +775,49 @@ mod tests {
         let workspace = Workspace::from_config(&root.join("user/config.json"), None);
         register_tools(&mut registry, Arc::new(workspace)).expect("注册 workspace 工具");
         registry
+    }
+
+    #[test]
+    fn own_credentials_config_is_not_a_business_file_or_search_result() {
+        let scratch = Scratch::new("workspace-own-config");
+        let path = scratch.path().join("user/config.json");
+        let original = r#"{"models":[{"apiKey":"private-fixture-value"}]}"#;
+        fs::write(&path, original).unwrap();
+        fs::write(scratch.path().join("note.txt"), "ordinary business data").unwrap();
+        let registry = registry(scratch.path());
+        for (tool, args) in [
+            ("workspace.read", json!({"path":"user/config.json"})),
+            (
+                "workspace.read_many",
+                json!({"paths":["note.txt","user/config.json"]}),
+            ),
+            (
+                "workspace.write",
+                json!({"path":"user/config.json","content":"{}","expectedSha256":"anything"}),
+            ),
+            ("workspace.delete", json!({"path":"user/config.json"})),
+        ] {
+            let result = call(&registry, tool, args);
+            assert_eq!(result["ok"], false, "{result}");
+            assert!(!result.to_string().contains("private-fixture-value"));
+        }
+        let result = call(
+            &registry,
+            "workspace.search",
+            json!({"path":".","pattern":"private-fixture-value","recursive":true}),
+        );
+        assert_eq!(result["ok"], true, "{result}");
+        assert!(
+            !result["value"]["patterns"][0]["samples"]
+                .to_string()
+                .contains("private-fixture-value")
+        );
+        assert_eq!(result["value"]["patterns"][0]["totalMatches"], 0);
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert_eq!(
+            call(&registry, "workspace.read", json!({"path":"note.txt"}))["ok"],
+            true
+        );
     }
 
     fn call(registry: &ToolRegistry, name: &str, arguments: Value) -> Value {

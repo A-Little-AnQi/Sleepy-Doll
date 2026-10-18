@@ -217,7 +217,27 @@ impl SkillRegistry {
         Ok(fs::read_to_string(path)?)
     }
 
+    pub fn explicit(&self, text: &str) -> Vec<Skill> {
+        let names = text
+            .split_whitespace()
+            .filter_map(|word| word.strip_prefix('$'))
+            .collect::<HashSet<_>>();
+        let mut found = self
+            .skills
+            .values()
+            .filter(|skill| names.contains(skill.name.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        found.sort_by(|left, right| left.name.cmp(&right.name));
+        found
+    }
+
     pub fn search(&self, query: &str, limit: usize) -> Vec<Skill> {
+        let explicit_names = self
+            .explicit(query)
+            .into_iter()
+            .map(|skill| skill.name)
+            .collect::<HashSet<_>>();
         let query_tokens = tokens(query);
         let mut scored = self
             .skills
@@ -229,7 +249,7 @@ impl SkillRegistry {
                     skill.description,
                     skill.tags.join(" ")
                 ));
-                let explicit = query.contains(&format!("${}", skill.name));
+                let explicit = explicit_names.contains(&skill.name);
                 let score = if explicit {
                     1000
                 } else {

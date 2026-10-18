@@ -1222,7 +1222,7 @@ impl super::Supervisor {
         source.data["learningRequest"] = json!(self.memory_learning_request(&run)?);
         let epoch = self.memory.edit_epoch()?;
         let mut model = self.model_for(&run)?;
-        model.options.max_output_tokens = Some(super::policy::output_reserve(&model).min(2048));
+        model.options.max_output_tokens = Some(super::policy::auxiliary_output_reserve(&model));
         if model.protocol == crate::config::ModelProtocol::OpenaiChat
             && model.model.to_lowercase().contains("glm-")
         {

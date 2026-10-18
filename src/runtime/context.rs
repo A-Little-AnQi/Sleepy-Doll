@@ -19,6 +19,30 @@ pub fn message(role: Role, content: impl Into<String>) -> Message {
     }
 }
 
+/// Restore the authoritative goal after summarization, without rewriting the
+/// stable system prefix or allowing context/tool messages to invent new inputs.
+pub fn missing_goal_message(
+    history: &[Message],
+    goal: &super::contracts::Goal,
+) -> Result<Option<Message>> {
+    let content = format!(
+        "[当前运行的真实用户输入记录；仅恢复本轮目标和禁止项，不继承历史授权]\n{}",
+        serde_json::to_string(goal)?
+    );
+    if history
+        .iter()
+        .any(|entry| entry.role == Role::Context && entry.content == content)
+        || goal.inputs.iter().all(|input| {
+            history
+                .iter()
+                .any(|entry| entry.role == Role::User && entry.content == input.text)
+        })
+    {
+        return Ok(None);
+    }
+    Ok(Some(message(Role::Context, content)))
+}
+
 /// 技能匹配看最初目标，也看最近几条用户补充。
 pub fn skill_query(prompt: &str, history: &[Message]) -> String {
     let mut parts = vec![prompt.to_owned()];
@@ -387,6 +411,8 @@ fn reobtainable(name: &str) -> bool {
             | "skills.reference"
             | "plugins.list"
             | "tools.search"
+            | "shortcut.list"
+            | "shortcut.get"
             | "resource.search"
             | "workspace.list"
             | "workspace.read"
@@ -654,6 +680,28 @@ pub fn build(
 mod tests {
     use super::*;
     use crate::model::ToolCall;
+
+    #[test]
+    fn compaction_cannot_remove_current_human_prohibitions_or_create_new_authority() {
+        let mut goal = crate::runtime::contracts::Goal::new("配好，别运行");
+        goal.revise(
+            crate::runtime::contracts::InputOrigin::HumanSupplement,
+            "只保留已有设置",
+        );
+        let original = vec![
+            message(Role::User, "配好，别运行"),
+            message(Role::User, "只保留已有设置"),
+        ];
+        assert!(missing_goal_message(&original, &goal).unwrap().is_none());
+        let mut compacted = vec![summary_message("历史操作的普通摘要")];
+        let record = missing_goal_message(&compacted, &goal).unwrap().unwrap();
+        assert_eq!(record.role, Role::Context);
+        assert!(record.content.contains("别运行"));
+        assert!(record.content.contains("只保留已有设置"));
+        compacted.push(record);
+        assert!(missing_goal_message(&compacted, &goal).unwrap().is_none());
+        assert_eq!(goal.inputs.len(), 2);
+    }
 
     #[test]
     fn cache_identity_tracks_wire_order_but_not_local_exposure_metadata() {

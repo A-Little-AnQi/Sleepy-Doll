@@ -242,6 +242,8 @@ BGI 的资源优先检索、配置组批量合并和启动交接位于适配层�
 
 范围核对是选择性语义判断，不是自由文本意图的数学证明。确定性保证来自来源、修订、参数及版本检查、原请求幂等、回执和终结闸门；不能用另一次模型回答代替原生核验。任意 shell／JS 的全部副作用也不能从声明推导出来。启动核验只证明交接，取消只证明取消请求或可观测终态，不表示撤销已发生的效果。
 
+真实用户以独立的 `$create-shortcut` 开始一轮时，按明确的封装请求开放保存能力，并把该轮工具限制为只读、提问和保存入口；后续回答不解锁业务执行。只有未经补充修改的独立请求可直接核验保存契约，后续补充仍须核对当前意图，不能沿用旧保存许可。保存通过当前工具契约与参数校验后直接结束，同批后续调用只记未执行结果。历史资料或引用该标记的普通文字不能授予这项能力。范围核对失败会结束当前目标，不转去扫描文件或继续派发动作。
+
 记忆默认启用，可由用户关闭使用和学习。自动轨迹先作为候选；只有相关目标与目标证据同时成立才标记已有核验记录。删除使用实现墓碑，编辑使用修订比较；引用旧记忆的压缩摘要失效后，重新投影仍保留的原始历史。后台提炼不占前台模型锁，已发送请求即使丢弃结果也记账；未收到用量时保留明确估算，不自动重发未知计费的提炼请求。
 
 `app.identity` 提供编译时版本、Git 修订、脏工作区标志和数据格式版本。`run.usage` 按 foreground、scope、compaction、memory 返回请求数、报告／估算用量和服务端缓存读取量；它不是账单金额。旧程序不可直接降级打开新格式数据库，分发必须同时核对应用、桥和数据迁移。
@@ -255,3 +257,23 @@ BGI 的资源优先检索、配置组批量合并和启动交接位于适配层�
 常驻核心仅保留身份、事实与权限边界、文件并发修改纪律、记忆触发条件和回复方式，限制在 1200 字符内。文件分页、统计和参数说明由对应工具描述提供；快捷入口表单只增加本次封装边界，应用调用细节仍从技能获取。按需技能、记忆详情和用户自定义指令不算进核心预算，不通过截断这些内容缩短核心。
 
 记忆的四种触发类型继续常驻；工具的 `trigger` 枚举必须在核心规则中有解释，运行时的证据、去重与静默展示校验不变。回归检查同时验证字符预算、通用核心不含 BGI 方法，以及真实模型请求使用当前核心并保留稳定的系统前缀。字符预算不等同于模型 token 数或整次请求长度。
+
+### 内部上下文与失败边界
+
+模型总容量保持用户配置，默认仍为 256k。内部辅助输出预算与总容量分开：范围核对、压缩和记忆维护最多预留 8192 输出 token，且不超过用户输出限制；压缩还按本轮窗口分配。总输入和输出受模型容量及 runtime.maxTokens 中更小的值约束。范围核对最多等待 90 秒、压缩 180 秒，并受前台本轮剩余时间约束；记忆维护独立计时 120 秒，不继承已结束任务的截止时间。强制思考模型仍须给可见结果留足预算，不用未经支持的关闭思考参数规避限制。
+
+| 已落实的约束 | 回归覆盖 |
+| --- | --- |
+| 同一 token 估算偏差只校准一次，不能每轮重复相乘缩小有效窗口 | `calibration_does_not_repeatedly_shrink_for_the_same_estimator_error` |
+| 辅助核对使用独立输出预算，不抬高模型总容量 | `auxiliary_review_has_its_own_output_budget_without_expanding_model_window` |
+| 备用模型容量不足时不派发超长请求，输出与窗口参数校验前置 | `fallback_with_smaller_window_is_not_sent_an_oversized_request` |
+| 回复被截断时不执行其中的工具调用；范围核对失败也不派发同批后续调用 | `truncated_tool_decisions_are_never_dispatched_or_retried`、`scope_model_failure_stops_sibling_calls_and_further_model_rounds` |
+| 压缩后缺失的本轮真实输入按原始来源恢复，包含禁止项；不把摘要或工具文字升级为授权 | `compaction_cannot_remove_current_human_prohibitions_or_create_new_authority` |
+| 技能正文未装入时明确列出未载入的名称，不能静默当成已读 | `omitted_instructions_are_named_without_partial_body_or_budget_overrun` |
+| 工具发现按中英文关键词排序，只返回候选摘要；完整调用契约按需开放 | `mixed_keywords_and_chinese_sentences_find_real_contracts` |
+| 已保存入口通过 shortcut.list/get 查询和分页，不扫描软件内部存储 | `stored_shortcuts_have_read_only_lookup_without_database_or_model_access` |
+| 普通文件工具拒绝读取、覆盖或删除本软件凭据配置，递归搜索跳过该文件 | `own_credentials_config_is_not_a_business_file_or_search_result` |
+| 发给模型的普通正文脱敏当前软件连接凭据；不修改原始历史和签名推理，无法安全回传的历史参数会阻止发送 | `model_context_redacts_legacy_credentials_without_rewriting_signed_reasoning` |
+| 正常穿插其他观测后的再次读取不按连续停滞处理 | `necessary_rereads_after_other_observations_are_not_a_stagnant_loop` |
+
+通用快捷任务技能仅规定读取、核对、封装、保存和终结；BGI 的具体接口、批量参数、运行前提与示例保留在插件的 `references/quick-tasks.md`。以上文件保护是普通工具的行为边界，不是操作系统沙箱；明确授权的 Shell 仍具有其运行权限。隔离回归不代替真实模型、当前安装包与游戏内执行的验收。

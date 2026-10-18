@@ -90,6 +90,9 @@ impl TurnTools {
         if self.shortcut && shortcut_action {
             return true;
         }
+        if self.shortcut && matches!(tool.name.as_str(), "shortcut.list" | "shortcut.get") {
+            return true;
+        }
         if self.mode == PermissionMode::PlanOnly && !read_only && !internal {
             return false;
         }
