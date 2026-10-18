@@ -107,7 +107,7 @@ public static class StatusTools
         registry.Register(
             "bgi.ensure_game_ready",
             Group,
-            "按真实状态做一次就绪准备并阻塞等待到主界面：需要时用宿主命令启动游戏或挂上截图器，最多等 120 秒。",
+            "按真实状态做一次就绪准备并阻塞等待到主界面：需要时用BetterGI命令启动游戏或挂上截图器，最多等 120 秒。",
             async (_, cancellation) =>
             {
                 await EnsureGameReady(cancellation).ConfigureAwait(false);
@@ -118,7 +118,7 @@ public static class StatusTools
             destructive: true,
             guide: new AgentGuide(
                 "统一就绪准备",
-                "按真实状态分类处理：无进程→宿主命令启动；有进程无截图→挂截图器；加载→阻塞等主界面；非 16:9/超时如实失败。",
+                "按真实状态分类处理：无进程→BetterGI命令启动；有进程无截图→挂截图器；加载→阻塞等主界面；非 16:9/超时如实失败。",
                 ["运行类接口在提交前需要就绪准备时（通常由运行时按契约自动执行）；排障时显式调用一次。"],
                 ["BetterGI 桥已连接。"],
                 ["可能启动原神进程或挂上截图器；不发送游戏输入，不改配置。"],

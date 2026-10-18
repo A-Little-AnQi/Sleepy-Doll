@@ -686,7 +686,7 @@ fn injection_copy(source: &Path, root: &Path) -> Result<PathBuf> {
         if std::fs::rename(&staging, &target).is_err() {
             let _ = std::fs::remove_dir_all(&staging);
             if !BRIDGE_FILES.iter().all(|file| target.join(file).is_file()) {
-                return Err(Error::Config("桥的注入副本建立失败。请重试。".into()));
+                return Err(Error::Config("无法准备 BetterGI 连接，请重试。".into()));
             }
         }
     }
@@ -794,5 +794,5 @@ fn inject() -> Result<()> {
 
 #[cfg(not(target_os = "windows"))]
 fn inject() -> Result<()> {
-    Err(Error::Config("BetterGI 注入仅支持 Windows。".into()))
+    Err(Error::Config("BetterGI 连接目前仅支持 Windows。".into()))
 }

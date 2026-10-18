@@ -9,12 +9,33 @@ public sealed record AgentGuide(
 
 public static class AgentGuides
 {
+    // Only descriptive metadata is rewritten. Examples, schemas, source references
+    // and identifiers are executable/diagnostic data and must stay byte-for-byte intact.
+    public static AgentGuide ForUser(AgentGuide guide) => guide with
+    {
+        Title = BetterGiName(guide.Title),
+        Purpose = BetterGiName(guide.Purpose),
+        WhenToUse = guide.WhenToUse.Select(BetterGiName).ToArray(),
+        Preconditions = guide.Preconditions.Select(BetterGiName).ToArray(),
+        SideEffects = guide.SideEffects.Select(BetterGiName).ToArray(),
+        ResultMeaning = BetterGiName(guide.ResultMeaning),
+        Verification = BetterGiName(guide.Verification),
+        Rollback = BetterGiName(guide.Rollback),
+    };
+
+    public static string BetterGiName(string text) => text
+        .Replace("BetterGI 宿主", "BetterGI", StringComparison.Ordinal)
+        .Replace("BetterGI宿主", "BetterGI", StringComparison.Ordinal)
+        .Replace("宿主 BetterGI", "BetterGI", StringComparison.Ordinal)
+        .Replace("宿主BetterGI", "BetterGI", StringComparison.Ordinal)
+        .Replace("宿主", "BetterGI", StringComparison.Ordinal);
+
     public static AgentGuide For(string id)
     {
         var (title, purpose, when, result, verify, rollback, example) = id switch
         {
-            "bgi.ping" => ("桥连通性", "检查当前 token 能否访问注入桥。不读取游戏画面。", "仅用于连接诊断；正常业务接口已经返回时无需调用", "ok=true 仅表示桥响应。hostLoaded 不代表截图器或游戏就绪。", "需要执行环境时读取 bgi.get_status。", "只读。", "{}"),
-            "bgi.probe" => ("BetterGI 兼容性", "检查桥依赖的 BetterGI 类型、DI 容器和 UI 调度器。", "接口报告成员缺失或版本不兼容时", "每个探测项独立表示可用、缺失或不可达。", "按目标接口所需依赖判断；不把探测成功当作任务成功。", "只读。", "{}"),
+            "bgi.ping" => ("BetterGI 连接状态", "检查与 BetterGI 的连接是否正常，不检查游戏画面。", "仅用于连接诊断；正常业务接口已经返回时无需调用", "ok=true 仅表示桥响应。hostLoaded 不代表截图器或游戏就绪。", "需要执行环境时读取 bgi.get_status。", "只读。", "{}"),
+            "bgi.probe" => ("BetterGI 兼容性", "检查当前 BetterGI 版本是否支持需要的功能。", "接口报告成员缺失或版本不兼容时", "每个探测项独立表示可用、缺失或不可达。", "按目标接口所需依赖判断；不把探测成功当作任务成功。", "只读。", "{}"),
             "bgi.get_status" => ("BetterGI 运行状态", "读取截图器、游戏句柄、窗口前台状态和独立任务锁。", "执行前、执行后或排障时；纯 User 文件操作不调用", "一次带时间戳的状态快照。ready 不是业务完成标记。", "检查 observedAt；执行结果按目标接口另行核验。", "只读。", "{}"),
             "bgi.start_game" => ("启动原神", "让 BetterGI 按「联动启动」的配置拉起原神并开始截图，随后返回最新状态。", "游戏或截图器没就绪、而用户要求运行游戏任务时（用户说「启动游戏」「打开原神」也是这个意思）；由你调用，不要反过来要求用户自己启动", "started 表示已经发出启动；ready 以进入游戏主界面为准，ready=true 才可以执行任务。stillLoading=true 是加载中的过程状态，不是失败。BetterGI 拒绝启动时本接口直接失败并说明缺哪一项，那类错误要把缺项讲给用户。", "用 bgi.get_status 等到 ready=true，再执行原任务。", "只启动进程与截图器；不改变已保存的配置。", "{}"),
             "bgi.list_setting_sections" => ("设置分区", "列出 AllConfig 的设置分区及可读、可写、敏感字段数量。", "尚不知道设置属于哪个分区时", "分区摘要，不包含设置当前值。", "选定分区后调用 bgi.search_settings。", "只读。", "{}"),

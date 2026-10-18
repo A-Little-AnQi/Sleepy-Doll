@@ -4,6 +4,7 @@
 using System.IO;
 using System.Text.Json.Nodes;
 using BgiBridge.Tools;
+using BgiBridge.Catalog;
 
 static void Require(bool value, string message) { if (!value) throw new Exception(message); }
 
@@ -41,6 +42,18 @@ using (var active = new FileStream(Path.Combine(lockedLegacy, "sleepy-doll.runti
     active.Unlock(0, 1);
 }
 
+// ---- descriptions use BetterGI while actual parameter values stay untouched ----
+var wordingRegistry = new MethodRegistry();
+var wordingSchema = System.Text.Json.JsonSerializer.SerializeToElement(new { type = "object", properties = new { value = new { type = "string", @enum = new[] { "宿主" } } } });
+var wordingExample = System.Text.Json.JsonSerializer.SerializeToElement(new { value = "宿主" });
+wordingRegistry.Register("fixture.wording", "settings", "宿主设置", (_, _) => Task.FromResult<object?>(null), inputSchema: wordingSchema,
+    guide: new AgentGuide("读取宿主设置", "查看宿主当前设置", ["修改宿主设置前"], ["宿主已连接"], [], "宿主返回当前值", "核对宿主设置", "只读", [wordingExample]));
+Require(wordingRegistry.TryGet("fixture.wording", out var wording, out _), "registered wording fixture");
+Require(wording.Guide.Title == "读取BetterGI设置" && wording.Summary == "查看BetterGI当前设置", "descriptions identify BetterGI");
+Require(wording.Guide.Preconditions[0] == "BetterGI已连接", "guide prerequisites identify BetterGI");
+Require(wording.InputSchema.GetRawText() == wordingSchema.GetRawText(), "schema values must remain exact");
+Require(wording.Guide.Examples[0].GetProperty("value").GetString() == "宿主", "example data must not be rewritten");
+
 // ---- requirements aggregation over real route files (production path) ----
 File.WriteAllText(Path.Combine(routeDir, "01.json"), """
 {"info":{"name":"01"},"positions":[
@@ -68,11 +81,11 @@ File.WriteAllText(Path.Combine(routeDir, "03.json"), """
 var odd = System.Text.Json.JsonSerializer.SerializeToElement(
     PathingPreparationTools.AggregateRouteRequirements(userRoot, ["兽怪暴徒/03.json"]));
 Require(odd.GetProperty("status").GetString() == "unknown", "unrecognized action must be unknown, not benign");
-Require(odd.GetProperty("partyConfirmationRequired").GetBoolean(), "unknown must still require confirmation (fail closed)");
+Require(!odd.GetProperty("partyConfirmationRequired").GetBoolean() && odd.GetProperty("inspectionRequired").GetBoolean(), "unknown must request inspection instead of inventing party requirements");
 
 var missing = System.Text.Json.JsonSerializer.SerializeToElement(
     PathingPreparationTools.AggregateRouteRequirements(userRoot, ["兽怪暴徒/不存在.json"]));
-Require(missing.GetProperty("status").GetString() == "unknown" && missing.GetProperty("partyConfirmationRequired").GetBoolean(),
+Require(missing.GetProperty("status").GetString() == "unknown" && !missing.GetProperty("partyConfirmationRequired").GetBoolean() && missing.GetProperty("inspectionRequired").GetBoolean(),
     "unreadable files must not be presented as no-preconditions");
 
 // ---- SyncCore: real CAS file flow ----

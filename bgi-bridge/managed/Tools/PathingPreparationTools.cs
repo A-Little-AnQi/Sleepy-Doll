@@ -16,10 +16,10 @@ public static class PathingPreparationTools
     public static void Register(MethodRegistry registry)
     {
         const string id = "bgi.prepare_pathing_group";
-        var guide = new AgentGuide("准备地图追踪配置组", "用宿主原生构造器把所选父目录下全部路线包装成一个配置组，保留原文件名和目录；运行配置继承全局配置当前有效值（同名同类型字段深拷贝），并返回路线需求聚合与有效战斗策略面。",
+        var guide = new AgentGuide("准备地图追踪配置组", "用BetterGI原生构造器把所选父目录下全部路线包装成一个配置组，保留原文件名和目录；运行配置继承全局配置当前有效值（同名同类型字段深拷贝），并返回路线需求聚合与有效战斗策略面。",
             ["资源已订阅或本机已安装，需要为路线父目录建立可运行的配置组。"], ["path 是 pathing/ 开始的精确目录路径，对应 User/AutoPathing 下同名子目录（替换前缀，不在前面追加 AutoPathing）；目录不存在直接失败，无需先启动游戏。groupName 依据用户目标直接取简短自然名，如“挖矿讨伐”；不拼目录、作者、时间或参数长句，不为命名再次提问，缺省时自动生成。"],
             ["只创建一个稳定命名的配置组；已有同名但不同内容的组不覆盖，已有组的显式配置保持不动。新组的 autoFightConfig 等同名同类型字段继承全局配置当前有效值，不用类型默认冒充继承。"],
-            "prepared=true 只表示完整配置组已落盘，不代表已经运行。requirements.partyConfirmationRequired=true（含战斗 fight/combat_script 或特殊机制动作）时，运行前必须完成当前任务的配队确认：用户原话已给队名/队员则用已给值；队员组成或策略适配所需角色信息缺失且无法从现场可靠观测时，用 user.ask 一次问清，未答复不得启动。策略文件列出的角色不是实际队伍名单。autoFightStrategy.requirementsExcerpt 是有效策略文件开头的原文要求，适配组配置以它为准。",
+            "prepared=true 只表示完整配置组已落盘，不代表已经运行。requirements.inspectionRequired=true 时先处理真实路线读取或未知动作问题，不能改成配队提问。路线规则仅适用于 Pathing；JS 的前提由脚本自己的设置与校验决定。requirements.partyConfirmationRequired=true（含战斗 fight/combat_script 或特殊机制动作）时，运行前必须完成当前任务的配队确认：用户原话已给队名/队员则用已给值；队员组成或策略适配所需角色信息缺失且无法从现场可靠观测时，用 user.ask 一次问清，未答复不得启动。策略文件列出的角色不是实际队伍名单。autoFightStrategy.requirementsExcerpt 是有效策略文件开头的原文要求，适配组配置以它为准。",
             "以返回的 inheritedSettings、requirements（含 sources）与 autoFightStrategy（exists/requirementsExcerpt）为准；队伍与赶路角色用 bgi.set_pathing_party 写入。只有用户明确要求运行时才运行；游戏未就绪时运行接口会按真实状态自行准备。",
             "删除该配置组后重新 prepare 即回到继承基线；不动路线与订阅。",
             [], "bridge-stable-operation");
@@ -101,12 +101,12 @@ public static class PathingPreparationTools
             if (!old.SequenceEqual(routes, StringComparer.OrdinalIgnoreCase)
                 || existing.RootElement.GetProperty("projects").EnumerateArray().Any(project => project.GetProperty("type").GetString() != "Pathing" || project.GetProperty("status").GetString() != "Enabled"))
                 throw new BridgeException("GROUP_CONFLICT", $"已有同名配置组内容不同，未覆盖：{name}", 409);
-            return Task.FromResult<object?>(new { prepared = true, reused = true, groupName = name, sourcePath = path, executionScope = "directoryRecursive", routeCount = routes.Length });
+            return Task.FromResult<object?>(new { prepared = true, reused = true, groupName = name, sourcePath = path, executionScope = "directoryRecursive", routeCount = routes.Length, requirements = AggregateRouteRequirements(userRoot,routes) });
         }
         var groupType = Reflect.FindType("BetterGenshinImpact.Core.Script.Group.ScriptGroup")
-            ?? throw BridgeException.Missing("宿主没有配置组构造器。");
+            ?? throw BridgeException.Missing("BetterGI没有配置组构造器。");
         var projectType = Reflect.FindType("BetterGenshinImpact.Core.Script.Group.ScriptGroupProject")
-            ?? throw BridgeException.Missing("宿主没有地图追踪项目构造器。");
+            ?? throw BridgeException.Missing("BetterGI没有地图追踪项目构造器。");
         var group = Activator.CreateInstance(groupType)!;
         Reflect.Set(group, "Name", name);
         // 组运行配置不从类型默认值开始：与全局配置根（HomePageViewModel.Config，
@@ -116,21 +116,21 @@ public static class PathingPreparationTools
         // 关键有效战斗配置缺证即拒绝创建：不用类型默认冒充继承，让用户兜底。
         if (!inherited.Contains("AutoFightConfig"))
             throw BridgeException.Failed(
-                "无法继承全局有效战斗配置（AutoFightConfig）：宿主全局配置根不可达或深拷贝失败。"
+                "无法继承全局有效战斗配置（AutoFightConfig）：BetterGI全局配置根不可达或深拷贝失败。"
                 + "已停止创建；请确认 BetterGI 已连接且全局配置可读后重试。");
         var projects = Reflect.Get(group, "Projects") as IList
-            ?? throw BridgeException.Missing("宿主配置组项目列表不可用。");
+            ?? throw BridgeException.Missing("BetterGI配置组项目列表不可用。");
         var index = 0;
         foreach (var route in routes)
         {
             var project = Reflect.CallStatic(projectType, "BuildPathingProject", Path.GetFileName(route), Path.GetDirectoryName(route)!)
-                ?? throw BridgeException.Missing("宿主未构造地图追踪项目。");
+                ?? throw BridgeException.Missing("BetterGI未构造地图追踪项目。");
             Reflect.Set(project, "Index", ++index);
             projects.Add(project);
         }
         cancellation.ThrowIfCancellationRequested();
         Reflect.Call(group, "WriteToFileAtomically", groupFile);
-        if (!File.Exists(groupFile)) throw BridgeException.Failed("宿主未保存配置组。");
+        if (!File.Exists(groupFile)) throw BridgeException.Failed("BetterGI未保存配置组。");
         // 路线需求聚合（程序侧深读，聚合结果才返回）与有效策略面。
         var requirements = AggregateRouteRequirements(userRoot, routes);
         var strategy = DescribeEffectiveStrategy(group, userRoot);
@@ -204,19 +204,22 @@ public static class PathingPreparationTools
         {
             string text;
             try { text = File.ReadAllText(Path.Combine(root, route)); }
-            catch (IOException) { unreadable++; continue; }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { unreadable++; continue; }
             JsonDocument document;
             try { document = JsonDocument.Parse(text); }
             catch (JsonException) { unreadable++; continue; }
             using (document)
             {
+                if (document.RootElement.ValueKind != JsonValueKind.Object
+                    || !new[] { "positions", "waypoints" }.Any(key => document.RootElement.TryGetProperty(key, out var points) && points.ValueKind == JsonValueKind.Array))
+                { unreadable++; continue; }
                 scanned++;
                 if (sources.Count < 8) sources.Add(route.Replace('\\', '/'));
                 foreach (var key in new[] { "positions", "waypoints" })
-                    if (document.RootElement.TryGetProperty(key, out var points))
+                    if (document.RootElement.TryGetProperty(key, out var points) && points.ValueKind == JsonValueKind.Array)
                         foreach (var point in points.EnumerateArray())
                             foreach (var field in new[] { "action", "type" })
-                                if (point.TryGetProperty(field, out var value)
+                                if (point.ValueKind == JsonValueKind.Object && point.TryGetProperty(field, out var value)
                                     && value.ValueKind == JsonValueKind.String
                                     && value.GetString() is { Length: > 0 } token)
                                     counts[token] = counts.GetValueOrDefault(token) + 1;
@@ -233,11 +236,14 @@ public static class PathingPreparationTools
             .Select(pair => (object)new { action = pair.Key, count = pair.Value })
             .ToArray();
         var incomplete = unreadable > 0 || routes.Length > limit;
-        var required = battle || special.Length > 0 || unrecognized.Length > 0 || incomplete;
-        var status = battle || special.Length > 0 ? "preconditionsFound" : required ? "unknown" : "noPreconditions";
+        var required = battle || special.Length > 0;
+        var inspectionRequired = unrecognized.Length > 0 || incomplete;
+        var status = routes.Length == 0 ? "notApplicable" : inspectionRequired ? "unknown" : required ? "preconditionsFound" : "noPreconditions";
         return new
         {
+            scope = "pathingOnly",
             status,
+            inspectionRequired,
             battle,
             specialActions = special,
             unrecognizedActions = unrecognized,
@@ -247,8 +253,9 @@ public static class PathingPreparationTools
             truncated = routes.Length > limit,
             sources,
             note = required
-                ? "由路线文件动作聚合的程序侧事实；battle/special/unknown 任一成立都要求运行前用 user.ask 问清缺的配队信息（用户已给的队名/队员不重复问），未答复不得启动。"
-                : "由路线文件动作聚合的程序侧事实；全部文件已读且未出现战斗/特殊/未识别动作。",
+                ? "已启用路线包含明确的战斗或特定角色机制；只询问确实缺少且无法观测的必要配队信息，已有配队不重复确认。"
+                : inspectionRequired ? "路线读取不全或存在未知动作，需要检查资源；未知不等于缺配队，不用配队提问代替检查。"
+                : "已读取路线未发现战斗或特定角色机制；该结论不代替 JS 自己的设置与校验。",
         };
     }
 
@@ -270,7 +277,7 @@ public static class PathingPreparationTools
                 file = (string?)null,
                 exists = true,
                 version = (string?)null,
-                requirementsExcerpt = (string?)"宿主会在运行时按实际队伍自动选择策略；适配前应按用户确认的队员组成评估可用策略。",
+                requirementsExcerpt = (string?)"BetterGI会在运行时按实际队伍自动选择策略；适配前应按用户确认的队员组成评估可用策略。",
             };
         foreach (var extension in new[] { ".txt", ".json" })
         {
@@ -473,7 +480,7 @@ public static class PathingPreparationTools
             fields,
             strategy,
             note = global is null
-                ? "宿主全局配置不可读：来源判定退化为 groupOnly/absent，不能据此断言与全局一致。"
+                ? "BetterGI全局配置不可读：来源判定退化为 groupOnly/absent，不能据此断言与全局一致。"
                 : "source=globalEqual 表示组内值与全局当前值一致；groupOverride 需判断是有意自定义还是历史默认覆盖。",
         });
     }
@@ -572,9 +579,9 @@ public static class PathingPreparationTools
         var userRoot = Path.Combine(AppContext.BaseDirectory, "User");
         // 字段合法性：必须同时存在于组 PathingConfig 与全局配置根且同类型；
         // 克隆值只能来自全局当前值，调用方给不了值。
-        var global = GlobalEffectiveView() ?? throw BridgeException.Failed("宿主全局配置不可读，无法按全局现值同步；未写入。");
+        var global = GlobalEffectiveView() ?? throw BridgeException.Failed("BetterGI全局配置不可读，无法按全局现值同步；未写入。");
         var pathingType = Reflect.FindType("BetterGenshinImpact.Core.Config.PathingPartyConfig")
-            ?? throw BridgeException.Missing("宿主 PathingPartyConfig 类型不可用。");
+            ?? throw BridgeException.Missing("BetterGI PathingPartyConfig 类型不可用。");
         var replacements = new Dictionary<string, JsonNode?>(StringComparer.Ordinal);
         foreach (var field in fields)
         {

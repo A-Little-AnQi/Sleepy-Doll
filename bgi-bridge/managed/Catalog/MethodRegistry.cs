@@ -71,9 +71,9 @@ public sealed class MethodRegistry
         string? preparation = null)
     {
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("方法 id 不能为空。", nameof(id));
-        var documentation = guide ?? AgentGuides.For(id);
+        var documentation = AgentGuides.ForUser(guide ?? AgentGuides.For(id));
         var descriptor = new MethodDescriptor(id, group, documentation.Purpose, readOnly, destructive,
-            inputSchema ?? AgentSchemas.Input(id)) { Guide = documentation, UnavailableReason = unavailableReason, RequiresGameReady = requiresGameReady, Preparation = preparation };
+            inputSchema ?? AgentSchemas.Input(id)) { Guide = documentation, UnavailableReason = unavailableReason is null ? null : AgentGuides.BetterGiName(unavailableReason), RequiresGameReady = requiresGameReady, Preparation = preparation };
         if (!_methods.TryAdd(id, (descriptor, handler)))
             throw new InvalidOperationException($"方法 id 重复：{id}");
     }

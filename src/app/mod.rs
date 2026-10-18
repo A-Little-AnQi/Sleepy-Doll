@@ -1270,9 +1270,8 @@ impl AppController {
                 self.reload_runtime()?;
                 self.reload_extensions()?;
                 crate::bridge::control::enable(&config).map_err(|restore| {
-                    Error::Tool(format!(
-                        "新版桥接管失败，旧连接也未恢复：{error}；{restore}"
-                    ))
+                    log::warn!("BetterGI 连接更新与恢复失败：{error}；{restore}");
+                    Error::Tool("BetterGI 连接更新失败，请重启 BetterGI 后重新连接。".into())
                 })?;
                 return Err(error);
             }

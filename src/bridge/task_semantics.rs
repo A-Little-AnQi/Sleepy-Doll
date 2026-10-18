@@ -145,7 +145,7 @@ pub(crate) fn launch_handoff(
 /// 行的后续任务时点名数量。
 pub(crate) fn handoff_message(names: &[String], close: bool, pending_tasks: usize) -> String {
     let mut text = if names.is_empty() {
-        "已提交任务后台运行计划，将按顺序执行。".to_owned()
+        "BetterGI 已接收任务，将在后台按顺序运行。".to_owned()
     } else {
         let listed = names
             .iter()
@@ -153,9 +153,9 @@ pub(crate) fn handoff_message(names: &[String], close: bool, pending_tasks: usiz
             .collect::<Vec<_>>()
             .join("");
         if close {
-            format!("已提交{listed}后台运行计划，完成后会关闭原神。")
+            format!("已交给 BetterGI 运行{listed}，全部完成后会关闭原神。")
         } else {
-            format!("已提交{listed}后台运行计划，将继续执行完成。")
+            format!("已交给 BetterGI 运行{listed}。")
         }
     };
     if pending_tasks > 0 {

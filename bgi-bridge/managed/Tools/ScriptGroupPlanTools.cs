@@ -30,11 +30,11 @@ public static class ScriptGroupPlanTools
         const string id = "bgi.run_script_groups";
         var guide = new AgentGuide(
             "按顺序运行多个配置组",
-            "把多个已存在的配置组按请求顺序合成一份宿主统一进度计划一次执行，各组配置保持原样不拆散；可选在调度进度全部成功核验后关闭游戏。",
+            "把多个已存在的配置组按请求顺序合成一份BetterGI统一进度计划一次执行，各组配置保持原样不拆散；可选在调度进度全部成功核验后关闭游戏。",
             ["用户要求一次按顺序运行多个配置组时。"],
-            ["战斗/特殊/未知前提路线（partyConfirmationRequired=true）：先完成缺配队 user.ask、inspect_group_effective 读实际生效配置与策略并按角色与策略要求适配回读，再运行。", "游戏未就绪时接口会按真实状态自动准备：启动游戏或挂上截图器并阻塞等待至主界面（至多 120 秒）；非 16:9 或超时如实失败。", "窗口分辨率为 16:9。", "没有其他独立任务持锁。", "groupNames 均来自 User/ScriptGroup 的真实 name。"],
+            ["配队前提只按已启用 Pathing 项目的明确战斗/特定角色证据处理（partyConfirmationRequired=true）；缺信息且无法观测时才询问，已有配置不重复确认。inspectionRequired=true 是路线资源检查，不是配队提问。JS 项目沿用其已有参数与脚本自身前提，不套用路线配队规则。", "游戏未就绪时接口会按真实状态自动准备：启动游戏或挂上截图器并阻塞等待至主界面（至多 120 秒）；非 16:9 或超时如实失败。", "窗口分辨率为 16:9。", "没有其他独立任务持锁。", "groupNames 均来自 User/ScriptGroup 的真实 name。"],
             ["按顺序启动所有组内的游戏自动化、脚本、路线或 Shell 任务；closeGameAfter=true 且收尾证据齐全时会在结束后关闭游戏。"],
-            "默认 waitForCompletion=false：accepted=true 表示宿主已接受整份计划并交接，立即返回，不守护执行；Sleepy-Doll 退出后宿主计划继续。只有用户明确要求等结果时才设 true。",
+            "默认 waitForCompletion=false：accepted=true 表示BetterGI已接受整份计划并交接，立即返回，不守护执行；Sleepy-Doll 退出后BetterGI计划继续。只有用户明确要求等结果时才设 true。",
             "普通多组运行请求用返回证据总结本次已交接，并结束本轮。不轮询进度、不查任务状态或日志。",
             "已发送的游戏输入和脚本副作用不能自动撤销；closeGameAfter 只在整个 EndTime 存在、全部历史成功且未手动取消时才会关闭游戏，缺证一律不关。",
             [JsonSerializer.SerializeToElement(new { groupNames = new[] { "用户目录中读取到的精确配置组名称" } })],
@@ -81,16 +81,16 @@ public static class ScriptGroupPlanTools
             var services = Host.Services()
                 ?? throw BridgeException.Missing("拿不到 BetterGI 服务容器。");
             var progressType = Reflect.FindType(TaskProgressType)
-                ?? throw BridgeException.Missing("宿主 TaskProgress 类型不可用，无法建立统一进度计划。");
+                ?? throw BridgeException.Missing("BetterGI TaskProgress 类型不可用，无法建立统一进度计划。");
             var viewModelType = Reflect.FindType(PreferredViewModelType)
                 ?? throw BridgeException.Missing("当前 BetterGI 没有提供 StartGroups(List<ScriptGroup>, TaskProgress?, bool) 的调度服务类型。");
             if (!HasStartGroups(viewModelType))
-                throw BridgeException.Missing("宿主调度服务没有公开 StartGroups(List<ScriptGroup>, TaskProgress?, bool) 三参签名。");
+                throw BridgeException.Missing("BetterGI调度服务没有公开 StartGroups(List<ScriptGroup>, TaskProgress?, bool) 三参签名。");
             if (closeGameAfter)
             {
                 var systemControl = Reflect.FindType(SystemControlType);
                 if (systemControl?.GetMethod("CloseGame") is null || systemControl.GetMethod("GetProcessByHandle") is null)
-                    throw BridgeException.Missing("宿主缺少 SystemControl.CloseGame 或 GetProcessByHandle，无法锁定并安全关闭目标进程，计划不启动。");
+                    throw BridgeException.Missing("BetterGI缺少 SystemControl.CloseGame 或 GetProcessByHandle，无法锁定并安全关闭目标进程，计划不启动。");
             }
             var viewModel = services.GetService(viewModelType)
                 ?? throw BridgeException.Missing($"包含 {StartGroupsMethod} 的 BetterGI 服务未注册。");
@@ -204,7 +204,7 @@ public static class ScriptGroupPlanTools
         if (ReadContinuousRun() is not false)
             throw BridgeException.Busy(ReadContinuousRunState()
                 ? "上一份配置组计划仍在组间过渡，未完全退出，请稍后再试。"
-                : "无法读取宿主连续运行状态（RunnerContext.IsContinuousRunGroup），缺证不启动。");
+                : "无法读取BetterGI连续运行状态（RunnerContext.IsContinuousRunGroup），缺证不启动。");
     }
 
     /// <summary>整份计划是否真正退出：任务锁空闲不足以判定——组间间隙锁已释放
@@ -235,11 +235,11 @@ public static class ScriptGroupPlanTools
             executionMode = "launch",
             verified = true,
             verificationScope = "launch",
-            verificationReason = "配置组均已唯一定位，宿主已接受整份有序计划并交接；launch 范围只核验交接，不表示业务完成。",
+            verificationReason = "配置组已定位，BetterGI 已接收并将按指定顺序运行；这里只确认已提交，尚未确认全部完成。",
             verification = new
             {
                 status = "succeeded",
-                reason = "启动交接已核验：全部配置组定位成功并交给宿主按顺序执行。",
+                reason = "BetterGI 已接收这些配置组，将按指定顺序运行。",
             },
         };
     }
@@ -327,7 +327,7 @@ public static class ScriptGroupPlanTools
             return new(false, "未关闭游戏：缺少启动时锁定的目标进程证据。");
         var context = Reflect.Singleton(CancellationContextType);
         if (context is null)
-            return new(false, "未关闭游戏：无法读取宿主取消状态。");
+            return new(false, "未关闭游戏：无法读取BetterGI取消状态。");
         if (AsBool(Reflect.Get(context, "IsManualStop")) is not false)
             return new(false, "未关闭游戏：手动取消状态不可读或已被取消。");
         if (Host.GameHandle != capturedHandle || capturedHandle == 0)
@@ -353,7 +353,7 @@ public static class ScriptGroupPlanTools
         try
         {
             using var leftover = Process.GetProcessById(identity.ProcessId);
-            return new(false, "已调用宿主 CloseGame，但目标进程仍在运行，关闭未核验。");
+            return new(false, "已调用BetterGI CloseGame，但目标进程仍在运行，关闭未核验。");
         }
         catch (ArgumentException)
         {
@@ -361,7 +361,7 @@ public static class ScriptGroupPlanTools
         }
         catch (Exception error)
         {
-            return new(false, $"已调用宿主 CloseGame，目标进程退出核验失败：{error.Message}");
+            return new(false, $"已调用BetterGI CloseGame，目标进程退出核验失败：{error.Message}");
         }
     }
 
@@ -390,7 +390,7 @@ public static class ScriptGroupPlanTools
     private static GameIdentity CaptureGameIdentity(long handle)
     {
         var systemControl = Reflect.FindType(SystemControlType)
-            ?? throw BridgeException.Missing("宿主 SystemControl 不可用。");
+            ?? throw BridgeException.Missing("BetterGI SystemControl 不可用。");
         var process = Reflect.CallStatic(systemControl, "GetProcessByHandle", new IntPtr(handle));
         if (process is null)
             throw BridgeException.GameNotReady("无法从游戏窗口句柄定位目标进程，closeGameAfter 计划不启动。");
@@ -451,7 +451,7 @@ public static class ScriptGroupPlanTools
             {
                 var elementType = batch.GetType().GetElementType()
                     ?? batch.GetType().GetGenericArguments().FirstOrDefault()
-                    ?? throw BridgeException.Missing("宿主配置组列表元素类型不可用。");
+                    ?? throw BridgeException.Missing("BetterGI配置组列表元素类型不可用。");
                 combined = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(elementType))!;
             }
             foreach (var group in batch) combined.Add(group);
@@ -557,13 +557,13 @@ public static class ScriptGroupPlanTools
                 return new(false, "failed", $"第 {index + 1} 条进度状态为 2（失败）；即使后续条目成功也不算全成功。");
         }
         if (!snapshot.ManualStopKnown)
-            return new(false, "unknown", "无法读取宿主手动取消状态，缺证不判定。");
+            return new(false, "unknown", "无法读取BetterGI手动取消状态，缺证不判定。");
         if (!snapshot.OverallEndTimePresent)
-            return new(false, "unknown", "宿主计划没有整体 EndTime，可能仍在运行或被取消。");
+            return new(false, "unknown", "BetterGI计划没有整体 EndTime，可能仍在运行或被取消。");
         if (snapshot.CurrentProjectIncomplete)
             return new(false, "unknown", "当前配置组项目未完整收尾（状态、结束标记或结束时间缺失）。");
         if (snapshot.History.Count == 0)
-            return new(false, "unknown", "宿主进度没有历史记录，无法核验。");
+            return new(false, "unknown", "BetterGI进度没有历史记录，无法核验。");
         for (var index = 0; index < snapshot.History.Count; index++)
         {
             var entry = snapshot.History[index];

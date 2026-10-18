@@ -19,9 +19,9 @@ public static class ScriptGroupTools
             "按名称运行配置组",
             "调用 BetterGI 自带的按名称执行入口，运行指定配置组中的已启用任务。无需用户预先在脚本调度页选中目标。",
             ["用户要求运行一个已从 User/ScriptGroup 确认存在的配置组时。"],
-            ["战斗/特殊/未知前提路线（resolve/prepare 的 partyConfirmationRequired=true）：先完成缺配队 user.ask、bgi.inspect_group_effective 读实际生效配置与策略并按角色与策略要求适配回读，再运行。", "游戏未就绪时接口会按真实状态自动准备：启动游戏或挂上截图器并阻塞等待至主界面（至多 120 秒）；非 16:9 或超时如实失败。", "窗口分辨率为 16:9。", "没有其他独立任务持锁。", "groupName 来自 User/ScriptGroup 的真实 name。"],
+            ["配队前提只按已启用 Pathing 项目的明确战斗/特定角色证据处理（partyConfirmationRequired=true）；缺信息且无法观测时才询问，已有配置不重复确认。inspectionRequired=true 是路线资源检查，不是配队提问。JS 项目沿用其已有参数与脚本自身前提，不套用路线配队规则。", "游戏未就绪时接口会按真实状态自动准备：启动游戏或挂上截图器并阻塞等待至主界面（至多 120 秒）；非 16:9 或超时如实失败。", "窗口分辨率为 16:9。", "没有其他独立任务持锁。", "groupName 来自 User/ScriptGroup 的真实 name。"],
             ["启动配置组中的游戏自动化、脚本、路线或 Shell 任务；具体影响由组内已启用任务决定。"],
-            "默认 waitForCompletion=false：accepted=true 表示宿主已接受运行，交接后立即返回，不守护整组。同一宿主计划的后续步骤与 closeGameAfter 等收尾都保持 false；只有用户明确要求监控等结果时才设 true。verified 的 launch 范围只核验启动交接，不是业务完成。",
+            "默认 waitForCompletion=false：accepted=true 表示BetterGI已接受运行，交接后立即返回，不守护整组。同一BetterGI计划的后续步骤与 closeGameAfter 等收尾都保持 false；只有用户明确要求监控等结果时才设 true。verified 的 launch 范围只核验启动交接，不是业务完成。",
             "普通运行请求用返回证据总结本次已提交或执行方法已返回，并结束本轮。不继续 job.get、查任务状态、日志或截图，不重跑。只有用户明确要求监控等结果才继续；查看当前状态与排障只是当前请求的一次读取，不自动持续盯。",
             "已经发送的游戏输入和脚本副作用不能自动撤销；需要停止时使用对应停止操作并核验终态。",
             [JsonSerializer.SerializeToElement(new { groupName = "用户目录中读取到的精确配置组名称" })],
@@ -100,7 +100,7 @@ public static class ScriptGroupTools
             catch (JsonException) { return false; }
         }).ToArray();
         if (files.Length != 1) throw new BridgeException("AMBIGUOUS_TARGET", "配置组文件未唯一定位，未执行。", 409);
-        var type = Reflect.FindType("BetterGenshinImpact.Core.Script.Group.ScriptGroup") ?? throw BridgeException.Missing("宿主配置组类型不可用。");
+        var type = Reflect.FindType("BetterGenshinImpact.Core.Script.Group.ScriptGroup") ?? throw BridgeException.Missing("BetterGI配置组类型不可用。");
         var group = Reflect.CallStatic(type, "FromJson", File.ReadAllText(files[0])) ?? throw BridgeException.Failed("配置组解析失败。");
         var groups = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(type))!;
         groups.Add(group);

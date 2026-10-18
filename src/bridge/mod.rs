@@ -314,7 +314,7 @@ impl BgiClient {
         self.host()?["userPath"]
             .as_str()
             .map(PathBuf::from)
-            .ok_or_else(|| Error::Tool("桥没有返回 BGI 用户目录".into()))
+            .ok_or_else(|| Error::Tool("无法读取 BetterGI 用户目录".into()))
     }
     pub fn catalog(&self, query: &str) -> Result<Value> {
         self.catalog_page(query, None, 0)
@@ -500,11 +500,11 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             let client = client.clone();
             Arc::new(move |a: &Value| client.repository_read("bgi.read_script_repository_file", a)) as BridgeToolFn
         }),
-        ("bgi.api.search", "检索 BetterGI 接口", "在当前 BetterGI 宿主中发现设置或动作。它不搜索配置组、路线、脚本等用户资源。group 必须来自目录实际返回的分组；用一个业务词查询，一次零结果后检查证据源。", json!({"type":"object","properties":{"query":{"type":"string","description":"一个核心业务词、动作词或精确 methodId；空字符串用于浏览分组"},"group":{"type":"string","description":"可选；使用目录实际返回的分组，例如 settings、command、scheduler、repository"},"offset":{"type":"integer","minimum":0,"description":"仅在响应给出 nextOffset 时继续"},"limit":{"type":"integer","minimum":1,"maximum":50,"default":8,"description":"候选数量；默认 8，只有响应给出 nextOffset 且确有必要时增加"}},"required":["query"],"additionalProperties":false}), {
+        ("bgi.api.search", "检索 BetterGI 接口", "查找当前 BetterGI 可用的设置和操作。它不搜索配置组、路线、脚本等用户资源。group 必须来自目录实际返回的分组；用一个业务词查询，一次零结果后检查证据源。", json!({"type":"object","properties":{"query":{"type":"string","description":"一个核心业务词、动作词或精确 methodId；空字符串用于浏览分组"},"group":{"type":"string","description":"可选；使用目录实际返回的分组，例如 settings、command、scheduler、repository"},"offset":{"type":"integer","minimum":0,"description":"仅在响应给出 nextOffset 时继续"},"limit":{"type":"integer","minimum":1,"maximum":50,"default":8,"description":"候选数量；默认 8，只有响应给出 nextOffset 且确有必要时增加"}},"required":["query"],"additionalProperties":false}), {
             let client = client.clone();
             Arc::new(move |a: &Value| client.catalog_page_with_limit(a["query"].as_str().unwrap_or(""),a["group"].as_str(),a["offset"].as_u64().unwrap_or(0),a["limit"].as_u64().unwrap_or(8))) as BridgeToolFn
         }),
-        ("bgi.api.describe", "读取接口说明", "读取精确 methodId 的当前契约，再 read/invoke。直接资源／设置／领域接口优先，cmd.*、bgi.ui.* 与页面上下文是最低优先级；能直接操作数据时不操作界面。callable=false 说明当前接口限制。", json!({"type":"object","properties":{"methodId":{"type":"string","description":"来自当前证据的精确 ID；资源删除用 bgi.inspect_local_resource / bgi.delete_local_resource，不选地图追踪界面删除命令"}},"required":["methodId"],"additionalProperties":false}), {
+        ("bgi.api.describe", "查看操作说明", "读取精确 methodId 的当前契约，再 read/invoke。直接资源／设置／领域接口优先，cmd.*、bgi.ui.* 与页面上下文是最低优先级；能直接操作数据时不操作界面。callable=false 说明当前接口限制。", json!({"type":"object","properties":{"methodId":{"type":"string","description":"来自当前证据的精确 ID；资源删除用 bgi.inspect_local_resource / bgi.delete_local_resource，不选地图追踪界面删除命令"}},"required":["methodId"],"additionalProperties":false}), {
             let client = client.clone();
             Arc::new(move |a: &Value| client.describe(a["methodId"].as_str().unwrap_or(""))) as BridgeToolFn
         }),
@@ -517,7 +517,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         (
             "bgi.user.list",
             "查看用户资源",
-            "列出 BetterGI User 目录下指定位置的一层真实文件和目录。jsonKeys 可在同一次调用中投影每个 JSON 文件的顶层字段，避免逐文件读取；不用于发现宿主接口。",
+            "列出 BetterGI User 目录下指定位置的一层真实文件和目录。jsonKeys 可在同一次调用中投影每个 JSON 文件的顶层字段，避免逐文件读取；不用于查找 BetterGI 的操作功能。",
             json!({"type":"object","properties":{
                 "path":{"type":"string","description":"相对 User 目录；空字符串表示根目录"},
                 "jsonKeys":{"type":"array","maxItems":32,"items":{"type":"string"},"description":"可选；为目录内每个 JSON 返回这些顶层字段"}
@@ -672,7 +672,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         (
             "bgi.user.resolve",
             "查找可运行任务",
-            "查找用户要求运行的实际资源：先匹配本机配置组、核验引用和地图追踪父目录；未命中自动搜索当前中央仓库全部分类。不要扫描路线 JSON 或先刷新仓库。run 表示组完整可运行，仍需比对返回的 config 槽位与用户目标，目标含队伍/赶路/参数变更时先写入再运行；repair 补 missing；create 准备本地父目录；resourceFound 按 repository 候选订阅、配置并继续运行；lookupFailed 是查询失败，不能称资源不存在；notFound 才是本机和当前全仓索引均未命中。",
+            "查找用户要求运行的实际资源：先匹配本机配置组、核验引用和地图追踪父目录；未命中自动搜索当前中央仓库全部分类。不要扫描路线 JSON 或先刷新仓库。run 表示已启用引用完整，按已有配置运行；仅用户要求修改时改对应槽位。requirements.scope=pathingOnly 只分析已启用路线，不代表 JS 无队伍要求；JS 按自身设置与明确校验处理，不为选填队伍字段例行提问。inspect 表示路线需求待查，检查资源而不是问配队；repair 补 missing；create 准备本地父目录；resourceFound 按 repository 候选订阅、配置并继续运行；lookupFailed 是查询失败，不能称资源不存在；notFound 才是本机和当前全仓索引均未命中。",
             json!({"type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":200,"description":"用户原话或材料/脚本/配置组名称，例如帮我跑下血斛"}},"required":["query"],"additionalProperties":false}),
             {
                 let client = client.clone();
