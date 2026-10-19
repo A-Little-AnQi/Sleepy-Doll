@@ -25,7 +25,7 @@
     "build": "node scripts/release-version.mjs && npm run typecheck && vite build",
     "dist": "cmd /c scripts\\build.cmd",
     "clean:rust": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/clean-rust.ps1",
-    "test": "node --test cloudflare/worker.test.mjs scripts/r2-budget.test.mjs scripts/release-version.test.mjs scripts/build-boundary.test.mjs",
+    "test": "node --test cloudflare/worker.test.mjs scripts/r2-budget.test.mjs scripts/release-version.test.mjs scripts/build-boundary.test.mjs scripts/replace-release.test.mjs",
     "format": "prettier --write \"web/**/*.{ts,tsx,css,html}\" \"packages/ui/**/*.{ts,tsx,css,json}\" \"frame/**/*.{ts,tsx,css}\" \"*.{json,ts}\" \"!package-lock.json\"",
     "format:check": "prettier --check \"web/**/*.{ts,tsx,css,html}\" \"packages/ui/**/*.{ts,tsx,css,json}\" \"frame/**/*.{ts,tsx,css}\" \"*.{json,ts}\" \"!package-lock.json\"",
     "video:dev": "vite --config video/vite.config.ts",

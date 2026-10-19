@@ -1,0 +1,81 @@
+name: replace-release
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Exact committed product source to build
+        required: true
+      expected_sha256:
+        description: Verified current stable package SHA-256
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: sleepy-doll-release
+  cancel-in-progress: false
+jobs:
+  replace:
+    runs-on: windows-2022
+    env:
+      TEMP: ${{ github.workspace }}\target\ci\tmp
+      TMP: ${{ github.workspace }}\target\ci\tmp
+      npm_config_cache: ${{ github.workspace }}\target\ci\npm-cache
+      WRANGLER_LOG_PATH: ${{ github.workspace }}\target\ci\wrangler
+      WRANGLER_SEND_METRICS: "false"
+      NODE_DISABLE_COMPILE_CACHE: "1"
+      CLOUDFLARE_ACCOUNT_ID: "31b280af27ff4bf0d338ecd49cf27902"
+      R2_BUCKET: sleepy-doll-releases
+      REPLACE_SOURCE_COMMIT: ${{ inputs.source_commit }}
+      REPLACE_EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+      TOOL_SOURCE: ${{ github.sha }}
+      REPLACE_NOTE: "- 修复回退旧版后，旧界面缓存与已迁移数据共存导致启动退出的问题。"
+    steps:
+      - name: Validate replacement inputs
+        shell: pwsh
+        run: |
+          if ($env:REPLACE_SOURCE_COMMIT -notmatch '^[a-f0-9]{40}$') { throw 'Exact source commit required' }
+          if ($env:REPLACE_EXPECTED_SHA256 -notmatch '^[a-f0-9]{64}$') { throw 'Exact original SHA-256 required' }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_commit }}
+      - name: Load replacement tooling into this single checkout
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path $env:TEMP -Force | Out-Null
+          git fetch --no-tags origin $env:TOOL_SOURCE --depth=1
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot load replacement tooling source' }
+          foreach ($path in @('scripts/replace-release.mjs', 'scripts/replace-release.test.mjs')) {
+            $text = git show "${env:TOOL_SOURCE}:$path"
+            if ($LASTEXITCODE -ne 0) { throw "Missing replacement tooling: $path" }
+            [IO.File]::WriteAllText((Join-Path $PWD $path), ($text -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+          }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: npm install
+      - name: Validate migration and replacement rollback
+        run: |
+          cargo fmt --all -- --check
+          if ($LASTEXITCODE -ne 0) { throw 'Rust formatting failed' }
+          cargo test --no-default-features --lib data_directory::tests
+          if ($LASTEXITCODE -ne 0) { throw 'Migration regression tests failed' }
+          node --test scripts/replace-release.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Replacement rollback tests failed' }
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw 'Release contract tests failed' }
+      - name: Build the pinned hotfix source
+        shell: cmd
+        run: npm run dist
+      - name: Replace and verify the active stable package
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/replace-release.mjs
