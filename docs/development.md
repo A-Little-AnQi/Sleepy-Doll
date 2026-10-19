@@ -37,15 +37,20 @@ npm run dist
 
 | 路径 | 内容 |
 | --- | --- |
-| `target/debug/`、`target/release/` | Rust 构建及各自的开发用户数据 |
+| `target/debug/`、`target/release/` | Rust 标准构建结果与缓存 |
 | `target/ui/` | 前端生产构建 |
 | `target/bridge/` | 桥组件 |
 | `target/dotnet/` | .NET 与 native 构建缓存 |
-| `target/setup/` | 安装器内嵌载荷 |
+| `target/setup/staging/` | 清单组装的安装包暂存目录，结束后自动清理 |
+| `target/setup/payload.bin`、`target/setup/payload.json` | 安装器内嵌载荷，结束后自动清理 |
+| `target/dev/user/` | 开发 IPC 网关配置与用户数据 |
+| `target/dev/desktop/` | 通过 `npm run desktop` 启动的组装版程序及用户数据 |
+| `target/android/maven/` | Android 组件本地 Maven 仓库 |
 | `target/reports/` | 可重新生成的检查报告 |
 | `target/.tmp/` | 隔离测试、截图与工具临时数据 |
-| `dist/Sleepy-Doll/` | 本机组装目录：主程序、bridge、plugins 与 user |
-| `dist/Sleepy-Doll-<版本>-setup.exe` | 分发安装包 |
+| `dist/Sleepy-Doll-<版本>-setup.exe` | 当前版本分发安装包，配套 `.sha256` 与 `release.json` |
+
+`dist/` 按根目录 [AGENTS.md](../AGENTS.md) 的白名单验收。构建前发现未知交付项会停止；不会把已有运行数据当成暂存文件删除。目录不得用于启动程序，Android 本地 Maven 仓库也不再写入 `dist/android/`。
 
 构建与安装覆盖程序文件，保留用户数据和凭据。安装器按文件清单打包并使用空凭据模板，排除 `user/`。安装与发布细节见 [发布文档](distribution.md)，数据解析规则见 [配置文档](configuration.md)。
 

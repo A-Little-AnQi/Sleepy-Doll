@@ -77,7 +77,7 @@
 }
 .memory-page-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 32px;
   flex-shrink: 0;
@@ -98,7 +98,6 @@
 }
 .memory-page-header > .memory-toggle {
   flex-shrink: 0;
-  padding-top: 1px;
 }
 .memory-page-header .memory-toggle .setting-row {
   min-height: 34px;
@@ -119,10 +118,7 @@
   max-width: 400px;
   min-width: 0;
 }
-.memory-toolbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+.memory-toolbar-count {
   flex-shrink: 0;
 }
 .memory-content {
@@ -214,9 +210,8 @@
   .memory-toolbar .search-field {
     flex-basis: 180px;
   }
-  .memory-toolbar-actions {
+  .memory-toolbar-count {
     margin-left: auto;
-    gap: 12px;
   }
   .memory-entry-body {
     padding-right: 0;

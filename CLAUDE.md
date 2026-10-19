@@ -1,6 +1,6 @@
 # 工程约定
 
-Sleepy Doll 是游戏脚本工具的通用本地桌面助手，目前适配 BetterGI。工程结构、命令和产物路径见 [README](README.md) 与 [开发文档](docs/development.md)，发布流程见 [发布文档](docs/distribution.md)。
+Sleepy Doll 是游戏脚本工具的通用本地桌面助手，目前适配 BetterGI。目录结构、产物位置和清理验收以根目录 [AGENTS.md](AGENTS.md) 为准；工程命令见 [README](README.md) 与 [开发文档](docs/development.md)，发布流程见 [发布文档](docs/distribution.md)。
 
 ## 架构边界
 
@@ -12,7 +12,7 @@ Sleepy Doll 是游戏脚本工具的通用本地桌面助手，目前适配 Bett
 
 - 正式源码在本仓库原地修改，不创建源码副本或 worktree。
 - `.cmd` 必须为 ASCII；脚本从自身位置解析仓库根目录。
-- 构建、报告和验证数据放在 `target/`；桌面交付物放在 `dist/`；宣传片沿用 `video/output/`。工具临时目录必须重定向到项目缓存。
+- 构建、开发运行、组包暂存、报告和验证数据按 `AGENTS.md` 归入 `target/`；`dist/` 仅放最终软件交付物；宣传片沿用 `video/output/`。工具临时目录必须重定向到项目缓存。
 - 构建覆盖程序文件，保留 `user/` 与含 token 的现有配置；打包按 `scripts/pack-payload.ps1` 的清单执行，不能直接压缩工作安装目录。
 - `package-lock.json` 与 `Cargo.lock` 只保留本机，不进 Git；不使用 `npm ci` 或依赖锁文件的 CI 缓存配置。
 - 生成报告不进 Git；桥内嵌的 `managed/generated/host-documentation.json`、插件功能索引与 `dev/fixtures/` 是构建或测试输入，更新时核对生成来源。

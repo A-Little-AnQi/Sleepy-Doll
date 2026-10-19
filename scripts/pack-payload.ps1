@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Packs dist\Sleepy-Doll into the two files the installer embeds.
+    Packs target\setup\staging into the two files the installer embeds.
 
 .DESCRIPTION
     Writes target\setup\payload.bin (every file's bytes concatenated in path
@@ -18,7 +18,7 @@
     using the system ANSI code page, which would garble anything else.
 
 .PARAMETER Source
-    Product folder to pack. Defaults to ..\dist\Sleepy-Doll.
+    Product folder to pack. Defaults to ..\target\setup\staging.
 
 .PARAMETER Output
     Folder for payload.bin and payload.json. Defaults to ..\target\setup.
@@ -43,7 +43,7 @@ $ErrorActionPreference = 'Stop'
 
 # Defaults are resolved here, not in the param block: $PSScriptRoot is not set
 # yet while parameters are being bound.
-if (-not $Source) { $Source = Join-Path $PSScriptRoot '..\dist\Sleepy-Doll' }
+if (-not $Source) { $Source = Join-Path $PSScriptRoot '..\target\setup\staging' }
 if (-not $Output) { $Output = Join-Path $PSScriptRoot '..\target\setup' }
 
 $bridgeFiles = @(

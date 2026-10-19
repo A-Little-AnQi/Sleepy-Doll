@@ -276,7 +276,12 @@ fn apply_update_after(pid: u32) -> Result<(), Box<dyn std::error::Error>> {
 
 /// 关窗口，退出前安排好清理。
 fn quit(control_flow: &mut ControlFlow) {
-    if let Err(error) = setup::cleanup_after_exit(&[setup::Removal::Tree(setup::scratch_root())]) {
+    let scratch = setup::scratch_root();
+    let mut removals = vec![setup::Removal::Tree(scratch.clone())];
+    if let Some(parent) = scratch.parent() {
+        removals.push(setup::Removal::Empty(parent.to_path_buf()));
+    }
+    if let Err(error) = setup::cleanup_after_exit(&removals) {
         native_message(&format!("无法安排安装缓存清理：{error}"));
     }
     *control_flow = ControlFlow::Exit;

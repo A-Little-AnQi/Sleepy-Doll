@@ -13,7 +13,7 @@ npm install
 npm run dist
 ```
 
-完整构建生成 `dist/Sleepy-Doll/` 和 `dist/Sleepy-Doll-<版本>-setup.exe`。分发使用安装包；本机组装目录可能含用户数据，不能整目录打包。
+完整构建在 `dist/` 生成当前版本安装包、SHA-256 校验文件和本地构建清单。组包暂存与内嵌载荷位于 `target/setup/`，构建结束后自动清理。`npm run desktop` 在 `target/dev/desktop/` 组装并启动开发程序，用户数据不进入交付目录。目录规范见 [AGENTS.md](AGENTS.md)。
 
 Web 与安卓组件库作为仓库内部模块维护。Moduloom 预览工具是本地可选依赖，正常安装和 GitHub 构建无需它；需要预览时按[开发文档](docs/development.md#浏览器预览)单独安装。
 
@@ -37,7 +37,7 @@ Web 与安卓组件库作为仓库内部模块维护。Moduloom 预览工具是�
 | `video/` | 宣传片源码与制作入口 |
 | `docs/` | 维护文档 |
 | `target/` | 构建缓存、生成报告与验证数据，不进 Git |
-| `dist/` | 桌面程序和安装包，不进 Git |
+| `dist/` | 最终软件交付物及其校验文件、清单，不进 Git |
 
 宣传片使用现有的 `make-video.bat`，成片保存在 `video/output/`。
 

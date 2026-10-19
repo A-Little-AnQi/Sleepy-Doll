@@ -324,7 +324,10 @@ try {
     .getByRole("heading", { name: "还没有记忆", exact: true })
     .waitFor();
   failList = true;
-  await memory.getByRole("button", { name: "刷新", exact: true }).click();
+  await page.evaluate(() =>
+    window.__sleepyDollReceive({ kind: "event", id: "openSettings" }),
+  );
+  await page.getByRole("button", { name: "管理记忆", exact: true }).click();
   await memory.getByRole("alert").filter({ hasText: "读取记忆失败" }).waitFor();
   assert.deepEqual(errors, []);
   assert.equal(requests.filter((q) => q.method === "task.submit").length, 0);

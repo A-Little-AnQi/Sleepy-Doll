@@ -31,7 +31,14 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($Action -in @('build','publish')) {
     $distribution = Join-Path $projectRoot 'dist/android'
     New-Item -ItemType Directory -Path $distribution -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'target/android/build/app/outputs/apk/debug/app-debug.apk') -Destination (Join-Path $distribution 'sleepy-doll-0.1.0-android-debug.apk') -Force
+    $version = (Get-Content (Join-Path $projectRoot 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version
+    $apk = Join-Path $distribution "sleepy-doll-$version-android-debug.apk"
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'target/android/build/app/outputs/apk/debug/app-debug.apk') -Destination $apk -Force
+    $stream = [IO.File]::OpenRead($apk)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { $digest = [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
+    finally { $algorithm.Dispose(); $stream.Dispose() }
+    [IO.File]::WriteAllText("$apk.sha256", "$digest  $([IO.Path]::GetFileName($apk))`n", [Text.UTF8Encoding]::new($false))
 }
 if ($Action -eq 'preview') {
     $assets = Join-Path $projectRoot 'target/frame-android/assets'

@@ -20,7 +20,7 @@
     "android:preview": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action preview",
     "android:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action check",
     "backend": "cargo run --no-default-features --features dev-ipc --bin sleepy-doll-dev",
-    "desktop": "npm run dist && powershell -NoProfile -Command \"Start-Process -WindowStyle Hidden -FilePath './dist/Sleepy-Doll/sleepy-doll.exe'\"",
+    "desktop": "npm run dist && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Action Desktop",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "node scripts/release-version.mjs && npm run typecheck && vite build",
     "dist": "cmd /c scripts\\build.cmd",

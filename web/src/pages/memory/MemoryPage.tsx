@@ -108,24 +108,9 @@ export function MemoryPage() {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <div className="memory-toolbar-actions">
-          <span className="memory-hint">
-            {t.settings.memoryCount(rows.length)}
-          </span>
-          <Button
-            variant="subtle"
-            disabled={busy || loading}
-            onClick={() => {
-              setLoading(true);
-              setError("");
-              void refresh()
-                .catch((reason: unknown) => setError(readError(reason)))
-                .finally(() => setLoading(false));
-            }}
-          >
-            {t.settings.memoryRefresh}
-          </Button>
-        </div>
+        <span className="memory-hint memory-toolbar-count">
+          {t.settings.memoryCount(rows.length)}
+        </span>
       </div>
       {error && (
         <p className="memory-error" role="alert">

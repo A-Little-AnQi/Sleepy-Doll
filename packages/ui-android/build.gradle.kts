@@ -62,7 +62,7 @@ dependencies {
 }
 publishing {
     repositories {
-        maven { name = "Project"; url = uri(rootProject.file("../dist/android/maven")) }
+        maven { name = "Project"; url = uri(rootProject.file("../target/android/maven")) }
     }
 }
 afterEvaluate {

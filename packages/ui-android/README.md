@@ -2,7 +2,7 @@
 
 原生 Jetpack Compose 组件库。正式安卓应用与 Frame 预览宿主直接依赖同一个 Gradle 模块，库本身不依赖 Frame、ADB 或网络服务。
 
-同仓库应用使用 `implementation(project(":ui"))`，独立项目可使用本地 Maven 仓库 `dist/android/maven` 中的 `dev.sleepydoll:ui:0.1.0`。组件包名为 `dev.sleepydoll.ui`，入口需要包裹 `SleepyTheme`。
+同仓库应用使用 `implementation(project(":ui"))`，独立项目可使用本地 Maven 仓库 `target/android/maven` 中的 `dev.sleepydoll:ui:0.1.0`。组件包名为 `dev.sleepydoll.ui`，入口需要包裹 `SleepyTheme`。
 
 | 组件类型 | API |
 | --- | --- |
