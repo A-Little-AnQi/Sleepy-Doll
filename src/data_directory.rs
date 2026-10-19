@@ -80,7 +80,19 @@ pub fn migrate(user_directory: &Path, database: &Path) -> Result<()> {
     }
     let destination = path(user_directory);
     match fs::symlink_metadata(&destination) {
-        Ok(_) => {
+        Ok(destination_metadata) => {
+            if destination_metadata.is_dir()
+                && !is_link(&destination_metadata)
+                && relative_path(&destination, database).is_some()
+                && database.is_file()
+                && legacy_has_only_auxiliary_state(&previous)?
+            {
+                // 回退运行旧版会重新生成界面和更新缓存，不代表出现第二份业务数据库。
+                log::warn!(
+                    "旧版界面缓存与已迁移数据共存，继续使用 data；旧版状态保留，未覆盖任何文件"
+                );
+                return Ok(());
+            }
             return Err(Error::Config(
                 "发现 .sleepy-doll 与 data 两份数据目录，未覆盖任何内容；请先核对并合并旧数据"
                     .into(),
@@ -120,6 +132,26 @@ pub fn migrate(user_directory: &Path, database: &Path) -> Result<()> {
     })?;
     log::info!("用户数据目录已从 .sleepy-doll 迁移到 data");
     Ok(())
+}
+
+fn legacy_has_only_auxiliary_state(directory: &Path) -> Result<bool> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let metadata = fs::symlink_metadata(entry.path())?;
+        let name = entry.file_name();
+        let allowed = if metadata.is_dir() {
+            matches!(
+                name.to_str(),
+                Some("webview2" | "updates" | "config-changes")
+            )
+        } else {
+            metadata.is_file() && name == "window-placement.json"
+        };
+        if !allowed || is_link(&metadata) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn is_link(metadata: &fs::Metadata) -> bool {
@@ -204,6 +236,76 @@ mod tests {
         let journal =
             crate::runtime::store::journal::Journal::open(&loaded.storage.database).unwrap();
         assert_eq!(journal.get(&run.id).unwrap().prompt, "原始用户目标");
+    }
+
+    #[test]
+    fn recreated_legacy_caches_do_not_block_an_existing_canonical_database() {
+        let (root, config) = legacy("data-migration-legacy-cache");
+        fs::create_dir_all(path(&root).join("webview2")).unwrap();
+        fs::write(path(&root).join("webview2/profile"), "canonical profile").unwrap();
+        let database = path(&root).join("sleepy-doll.db");
+        let journal = crate::runtime::store::journal::Journal::open(&database).unwrap();
+        let run = journal
+            .create("保留已有会话", "conversation", "client", 3600, None)
+            .unwrap();
+        drop(journal);
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+        value["storage"]["database"] = json!("./data/sleepy-doll.db");
+        fs::write(&config, serde_json::to_vec(&value).unwrap()).unwrap();
+        for (name, content) in [
+            ("webview2/profile", "legacy profile"),
+            ("updates/preferences.json", "legacy preferences"),
+            ("window-placement.json", "legacy window"),
+        ] {
+            let file = root.join(LEGACY_NAME).join(name);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, content).unwrap();
+        }
+        let original = fs::read(&config).unwrap();
+        let loaded = AppConfig::load(&config).unwrap();
+        assert_eq!(
+            loaded.storage.database.canonicalize().unwrap(),
+            database.canonicalize().unwrap()
+        );
+        assert_eq!(fs::read(&config).unwrap(), original);
+        assert_eq!(
+            fs::read_to_string(path(&root).join("webview2/profile")).unwrap(),
+            "canonical profile"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(LEGACY_NAME).join("webview2/profile")).unwrap(),
+            "legacy profile"
+        );
+        let journal = crate::runtime::store::journal::Journal::open(&database).unwrap();
+        assert_eq!(journal.get(&run.id).unwrap().prompt, "保留已有会话");
+    }
+
+    #[test]
+    fn a_second_legacy_database_is_still_a_conflict() {
+        let (root, config) = legacy("data-migration-two-databases");
+        fs::create_dir_all(path(&root)).unwrap();
+        fs::write(path(&root).join("sleepy-doll.db"), "canonical database").unwrap();
+        fs::write(
+            root.join(LEGACY_NAME).join("sleepy-doll.db"),
+            "legacy database",
+        )
+        .unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+        value["storage"]["database"] = json!("./data/sleepy-doll.db");
+        fs::write(&config, serde_json::to_vec(&value).unwrap()).unwrap();
+        let original = fs::read(&config).unwrap();
+        assert!(AppConfig::load(&config).is_err());
+        assert_eq!(fs::read(&config).unwrap(), original);
+        assert_eq!(
+            fs::read_to_string(path(&root).join("sleepy-doll.db")).unwrap(),
+            "canonical database"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(LEGACY_NAME).join("sleepy-doll.db")).unwrap(),
+            "legacy database"
+        );
     }
 
     #[test]
