@@ -9,6 +9,6 @@ plugins {
 }
 allprojects {
     group = "dev.sleepydoll"
-    version = "0.1.0"
+    version = "0.1.1"
     layout.buildDirectory.set(rootProject.layout.projectDirectory.dir("../target/android/build/" + project.name))
 }

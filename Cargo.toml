@@ -1,6 +1,6 @@
 [package]
 name = "sleepy-doll"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "General desktop agent for game scripting tools, with a BetterGI plugin"
 license = "MIT"
