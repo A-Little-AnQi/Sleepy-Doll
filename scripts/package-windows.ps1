@@ -42,8 +42,18 @@ function Remove-BuildFiles([string[]]$Paths) {
     }
     $existing = @($Paths | Where-Object { Test-Path -LiteralPath $_ })
     if ($existing.Count -eq 0) { return }
-    & E:\tools\Remove-Directory.ps1 -Path $existing -Json
-    if ($LASTEXITCODE -ne 0) { throw 'Setup cleanup failed' }
+    if ($env:GITHUB_ACTIONS -eq 'true') {
+        if (-not $env:GITHUB_WORKSPACE -or [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\', '/') -ne [IO.Path]::GetFullPath($root).TrimEnd('\', '/')) { throw 'CI cleanup workspace does not match this checkout' }
+        foreach ($path in $existing) {
+            $item = Get-Item -LiteralPath $path -Force
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Unexpected CI cleanup link: $path" }
+            if ($item.PSIsContainer) { [IO.Directory]::Delete($path, $true) }
+            else { [IO.File]::Delete($path) }
+        }
+    } else {
+        & E:\tools\Remove-Directory.ps1 -Path $existing -Json
+        if ($LASTEXITCODE -ne 0) { throw 'Setup cleanup failed' }
+    }
     foreach ($path in $existing) {
         if (Test-Path -LiteralPath $path) { throw "Setup cleanup incomplete: $path" }
     }

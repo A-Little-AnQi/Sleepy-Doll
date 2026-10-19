@@ -93,6 +93,8 @@ dist/
 
 本机删除目录、整棵树、批量文件及任何被策略拒绝的删除，必须使用 `E:\tools\Remove-Directory.ps1`。禁止目录树直接使用 `Remove-Item -Recurse -Force`、`rm -rf`、`rd /s /q`、`del /s` 等形式。
 
+本机工具的绝对路径不得成为 CI 依赖。GitHub Actions 中的组包清理由 `scripts/package-windows.ps1` 执行：必须确认 `GITHUB_WORKSPACE` 等于当前源码根，并限定在 `target/setup/` 的明确暂存项内，拒绝链接和未知文件。CI 分支不能用于绕过本机删除通道。
+
 ```powershell
 & E:\tools\Remove-Directory.ps1 -Path 'E:\已核实的绝对路径' -WhatIf
 & E:\tools\Remove-Directory.ps1 -Path 'E:\已核实的绝对路径' -Json
