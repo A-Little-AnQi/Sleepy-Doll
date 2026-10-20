@@ -11,7 +11,7 @@
 - Worker：`sleepy-doll-distribution`。
 - GA4：独立的 Sleepy Doll 媒体资源，衡量 ID `G-PBWX0V3ESR`。
 
-发布属性由 `release-channel.json` 明确指定，当前 `0.1.1` 为 `stable` 正式版。`0.x` 不代表测试版，`1.x` 也不代表正式版。测试发布不会修改正式通道。
+发布属性由 `release-channel.json` 明确指定，当前 `0.1.3` 为 `stable` 正式版。`0.x` 不代表测试版，`1.x` 也不代表正式版。测试发布不会修改正式通道。
 
 - `stable`：正式通道，GitHub Release 取消 Pre-release 并标记 Latest，不接受带预发布后缀的版本。
 - `test`：测试通道，GitHub Release 标记 Pre-release，不标记 Latest。
