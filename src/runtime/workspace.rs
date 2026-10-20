@@ -533,7 +533,7 @@ impl Tool for WorkspaceShellTool {
         ToolDefinition {
             name: "workspace.shell".into(),
             label: "执行 PowerShell".into(),
-            description: "执行一段 PowerShell。可选 cwd（默认软件目录）、timeoutMs（默认 120000，最大 3600000）与 maxOutputChars（默认 262144，最大 8388608）。".into(),
+            description: "执行一段 PowerShell；此工具可写入和启动进程，按高风险操作核对目标范围。只读文件定位优先用 workspace.list/search/read，应用资源优先用其专用接口；必要时才在已确认的相关目录执行命令，不为查应用配置递归扫描整个用户目录或磁盘。可选 cwd（默认软件目录）、timeoutMs（默认 120000，最大 3600000）与 maxOutputChars（默认 262144，最大 8388608）。".into(),
             input_schema: json!({"type":"object","properties":{
                 "command":{"type":"string","description":"一段 PowerShell 脚本"},
                 "cwd":{"type":"string","description":"工作目录，绝对或相对路径，默认软件目录"},

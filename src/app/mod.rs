@@ -8,7 +8,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::{
-    bridge::{BgiClient, register_tools},
+    bridge::BgiClient,
     config::{AppConfig, ModelAuth, ModelConfig, ModelOptions, ModelProtocol},
     error::{Error, Result},
     extension::plugins::PluginManager,
@@ -80,6 +80,11 @@ impl AppController {
         }
         let mut tools = ToolRegistry::default();
         let mut plugins = PluginManager::default();
+        let bridge = Arc::new(BgiClient::new(config.bridge.clone()));
+        plugins.provide_mcp(
+            "bgi",
+            crate::bridge::mcp::server(bridge.clone(), config.bridge.enabled)?,
+        );
         plugins.load(
             &config.plugins.directories,
             &config.plugins.enabled,
@@ -89,10 +94,6 @@ impl AppController {
         )?;
         let skills = Arc::new(skills);
         let plugins = Arc::new(plugins);
-        let bridge = Arc::new(BgiClient::new(config.bridge.clone()));
-        if config.host_plugin_enabled() && config.bridge.enabled {
-            register_tools(&mut tools, bridge.clone())?;
-        }
         register_builtin_tools(
             &mut tools,
             skills.clone(),
@@ -1470,6 +1471,11 @@ impl AppController {
         }
         let mut tools = ToolRegistry::default();
         let mut plugins = PluginManager::default();
+        let bridge = Arc::new(BgiClient::new(config.bridge.clone()));
+        plugins.provide_mcp(
+            "bgi",
+            crate::bridge::mcp::server(bridge.clone(), config.bridge.enabled)?,
+        );
         plugins.load(
             &config.plugins.directories,
             &config.plugins.enabled,
@@ -1479,10 +1485,6 @@ impl AppController {
         )?;
         let skills = Arc::new(skills);
         let plugins = Arc::new(plugins);
-        let bridge = Arc::new(BgiClient::new(config.bridge.clone()));
-        if config.host_plugin_enabled() && config.bridge.enabled {
-            register_tools(&mut tools, bridge.clone())?;
-        }
         register_builtin_tools(
             &mut tools,
             skills.clone(),

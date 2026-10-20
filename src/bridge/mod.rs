@@ -3,6 +3,8 @@
 pub(crate) mod approval;
 pub mod control;
 pub mod features;
+pub(crate) mod guidance;
+pub mod mcp;
 pub(crate) mod origin;
 pub mod recovery;
 pub(crate) mod resolve;
@@ -305,6 +307,7 @@ impl BgiClient {
     }
     pub fn state(&self) -> Result<Value> {
         self.request("GET", "/bridge/v1/state", None, None)
+            .map(guidance::state)
     }
     pub fn host(&self) -> Result<Value> {
         self.request("GET", "/bridge/v1/host", None, None)
@@ -347,6 +350,7 @@ impl BgiClient {
     pub fn describe(&self, method_id: &str) -> Result<Value> {
         let encoded: String = url::form_urlencoded::byte_serialize(method_id.as_bytes()).collect();
         self.request("GET", &format!("/bridge/v1/catalog/{encoded}"), None, None)
+            .map(guidance::contract)
     }
     pub fn job(&self, job_id: &str) -> Result<Value> {
         self.request("GET", &format!("/bridge/v1/jobs/{job_id}"), None, None)
@@ -423,7 +427,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         (
             "bgi.state.get",
             "读取游戏状态",
-            "读取一次 BetterGI、截图器、游戏窗口和任务锁状态。仅在准备执行、执行后核验或排障时使用；查询和编辑 User 文件不需要先调它。",
+            "读取一次 BetterGI、截图器、游戏窗口和任务锁状态。接口响应即说明连接正常；gameReady（旧字段 bridgeReady）表示游戏主界面就绪，false 不是断连。读取或保存配置、创建快捷入口不要求游戏就绪，不为它们启动游戏。",
             json!({"type":"object","properties":{},"additionalProperties":false}),
             {
                 let client = client.clone();
@@ -504,14 +508,14 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             let client = client.clone();
             Arc::new(move |a: &Value| client.catalog_page_with_limit(a["query"].as_str().unwrap_or(""),a["group"].as_str(),a["offset"].as_u64().unwrap_or(0),a["limit"].as_u64().unwrap_or(8))) as BridgeToolFn
         }),
-        ("bgi.api.describe", "查看操作说明", "读取精确 methodId 的当前契约，再 read/invoke。直接资源／设置／领域接口优先，cmd.*、bgi.ui.* 与页面上下文是最低优先级；能直接操作数据时不操作界面。callable=false 说明当前接口限制。", json!({"type":"object","properties":{"methodId":{"type":"string","description":"来自当前证据的精确 ID；资源删除用 bgi.inspect_local_resource / bgi.delete_local_resource，不选地图追踪界面删除命令"}},"required":["methodId"],"additionalProperties":false}), {
+        ("bgi.api.describe", "查看操作说明", "读取精确 methodId 的当前契约及 agentCall 调用映射。methodId 不是 Agent 工具名；快捷绑定按 agentCall.tool 保留 {methodId, arguments:{…}} 参数层级。直接资源／设置／领域接口优先，界面操作最后。callable=false 的具体限制看 unavailableReason。", json!({"type":"object","properties":{"methodId":{"type":"string","description":"来自当前证据的精确 ID；资源删除用 bgi.inspect_local_resource / bgi.delete_local_resource，不选地图追踪界面删除命令"}},"required":["methodId"],"additionalProperties":false}), {
             let client = client.clone();
             Arc::new(move |a: &Value| client.describe(a["methodId"].as_str().unwrap_or(""))) as BridgeToolFn
         }),
-        ("bgi.api.read", "读取 BetterGI 状态", "调用刚通过 api.describe 确认的只读接口。用于读取宿主当前设置或诊断；不用于读取 User 文件。arguments 必须满足该接口 inputSchema。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"无参数接口传空对象"}},"required":["methodId","arguments"],"additionalProperties":false}), {
+        ("bgi.api.read", "读取 BetterGI 状态", "调用当前契约 effect=readOnly 的 BetterGI 接口。methodId 放接口标识，arguments 放满足该接口 inputSchema 的参数对象；User 文件用 bgi.user.read。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"无参数接口传空对象"}},"required":["methodId","arguments"],"additionalProperties":false}), {
             Arc::new(move |_: &Value| Err(Error::Tool("该接口必须通过运行时的契约检查调用".into()))) as BridgeToolFn
         }),
-        ("bgi.api.invoke", "执行 BetterGI 操作", "只调用本次运行已经 api.describe 的写接口。直接改资源／设置／领域数据优先，界面操作优先级最低。删除路线或脚本先 inspect_local_resource，再调用 delete_local_resource；不先选中、右键、导航或展开树。多组运行及关闭游戏收尾先统一计划一次 bgi.run_script_groups，默认 waitForCompletion=false 后台交接；同计划的后续步骤不是用户要求等待。仅明确要求监控、等结果或汇报完成才 true；普通请求直接规划并运行，不额外问是否守护，游戏运行期间不查 Job、日志或状态。游戏启动后的加载用 wait_ready 阻塞等待，不让模型循环查状态。运行时等待期间不调用模型，取得交接证据后给最终总结并结束，不再 job.get、查状态或日志，也不重跑；明确要求等待／后续步骤／排错时才继续。completed 不自动表示业务成功。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"严格满足本次已读取的 inputSchema"}},"required":["methodId","arguments"],"additionalProperties":false}), {
+        ("bgi.api.invoke", "执行 BetterGI 操作", "执行当前契约允许的写接口，运行时会重新取得并校验契约。直接改资源／设置／领域数据优先，界面操作优先级最低。删除路线或脚本先 inspect_local_resource，再调用 delete_local_resource；不先选中、右键、导航或展开树。多组运行及关闭游戏收尾先统一计划一次 bgi.run_script_groups，默认 waitForCompletion=false 后台交接；同计划的后续步骤不是用户要求等待。仅明确要求监控、等结果或汇报完成才 true；普通请求直接规划并运行，不额外问是否守护，游戏运行期间不查 Job、日志或状态。游戏启动后的加载用 wait_ready 阻塞等待，不让模型循环查状态。运行时等待期间不调用模型，取得交接证据后给最终总结并结束，不再 job.get、查状态或日志，也不重跑；明确要求等待／后续步骤／排错时才继续。completed 不自动表示业务成功。", json!({"type":"object","properties":{"methodId":{"type":"string"},"arguments":{"type":"object","description":"严格满足本次已读取的 inputSchema"}},"required":["methodId","arguments"],"additionalProperties":false}), {
             Arc::new(move |_: &Value| Err(Error::Tool("该接口必须通过运行时的授权与 Job 跟踪调用".into()))) as BridgeToolFn
         }),
         (

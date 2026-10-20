@@ -266,6 +266,8 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
             snapshotId = Guid.NewGuid().ToString("N"),
             observedAt = DateTimeOffset.UtcNow,
             runtime = detail,
+            bridgeConnected = true,
+            gameReady = ready,
             bridgeReady = ready,
             host = HostPaths(),
         };

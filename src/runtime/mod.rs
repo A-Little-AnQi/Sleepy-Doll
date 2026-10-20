@@ -1345,7 +1345,16 @@ impl Supervisor {
     async fn session(&self, run: &mut Run, cancel: &CancellationToken) -> Result<()> {
         let initial = self.config.read().unwrap().clone();
         let policy = initial.runtime.clone();
-        let bridge = host::bridge::Bridge::new(initial.bridge.clone())?;
+        let mut bridge = host::bridge::Bridge::new(initial.bridge.clone())?;
+        if let Some(client) = self
+            .extensions
+            .read()
+            .unwrap()
+            .tools
+            .mcp_connection("bgi", "bridge")
+        {
+            bridge = bridge.with_mcp(client);
+        }
         self.emit_lifecycle(
             host::hooks::HookEventKind::RunStarted,
             Some(&run.id),
@@ -2814,11 +2823,14 @@ impl Supervisor {
         }
         // 工具注册表来自多个插件与 HashMap，发现顺序不可作为请求字节顺序。
         // 按来源和名称固定排列，避免仅因进程重启或插件扫描顺序变化打断缓存。
+        let shortcut_schema = operation::shortcuts::schema_for_tools(
+            definitions.iter().map(|definition| definition.name.clone()),
+        );
         if let Some(definition) = definitions
             .iter_mut()
             .find(|definition| definition.name == "task.save")
         {
-            definition.input_schema = operation::shortcuts::schema();
+            definition.input_schema = shortcut_schema.clone();
             definition.execution.always_load = false;
             definition.execution.effect = ToolEffect::LocalWrite;
             definition.description = "兼容名称，优先使用 shortcut.save；单动作绑定 binding.action，多动作按契约选择批量能力或 binding.steps，不拆分用户要求的组合入口。".into();
@@ -2827,7 +2839,7 @@ impl Supervisor {
             .iter_mut()
             .find(|definition| definition.name == "shortcut.save")
         {
-            definition.input_schema = operation::shortcuts::schema();
+            definition.input_schema = shortcut_schema;
         }
         definitions.sort_by(|left, right| {
             left.source
@@ -3110,8 +3122,6 @@ impl Supervisor {
         self.journal.ensure_current_goal(run)?;
         let shortcut_only = self.shortcut_only(run)?;
         self.check_progress(run, call)?;
-        self.check_observation_scope(run, call, &definitions, cancel)
-            .await?;
         let definition = definitions
             .iter()
             .find(|t| t.name == call.name)
@@ -3159,6 +3169,14 @@ impl Supervisor {
         .await?;
         let validation_issues = crate::extension::validate(a, &definition.input_schema, "$");
         if !validation_issues.is_empty() {
+            if matches!(call.name.as_str(), "shortcut.save" | "task.save")
+                && let Ok(binding) = serde_json::from_value::<operation::shortcuts::ShortcutBinding>(
+                    a["binding"].clone(),
+                )
+            {
+                // 在通用 enum 错误前给出绑定层的具体问题；只校验，不保存或执行。
+                operation::shortcuts::nodes(&binding, &self.tool_catalog())?;
+            }
             // 与 ToolRegistry::call_async 同口径：反馈字段路径与约束（最多 5 条），
             // 不回显参数原值，帮助一次定位缺必填字段。
             let details = validation_issues
@@ -3176,6 +3194,8 @@ impl Supervisor {
                 .join("；");
             return Err(Error::Tool(format!("工具参数不符合契约：{details}")));
         }
+        self.check_observation_scope(run, call, &definitions, cancel)
+            .await?;
         if !definition.execution.effect_is_dynamic
             && !matches!(
                 definition.execution.effect,
@@ -3422,7 +3442,10 @@ impl Supervisor {
                     json!({"content":self.skills().read_reference(name,a["path"].as_str().unwrap_or(""))?}),
                 )
             }
-            "bgi.state.get" => bridge.get("/bridge/v1/state", cancel).await,
+            "bgi.state.get" => bridge
+                .get("/bridge/v1/state", cancel)
+                .await
+                .map(crate::bridge::guidance::state),
             "bgi.api.search" => {
                 let history = self.journal.history(run)?;
                 let skills = self.skills();

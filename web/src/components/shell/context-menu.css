@@ -2,7 +2,7 @@
    这里只借用产品令牌，明暗主题随 :root / .dark 自动切换。 */
 .context-menu {
   position: fixed;
-  z-index: 1100; /* 弹层里最高（Select 1000、Dialog 200）。 */
+  z-index: 1100; /* 弹层里最高（Select 1000、Dialog 600）。 */
   min-width: 176px;
   padding: 4px;
   border: 1px solid var(--border);

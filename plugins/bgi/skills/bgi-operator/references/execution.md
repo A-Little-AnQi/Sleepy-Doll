@@ -1,31 +1,34 @@
 # 任务准备、执行与核验
 
-## 执行任务
+## 资源目标
 
-1. “跑个 X”“运行下 X”默认把 X 当作资源目标，先调用一次 `bgi.user.resolve`，使用用户原话或目标名称。它在本机未命中时自动查当前全仓索引。不要先 `bgi.api.search`，也不要列 AutoPathing 或逐条读取路线 JSON。用户明确指定本体动作或一条龙时才走对应原生动作。
-2. `verdict=run` 时直接读取 `bgi.run_script_group` 契约并传入精确 `groupName`。路径缺失时运行时会拒绝执行；不要在 `repair` 状态下调用它。
-3. `verdict=repair` 时只处理 `missing` 列出的路径：更新仓库或订阅后再次 `resolve`。
-3a. `resourceFound` 表示已有中央仓库证据。直接用 `repository.items`，不用重复查或刷新；采集选择一个完整作者包并核对角色前提。describe/invoke `bgi.subscribe_script_resources` 安装该目录，再 `bgi.prepare_pathing_group`，使用返回的 groupName 运行。JS 候选按定义读取参数、订阅和配置。不能逐条读、重写或重命名叶子路线 JSON。
-3b. `notFound` 表示本机与当前全仓索引均未命中，核对名称后，确需更新才刷新一次再 resolve。`lookupFailed` 是仓库查询失败，处理返回的错误，不能报告资源不存在。单独使用 `bgi.repo.search` 时分类无结果也不能代表全仓不存在。
-3c. `create` 的 candidates 明确区分 `Pathing` 与 `Javascript`。JS 先 inspect_script，settings 来源是 manifest 的 settingsUi；读取参数、README 与必要源码后，用 `bgi.prepare_js_group` 的 folderName/settings 建组，随后运行返回的 groupName。本机自建 JS 可以执行，不要求中央仓库同名条目。地图追踪不能套 JS 设置流程。
-4. 只有准备提交执行时才调用一次 `bgi.state.get`，检查截图器、游戏句柄、任务锁和窗口状态。纯查询或文件编辑不需要状态快照。`ready` 以**进入游戏主界面**为准：截图器就绪但仍在登录或加载画面时调用会被拒绝，等 `bgi.get_status` 的 `ready=true` 再提交。`gameResolution.sixteenToNine=false` 时先把游戏或远程桌面会话调到 16:9（如 1920x1080），启动参数 `-screen-width` 对已初始化过的原神不生效。
-4b. 未就绪时直接 describe/invoke `bgi.start_game`，再 `bgi.wait_ready` 一次阻塞等待（默认 120 秒，超时后报告，不由模型轮询）；不要先搜索截图器 ViewModel 命令，更不能明知未就绪仍试跑。游戏已就绪直接 describe/invoke `bgi.run_script_group`，不用另找运行命令。
-4a. 目标是每日/清体力/周常一条龙时用 `bgi.run_one_dragon`（宿主原生任务链，`configName` 可选），不要为它建调度器配置组；它收尾可能自动退出游戏。用户要求退出原神或任务链收尾时用 `bgi.exit_game`（正常关闭，超时强结束）；长任务结束与退出证据按当前契约 verification 和真实进程核对，不能只看缓存的 gameHandle。
-5. 其他动作若已知道精确 `methodId`，直接 `bgi.api.describe`；否则只在 `command` 组按一个动作词搜索一次。
-6. 契约必须同时满足：`callable=true`、参数可提供、接口确实作用于目标对象。readOnly 契约走 `bgi.api.read`，写和游戏动作才 invoke；`bgi.js_api` 的 search/read 同理必须用 read。其他低层命令仍依赖界面当前选择时，不得声称能按名称执行。
-7. 普通对话和快捷入口的配置组运行默认 `waitForCompletion=false`，只等宿主接受启动交接，立即总结并结束对话，不等整组脚本跑完，不查询 Job、状态、日志、截图或睡眠轮询。多组运行及关闭游戏收尾统一计划一次 `bgi.run_script_groups`（groupNames 按计划顺序、收尾用 closeGameAfter），仍默认后台交接。用户说“A 然后 B、跑完关游戏”是宿主计划顺序与 closeGameAfter，不是授权模型等待或监控；仅用户明确要监控、等结果或汇报完成时才用 true。普通请求直接规划并运行，不额外问是否守护。调用由运行时阻塞，期间不调用模型。返回的 verified/verificationScope=launch 只核验交接，不代表业务成功；accepted=true 写“已提交运行”，不能写“全部完成”。不继承此前助手错误的等待说明或旧工具 wait=true 作为用户意图。
-8. 接口不可调用时直接说明唯一阻塞项。不要继续换中英文、查插件、搜生命周期接口或让用户重复提供已经查到的信息。
+“跑个 X”先 bgi.user.resolve，用用户原话或明确目标；不先找本体命令、打开页面或遍历叶子路线。
 
+- run：沿用返回的真实 groupName 和现有参数，读取 bgi.run_script_group 契约。仅处理工具证实的必要前提，不例行重配或读全部源码。
+- repair：按 missing 补资源，再 resolve；不运行缺失引用的组。
+- resourceFound：使用 repository.items 中的完整作者包，subscribe_script_resources 后 prepare_pathing_group，运行返回的组名；JS 按脚本定义处理。
+- create：按候选类型准备；JS 用 inspect_script 读取 manifest 声明的参数定义，再 prepare_js_group；Pathing 不套 JS 流程。
+- notFound：只代表本机与当前索引未命中；核对名称，确有更新需要再刷新一次。
+- lookupFailed：按真实仓库错误处理，不说资源不存在。
 
-## 动态命令的完整链路
+一条龙用 bgi.run_one_dragon，不混同调度器组。只要求配置或封装快捷入口时，到保存与回读为止，不进入游戏启动。
 
-- `callable=true` 仅表示契约可提交，还必须确认参数、当前选择和验证证据。稳定业务入口优先；动态命令需要对象时，describe/read `bgi.list_command_targets`，按真实 `contextId/objectId` 绑定，不能让用户手动选中来替代。
-- 当前窗口或子对象尚未创建时，按返回的构造契约 invoke `bgi.create_command_target`；原服务依赖来自宿主容器。开放泛型和抽象基类使用已有具体上下文，不猜类型。新增参数对象只用 `bgi.create_command_argument` 声明的类型；不能指定任意 CLR 类型。
-- `selection` 按当前 Schema 绑定 Selected 字段；多实例必须显式给 contextId。旧引用、类型不符、未匹配的构造器和缺少弹窗输入应根据错误重新取得必要证据，不能扫描 DLL 或换无关接口绕过。
-- 需要输入的命令提供 `dialogInput`：名称用 text，文件／目录用 filePath，资源选择用真实 Tag 的 selectedValues，确认用明确 confirm。作用域只接管本次新建窗口，不能操作用户已有窗口。`dialogsHandled` 不是业务成功标记，修改后仍回读目标。
-- 使用结束后释放桥创建的无用上下文；用户已有实例保留。空实现、弃用功能和内部 UI 事件已从公共目录移除，不能反射恢复或寻找旧教程绕过。
-- 当前可见编辑器、列表行或模态窗口保留原生链路，按需读取 native-ui.md：ui.read/write/options/reorder/invoke/respond/operation 完成输入、排序、保存与终态，不因需要弹窗而删掉功能。
-- 独立任务的目标参数先走 settings 读取与事务，例如首领名称、指定次数模式和次数。联动字段在 preview 的 differences 中一并核对，不能只写 runCount 却遗漏 specifyRunCount。
-- 设置的 writable=false 是直接事务限制；当前可见字段可走 ui.read/write 的真实控件绑定、原生校验和保存。不通过 workspace 或磁盘全局配置绕过。
-- 打开页面是明确 UI 目标；使用 bgi.list_pages/open_page。对采集、运行、删除请求，页面导航不能代替操作结果。
-- 停止：只有仍未完成、还在等待的 Job 才用 job.cancel；默认启动已交接的 Job 即使有 ID 也已终态，停止当前运行用 `bgi.stop_current_task` 并核对停的原目标——旧 Job 已停止不证明新任务已停。结果为 timeout 就仍在停止，不能回答“已停止”；音乐播放、录制与外部绑定还要核对各自的停止命令。
+## 调用与就绪
+
+Agent 调用工具是 bgi.api.read/invoke，methodId 是工具参数，不是另一套工具名。describe 返回 agentCall 和 inputSchema；业务参数放 arguments 对象。readOnly 用 read，写动作用 invoke。callable 表示该接口契约可用，不等于游戏已就绪或任务已完成。
+
+配置组运行接口标有 preparation=ensureGameReady 时，由执行器启动原神、挂接截图器并阻塞等待主界面；直接提交目标即可，不在模型中重复编排启动和轮询。其他确需游戏就绪而没有自动准备的接口，才按契约调用 start_game 和一次 wait_ready。wait_ready 不会自行启动不存在的游戏。
+
+gameReady（旧字段 bridgeReady）只表示截图器和游戏主界面就绪，false 不表示 BetterGI 断连。连接错误以真实请求失败为准。非 16:9、目标分辨率超出当前桌面、缺少安装路径或人工验证等阻碍，按具体错误处理；不为了保存入口或读取配置启动游戏，也不擅自改分辨率。
+
+## 返回与停止
+
+普通运行与快捷入口默认 waitForCompletion=false，交接后总结并结束。多组及收尾关闭游戏用一次 run_script_groups 的 groupNames/closeGameAfter，不把计划顺序当成模型监控授权。用户明确要求等结果时才使用 true。工具等待期间不调用模型，返回已有终态不再 job.get，也不自动重跑。
+
+accepted/verificationScope=launch 只证明启动交接；executed 只证明相应方法返回。业务完成以本次契约和实际证据为准。
+
+停止尚未终态的原 Job 用 job.cancel；已交接的启动 Job 是回执，停止实际独立任务用 bgi.stop_current_task 并核对目标。timeout、取消请求已发出都不是停止完成。音乐、录制等使用自身停止入口。
+
+## 确需原生界面时
+
+直接资源、设置与业务入口优先；仅 UI 本身是目标或直接接口不适用时读 [native-ui.md](native-ui.md)。当前对象、selection、dialogInput 和 contextId 来自真实契约；不构造任意 CLR 类型、不扫描 DLL 猜接口。界面命令返回、窗口消失和 dialogsHandled 不证明业务完成，须回读目标。版本或对象已变时重新取证；弃用与空实现不恢复暴露。

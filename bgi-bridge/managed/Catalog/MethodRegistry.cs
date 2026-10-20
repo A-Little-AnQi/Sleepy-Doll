@@ -72,8 +72,17 @@ public sealed class MethodRegistry
     {
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("方法 id 不能为空。", nameof(id));
         var documentation = AgentGuides.ForUser(guide ?? AgentGuides.For(id));
+        var schema = inputSchema ?? AgentSchemas.Input(id);
+        foreach (var example in documentation.Examples)
+        {
+            try { ArgumentSchema.Validate(example, schema); }
+            catch (BridgeException error)
+            {
+                throw new InvalidOperationException($"接口 {id} 的示例不满足输入契约。", error);
+            }
+        }
         var descriptor = new MethodDescriptor(id, group, documentation.Purpose, readOnly, destructive,
-            inputSchema ?? AgentSchemas.Input(id)) { Guide = documentation, UnavailableReason = unavailableReason is null ? null : AgentGuides.BetterGiName(unavailableReason), RequiresGameReady = requiresGameReady, Preparation = preparation };
+            schema) { Guide = documentation, UnavailableReason = unavailableReason is null ? null : AgentGuides.BetterGiName(unavailableReason), RequiresGameReady = requiresGameReady, Preparation = preparation };
         if (!_methods.TryAdd(id, (descriptor, handler)))
             throw new InvalidOperationException($"方法 id 重复：{id}");
     }

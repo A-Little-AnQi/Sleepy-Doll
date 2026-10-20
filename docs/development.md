@@ -65,11 +65,14 @@ cargo fmt --all -- --check
 cargo check
 cargo check --no-default-features
 cargo test --no-default-features --lib
+cargo test --no-default-features --lib extension::mcp::tests
 cargo clippy --all-targets --no-default-features -- -D warnings
 python bgi-bridge/dev/feature-guide-builder.py --check
 ```
 
 CI 执行前端、发布脚本、Rust 格式／编译／库测试及功能索引一致性检查；clippy 在本地执行。
+
+MCP 协议测试使用 `tests/runtime/mcp-fixture.mjs` 作为独立 Node 测试端，覆盖 stdio、HTTP JSON/SSE、有会话与无会话服务、取消通知、输出契约、错误，以及 BGI 工具迁移前后的契约一致性。测试端只绑定随机回环端口，退出时结束本任务子进程；不连接真实游戏或模型。
 
 `tests/ui/` 用 Playwright 验证实际 React 界面，`tests/desktop/` 验证窗口与托盘，`tests/runtime/` 验证运行时行为。`bgi-bridge/dev/` 保留桥专项 C# 检查、元数据生成器及宿主接口盘点工具。需要模型或真实宿主的验证必须单独说明环境与范围，不能算作游戏全流程通过。
 

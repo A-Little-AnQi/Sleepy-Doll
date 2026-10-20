@@ -1,7 +1,7 @@
 import "./runtime.mjs";
 // 软件更新/关于页回归：真实 App/SettingsPage/AboutPage/ReleaseSettings + fake IPC，
 // 不访问线上下载/安装，不使用真实凭证。资源登记：本地 vite 服务、Chromium、
-// 截图与运行时 TEMP/TMP 固定 target/.tmp/telemetry-removal，属本任务；
+// 截图与运行时 TEMP/TMP 固定 target/.tmp/release-settings，属本任务；
 // finally 关闭 browser/server，截图留 Root 查设计。
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -14,7 +14,7 @@ const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
-const tempRoot = path.join(root, "target", ".tmp", "telemetry-removal");
+const tempRoot = path.join(root, "target", ".tmp", "release-settings");
 fs.mkdirSync(tempRoot, { recursive: true });
 process.env.TEMP = tempRoot;
 process.env.TMP = tempRoot;
@@ -35,7 +35,10 @@ try {
   });
   await server.listen();
   const port = server.httpServer.address().port;
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
+  });
 
   const runScenario = async (theme, locale = "zh") => {
     const context = await browser.newContext({
@@ -58,6 +61,7 @@ try {
     const installCalls = [];
     const state = () => ({
       currentVersion: appVersion,
+      currentChannel: "stable",
       channel: "stable",
       analyticsEnabled: true,
       downloaded,
@@ -185,18 +189,19 @@ try {
     await hideSidebar();
 
     // 通用页不再出现更新/统计/查看更新内容。
-    const generalText = await page
-      .locator(".settings-general")
-      .textContent();
+    const generalText = await page.locator(".settings-general").textContent();
     const bannedList =
       locale === "en"
-        ? ["Check for updates", "Update channel", "analytics", "release notes", "Privacy"]
+        ? [
+            "Check for updates",
+            "Update channel",
+            "analytics",
+            "release notes",
+            "Privacy",
+          ]
         : ["检查更新", "更新通道", "统计", "查看更新内容", "隐私"];
     for (const banned of bannedList) {
-      assert.ok(
-        !generalText.includes(banned),
-        `通用页不应出现「${banned}」`,
-      );
+      assert.ok(!generalText.includes(banned), `通用页不应出现「${banned}」`);
     }
     assert.equal(
       await page.locator(".settings-general .release-settings").count(),
@@ -230,7 +235,11 @@ try {
       "更新组应只有当前版本/通道两行",
     );
     const hint = await updateGroup.locator(".setting-row-hint").textContent();
-    assert.equal(hint, appVersion, "版本号只在更新组 hint 显示一次");
+    assert.equal(
+      hint,
+      `${appVersion} · ${locale === "en" ? "Stable" : "正式版"}`,
+      "当前版本和通道应与服务端状态一致",
+    );
     const aboutText = await zone.textContent();
     const bannedAbout =
       locale === "en"
@@ -252,7 +261,10 @@ try {
       1,
       "关于页版本号只出现一次",
     );
-    assert.equal(await checkButton.textContent(), locale === "en" ? "Check for updates" : "检查更新");
+    assert.equal(
+      await checkButton.textContent(),
+      locale === "en" ? "Check for updates" : "检查更新",
+    );
     // 「查看更新内容」入口已删：全页不再有该按钮/事件入口。
     assert.equal(await page.locator(".settings-about").count(), 0);
 
@@ -289,8 +301,7 @@ try {
         ".release-settings .setting-row-control .secondary-action",
       );
       const select = node.querySelector("[data-ui='select-trigger']");
-      const overflow =
-        document.documentElement.scrollWidth - window.innerWidth;
+      const overflow = document.documentElement.scrollWidth - window.innerWidth;
       return {
         button: button.getBoundingClientRect().width,
         select: select.getBoundingClientRect().width,
@@ -334,7 +345,10 @@ try {
     slowNextCheck = true;
     await checkButton.click();
     assert.ok(await checkButton.isDisabled(), "检查期间按钮应禁用");
-    assert.equal(await checkButton.textContent(), locale === "en" ? "Checking…" : "正在检查…");
+    assert.equal(
+      await checkButton.textContent(),
+      locale === "en" ? "Checking…" : "正在检查…",
+    );
     await zone.locator(".release-actions").waitFor();
     assert.equal(
       await checkButton.textContent(),
@@ -348,10 +362,15 @@ try {
       locale === "en" ? "New version available · 9.9.9" : "发现新版本 · 9.9.9",
     );
     const actionButton = zone.locator(".primary-action");
-    assert.equal(await actionButton.textContent(), locale === "en" ? "Download update" : "下载更新");
+    assert.equal(
+      await actionButton.textContent(),
+      locale === "en" ? "Download update" : "下载更新",
+    );
     await actionButton.click();
     await zone
-      .locator(".primary-action", { hasText: locale === "en" ? "Install and restart" : "安装并重启" })
+      .locator(".primary-action", {
+        hasText: locale === "en" ? "Install and restart" : "安装并重启",
+      })
       .waitFor();
     assert.equal(downloadCalls.length, 1, "应发出一次 release.download");
     await actionButton.click();
@@ -388,10 +407,7 @@ try {
     await checkButton.click();
     await toast.waitFor();
     await sleep(350);
-    assert.ok(
-      await toast.isVisible(),
-      "重复相同结果应重新出现 Toast 提示",
-    );
+    assert.ok(await toast.isVisible(), "重复相同结果应重新出现 Toast 提示");
     // Toast 到时自动消失（默认 4000ms）。
     await toast.waitFor({ state: "detached", timeout: 6000 });
     assert.equal(await zone.locator(".release-actions").count(), 0);
@@ -400,7 +416,10 @@ try {
     // 换通道不得改写统计开关。
     await zone.locator("[data-ui='select-trigger']").click();
     await page
-      .getByRole("option", { name: locale === "en" ? "Test" : "测试版", exact: true })
+      .getByRole("option", {
+        name: locale === "en" ? "Test" : "测试版",
+        exact: true,
+      })
       .click();
     await sleep(200);
     assert.deepEqual(

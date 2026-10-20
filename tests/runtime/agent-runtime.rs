@@ -671,6 +671,273 @@ async fn standalone_shortcut_skill_saves_once_without_scope_model_or_execution()
 }
 
 #[test]
+fn shortcut_schema_lists_registered_tools_without_creating_method_aliases() {
+    let supervisor = super::record_result_tests::interrupt_supervisor("binding-tools");
+    let mut tools = crate::extension::ToolRegistry::default();
+    crate::bridge::register_tools(
+        &mut tools,
+        Arc::new(crate::bridge::BgiClient::new(
+            supervisor.config.read().unwrap().bridge.clone(),
+        )),
+    )
+    .unwrap();
+    supervisor.extensions.write().unwrap().tools = Arc::new(tools);
+    let definitions = supervisor.tool_definitions();
+    for name in ["shortcut.save", "task.save"] {
+        let schema = &definitions
+            .iter()
+            .find(|tool| tool.name == name)
+            .unwrap()
+            .input_schema;
+        let names = schema
+            .pointer("/properties/binding/properties/action/properties/tool/enum")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert!(names.contains(&json!("bgi.api.invoke")));
+        assert!(!names.contains(&json!("bgi.run_script_group")));
+        assert!(!names.contains(&json!("shortcut.save")));
+        assert!(
+            names
+                .iter()
+                .all(|name| definitions.iter().any(|tool| name == &tool.name))
+        );
+    }
+}
+
+#[tokio::test]
+async fn observed_game_state_does_not_adjudicate_explicit_shortcut_saves_or_repairs() {
+    for repair in [false, true] {
+        let mut turn = 0;
+        let fixture = ModelFixture::new(move |request| {
+            if request["messages"][0]["content"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("你只核对用户本次目标")
+            {
+                return (200, answer(r#"{"decision":"reject"}"#));
+            }
+            turn += 1;
+            if turn == 1 {
+                return (200, tool_calls(vec![("fixture.status", json!({}))]));
+            }
+            if repair && turn == 3 {
+                let reply = request["messages"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .rev()
+                    .find(|m| m["role"] == "tool")
+                    .unwrap();
+                let reply: Value =
+                    serde_json::from_str(reply["content"].as_str().unwrap()).unwrap();
+                assert_eq!(reply["ok"], false);
+                assert!(reply["error"].as_str().unwrap().contains("未登记"));
+            }
+            (
+                200,
+                tool_calls(vec![(
+                    "shortcut.save",
+                    json!({"name":"existing","binding":{"applicationName":"Fixture","targetName":"existing","action":{"tool":if repair && turn == 2 { "application.method" } else { "fixture.change" },"arguments":{}}}}),
+                )]),
+            )
+        });
+        let supervisor = supervisor(&fixture);
+        let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        install_status_slice(&supervisor, changes.clone());
+        let mut run = supervisor
+            .journal
+            .create("$create-shortcut", "state-save", "state-save", 600, None)
+            .unwrap();
+        supervisor
+            .session(&mut run, &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            run.state,
+            RunState::Answered,
+            "repair={repair}: {:?}",
+            run.result
+        );
+        assert_eq!(changes.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            fixture.requests.lock().unwrap().len(),
+            if repair { 3 } else { 2 }
+        );
+        let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.kind == "shortcut.saved")
+                .count(),
+            1
+        );
+        assert!(!events.iter().any(|event| event.kind == "scope.reviewed"));
+        let usage = supervisor.journal.model_usage(&run.id).unwrap();
+        assert!(
+            usage["byPurpose"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| item["purpose"] == "foreground")
+        );
+    }
+}
+
+#[tokio::test]
+async fn invalid_shortcut_tool_can_be_corrected_without_starting_the_target() {
+    let mut turn = 0;
+    let fixture = ModelFixture::new(move |request| {
+        turn += 1;
+        if turn == 2 {
+            let result = request["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|m| m["role"] == "tool")
+                .unwrap();
+            let result: Value = serde_json::from_str(result["content"].as_str().unwrap()).unwrap();
+            assert_eq!(result["ok"], false);
+        }
+        (
+            200,
+            tool_calls(vec![(
+                "shortcut.save",
+                json!({"name":"existing","binding":{"applicationName":"Fixture","targetName":"existing","action":{"tool":if turn == 1 { "application.method" } else { "fixture.change" },"arguments":{}}}}),
+            )]),
+        )
+    });
+    let supervisor = supervisor(&fixture);
+    let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    install_status_slice(&supervisor, changes.clone());
+    let mut run = supervisor
+        .journal
+        .create(
+            "$create-shortcut",
+            "correct-entry",
+            "correct-entry",
+            600,
+            None,
+        )
+        .unwrap();
+    supervisor
+        .session(&mut run, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(run.state, RunState::Answered);
+    assert_eq!(changes.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.requests.lock().unwrap().len(), 2);
+    let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.kind == "shortcut.saved")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn bgi_mcp_state_then_shortcut_repair_saves_without_review_or_game_calls() {
+    let native = ModelFixture::new(|body| {
+        assert!(body.is_null(), "保存入口不能向 BetterGI 提交执行请求");
+        (
+            200,
+            json!({"instanceId":"fixture","bridgeReady":false,"runtime":{"hostLoaded":true,"captureReady":false,"gameProcessRunning":false}}),
+        )
+    });
+    let mut turn = 0;
+    let model = ModelFixture::new(move |request| {
+        if request["messages"][0]["content"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("你只核对用户本次目标")
+        {
+            return (200, answer(r#"{"decision":"reject"}"#));
+        }
+        turn += 1;
+        if turn == 1 {
+            return (200, tool_calls(vec![("bgi.state.get", json!({}))]));
+        }
+        let action = if turn == 2 {
+            json!({"tool":"bgi.run_script_group","arguments":{"groupName":"千星","waitForCompletion":false}})
+        } else {
+            json!({"tool":"bgi.api.invoke","arguments":{"methodId":"bgi.run_script_group","arguments":{"groupName":"千星","waitForCompletion":false}}})
+        };
+        (
+            200,
+            tool_calls(vec![(
+                "shortcut.save",
+                json!({"name":"千星","binding":{"applicationName":"BetterGI","targetName":"千星","action":action}}),
+            )]),
+        )
+    });
+    let supervisor = supervisor(&model);
+    let mut config = supervisor.config.read().unwrap().bridge.clone();
+    config.enabled = true;
+    config.base_url = native.url.trim_end_matches("/v1").into();
+    let transport = Arc::new(host::bridge::Bridge::for_transport_tests(config.clone()).unwrap());
+    let mut original = ToolRegistry::default();
+    crate::bridge::register_tools(
+        &mut original,
+        Arc::new(crate::bridge::BgiClient::new(config)),
+    )
+    .unwrap();
+    let server = crate::extension::mcp_server::RegistryServer::new(original, "bgi", "")
+        .with_internal(crate::bridge::mcp::transport_tools(transport).unwrap());
+    let endpoint = serde_json::from_value(
+        json!({"id":"bridge","transport":"inProcess","server":"bgi","timeoutMs":2000}),
+    )
+    .unwrap();
+    let client = crate::extension::mcp::McpClient::in_process(&endpoint, server).unwrap();
+    let mut tools = ToolRegistry::default();
+    tools.register_mcp("bgi", "bridge", client.clone());
+    for tool in client
+        .list_tools("bgi", "bridge", "1", &std::collections::HashMap::new())
+        .unwrap()
+    {
+        tools.register_shared(tool).unwrap();
+    }
+    supervisor.extensions.write().unwrap().tools = Arc::new(tools);
+    let mut run = supervisor
+        .journal
+        .create(
+            "$create-shortcut",
+            "mcp-state-save",
+            "mcp-state-save",
+            600,
+            None,
+        )
+        .unwrap();
+    crate::runtime::executor()
+        .block_on(supervisor.session(&mut run, &CancellationToken::new()))
+        .unwrap();
+    assert_eq!(run.state, RunState::Answered);
+    assert_eq!(model.requests.lock().unwrap().len(), 3);
+    assert_eq!(
+        native.requests.lock().unwrap().len(),
+        1,
+        "只能读取状态，不能启动或准备游戏"
+    );
+    let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
+    assert!(!events.iter().any(|event| event.kind == "scope.reviewed"));
+    let saved = events
+        .iter()
+        .find(|event| event.kind == "shortcut.saved")
+        .unwrap();
+    let entry = supervisor
+        .tasks
+        .published_revision(saved.data["taskId"].as_str().unwrap())
+        .unwrap()
+        .unwrap();
+    let action = entry.shortcut.unwrap().action.unwrap();
+    assert_eq!(action.tool, "bgi.api.invoke");
+    assert_eq!(action.arguments["methodId"], "bgi.run_script_group");
+    assert_eq!(action.arguments["arguments"]["groupName"], "千星");
+}
+
+#[test]
 fn shortcut_skill_admission_requires_current_standalone_human_input() {
     let supervisor = super::record_result_tests::interrupt_supervisor("shortcut-intent");
     let run = supervisor
@@ -940,7 +1207,7 @@ fn install_status_slice(supervisor: &Supervisor, changes: Arc<std::sync::atomic:
             crate::extension::FunctionTool::new(
                 "fixture.change",
                 "修改当前配置",
-                json!({"type":"object"}),
+                json!({"type":"object","properties":{"checked":{"type":"boolean"}}}),
                 "plugin:fixture",
                 move |_| {
                     changes.fetch_add(1, Ordering::SeqCst);
@@ -1353,6 +1620,57 @@ async fn full_access_does_not_turn_a_query_into_permission_to_write() {
             .unwrap()
             .len(),
         2
+    );
+}
+
+#[tokio::test]
+async fn malformed_arguments_after_observation_do_not_spend_scope_review_tokens() {
+    let mut turn = 0;
+    let fixture = ModelFixture::new(move |request| {
+        if request["messages"][0]["content"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("你只核对用户本次目标")
+        {
+            return (200, answer(r#"{"decision":"reject"}"#));
+        }
+        turn += 1;
+        (
+            200,
+            match turn {
+                1 => tool_calls(vec![("fixture.status", json!({}))]),
+                2 => tool_calls(vec![("fixture.change", json!({"checked":"invalid"}))]),
+                _ => answer("游戏没开；参数不正确的操作没有执行。"),
+            },
+        )
+    });
+    let supervisor = supervisor(&fixture);
+    let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    install_status_slice(&supervisor, changes.clone());
+    let mut run = supervisor
+        .journal
+        .create(
+            "查看游戏状态",
+            "invalid-after-state",
+            "invalid-after-state",
+            600,
+            None,
+        )
+        .unwrap();
+    supervisor
+        .session(&mut run, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(run.state, RunState::Answered);
+    assert_eq!(changes.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.requests.lock().unwrap().len(), 3);
+    let usage = supervisor.journal.model_usage(&run.id).unwrap();
+    assert!(
+        usage["byPurpose"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["purpose"] == "foreground")
     );
 }
 

@@ -1,5 +1,7 @@
 import { Button } from "@sleepy-doll/ui";
 import { useEffect, useState } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { api, type ReleaseState } from "../ipc/api";
 import { Select } from "@sleepy-doll/ui/controls/Select";
 import { SettingRow } from "@sleepy-doll/ui/controls/SettingRow";
@@ -23,6 +25,11 @@ const zh = {
   install: "安装并重启",
   installing: "正在准备重启…",
   available: "发现新版本",
+  revised: "当前版本有修订",
+  later: "稍后",
+  verified: "下载完成，校验已通过。安装时将关闭并重启软件。",
+  preserve: "安装更新会保留你的配置、对话和快捷任务。",
+  noNotes: "本次更新未提供说明。",
 };
 const en: typeof zh = {
   title: "Software updates",
@@ -38,57 +45,116 @@ const en: typeof zh = {
   install: "Install and restart",
   installing: "Preparing restart…",
   available: "New version available",
+  revised: "A revision is available",
+  later: "Later",
+  verified: "Download verified. Installing will close and restart the app.",
+  preserve: "Your settings, conversations and shortcuts will be kept.",
+  noNotes: "No release notes were provided.",
 };
 
 function ReleaseActions({
   state,
   onState,
+  onDismiss,
 }: {
   state: ReleaseState;
   onState(state: ReleaseState): void;
+  onDismiss?(): void;
 }) {
-  const text = useLocale() === "en" ? en : zh;
-  const [busy, setBusy] = useState(false);
+  const locale = useLocale();
+  const text = locale === "en" ? en : zh;
+  const [phase, setPhase] = useState<"idle" | "downloading" | "installing">(
+    "idle",
+  );
   const [error, setError] = useState("");
   if (!state.release) return null;
+  const release = state.release;
+  const available =
+    release.version === state.currentVersion ? text.revised : text.available;
+  const size =
+    release.size > 0
+      ? `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(release.size / 1024 / 1024)} MB`
+      : "";
+  const channel = release.channel === "test" ? text.test : text.stable;
+  const busy = phase !== "idle";
   return (
-    <div className="release-actions">
+    <div
+      className={`release-actions${onDismiss ? " is-notification" : ""}`}
+      aria-busy={busy}
+    >
       <div className="release-info">
         <strong>
-          {text.available} · {state.release.version}
+          {available} · {release.version}
         </strong>
-        <p className="release-notes">{state.release.notes}</p>
+        <span className="release-metadata">
+          {text.current} {state.currentVersion} · {channel}
+          {size ? ` · ${size}` : ""}
+        </span>
       </div>
-      <Button
-        type="button"
-        variant="primary"
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          setError("");
-          try {
-            if (state.downloaded) await api.releaseInstall();
-            else onState(await api.releaseDownload());
-          } catch (reason) {
-            setError(readError(reason));
-          } finally {
-            setBusy(false);
-          }
-        }}
+      <div
+        className="release-notes"
+        tabIndex={0}
+        role="region"
+        aria-label={text.title}
       >
+        <Markdown remarkPlugins={[remarkGfm]}>
+          {release.notes.trim() || text.noNotes}
+        </Markdown>
+      </div>
+      <p className="release-progress" role="status" aria-live="polite">
         {busy
-          ? state.downloaded
+          ? phase === "installing"
             ? text.installing
             : text.downloading
           : state.downloaded
-            ? text.install
-            : text.download}
-      </Button>
+            ? text.verified
+            : text.preserve}
+      </p>
       {error && (
         <p className="release-error" role="alert">
           {error}
         </p>
       )}
+      <div className="release-action-buttons">
+        {onDismiss && (
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={phase === "installing"}
+            onClick={onDismiss}
+          >
+            {text.later}
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant="primary"
+          disabled={busy}
+          onClick={async () => {
+            setPhase(state.downloaded ? "installing" : "downloading");
+            setError("");
+            try {
+              if (state.downloaded) {
+                await api.releaseInstall();
+              } else {
+                onState(await api.releaseDownload());
+                setPhase("idle");
+              }
+            } catch (reason) {
+              setError(readError(reason));
+              setPhase("idle");
+            }
+          }}
+        >
+          {busy
+            ? phase === "installing"
+              ? text.installing
+              : text.downloading
+            : state.downloaded
+              ? text.install
+              : text.download}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -167,10 +233,20 @@ export function ReleaseSettings() {
   );
 }
 
-export function ReleaseNotifications() {
+export function ReleaseNotifications({ paused = false }: { paused?: boolean }) {
   const text = useLocale() === "en" ? en : zh;
   const [state, setState] = useState<ReleaseState | null>(null);
   const [open, setOpen] = useState(false);
+  const [ready, setReady] = useState(!paused);
+  useEffect(() => {
+    if (paused) {
+      setReady(false);
+      return;
+    }
+    // 等前一个 Dialog 的退出动画结束，避免两层遮罩和焦点陷阱叠加。
+    const timer = window.setTimeout(() => setReady(true), 300);
+    return () => window.clearTimeout(timer);
+  }, [paused]);
   useEffect(() => {
     if (!window.__SLEEPY_DOLL_DESKTOP__) return;
     let active = true;
@@ -188,8 +264,20 @@ export function ReleaseNotifications() {
     };
   }, []);
   return (
-    <Dialog title={text.title} open={open} onClose={() => setOpen(false)}>
-      {state && <ReleaseActions state={state} onState={setState} />}
+    <Dialog
+      title={text.title}
+      open={open && !paused && ready}
+      onClose={() => setOpen(false)}
+      compact
+      className="release-update-dialog"
+    >
+      {state && (
+        <ReleaseActions
+          state={state}
+          onState={setState}
+          onDismiss={() => setOpen(false)}
+        />
+      )}
     </Dialog>
   );
 }

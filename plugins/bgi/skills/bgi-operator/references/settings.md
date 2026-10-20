@@ -11,4 +11,4 @@
 3. 用 `bgi.api.read` 读取当前值、`valueSchema`、`writable` 和 `valueVersion`。
 4. 单字段可用 `bgi.set_setting`；多字段用 `bgi.preview_settings` 后提交 `bgi.commit_settings`。
 5. 运行时按实际改动范围决定要不要确认一次写操作。提交后回读；保存 `changeId` 供回退。
-6. 候选不可写或语义不确定时停止修改并说明具体缺口，不靠字段名猜效果。
+6. 语义不确定时先补证据；writable=false 只表示直接事务不可写。若当前原生界面可完成同一已授权目标，按 native-ui.md 的真实字段与校验处理；无安全入口才说明缺口，不改磁盘绕过。

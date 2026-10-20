@@ -504,16 +504,24 @@ mod tests {
             let action = binding.action.as_ref().unwrap_or_else(|| {
                 panic!("{source}: 组合入口示例必须用单动作 binding.action");
             });
-            // canonical 动作：工具名、批量 methodId、后台交接都在 arguments.arguments 层。
+            // 调用工具与应用接口分层；单组、多组都必须可由生产目录编译。
             assert_eq!(
                 action.tool, "bgi.api.invoke",
                 "{source}: canonical 动作工具名"
             );
             let method_id = action.arguments["methodId"].as_str().unwrap_or("");
-            assert_eq!(
-                method_id, "bgi.run_script_groups",
-                "{source}: 批量 methodId"
+            assert!(
+                matches!(method_id, "bgi.run_script_group" | "bgi.run_script_groups"),
+                "{source}: 配置组 methodId"
             );
+            let parameters = &action.arguments["arguments"];
+            if method_id == "bgi.run_script_group" {
+                assert!(parameters["groupName"].is_string());
+                assert!(parameters.get("groupNames").is_none());
+            } else {
+                assert!(parameters["groupNames"].is_array());
+                assert!(parameters.get("groupName").is_none());
+            }
             assert_eq!(
                 action.arguments["arguments"]["waitForCompletion"],
                 json!(false),

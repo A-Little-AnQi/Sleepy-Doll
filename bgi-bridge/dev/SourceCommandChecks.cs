@@ -24,6 +24,12 @@ var missingFromHostVersion = absent.Where(c => assembly.GetType(c.GetProperty("o
 var blocked = commands.Where(c => c.Value.UnavailableReason is not null).Select(c => new { methodId = c.Key, reason = c.Value.UnavailableReason }).ToArray();
 var malformed = commands.Where(c => c.Value.ParameterType is not null && c.Value.ParameterSchema is null).Select(c => c.Key).ToArray();
 var stable = new MethodRegistry(); StatusTools.Register(stable); HostLogTools.Register(stable); CatalogTools.Register(stable);
+var documented = commands.Values.Select(item =>
+{
+    var (schema, guide) = CatalogTools.DescribeCommand(item);
+    foreach (var example in guide.Examples) ArgumentSchema.Validate(example, schema);
+    return new { item.Name, examples = guide.Examples.Length, needsDialogInput = item.NeedsDialogInput };
+}).ToArray();
 var jsContracts=new List<JsonElement>();var jsErrors=new List<object>();
 foreach(var binding in SourceDocumentation.ScriptBindings.EnumerateArray())
 {
@@ -37,5 +43,6 @@ if (args.Length > 2)
     File.WriteAllText(output, JsonSerializer.Serialize(new { sourceAssembly = host, commands = commands.Values.OrderBy(c => c.Name), stable = stable.All.OrderBy(m => m.Id),jsContracts }, new JsonSerializerOptions { WriteIndented = true }));
 }
 Console.WriteLine(JsonSerializer.Serialize(new { sourceAssembly = host, discovered = commands.Count, stable = stable.Count,jsBindings=jsContracts.Count,jsErrors, missing, missingFromHostVersion, blocked, malformed, excludedLeaks,
+    commandGuidesValidated = documented.Length, commandExamplesValidated = documented.Sum(item => item.examples), dialogGuidesWithoutIncompleteExamples = documented.Count(item => item.needsDialogInput && item.examples == 0),
     hostConstructed = false, gameStarted = false }, new JsonSerializerOptions { WriteIndented = true }));
 if (missing.Length > 0 || malformed.Length > 0 || excludedLeaks.Length > 0 || blocked.Length > 0||jsErrors.Count>0) Environment.ExitCode = 1;

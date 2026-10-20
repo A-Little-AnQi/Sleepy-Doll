@@ -195,6 +195,9 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    if sleepy_doll::bridge::mcp::run_stdio_if_requested()? {
+        return Ok(());
+    }
     let config_path = match sleepy_doll::config::resolve_path()? {
         sleepy_doll::config::Resolved::Config(path) => path,
         sleepy_doll::config::Resolved::Help => {

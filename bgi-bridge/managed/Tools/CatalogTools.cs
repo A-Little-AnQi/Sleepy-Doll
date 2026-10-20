@@ -7,24 +7,37 @@ namespace BgiBridge.Tools;
 
 public static class CatalogTools
 {
+    public static (JsonElement Schema, AgentGuide Guide) DescribeCommand(CommandDescriptor item)
+    {
+        var context = ("contextId", ArgumentSchema.Parse("""{"type":"string","minLength":1,"maxLength":64,"description":"list_command_targets 返回的当前上下文引用；多实例或泛型命令必须指定。"}"""), false);
+        var selection = ("selection", item.SelectionSchema, false);
+        var dialog = ("dialogInput", NativeDialogScope.Schema, item.NeedsDialogInput);
+        var schema = item.ParameterType is null ? AgentSchemas.Object(context, selection, dialog)
+            : AgentSchemas.Object(context, selection, dialog, ("argument", item.ParameterSchema!.Value, true));
+        // 弹窗取值必须来自本次目标与真实资源，不能把缺 dialogInput 的对象伪装成完整调用。
+        var guide = item.NeedsDialogInput ? item.Guide with
+        {
+            Examples = [],
+            Preconditions = [.. item.Guide.Preconditions,
+                "本接口必填 dialogInput；按实际弹窗类型提供 text、filePath 或真实 selectedValues。目标取值需本次确认，目录不提供缺少弹窗输入的调用示例。"],
+        } : item.Guide;
+        return (schema, guide);
+    }
+
     public static void RegisterDiscovered(MethodRegistry registry, BridgeConfig config)
     {
         CommandCatalog.Configure(config);
         foreach (var command in CommandCatalog.All)
         {
             var item = command;
-            var context = ("contextId", ArgumentSchema.Parse("""{"type":"string","minLength":1,"maxLength":64,"description":"list_command_targets 返回的当前上下文引用；多实例或泛型命令必须指定。"}"""), false);
-            var selection = ("selection", item.SelectionSchema, false);
-            var dialog = ("dialogInput", NativeDialogScope.Schema, item.NeedsDialogInput);
-            var schema = item.ParameterType is null ? AgentSchemas.Object(context, selection, dialog)
-                : AgentSchemas.Object(context, selection, dialog, ("argument", item.ParameterSchema!.Value, true));
+            var (schema, guide) = DescribeCommand(item);
             registry.Register($"cmd.{item.Name}", "command", item.Guide.Purpose,
                 (arguments, cancellation) => CommandCatalog.Invoke(item.Name,
                     arguments.TryGetProperty("argument", out var value) ? value : null, cancellation,
                     arguments.TryGetProperty("contextId", out var contextId) ? contextId.GetString() : null,
                     arguments.TryGetProperty("selection", out var selected) ? selected : null,
                     arguments.TryGetProperty("dialogInput", out var input) ? input : null),
-                readOnly: false, destructive: true, inputSchema: schema, guide: item.Guide,
+                readOnly: false, destructive: true, inputSchema: schema, guide: guide,
                 unavailableReason: item.UnavailableReason, requiresGameReady: item.RequiresGameReady);
         }
         foreach (var setting in SettingsCatalog.Build())

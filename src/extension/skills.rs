@@ -164,6 +164,39 @@ impl SkillRegistry {
         Ok(())
     }
 
+    /// 握手返回的 MCP 操作说明按插件技能装载，停用插件或重载后自然移除。
+    pub fn load_mcp_instructions(&mut self, plugin: &str, server: &str, body: &str) -> Result<()> {
+        if body.trim().is_empty() {
+            return Ok(());
+        }
+        if body.len() > 128 * 1024 {
+            return Err(Error::Config("MCP instructions 超过大小限制".into()));
+        }
+        let name = format!("mcp-{plugin}-{server}");
+        if self.skills.contains_key(&name) {
+            return Err(Error::Config(format!("技能名重复：{name}")));
+        }
+        self.skills.insert(
+            name.clone(),
+            Skill {
+                name,
+                description: format!("{plugin} MCP 服务的操作说明"),
+                source: SkillSource::Plugin(plugin.into()),
+                tags: vec![plugin.into()],
+                requires_plugins: vec![plugin.into()],
+                requires_capabilities: vec![],
+                requires_providers: vec![plugin.into()],
+                resource_kinds: vec![],
+                platforms: vec![],
+                allowed_tools: vec![],
+                always_load: true,
+                body: body.into(),
+                path: PathBuf::new(),
+            },
+        );
+        Ok(())
+    }
+
     /// 全部技能，含插件带来的。
     pub fn list(&self) -> Vec<Skill> {
         self.sorted(|_| true)

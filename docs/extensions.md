@@ -1,6 +1,6 @@
 # Skill 与 Plugin 格式
 
-Sleepy Doll 通过技能（Skill）与插件（Plugin）扩展模型能力：技能是按需加载的操作说明，插件可以附带技能、HTTP 工具和 MCP 子进程。这份文档定义两种格式的文件结构、安装与启用规则、执行策略和子进程隔离契约。
+Sleepy Doll 通过技能（Skill）与插件（Plugin）扩展模型能力：技能是按需加载的操作说明，插件可以附带技能、HTTP 工具和标准 MCP 服务。这份文档定义两种格式的文件结构、安装与启用规则、执行策略和子进程隔离契约。
 
 **适用读者**：想给 Agent 增加新能力的开发者和高级用户。
 
@@ -104,7 +104,7 @@ tags: bgi, route
 | `id` | 插件标识。`bgi` 是宿主提供方的保留 ID |
 | `skills` | 插件附带的技能目录 |
 | `httpTools` | HTTP 工具定义，`inputSchema` / `outputSchema` 为 JSON Schema |
-| `mcpServers` | MCP 子进程定义与逐工具执行策略 |
+| `mcpServers` | MCP 连接定义与逐工具执行策略 |
 
 ## 安装与启用
 
@@ -113,7 +113,7 @@ tags: bgi, route
 - 更新插件前必须先停用；移除和替换把旧文件留在插件目录的 `.retired/` 下。
 - 配置目录旁的 `plugins/`（`plugins.directories` 引入）是用户自己装的插件；产品自带的插件放在安装目录的 `plugins/`，由配置里的 `../plugins` 引入。
 - 产品插件默认开启，关闭它要把 ID 写进 `plugins.disabled`：仅列进 `plugins.enabled` 不会重新打开已被显式停用的插件。这类插件无法移除，界面上没有对应入口。
-- `bgi` 的工具由程序自己登记，插件目录里放的是它的领域说明。
+- `bgi` 的工具和领域说明都由插件清单装载；其 MCP 服务实现随程序分发。
 
 ## 执行策略
 
@@ -126,10 +126,50 @@ tags: bgi, route
 
 ## MCP
 
-桥与 MCP Server 之间使用 newline-delimited JSON-RPC stdio：
+客户端与服务端使用官方 Rust SDK `rmcp`。支持标准 stdio 和 Streamable HTTP；应用内服务通过双向字节管道运行同一套 MCP JSON-RPC 编解码、握手和工具调用，不直接调用服务端方法。
 
-- 握手序列：`initialize` → `notifications/initialized` → 分页 `tools/list` → 按请求 ID 分发 `tools/call`。
-- 桥不向第三方 Server 提供采样、任意文件访问或客户端资源能力；这类服务端发起的请求收到 method-not-found。
+| `transport` | 必填字段 | 说明 |
+| --- | --- | --- |
+| `stdio`（省略时默认） | `command` | 可带 `args`；兼容既有清单，子进程退出时连接关闭 |
+| `streamableHttp` | `url` | 可带 `headers`；支持 JSON/SSE 响应、有会话和无会话服务 |
+| `inProcess` | `server` | 仅可引用应用注入、与插件 ID 相同的服务；第三方清单不能指定任意实现 |
+
+各传输都可指定 `timeoutMs`（默认 30000）与按远端原始工具名索引的 `toolExecution`。混用传输字段会拒绝加载。HTTP 标头支持 `${ENV:NAME}`，环境值不会写回清单。
+
+例如连接绝区零一条龙已经启动的服务：
+
+```json
+{
+  "id": "zzz",
+  "transport": "streamableHttp",
+  "url": "http://127.0.0.1:23001/mcp",
+  "timeoutMs": 30000
+}
+```
+
+- 握手、协议版本协商、会话标头、分页、请求 ID 和取消通知由 SDK 管理；服务端未声明的采样、文件访问等客户端能力不启用。
+- 服务的 `instructions` 作为随插件启停的常驻操作说明装载；它不能改变用户授权。
+- 远端工具注册名为 `<插件>.<服务>.<原始工具名>`；优先读取标准 `title`，其次读取 `annotations.title`。
+- 返回 `structuredContent` 时按 `outputSchema` 校验后作为工具值返回；纯内容或带图片、音频、资源的混合结果保留整个标准结果，避免丢失 `content`。`isError` 保留服务端错误说明。
+- 远端 `annotations` 和 `_meta` 是提示，不授予只读、并行或免审批权限；这些策略由本地 `toolExecution` 明确声明。
+- 取消或超时会发送标准取消通知，并将未确认的执行结果报告为未知。后台游戏任务仍需领域停止工具和终态核验。
+
+### BGI 服务
+
+`plugins/bgi` 清单引用应用内 `bgi` 服务。模型工具保留 `bgi.*` 原名及原执行策略，按标准 MCP 结构化结果往返；运行内核的原生请求和 Job 事件也通过该 MCP 连接到 BGI 提供方，再访问宿主桥。宿主来源检查、授权、实例和目录版本、幂等提交、就绪闸门及业务核验仍保留。
+
+`io.sleepy-doll/execution`、`io.sleepy-doll/error`、`io.sleepy-doll/internal` 是 MCP `_meta` 中的产品扩展。只有应用内服务可提供可信的执行策略与内部连接；内部连接不进入模型工具注册表。标准客户端可忽略这些扩展。
+
+其他 MCP 客户端也可通过 stdio 使用 BGI 服务：
+
+```json
+{
+  "command": "<安装目录>/sleepy-doll.exe",
+  "args": ["--mcp-bgi", "--config", "<已有用户目录>/config.json"]
+}
+```
+
+该模式只提供 MCP，不创建窗口、Agent 数据库或模型会话；要求已有配置启用 BGI 插件与连接，不会自动启动 BetterGI。标准输出仅承载 MCP，错误写入标准错误。开发入口 `sleepy-doll-dev` 支持同样参数。此服务使用配置中的宿主连接权限；外部客户端负责自己的用户授权与结果核验。
 
 ## 子进程隔离
 

@@ -4,7 +4,7 @@
 
 1. 问本机任务时从配置组任务的 `folderName` 定位；只问脚本含义时直接用 `bgi.repo.search` 搜索脚本标题，使用返回的精确 path，不要求先订阅。
 2. 已知本机脚本用一次 `bgi.user.inspect_script` 读取资料；未安装脚本用 `bgi.repo.read` 直接读中央 Git 对象中的 manifest、README 和 settings。仓库候选携带 `readingGuide` 时按其中的 `bgi-javascript` 技能追踪源码。不要把 User 目录未命中当成仓库没有该脚本。
-3. `jsScriptSettingsObject` 的键必须来自 `settings.json.name`；值满足对应类型、选项和默认值。
+3. `jsScriptSettingsObject` 的键来自 manifest 声明的 settings_ui/settingsUi 参数定义中的 name；不假定文件总叫 settings.json。值满足对应类型、选项和默认值。
 4. 参数定义只说明用途；涉及动作先后、切回、默认值、生效条件或报错时按 `bgi-javascript` 阅读 main 指定的入口、字段全部引用和必要模块。只问输入类型或选项列表时定义足够。需要账户文件或子资源时按定义路径读取。
 5. 修改配置组时读取完整目标文件，只改目标字段，保留未知字段；写入时传该次读取返回的 `sha256`，防止覆盖期间出现的新改动。
 

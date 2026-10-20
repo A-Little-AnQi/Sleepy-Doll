@@ -1,6 +1,7 @@
 //! 工具契约与扩展：工具注册表，以及技能、插件、MCP 三类扩展来源。
 
 pub mod mcp;
+pub mod mcp_server;
 pub mod plugins;
 pub mod providers;
 pub mod skills;
@@ -315,9 +316,30 @@ pub trait Tool: Send + Sync {
 #[derive(Default, Clone)]
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
+    mcp_connections: HashMap<String, Arc<mcp::McpClient>>,
 }
 
 impl ToolRegistry {
+    pub(crate) fn register_mcp(
+        &mut self,
+        provider: &str,
+        server: &str,
+        client: Arc<mcp::McpClient>,
+    ) {
+        self.mcp_connections
+            .insert(format!("{provider}/{server}"), client);
+    }
+
+    pub(crate) fn mcp_connection(
+        &self,
+        provider: &str,
+        server: &str,
+    ) -> Option<Arc<mcp::McpClient>> {
+        self.mcp_connections
+            .get(&format!("{provider}/{server}"))
+            .cloned()
+    }
+
     pub async fn call_async(
         &self,
         name: &str,

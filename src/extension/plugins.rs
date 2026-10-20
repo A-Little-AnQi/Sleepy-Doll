@@ -50,12 +50,76 @@ const fn default_timeout() -> u64 {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct McpServerManifest {
     pub id: String,
+    #[serde(default)]
+    pub transport: McpTransport,
+    #[serde(default)]
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+    /// 应用注入的本地 MCP 服务标识，不允许从清单指定任意 Rust 实现。
+    #[serde(default)]
+    pub server: Option<String>,
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
     /// 按 MCP 服务的原始工具名索引。
     #[serde(default)]
     pub tool_execution: HashMap<String, ToolExecution>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum McpTransport {
+    #[default]
+    Stdio,
+    StreamableHttp,
+    InProcess,
+}
+
+impl McpServerManifest {
+    pub fn validate(&self) -> Result<()> {
+        if self.id.trim().is_empty() || self.timeout_ms == 0 {
+            return Err(Error::Config(
+                "MCP id 不能为空，timeoutMs 必须大于零".into(),
+            ));
+        }
+        let valid = match self.transport {
+            McpTransport::Stdio => {
+                !self.command.trim().is_empty()
+                    && self.url.is_none()
+                    && self.server.is_none()
+                    && self.headers.is_empty()
+            }
+            McpTransport::StreamableHttp => {
+                self.command.is_empty()
+                    && self.args.is_empty()
+                    && self.server.is_none()
+                    && self.url.as_deref().is_some_and(|url| {
+                        url::Url::parse(url).is_ok_and(|url| {
+                            matches!(url.scheme(), "http" | "https")
+                                && url.host_str().is_some()
+                                && url.username().is_empty()
+                                && url.password().is_none()
+                                && url.fragment().is_none()
+                        })
+                    })
+            }
+            McpTransport::InProcess => {
+                self.command.is_empty()
+                    && self.args.is_empty()
+                    && self.url.is_none()
+                    && self.headers.is_empty()
+                    && self.server.as_deref().is_some_and(|id| !id.is_empty())
+            }
+        };
+        if !valid {
+            return Err(Error::Config("MCP 传输配置无效或混用了多种传输字段".into()));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,11 +201,16 @@ pub struct PluginStatus {
 pub struct PluginManager {
     plugins: Vec<PluginStatus>,
     mcp_clients: Vec<std::sync::Arc<McpClient>>,
+    mcp_servers: HashMap<String, crate::extension::mcp_server::RegistryServer>,
     adapters: Vec<std::sync::Arc<AdapterClient>>,
     broker_specs: Vec<(String, Vec<PathBuf>)>,
 }
 
 impl PluginManager {
+    pub fn provide_mcp(&mut self, id: &str, server: crate::extension::mcp_server::RegistryServer) {
+        self.mcp_servers.insert(id.into(), server);
+    }
+
     /// 目录按顺序扫描，先出现的占住 id，重复 id 记失败。
     pub fn load(
         &mut self,
@@ -292,7 +361,21 @@ impl PluginManager {
             for execution in server.tool_execution.values() {
                 execution.validate()?;
             }
-            let client = McpClient::start(server)?;
+            let client = if server.transport == McpTransport::InProcess {
+                let key = server.server.as_deref().unwrap_or_default();
+                let implementation = self
+                    .mcp_servers
+                    .get(key)
+                    .filter(|_| key == manifest.id)
+                    .ok_or_else(|| Error::Config("插件引用的本地 MCP 服务不可用".into()))?;
+                McpClient::in_process(server, implementation.clone())?
+            } else {
+                McpClient::start(server)?
+            };
+            if let Some(instructions) = client.instructions() {
+                skills.load_mcp_instructions(&manifest.id, &server.id, &instructions)?;
+            }
+            tools.register_mcp(&manifest.id, &server.id, client.clone());
             for tool in client.list_tools(
                 &manifest.id,
                 &server.id,
@@ -451,7 +534,7 @@ fn call_http(definition: &HttpToolManifest, arguments: &Value) -> Result<Value> 
     }
 }
 
-fn expand_env(value: &str) -> String {
+pub(crate) fn expand_env(value: &str) -> String {
     value
         .strip_prefix("${ENV:")
         .and_then(|rest| rest.strip_suffix('}'))

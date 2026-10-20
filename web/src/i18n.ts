@@ -382,6 +382,7 @@ const zh = {
   },
 
   update: {
+    done: "开始使用",
     title: "使用说明与更新",
     changelog: "更新日志",
     guide: "使用说明",
@@ -973,6 +974,7 @@ const en: Dict = {
   },
 
   update: {
+    done: "Continue",
     title: "Help and updates",
     changelog: "Changelog",
     guide: "Guide",

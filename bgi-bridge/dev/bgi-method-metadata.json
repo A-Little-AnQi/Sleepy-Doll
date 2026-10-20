@@ -40,7 +40,7 @@
   },
   "bgi.prepare_pathing_group": {
     "group": "scheduler",
-    "summary": "用宿主原生构造器把所选父目录下全部路线包装成一个配置组，保留原文件名和目录；运行配置继承全局配置当前有效值（同名同类型字段深拷贝），并返回路线需求聚合与有效战斗策略面。",
+    "summary": "用BetterGI原生构造器把所选父目录下全部路线包装成一个配置组，保留原文件名和目录；运行配置继承全局配置当前有效值（同名同类型字段深拷贝），并返回路线需求聚合与有效战斗策略面。",
     "readOnly": false,
     "destructive": true,
     "effect": "hostCommand",
@@ -67,7 +67,7 @@
     },
     "guide": {
       "title": "准备地图追踪配置组",
-      "purpose": "用宿主原生构造器把所选父目录下全部路线包装成一个配置组，保留原文件名和目录；运行配置继承全局配置当前有效值（同名同类型字段深拷贝），并返回路线需求聚合与有效战斗策略面。",
+      "purpose": "用BetterGI原生构造器把所选父目录下全部路线包装成一个配置组，保留原文件名和目录；运行配置继承全局配置当前有效值（同名同类型字段深拷贝），并返回路线需求聚合与有效战斗策略面。",
       "whenToUse": [
         "资源已订阅或本机已安装，需要为路线父目录建立可运行的配置组。"
       ],
@@ -77,7 +77,7 @@
       "sideEffects": [
         "只创建一个稳定命名的配置组；已有同名但不同内容的组不覆盖，已有组的显式配置保持不动。新组的 autoFightConfig 等同名同类型字段继承全局配置当前有效值，不用类型默认冒充继承。"
       ],
-      "resultMeaning": "prepared=true 只表示完整配置组已落盘，不代表已经运行。requirements.partyConfirmationRequired=true（含战斗 fight/combat_script 或特殊机制动作）时，运行前必须完成当前任务的配队确认：用户原话已给队名/队员则用已给值；队员组成或策略适配所需角色信息缺失且无法从现场可靠观测时，用 user.ask 一次问清，未答复不得启动。策略文件列出的角色不是实际队伍名单。autoFightStrategy.requirementsExcerpt 是有效策略文件开头的原文要求，适配组配置以它为准。",
+      "resultMeaning": "prepared=true 只表示完整配置组已落盘，不代表已经运行。requirements.inspectionRequired=true 时先处理真实路线读取或未知动作问题，不能改成配队提问。路线规则仅适用于 Pathing；JS 的前提由脚本自己的设置与校验决定。requirements.partyConfirmationRequired=true（含战斗 fight/combat_script 或特殊机制动作）时，运行前必须完成当前任务的配队确认：用户原话已给队名/队员则用已给值；队员组成或策略适配所需角色信息缺失且无法从现场可靠观测时，用 user.ask 一次问清，未答复不得启动。策略文件列出的角色不是实际队伍名单。autoFightStrategy.requirementsExcerpt 是有效策略文件开头的原文要求，适配组配置以它为准。",
       "verification": "以返回的 inheritedSettings、requirements（含 sources）与 autoFightStrategy（exists/requirementsExcerpt）为准；队伍与赶路角色用 bgi.set_pathing_party 写入。只有用户明确要求运行时才运行；游戏未就绪时运行接口会按真实状态自行准备。",
       "rollback": "删除该配置组后重新 prepare 即回到继承基线；不动路线与订阅。",
       "documentationSource": "bridge-stable-operation"
@@ -116,7 +116,7 @@
         "用户要求运行一个已从 User/ScriptGroup 确认存在的配置组时。"
       ],
       "preconditions": [
-        "战斗/特殊/未知前提路线（resolve/prepare 的 partyConfirmationRequired=true）：先完成缺配队 user.ask、bgi.inspect_group_effective 读实际生效配置与策略并按角色与策略要求适配回读，再运行。",
+        "配队前提只按已启用 Pathing 项目的明确战斗/特定角色证据处理（partyConfirmationRequired=true）；缺信息且无法观测时才询问，已有配置不重复确认。inspectionRequired=true 是路线资源检查，不是配队提问。JS 项目沿用其已有参数与脚本自身前提，不套用路线配队规则。",
         "游戏未就绪时接口会按真实状态自动准备：启动游戏或挂上截图器并阻塞等待至主界面（至多 120 秒）；非 16:9 或超时如实失败。",
         "窗口分辨率为 16:9。",
         "没有其他独立任务持锁。",
@@ -125,7 +125,7 @@
       "sideEffects": [
         "启动配置组中的游戏自动化、脚本、路线或 Shell 任务；具体影响由组内已启用任务决定。"
       ],
-      "resultMeaning": "默认 waitForCompletion=false：accepted=true 表示宿主已接受运行，交接后立即返回，不守护整组。同一宿主计划的后续步骤与 closeGameAfter 等收尾都保持 false；只有用户明确要求监控等结果时才设 true。verified 的 launch 范围只核验启动交接，不是业务完成。",
+      "resultMeaning": "默认 waitForCompletion=false：accepted=true 表示BetterGI已接受运行，交接后立即返回，不守护整组。同一BetterGI计划的后续步骤与 closeGameAfter 等收尾都保持 false；只有用户明确要求监控等结果时才设 true。verified 的 launch 范围只核验启动交接，不是业务完成。",
       "verification": "普通运行请求用返回证据总结本次已提交或执行方法已返回，并结束本轮。不继续 job.get、查任务状态、日志或截图，不重跑。只有用户明确要求监控等结果才继续；查看当前状态与排障只是当前请求的一次读取，不自动持续盯。",
       "rollback": "已经发送的游戏输入和脚本副作用不能自动撤销；需要停止时使用对应停止操作并核验终态。",
       "documentationSource": "bridge-stable-operation"
@@ -133,7 +133,7 @@
   },
   "bgi.run_script_groups": {
     "group": "scheduler",
-    "summary": "把多个已存在的配置组按请求顺序合成一份宿主统一进度计划一次执行，各组配置保持原样不拆散；可选在调度进度全部成功核验后关闭游戏。",
+    "summary": "把多个已存在的配置组按请求顺序合成一份BetterGI统一进度计划一次执行，各组配置保持原样不拆散；可选在调度进度全部成功核验后关闭游戏。",
     "readOnly": false,
     "destructive": true,
     "effect": "gameWrite",
@@ -169,12 +169,12 @@
     },
     "guide": {
       "title": "按顺序运行多个配置组",
-      "purpose": "把多个已存在的配置组按请求顺序合成一份宿主统一进度计划一次执行，各组配置保持原样不拆散；可选在调度进度全部成功核验后关闭游戏。",
+      "purpose": "把多个已存在的配置组按请求顺序合成一份BetterGI统一进度计划一次执行，各组配置保持原样不拆散；可选在调度进度全部成功核验后关闭游戏。",
       "whenToUse": [
         "用户要求一次按顺序运行多个配置组时。"
       ],
       "preconditions": [
-        "战斗/特殊/未知前提路线（partyConfirmationRequired=true）：先完成缺配队 user.ask、inspect_group_effective 读实际生效配置与策略并按角色与策略要求适配回读，再运行。",
+        "配队前提只按已启用 Pathing 项目的明确战斗/特定角色证据处理（partyConfirmationRequired=true）；缺信息且无法观测时才询问，已有配置不重复确认。inspectionRequired=true 是路线资源检查，不是配队提问。JS 项目沿用其已有参数与脚本自身前提，不套用路线配队规则。",
         "游戏未就绪时接口会按真实状态自动准备：启动游戏或挂上截图器并阻塞等待至主界面（至多 120 秒）；非 16:9 或超时如实失败。",
         "窗口分辨率为 16:9。",
         "没有其他独立任务持锁。",
@@ -183,7 +183,7 @@
       "sideEffects": [
         "按顺序启动所有组内的游戏自动化、脚本、路线或 Shell 任务；closeGameAfter=true 且收尾证据齐全时会在结束后关闭游戏。"
       ],
-      "resultMeaning": "默认 waitForCompletion=false：accepted=true 表示宿主已接受整份计划并交接，立即返回，不守护执行；Sleepy-Doll 退出后宿主计划继续。只有用户明确要求等结果时才设 true。",
+      "resultMeaning": "默认 waitForCompletion=false：accepted=true 表示BetterGI已接受整份计划并交接，立即返回，不守护执行；Sleepy-Doll 退出后BetterGI计划继续。只有用户明确要求等结果时才设 true。",
       "verification": "普通多组运行请求用返回证据总结本次已交接，并结束本轮。不轮询进度、不查任务状态或日志。",
       "rollback": "已发送的游戏输入和脚本副作用不能自动撤销；closeGameAfter 只在整个 EndTime 存在、全部历史成功且未手动取消时才会关闭游戏，缺证一律不关。",
       "documentationSource": "bridge-stable-operation"

@@ -247,6 +247,11 @@ impl Supervisor {
         if self.journal.goal_conclusion(&run.id)?.is_some() {
             return Err(Error::Tool("本次目标已经收束；未执行额外操作".into()));
         }
+        // 封装目标只允许读取、问答和保存；游戏观测不能收束这个目标。
+        // 保存仍经过当前用户输入、参数契约及独立的副作用范围检查。
+        if self.shortcut_only(run)? {
+            return Ok(());
+        }
         let Some(goal) = self.journal.goal(&run.id)? else {
             return Ok(());
         };

@@ -9,6 +9,7 @@ import {
 } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Button } from "@sleepy-doll/ui";
 import { Dialog } from "@sleepy-doll/ui/overlay/Dialog";
 import { useT, type Text } from "../i18n";
 import "./UpdateDialog.css";
@@ -124,6 +125,11 @@ export function UpdateDialog({
       }
       open={open}
       onClose={onClose}
+      footer={
+        <Button variant="primary" onClick={onClose}>
+          {t.update.done}
+        </Button>
+      }
     >
       <div className="update-dialog" data-tab={active.key}>
         <div className="update-dialog-toolbar">

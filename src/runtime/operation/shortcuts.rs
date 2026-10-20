@@ -38,12 +38,42 @@ pub struct ShortcutStep {
 }
 
 pub fn schema() -> Value {
-    let call = json!({"type":"object","properties":{"tool":{"type":"string","minLength":1},"arguments":{"type":"object"}},"required":["tool","arguments"],"additionalProperties":false});
+    let call = json!({"type":"object","properties":{"tool":{"type":"string","minLength":1,"description":"当前 Agent 工具目录中的 canonical 名称；不是应用接口标识、SDK 别名或显示名称。"},"arguments":{"type":"object","description":"该工具的完整参数对象，保留外层封装与应用接口参数的层级。"}},"required":["tool","arguments"],"additionalProperties":false});
     json!({"type":"object","properties":{
         "id":{"type":"string"},"name":{"type":"string","minLength":1},"description":{"type":"string"},
         "binding":{"type":"object","properties":{"action":call,"steps":{"type":"array","minItems":1,"items":{"type":"object","properties":{"title":{"type":"string","minLength":1},"prepare":{"type":"array","items":call,"maxItems":4},"action":call},"required":["title","action"],"additionalProperties":false}},"prepare":{"type":"array","items":call,"maxItems":4},"targetName":{"type":"string"},"applicationName":{"type":"string"}},"required":["targetName","applicationName"],"oneOf":[{"required":["action"],"not":{"required":["steps"]}},{"required":["steps"],"not":{"required":["action"]}}],"additionalProperties":false}
     },"required":["name","binding"],"additionalProperties":false})
 }
+pub fn schema_for_tools(names: impl IntoIterator<Item = String>) -> Value {
+    let mut names = names
+        .into_iter()
+        .filter(|name| {
+            !matches!(
+                name.as_str(),
+                "shortcut.save" | "task.save" | "task.schema" | "user.ask"
+            )
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+    let mut value = schema();
+    for pointer in [
+        "/properties/binding/properties/action/properties/tool",
+        "/properties/binding/properties/prepare/items/properties/tool",
+        "/properties/binding/properties/steps/items/properties/action/properties/tool",
+        "/properties/binding/properties/steps/items/properties/prepare/items/properties/tool",
+    ] {
+        value.pointer_mut(pointer).unwrap()["enum"] = json!(names);
+    }
+    value
+}
+
+fn missing_tool(tool: &str) -> Error {
+    Error::Config(format!(
+        "入口绑定工具未登记：{tool}。请从当前工具目录选择 canonical 工具名，应用接口标识放在该工具的参数中；这不是连接或游戏就绪错误。尚未保存，也未执行目标。"
+    ))
+}
+
 fn transient(value: &Value) -> bool {
     match value {
         Value::Object(map) => map.iter().any(|(key, value)| {
@@ -106,7 +136,7 @@ fn preparation(
     for (at, call) in calls.iter().enumerate() {
         let contract = catalog
             .get(&call.tool)
-            .ok_or_else(|| Error::Config("准备工具当前不可用".into()))?;
+            .ok_or_else(|| missing_tool(&call.tool))?;
         if contract.execution.effect != ToolEffect::ReadOnly
             || !call.arguments.is_object()
             || transient(&call.arguments)
@@ -141,7 +171,7 @@ fn action_node(
     }
     let contract = catalog
         .get(&call.tool)
-        .ok_or_else(|| Error::Config("运行入口当前不可用".into()))?;
+        .ok_or_else(|| missing_tool(&call.tool))?;
     // 保存时按目录真实 input_schema 校验参数形状；扁平化的宿主参数
     // （如丢失 methodId/内层 arguments 的 bgi.api.invoke）在此拒绝。
     validate_against_schema(&call.tool, &call.arguments, &contract.input_schema)?;
@@ -302,6 +332,48 @@ mod tests {
             nodes(&missing_inner, &catalog).is_err(),
             "缺内层 arguments 必须被拒"
         );
+    }
+
+    #[test]
+    fn public_schema_rejects_method_ids_at_every_tool_position() {
+        let schema = schema_for_tools(
+            [
+                "plugin.invoke",
+                "plugin.describe",
+                "shortcut.save",
+                "user.ask",
+            ]
+            .map(str::to_owned),
+        );
+        let call = json!({"tool":"plugin.invoke","arguments":{"methodId":"app.run","arguments":{"name":"existing"}}});
+        let base = json!({"name":"entry","binding":{"applicationName":"App","targetName":"existing","action":call}});
+        assert!(crate::extension::validate(&base, &schema, "$").is_empty());
+        for location in ["action", "prepare", "stepAction", "stepPrepare"] {
+            let invalid = json!({"tool":"app.run","arguments":{"name":"existing"}});
+            let mut value = base.clone();
+            match location {
+                "action" => value["binding"]["action"] = invalid,
+                "prepare" => value["binding"]["prepare"] = json!([invalid]),
+                _ => {
+                    value["binding"].as_object_mut().unwrap().remove("action");
+                    value["binding"]["steps"] = if location == "stepAction" {
+                        json!([{"title":"run","action":invalid}])
+                    } else {
+                        json!([{"title":"run","prepare":[invalid],"action":call}])
+                    };
+                }
+            }
+            assert!(
+                !crate::extension::validate(&value, &schema, "$").is_empty(),
+                "{location}"
+            );
+        }
+        let binding: ShortcutBinding = serde_json::from_value(json!({"applicationName":"App","targetName":"existing","action":{"tool":"app.run","arguments":{}}})).unwrap();
+        let error = nodes(&binding, &ToolCatalog::new())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("app.run") && error.contains("未登记"));
+        assert!(!error.contains("当前不可用"));
     }
 
     #[test]

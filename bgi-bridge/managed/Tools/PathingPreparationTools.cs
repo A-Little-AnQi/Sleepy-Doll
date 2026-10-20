@@ -27,14 +27,14 @@ public static class PathingPreparationTools
             inputSchema: AgentSchemas.Input(id), guide: guide);
 
         const string partyId = "bgi.set_pathing_party";
-        var partyGuide = new AgentGuide("设置配置组队伍与赶路角色", "把用户点名的队伍与赶路角色写入配置组的 pathingConfig；其他配置字段原样保留。",
+        var partyGuide = new AgentGuide("设置配置组队伍与赶路角色", "把用户点名的队伍与赶路角色写入配置组的 pathingConfig；仅当组内战斗配置被证实是未配置的原生默认时，同步为全局当前有效值，自定义战斗配置保留。",
             ["用户为现成配置组指定队伍、赶路/加速角色等运行偏好时；角色俗称由本接口做数据映射，不需要模型猜字段。"],
             ["groupName 来自 User/ScriptGroup 的真实 name，不需要启动游戏。", "expectedSha256 来自 bgi.user.read 的当前 SHA-256；内容不一致时拒绝写入。", "partyName 用用户原话中的队伍名。", "hurryAvatar 接受本机支持列表内的角色名、常见俗称或“自动”；空字符串表示不使用技能赶路。"],
-            ["只修改该组 config.pathingConfig 的对应字段；写 partyName 时同时置 enabled=true，否则新队名不生效。文件其余字段不动。"],
+            ["修改对应队伍/赶路字段；写 partyName 会置 enabled=true。若 fightAlignedToGlobal=true，还会把已证实的原生默认 autoFightConfig 对齐全局现值；其余字段保留，按 changedFields 与回读结果核对。"],
             "configured=true 表示字段已写入并回读核验；不代表已运行任何脚本。",
             "以返回的 partyName、partySwitchEnabled、hurryOnAvatar 与回读核验为准。",
-            "再次调用同一接口改回原值即可；不删除组、不动路线。",
-            [JsonSerializer.SerializeToElement(new { groupName = "用户目录中读取到的精确配置组名称", partyName = "用户点名的队伍名", hurryAvatar = "玛薇卡" })],
+            "本接口不自动保留完整回退记录；需保留修改前的完整配置。撤销时重新读取当前文件版本，只恢复本次改变的字段并保留后续修改；不删除组或路线。",
+            [JsonSerializer.SerializeToElement(new { groupName = "用户目录中读取到的精确配置组名称", expectedSha256 = new string('0', 64), partyName = "用户点名的队伍名", hurryAvatar = "玛薇卡" })],
             "bridge-stable-operation");
         registry.Register(partyId, "scheduler", partyGuide.Purpose, SetParty, readOnly: false, destructive: false,
             inputSchema: AgentSchemas.Input(partyId), guide: partyGuide);
@@ -59,8 +59,8 @@ public static class PathingPreparationTools
             ["只替换 fields 列出的字段为全局当前值；其余字段与文件其他部分逐字段保留。"],
             "synced=true 且 otherFieldsPreserved=true 表示替换完成并回读核验；SHA 不匹配返回 VERSION_CONFLICT 未写入。",
             "回读 replacedFields 的值与全局当前值一致；其他字段与改前逐字段一致。",
-            "再次调用同一接口换回原值即可；不删除组。",
-            [JsonSerializer.SerializeToElement(new { groupName = "组名", expectedSha256 = "bgi.user.read 的 SHA-256", fields = new[] { "AutoFightConfig" } })],
+            "再次调用仍是同步到全局现值，不能恢复任意旧值。需用修改前保留的字段值，在重新读取当前版本后恢复；本接口没有自动回退计划，不删除组。",
+            [JsonSerializer.SerializeToElement(new { groupName = "组名", expectedSha256 = new string('0', 64), fields = new[] { "AutoFightConfig" } })],
             "bridge-stable-operation");
         registry.Register(syncId, "scheduler", syncGuide.Purpose, Sync, readOnly: false, destructive: false,
             inputSchema: AgentSchemas.Input(syncId), guide: syncGuide);

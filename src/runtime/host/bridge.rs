@@ -61,6 +61,7 @@ const OBSERVATION_MAX_AGE_SEC: i64 = 15;
 
 #[derive(Clone)]
 pub struct Bridge {
+    mcp: Option<Arc<crate::extension::mcp::McpClient>>,
     config: BridgeConfig,
     client: reqwest::Client,
     /// Job 事件流专用：用空闲超时，不用总超时。
@@ -78,9 +79,36 @@ pub struct Invocation<'a> {
     pub catalog: &'a crate::runtime::host::catalog::Catalog,
 }
 impl Bridge {
+    pub(crate) async fn open_events(
+        &self,
+        cursor: Option<&str>,
+        cancel: &CancellationToken,
+    ) -> Result<futures_util::stream::BoxStream<'static, Result<Vec<u8>>>> {
+        self.get("/bridge/v1/info", cancel).await?;
+        let mut request = self
+            .stream_client
+            .get(format!(
+                "{}/bridge/v1/events",
+                self.config.base_url.trim_end_matches('/')
+            ))
+            .bearer_auth(self.config.token.as_deref().unwrap_or(""));
+        if let Some(cursor) = cursor {
+            request = request.header("last-event-id", cursor);
+        }
+        let response = tokio::select! { _ = cancel.cancelled() => return Err(Error::Cancelled), response = request.send() => response? };
+        if !response.status().is_success() {
+            return Err(Error::Http("Job 事件流连接失败".into()));
+        }
+        Ok(response
+            .bytes_stream()
+            .map(|r| r.map(|b| b.to_vec()).map_err(Error::from))
+            .boxed())
+    }
+
     pub fn new(config: BridgeConfig) -> Result<Self> {
         let idle = Duration::from_millis(config.timeout_ms);
         Ok(Self {
+            mcp: None,
             client: reqwest::Client::builder().timeout(idle).build()?,
             stream_client: reqwest::Client::builder()
                 .connect_timeout(idle)
@@ -89,6 +117,11 @@ impl Bridge {
             config,
             origin_preflight: true,
         })
+    }
+
+    pub(crate) fn with_mcp(mut self, client: Arc<crate::extension::mcp::McpClient>) -> Self {
+        self.mcp = Some(client);
+        self
     }
 
     /// 仅供传输层协议静态测试：跳过对端进程来源核对（本地假服务器没有官方
@@ -107,6 +140,16 @@ impl Bridge {
         body: Option<&Value>,
         cancel: &CancellationToken,
     ) -> Result<Value> {
+        if let Some(client) = &self.mcp {
+            let reply = client
+                .call_tool(
+                    "bgi.host.request",
+                    json!({"method":method,"path":path,"body":body}),
+                    cancel.clone(),
+                )
+                .await?;
+            return crate::bridge::mcp::decode_reply(reply);
+        }
         if !self.config.enabled {
             return Err(Error::Tool("BGI Bridge 未启用".into()));
         }
@@ -207,7 +250,9 @@ impl Bridge {
         if id.is_empty() || id.contains(['/', '?', '#', '%']) {
             return Err(Error::Tool("能力标识不合法".into()));
         }
-        self.get(&format!("/bridge/v1/catalog/{id}"), cancel).await
+        self.get(&format!("/bridge/v1/catalog/{id}"), cancel)
+            .await
+            .map(crate::bridge::guidance::contract)
     }
     pub async fn invoke(
         &self,
@@ -903,6 +948,25 @@ impl Bridge {
                 }
                 journal.emit(run, "attempt.finished", json!(a))?;
                 return Ok(json!({"jobId":job_id,"outcome":a.outcome,"evidence":v}));
+            }
+            if supports_events && let Some(client) = &self.mcp {
+                match client
+                    .call_tool(
+                        "bgi.host.events",
+                        json!({"cursor":a.request["eventCursor"]}),
+                        cancel.clone(),
+                    )
+                    .await
+                {
+                    Ok(value) => {
+                        if let Some(cursor) = value["cursor"].as_str() {
+                            a.request["eventCursor"] = json!(cursor);
+                            journal.attempt(a)?;
+                        }
+                    }
+                    Err(_) => tokio::time::sleep(Duration::from_millis(500)).await,
+                }
+                continue;
             }
             if supports_events && events.is_none() && std::time::Instant::now() >= reconnect_at {
                 let mut request = self

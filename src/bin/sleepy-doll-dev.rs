@@ -27,6 +27,9 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    if sleepy_doll::bridge::mcp::run_stdio_if_requested()? {
+        return Ok(());
+    }
     if let Some(argument) = env::args_os().nth(1) {
         match argument.to_string_lossy().as_ref() {
             "-h" | "--help" => {

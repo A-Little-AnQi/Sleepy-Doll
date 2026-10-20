@@ -27,7 +27,7 @@ public static class ScriptGroupDeletionTools
             "deleted=true、verified=true 表示目标文件和宿主组列表均已移除；backup 是 User 下的恢复文件。",
             "返回已验证结果即完成，不再查生命周期、导航或游戏状态。",
             "需要撤销时读取 backup，用 bgi.user.write 在原 path 新建原始内容；已有同名文件时不得覆盖。",
-            [JsonSerializer.SerializeToElement(new { groupName = "精确配置组名称", expectedSha256 = "bgi.user.read 返回的 SHA-256" })],
+            [JsonSerializer.SerializeToElement(new { groupName = "精确配置组名称", expectedSha256 = new string('0', 64) })],
             "bridge-stable-operation");
         registry.Register(id, "scheduler", guide.Purpose, Delete,
             readOnly: false, destructive: true, inputSchema: AgentSchemas.Input(id), guide: guide);

@@ -42,6 +42,7 @@ pub fn install(config_dir: &Path, config: &AppConfig, source: &Path) -> Result<S
         tool.execution.validate()?;
     }
     for server in &manifest.mcp_servers {
+        server.validate()?;
         for execution in server.tool_execution.values() {
             execution.validate()?;
         }

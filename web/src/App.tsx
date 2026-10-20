@@ -323,7 +323,7 @@ export default function App() {
         initialTab={releaseNotesTab}
         onClose={() => setReleaseNotesOpen(false)}
       />
-      <ReleaseNotifications />
+      <ReleaseNotifications paused={releaseNotesOpen} />
     </AppShell>
   );
 }

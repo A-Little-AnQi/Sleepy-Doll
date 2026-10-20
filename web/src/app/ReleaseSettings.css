@@ -27,9 +27,11 @@
 }
 
 .release-actions {
-  display: grid;
-  gap: 10px;
-  padding: 10px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 18px 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -47,8 +49,75 @@
   margin: 0;
   color: var(--muted);
   font-size: var(--font-meta);
-  line-height: 1.5;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  max-height: min(340px, 40dvh);
+  min-height: 0;
+  scrollbar-gutter: stable;
+}
+
+.release-notes > :first-child {
+  margin-top: 0;
+}
+.release-notes > :last-child {
+  margin-bottom: 0;
+}
+.release-notes ul,
+.release-notes ol {
+  padding-left: 20px;
+}
+.release-notes li + li {
+  margin-top: 6px;
+}
+.release-notes code {
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+.release-notes pre {
   white-space: pre-wrap;
+}
+
+.release-metadata,
+.release-progress {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.6;
+}
+.release-progress {
+  margin: 0;
+}
+.release-action-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.sd-dialog.is-compact.release-update-dialog {
+  width: min(560px, 100%);
+  max-height: calc(100dvh - 48px);
+}
+.release-update-dialog .sd-dialog-head {
+  align-items: center;
+  padding: 22px 24px 18px;
+}
+.release-update-dialog .sd-dialog-body {
+  padding: 20px 24px 24px;
+  overflow: hidden;
+}
+.release-actions.is-notification {
+  padding: 0;
+  border: 0;
+}
+.release-actions.is-notification .release-info strong {
+  font-size: 18px;
+}
+.release-actions.is-notification .release-progress {
+  flex-shrink: 0;
+}
+.release-actions.is-notification .release-notes {
+  flex: 1 1 auto;
 }
 
 .release-error {
@@ -62,5 +131,26 @@
   .release-actions .primary-action {
     width: 100%;
     flex: 1 1 100%;
+  }
+  .release-update-dialog .sd-dialog-head {
+    padding: 18px 18px 14px;
+  }
+  .release-update-dialog .sd-dialog-body {
+    padding: 16px 18px 18px;
+  }
+  .release-action-buttons {
+    flex-wrap: wrap;
+  }
+  .release-update-dialog .release-action-buttons {
+    flex-wrap: nowrap;
+  }
+  .release-update-dialog .release-action-buttons .primary-action {
+    width: auto;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .release-update-dialog .release-action-buttons .secondary-action {
+    min-width: 72px;
+    flex: 0 0 auto;
   }
 }

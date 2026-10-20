@@ -87,6 +87,8 @@ flowchart TD
 
 对应实现：[BGI 提供方工具](../src/bridge/mod.rs)、[离线功能索引](../src/bridge/features.rs)、[资源定位](../src/bridge/resolve.rs)、[检索路由](../src/bridge/retrieval.rs)、[运行时桥调用](../src/runtime/host/bridge.rs)、[托管桥宿主](../bgi-bridge/managed/Hosting/BridgeHost.cs)。
 
+BGI 工具由插件清单引用标准 MCP 服务装载。工具发现、普通调用，以及运行内核的原生请求与 Job 事件，通过同一 MCP 连接进入 BGI 提供方；提供方内部继续使用宿主桥协议。通用 MCP 客户端同时支持 stdio 和 Streamable HTTP，协议由官方 `rmcp` SDK 实现。应用内服务通过字节管道执行真实协议往返；对外另有 stdio 入口，见 [插件格式](extensions.md#mcp)。
+
 ## 反射、对象、选择与弹窗链路
 
 ```mermaid

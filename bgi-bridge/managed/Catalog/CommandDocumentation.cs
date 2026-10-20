@@ -275,7 +275,7 @@ public static class CommandDocumentation
                 var target = name[verb.Length..];
                 var nouns = new Dictionary<string,string> { ["ScriptGroup"]="脚本组",["JsScript"]="JavaScript 脚本",["KmScript"]="键鼠脚本",["Pathing"]="地图追踪路线",["Shell"]="Shell 动作",["Script"]="脚本",["Config"]="配置",["ScriptsFolder"]="脚本目录",["ScriptFolder"]="脚本目录",["ScriptProjectFolder"]="脚本项目目录",["LocalScriptRepo"]="本地脚本仓库",["Settings"]="设置窗口",["ChildSessionWindow"]="桌面分身窗口",["FightFolder"]="战斗策略目录",["HotKeyPage"]="快捷键设置页",["LogFolder"]="日志目录",["CustomHtmlMaskFolder"]="HTML 遮罩目录",["CustomHtmlMaskEditor"]="HTML 遮罩编辑器",["ScriptGroupSettings"]="脚本组设置",["PathingDetail"]="路线详情",["ScriptDetailDrawer"]="脚本详情抽屉",["DevTools"]="开发者工具",["CacheFolder"]="缓存目录",["AvatarConditionConfig"]="角色条件",["PartyConditionConfig"]="队伍条件",["JsScriptSettings"]="JavaScript 脚本设置",["ScriptCommon"]="脚本通用设置",["AvatarMacro"]="角色宏",["SkillCdConfig"]="技能冷却显示配置",["BlacklistModeConfig"]="拾取黑名单配置",["WhitelistModeConfig"]="拾取白名单配置",["Drawer"]="详情抽屉" };
                 var targetLabel = nouns.GetValueOrDefault(target, Regex.Replace(target, "([a-z])([A-Z])", "$1 $2"));
-                return $"在{scope}中{translated}{targetLabel}。依赖该页面当前选择；如出现文件或输入对话框，需要用户在 BetterGI 界面完成交互。";
+                return $"在{scope}中{translated}{targetLabel}。依赖该页面当前选择；如出现本次命令的输入或文件对话框，按当前契约提供 dialogInput；需要人工验证或无法自动处理的交互时再说明具体限制。";
             }
         return $"{scope}中的 {Humanize(name)} 命令。BetterGI 没有提供足以确定目标、副作用和结果的业务说明；目录保留该真实命令供审计，不安排自动调用。";
     }

@@ -747,6 +747,7 @@ Sleepy Doll — 面向 BetterGI 的本地桌面 Agent
 
 用法:
   sleepy-doll [配置文件]
+  sleepy-doll --mcp-bgi --config <已有配置文件>  提供 BGI 标准 MCP stdio 服务
 
 配置解析顺序:
   1. 命令行第一个参数（相对路径相对于可执行文件所在目录）

@@ -43,7 +43,7 @@
 | --- | --- |
 | 仓库树、节点、描述和更新时间 | `repo.json` |
 | 地图追踪 | `pathing/<分类>/<目标>/` |
-| JavaScript 脚本 | `js/<脚本>/manifest.json`、`settings.json`、`README.md`、`main.js` 与引用模块 |
+| JavaScript 脚本 | `js/<脚本>/manifest.json`、manifest 指定的 settings_ui/main、`README.md` 与引用模块（文件名不固定） |
 | 战斗策略 | `combat/` |
 | 七圣召唤策略 | `tcg/` |
 | BetterGI JS 可用 API | `bettergi.d.ts` |

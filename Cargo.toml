@@ -24,6 +24,9 @@ uuid = { version = "1.18.1", features = ["v4", "serde"] }
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "process", "io-util"] }
 tokio-util = { version = "0.7", features = ["rt"] }
+# SDK 的 HTTP 客户端沿用现有 Rustls ring provider，避免再引入一套加密后端。
+rmcp = { version = "3.5.1", default-features = false, features = ["client", "server", "transport-io", "transport-streamable-http-client-reqwest", "reqwest-tls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "blocking", "rustls-tls"] }
 sha2 = "0.10"
 semver = "1"

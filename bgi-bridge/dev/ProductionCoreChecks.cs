@@ -53,6 +53,18 @@ Require(wording.Guide.Title == "读取BetterGI设置" && wording.Summary == "查
 Require(wording.Guide.Preconditions[0] == "BetterGI已连接", "guide prerequisites identify BetterGI");
 Require(wording.InputSchema.GetRawText() == wordingSchema.GetRawText(), "schema values must remain exact");
 Require(wording.Guide.Examples[0].GetProperty("value").GetString() == "宿主", "example data must not be rewritten");
+var invalidExampleRejected = false;
+try
+{
+    wordingRegistry.Register("fixture.invalid-example", "settings", "invalid example", (_, _) => Task.FromResult<object?>(null), inputSchema: wordingSchema,
+        guide: wording.Guide with { Examples = [System.Text.Json.JsonSerializer.SerializeToElement(new { value = "invalid" })] });
+}
+catch (InvalidOperationException) { invalidExampleRejected = true; }
+Require(invalidExampleRejected && !wordingRegistry.TryGet("fixture.invalid-example", out _, out _), "invalid examples must not enter public registry");
+var documentedRegistry = new MethodRegistry(); StatusTools.Register(documentedRegistry); CatalogTools.Register(documentedRegistry); HostLogTools.Register(documentedRegistry);
+foreach (var method in documentedRegistry.All)
+    foreach (var example in method.Guide.Examples) ArgumentSchema.Validate(example, method.InputSchema);
+Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { stableGuidesValidated = documentedRegistry.Count }));
 
 // ---- requirements aggregation over real route files (production path) ----
 File.WriteAllText(Path.Combine(routeDir, "01.json"), """

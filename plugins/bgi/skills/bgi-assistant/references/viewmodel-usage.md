@@ -35,6 +35,6 @@ ViewModel 中确实存在用户可用能力，不能一概隐藏。应按实际�
 
 公共目录仅包含已审查的业务入口。UI 生命周期事件、弃用与空实现已移除，不能反射恢复。命令必须匹配真实上下文、输入和时序；返回不能证明业务已完成。
 
-ViewModel 派生能力应增加 `surface_role`：`navigation`、`ui_command`、`config`、`task` 或 `internal`；再增加 `completes_goal` 表示它是否真正完成用户目标。搜索排序中，`navigation` 不应在“收集、刷取、运行”请求中排在 `task` 前面，但应在“打开、带我去、显示”请求中优先。
+以下为元数据设计建议，不代表当前返回中已有这些字段。ViewModel 派生能力可增加 `surface_role`：`navigation`、`ui_command`、`config`、`task` 或 `internal`；再增加 `completes_goal` 表示它是否真正完成用户目标。搜索排序中，`navigation` 不应在“收集、刷取、运行”请求中排在 `task` 前面，但应在“打开、带我去、显示”请求中优先。
 
 普通回复始终说页面或功能名称。例如说“已经打开地图追踪页面”，不要说“已调用 MapPathingViewModel 的导航方法”。
