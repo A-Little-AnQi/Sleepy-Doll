@@ -81,8 +81,8 @@ mod platform {
             WindowsAndMessaging::{
                 GWL_STYLE, GetCursorPos, GetWindowLongPtrW, GetWindowRect, HTBOTTOM, HTBOTTOMLEFT,
                 HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT,
-                IsZoomed, NCCALCSIZE_PARAMS, SM_CXFRAME, SM_CXPADDEDBORDER, SWP_FRAMECHANGED,
-                SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageW,
+                IsZoomed, NCCALCSIZE_PARAMS, PostMessageW, SM_CXFRAME, SM_CXPADDEDBORDER,
+                SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
                 SetWindowLongPtrW, SetWindowPos, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDBLCLK,
                 WM_NCLBUTTONDOWN, WS_THICKFRAME,
             },
@@ -182,12 +182,22 @@ mod platform {
         }
     }
 
-    /// 立即进入系统的移动循环。条带上报之前由界面在 pointerdown 时调用。
+    /// 回调返回后进入系统移动循环，避免在 WebView2 回调内启动嵌套消息循环。
     pub fn begin_system_drag(hwnd: isize) {
         unsafe {
-            // 拖动交给系统的移动循环：贴边吸附、拖离最大化、跨显示器换 DPI 都由它处理。
+            let mut point = POINT::default();
+            if GetCursorPos(&mut point) == 0 {
+                return;
+            }
+            let position =
+                (((point.y as u32 & 0xFFFF) << 16) | (point.x as u32 & 0xFFFF)) as LPARAM;
             ReleaseCapture();
-            SendMessageW(hwnd as HWND, WM_NCLBUTTONDOWN, HTCAPTION as WPARAM, 0);
+            PostMessageW(
+                hwnd as HWND,
+                WM_NCLBUTTONDOWN,
+                HTCAPTION as WPARAM,
+                position,
+            );
         }
     }
 
@@ -217,7 +227,7 @@ mod platform {
             let position =
                 (((point.y as u32 & 0xFFFF) << 16) | (point.x as u32 & 0xFFFF)) as LPARAM;
             ReleaseCapture();
-            SendMessageW(hwnd, WM_NCLBUTTONDOWN, hit as WPARAM, position);
+            PostMessageW(hwnd, WM_NCLBUTTONDOWN, hit as WPARAM, position);
         }
     }
 

@@ -100,6 +100,7 @@
   pointer-events: auto;
 }
 .app-brand {
+  app-region: drag;
   height: calc(var(--header-height) + 8px);
   display: flex;
   align-items: center;
@@ -113,6 +114,7 @@
   overflow: visible;
 }
 .app-brand .icon-button {
+  app-region: no-drag;
   margin-left: auto;
   color: var(--muted);
 }

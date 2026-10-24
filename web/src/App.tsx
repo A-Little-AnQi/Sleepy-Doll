@@ -191,6 +191,7 @@ export default function App() {
   const openConversation = (id: string) => {
     setConversation(id || undefined);
     setSelectedTask(undefined);
+    if (!id) setDetailsOpen(false);
     setPage("chat");
   };
 
@@ -229,6 +230,7 @@ export default function App() {
       onNew={() => {
         setConversation(undefined);
         setSelectedTask(undefined);
+        setDetailsOpen(false);
         setPage("chat");
       }}
       onConversation={openConversation}

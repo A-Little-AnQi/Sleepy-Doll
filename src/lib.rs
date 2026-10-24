@@ -9,6 +9,7 @@ pub mod logging;
 pub mod model;
 pub mod runtime;
 pub mod setup;
+pub mod webview_runtime;
 
 pub use config::{AppConfig, ModelConfig, ModelProtocol};
 pub use error::{Error, Result};

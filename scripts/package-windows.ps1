@@ -114,16 +114,22 @@ function Assert-Distribution {
 }
 
 switch ($Action) {
-    'Check' { Assert-Distribution }
+    'Check' {
+        Assert-Distribution
+        & (Join-Path $PSScriptRoot 'sign-windows.ps1') -Action Check -Optional
+    }
     'Stage' {
         Clear-Staging
         Copy-Product $staging
+        $binaries = @(Get-ProductFiles | Where-Object { [IO.Path]::GetExtension($_.Relative) -in @('.exe', '.dll') } | ForEach-Object { Join-Path $staging $_.Relative })
+        & (Join-Path $PSScriptRoot 'sign-windows.ps1') -Action Sign -Path $binaries -Optional
     }
     'Clean' { Clear-Staging }
     'Complete' {
         Assert-Distribution
         $built = Join-Path $root 'target/release/sleepy-doll-setup.exe'
         if (-not (Test-Path -LiteralPath $built -PathType Leaf)) { throw 'Built installer is missing' }
+        & (Join-Path $PSScriptRoot 'sign-windows.ps1') -Action Sign -Path $built -Optional
         [IO.Directory]::CreateDirectory($distribution) | Out-Null
         $output = Join-Path $distribution $installerName
         Copy-Item -LiteralPath $built -Destination $output -Force

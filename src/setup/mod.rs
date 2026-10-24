@@ -284,4 +284,5 @@ pub fn scratch_root() -> PathBuf {
         .expect("安装程序目录不可用")
         .join(".cache")
         .join("setup")
+        .join(std::process::id().to_string())
 }

@@ -1,5 +1,5 @@
 import "./runtime.mjs";
-// Main/setup entries with fake native IPC; no Agent, BGI or user files.
+// Main entry with fake native IPC; no Agent, BGI or user files.
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,8 +24,11 @@ try {
   console.log(
     JSON.stringify({ port, cleanup: "finally closes Chromium and Vite" }),
   );
-  browser = await chromium.launch({ headless: true });
-  for (const entry of ["/", "/setup.html"]) {
+  browser = await chromium.launch({
+    headless: true,
+    channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
+  });
+  for (const entry of ["/"]) {
     for (const dark of [true, false]) {
       const page = await browser.newPage({
         viewport: { width: 1100, height: 800 },
@@ -99,25 +102,13 @@ try {
               if (request.method === "bootstrap") result = bootstrap;
               if (request.method === "bridge.status") result = bootstrap.bridge;
               if (request.method === "tray.state") result = { enabled: true };
-              if (request.method === "setup.info")
-                result = {
-                  version: "0.1.0",
-                  directory: "D:\\Fixture",
-                  defaultDirectory: "D:\\Fixture",
-                  installed: false,
-                  installedVersion: null,
-                  uninstallMode: false,
-                };
               queueMicrotask(() => {
-                if (request.method.startsWith("setup."))
-                  window.__setupReceive?.({ id: request.id, result });
-                else
-                  window.__sleepyDollReceive?.({
-                    kind: "response",
-                    id: request.id,
-                    ok: true,
-                    result,
-                  });
+                window.__sleepyDollReceive?.({
+                  kind: "response",
+                  id: request.id,
+                  ok: true,
+                  result,
+                });
               });
             },
           };
@@ -143,6 +134,96 @@ try {
         dark ? "rgb(27, 27, 27)" : "rgb(255, 255, 255)",
       );
       assert.equal(ready.hasContent, true);
+      await page.getByRole("dialog").waitFor();
+      assert.equal(
+        await page.evaluate(
+          () =>
+            document.elementFromPoint(100, 16)?.closest(".title-bar") != null,
+        ),
+        true,
+        "dialog overlay blocks the window caption",
+      );
+      assert.equal(
+        await page
+          .locator('.sd-dialog-layer[data-visible="true"]')
+          .evaluate((layer) => layer.getBoundingClientRect().top),
+        32,
+      );
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "开始使用", exact: true })
+        .click();
+      await page.getByRole("dialog").waitFor({ state: "hidden" });
+      const mascot = page.locator(".welcome-mascot");
+      await mascot.waitFor();
+      assert.equal(await mascot.evaluate((img) => img.draggable), false);
+      assert.deepEqual(
+        await mascot.evaluate((img) => {
+          const style = getComputedStyle(img);
+          const bounds = img.getBoundingClientRect();
+          return {
+            pointerEvents: style.pointerEvents,
+            userSelect: style.userSelect,
+            userDrag: style.getPropertyValue("-webkit-user-drag"),
+            receivesPointer:
+              document.elementFromPoint(
+                bounds.x + bounds.width / 2,
+                bounds.y + bounds.height / 2,
+              ) === img,
+            pointerInWelcome:
+              document
+                .elementFromPoint(
+                  bounds.x + bounds.width / 2,
+                  bounds.y + bounds.height / 2,
+                )
+                ?.closest(".chat-welcome") != null,
+          };
+        }),
+        {
+          pointerEvents: "none",
+          userSelect: "none",
+          userDrag: "none",
+          receivesPointer: false,
+          pointerInWelcome: true,
+        },
+      );
+      assert.equal(
+        await page
+          .locator(".title-bar")
+          .evaluate((bar) =>
+            getComputedStyle(bar).getPropertyValue("app-region"),
+          ),
+        "drag",
+      );
+      assert.equal(
+        await page
+          .locator(".title-bar-controls")
+          .evaluate((bar) =>
+            getComputedStyle(bar).getPropertyValue("app-region"),
+          ),
+        "no-drag",
+      );
+      await page.evaluate(() => {
+        window.mascotDrags = 0;
+        document.addEventListener("dragstart", () => window.mascotDrags++);
+      });
+      const bounds = await mascot.boundingBox();
+      await page.mouse.move(
+        bounds.x + bounds.width / 2,
+        bounds.y + bounds.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.move(
+        bounds.x + bounds.width / 2 + 70,
+        bounds.y + bounds.height / 2 + 40,
+        { steps: 10 },
+      );
+      await page.mouse.up();
+      assert.equal(
+        await page.evaluate(() => window.mascotDrags),
+        0,
+        "welcome image started browser dragging",
+      );
       assert.deepEqual(errors, []);
       await page.waitForTimeout(80);
       assert.equal(
@@ -182,7 +263,7 @@ try {
   await failedPage.close();
   console.log(
     JSON.stringify({
-      mainAndSetupReady: true,
+      mainReady: true,
       darkAndLightReady: true,
       noEarlyExposure: true,
       assetFailureShowsErrorInsteadOfHiddenWindow: true,

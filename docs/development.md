@@ -2,7 +2,7 @@
 
 ## 环境与命令
 
-Windows 构建需要 Rust stable（edition 2024）、Node.js 22.18+、.NET 8 SDK、Visual Studio 2022 C++ Build Tools（x64）。桌面运行需要 WebView2 Runtime；Linux 桌面开发另需 GTK/WebKitGTK。
+Windows 构建需要 Rust stable（edition 2024）、Node.js 22.18+、.NET 8 SDK、Visual Studio 2022 C++ Build Tools（x64）。主程序运行需要 WebView2 Runtime；安装器使用 Slint 原生界面，启动不依赖 WebView2。Linux 桌面开发另需 GTK/WebKitGTK。
 
 ```powershell
 npm install
@@ -30,6 +30,8 @@ npm run dist
 | `npm run clean:rust` | 清理上述缓存 |
 
 完整构建由 `scripts/build.cmd` 执行，内部调用 `bgi-bridge/build.cmd` 和 `scripts/pack-payload.ps1`。单独修改桥时可执行 `bgi-bridge/build.cmd`。桥通过影拷贝加载；重建不强制结束 BetterGI，连接后核对实际加载版本。
+
+安装器入口为 `src/bin/sleepy-doll-setup.rs`，原生界面为 `src/setup/ui.slint`，由 `setup` 特性构建并嵌入。Vite 只构建主程序和托盘界面。安装器固定使用深色样式，不读取主程序主题设置；要求管理员权限，窗口首次显示时居中。运行时检测、安装、更新和卸载通过 Rust 安装引擎执行。
 
 `package-lock.json` 与 `Cargo.lock` 为本机文件，Git 忽略它们；CI 使用 `npm install`。构建脚本把 `TEMP`、`TMP` 指向 `target/tmp/`，npm 缓存在 `target/npm-cache/`。
 
@@ -78,7 +80,7 @@ MCP 协议测试使用 `tests/runtime/mcp-fixture.mjs` 作为独立 Node 测试�
 
 ## 浏览器预览
 
-通用控件、弹层、图标、品牌资源、输入容器、扩展条目和任务卡片位于内部 workspace 包 `packages/ui/`，主程序、安装器和托盘通过 `@sleepy-doll/ui` 导入。包不依赖产品 IPC 或会话状态；`ProductUiProvider` 提供产品文案，任务卡片的业务适配留在 `web/src/components/tasks/TaskCard.tsx`。CSS 和资源只有组件包中的一份实现，页面继续负责布局、数据和操作。
+通用控件、弹层、图标、品牌资源、输入容器、扩展条目和任务卡片位于内部 workspace 包 `packages/ui/`，主程序和托盘通过 `@sleepy-doll/ui` 导入。包不依赖产品 IPC 或会话状态；`ProductUiProvider` 提供产品文案，任务卡片的业务适配留在 `web/src/components/tasks/TaskCard.tsx`。CSS 和资源只有组件包中的一份实现，页面继续负责布局、数据和操作。Slint 安装器独立编译，界面验证通过原生安装器进行。
 
 组件库是仓库内的正式模块，正常 `npm install`、`npm run build` 和 GitHub 构建无需 Moduloom。Moduloom 是独立的本地可选工具，`frame/package.json` 不属于产品 workspace，也不记录未发布包或机器路径。需要预览时执行 `npm run frame:setup -- <loom-frame.tgz完整路径> <android-plugin.tgz完整路径>`：安装位置是被 Git 忽略的 `frame/node_modules/`，不会写入根依赖或根 lock 文件。普通 Web 预览可使用轻量安卓插件；需要自带模拟器时使用 Windows 完整包。工具安装不包含在产品或安装包里。
 
@@ -101,6 +103,16 @@ dotnet run --project bgi-bridge/dev/MetadataBuilder.csproj -- <BGI源码根目�
 python bgi-bridge/dev/coverage-audit.py <BGI源码根目录>
 ```
 
-覆盖报告与现场契约快照生成到 `target/reports/bgi/`。确认需要更新功能索引的基准时，对盘点命令加 `--update-fixture`，再执行 `python bgi-bridge/dev/feature-guide-builder.py`。基准位于 `bgi-bridge/dev/fixtures/host-features.json`，口语目标测试数据位于同目录的 `user-scenarios.json`；它们供索引生成和 Rust 测试读取，不能当作现场运行证据。
+覆盖报告与现场契约快照生成到 `target/reports/bgi/`。确认需要更新功能索引的基准时，对盘点命令加 `--update-fixture`，再执行 `python bgi-bridge/dev/feature-guide-builder.py`。基准位于 `bgi-bridge/dev/fixtures/host-features.json`，口语目标测试数据位于同目录的 `user-scenarios.json`；前者供索引生成，后者仅保存测试请求和行为约束，不参与生产检索，不能当作现场运行证据。
 
 `interface-review.py <类型契约JSON>` 将接口审阅报告写到相同报告目录。源码索引、隔离验证、宿主任务记录与实际游戏结果分别判定；Job 完成、接口返回或编译成功均不能单独证明业务成功。
+
+
+### 主模型的渐进式技能验证
+
+`tests/runtime/progressive-skills.rs` 提供显式运行的真实模型回归：用 SLEEPY_DOLL_MODEL_CONFIG 指定已有配置，SLEEPY_DOLL_TEST_MODEL 选择其中的模型；执行 `cargo test --no-default-features --lib live_model_reads_plugin_references_and_corrects_existing_task_without_running -- --ignored --nocapture`。它走真实 Supervisor 和模型协议，读取隔离练习应用的技能正文、引用资料、配置和文件版本；两轮修改次数并验证不运行、保留其他设置，不连接 BetterGI 或游戏，不修改正式配置。临时目录由 SLEEPY_DOLL_TEST_ROOT 控制，遵守根 AGENTS 的登记和清理要求。此测试只证明通用主循环的行为，不能代替具体插件的现场验收。
+
+
+### 基础工具的效率对比
+
+`tests/runtime/skill-efficiency.rs` 的显式真实模型检查走生产 Supervisor、实际 BGI 工具登记及文件读写；仅测试目录位置由本地夹具提供。设置模型配置、模型名、阶段、报告路径及测试根目录对应的 SLEEPY_DOLL 环境变量后，运行 `cargo test --no-default-features --lib live_bgi_skill_efficiency -- --ignored --nocapture`。每个阶段包含只读查询、修改真实配置开关和源码符号关系，各两次。运行时不加载真实游戏，不把测试期望传给模型。报告记录成功率、请求、工具、实际用量及网络耗时，不能用静态目录命中代替模型任务通过。旧阶段无效字段的样本须单列排除，不纳入有效效率比较。

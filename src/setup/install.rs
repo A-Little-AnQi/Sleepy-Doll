@@ -36,6 +36,7 @@ fn apply(
     desktop_shortcut: Option<bool>,
     progress: Progress,
 ) -> Result<(), Error> {
+    ensure_programs_available(archive, directory)?;
     let updating = desktop_shortcut.is_none();
     progress(
         0.0,
@@ -78,6 +79,35 @@ fn apply(
             "安装完成"
         },
     );
+    Ok(())
+}
+
+/// 只检查本次会替换或迁移的程序路径，在解包与首个写入之前拒绝占用。
+fn ensure_programs_available(archive: &Archive, directory: &Path) -> Result<(), Error> {
+    let mut programs: Vec<PathBuf> = archive
+        .entries()
+        .iter()
+        .map(|entry| destination(directory, archive, &entry.path))
+        .collect();
+    programs.extend([directory.join(EXECUTABLE), directory.join(UNINSTALLER)]);
+    if bridge_directory(archive).is_some()
+        && let Ok(entries) = fs::read_dir(directory)
+    {
+        programs.extend(entries.flatten().filter_map(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .starts_with("bgibridge.")
+                .then(|| entry.path())
+        }));
+    }
+    if let Some(busy) = super::uninstall::busy_program(&programs) {
+        return Err(Error::message(format!(
+            "{} 正在使用中，请关闭占用它的程序后重试。",
+            busy.display()
+        )));
+    }
     Ok(())
 }
 
@@ -331,4 +361,66 @@ pub fn shortcut_name() -> String {
 pub(crate) fn relative(path: &str) -> PathBuf {
     path.split('/')
         .fold(PathBuf::new(), |path, part| path.join(part))
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::os::windows::fs::OpenOptionsExt;
+
+    #[test]
+    fn setup_update_preflight_prevents_partial_overwrite_when_program_is_locked() {
+        let root = crate::test_root("setup-update-locked-program");
+        fs::create_dir_all(root.join("skills")).unwrap();
+        fs::write(root.join("settings.json"), b"original settings").unwrap();
+        fs::write(root.join("skills/legacy.md"), b"legacy skill").unwrap();
+        let executable = root.join(EXECUTABLE);
+        fs::write(&executable, b"existing executable").unwrap();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&executable)
+            .unwrap();
+        let archive = Archive::new(
+            br#"[{"path":"settings.json","size":3},{"path":"sleepy-doll.exe","size":3}]"#,
+            b"newexe".to_vec(),
+        )
+        .unwrap();
+        let mut progress = Vec::new();
+        let error =
+            update(&archive, &root, &mut |fraction, _| progress.push(fraction)).unwrap_err();
+        assert!(error.to_string().contains(EXECUTABLE));
+        assert!(
+            progress.is_empty(),
+            "a blocked update must not start staging"
+        );
+        assert_eq!(
+            fs::read(root.join("settings.json")).unwrap(),
+            b"original settings"
+        );
+        assert_eq!(
+            fs::read(root.join("skills/legacy.md")).unwrap(),
+            b"legacy skill"
+        );
+        drop(lock);
+        assert_eq!(fs::read(&executable).unwrap(), b"existing executable");
+        assert!(ensure_programs_available(&archive, &root).is_ok());
+    }
+
+    #[test]
+    fn setup_update_preflight_checks_uninstaller_outside_payload() {
+        let root = crate::test_root("setup-update-locked-uninstaller");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join(UNINSTALLER);
+        fs::write(&path, b"existing uninstaller").unwrap();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+        let archive = Archive::new(b"[]", vec![]).unwrap();
+        assert!(ensure_programs_available(&archive, &root).is_err());
+        drop(lock);
+        assert!(ensure_programs_available(&archive, &root).is_ok());
+    }
 }

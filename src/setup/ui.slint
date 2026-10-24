@@ -1,0 +1,621 @@
+// 原生安装器沿用 720 × 460、左侧品牌区与右侧内容区的既有布局。
+export struct SetupRow {
+    label: string,
+    value: string,
+}
+
+global SetupTheme {
+    out property <color> background: #1b1b1b;
+    out property <color> foreground: #e9e9e9;
+    out property <color> secondary: #b4b4b4;
+    out property <color> muted: #858585;
+    out property <color> line: #303030;
+    out property <color> soft: #222222;
+    out property <color> hover: #262626;
+    out property <color> rail: #151515;
+    out property <color> on-primary: #171717;
+    out property <color> error: #ed9d88;
+    out property <color> accent: #c5a251;
+}
+
+component SetupButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    in property <bool> quiet;
+    in property <bool> enabled: true;
+    in property <bool> folder-icon;
+    callback clicked();
+    width: max(root.primary ? 72px : 0px, label.preferred-width + (root.folder-icon ? 46px : 26px));
+    height: 32px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: keyboard.has-focus ? SetupTheme.secondary : root.quiet ? transparent : root.primary ? SetupTheme.foreground : SetupTheme.line;
+    background: root.primary ? SetupTheme.foreground :
+        area.has-hover && root.enabled ? SetupTheme.soft : transparent;
+    opacity: !root.enabled ? 0.4 : area.pressed ? 0.75 : 1;
+    animate background, opacity { duration: 140ms; easing: ease-out; }
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+    forward-focus: keyboard;
+    HorizontalLayout {
+        x: 0px; y: 0px; width: parent.width; height: parent.height;
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 6px;
+        if root.folder-icon: Path {
+            y: (parent.height - 14px) / 2;
+            width: 14px; height: 14px;
+            viewbox-width: 24; viewbox-height: 24;
+            stroke: SetupTheme.foreground; stroke-width: 1.6px;
+            commands: "M 3 7 V 5 A 2 2 0 0 1 5 3 H 9 L 12 6 H 19 A 2 2 0 0 1 21 8 V 9 M 3 7 H 8 L 11 10 H 21 L 18 21 H 2 Z";
+        }
+        label := Text {
+            text: root.text;
+            font-size: 12px; font-weight: 500;
+            color: root.primary ? SetupTheme.on-primary : root.quiet ? SetupTheme.secondary : SetupTheme.foreground;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    keyboard := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if root.enabled && (event.text == Key.Space || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    area := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { keyboard.focus(); root.clicked(); }
+    }
+}
+
+component StatusIcon inherits Rectangle {
+    in property <int> kind;
+    in property <bool> bad;
+    width: 28px; height: 28px;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: SetupTheme.line;
+    background: SetupTheme.soft;
+    property <color> ink: root.bad ? SetupTheme.error : SetupTheme.secondary;
+    animate ink { duration: 180ms; easing: ease-out; }
+    // 统一使用 24 单位的细线图标，不依赖字体图形。
+    if root.kind == 1: Path {
+        x: 6px; y: 6px; width: 16px; height: 16px;
+        viewbox-width: 24; viewbox-height: 24;
+        stroke: root.ink; stroke-width: 1.6px;
+        commands: "M 22 11.1 V 12 A 10 10 0 1 1 16.1 2.9 M 22 4 L 12 14 L 9 11";
+    }
+    if root.kind == 2: Path {
+        x: 6px; y: 6px; width: 16px; height: 16px;
+        viewbox-width: 24; viewbox-height: 24;
+        stroke: root.ink; stroke-width: 1.6px;
+        commands: "M 22 12 A 10 10 0 1 1 2 12 A 10 10 0 1 1 22 12 M 12 7 V 13 M 12 16 V 17";
+    }
+    if root.kind == 3: Path {
+        x: 6px; y: 6px; width: 16px; height: 16px;
+        viewbox-width: 24; viewbox-height: 24;
+        stroke: root.ink; stroke-width: 1.6px;
+        commands: "M 21 15 V 19 A 2 2 0 0 1 19 21 H 5 A 2 2 0 0 1 3 19 V 15 M 7 10 L 12 15 L 17 10 M 12 15 V 3";
+    }
+    if root.kind == 4: Path {
+        x: 6px; y: 6px; width: 16px; height: 16px;
+        viewbox-width: 24; viewbox-height: 24;
+        stroke: root.ink; stroke-width: 1.6px;
+        commands: "M 3 11 A 9 9 0 0 1 18.4 4.6 L 21 7 M 21 3 V 7 H 17 M 21 13 A 9 9 0 0 1 5.6 19.4 L 3 17 M 3 21 V 17 H 7";
+    }
+    if root.kind == 5: Path {
+        x: 6px; y: 6px; width: 16px; height: 16px;
+        viewbox-width: 24; viewbox-height: 24;
+        stroke: root.ink; stroke-width: 1.6px;
+        commands: "M 5 3 H 19 A 2 2 0 0 1 21 5 V 19 A 2 2 0 0 1 19 21 H 5 A 2 2 0 0 1 3 19 V 5 A 2 2 0 0 1 5 3 M 3 8 H 21 M 7 5 V 6 M 11 5 V 6";
+    }
+    if root.kind == 6: Path {
+        x: 6px; y: 6px; width: 16px; height: 16px;
+        viewbox-width: 24; viewbox-height: 24;
+        stroke: root.ink; stroke-width: 1.6px;
+        commands: "M 12 3 L 21 8 V 15 M 21 8 L 12 13 L 3 8 M 12 13 V 22 L 3 17 V 8 L 12 3 M 7.5 5.5 L 16.5 10.5 M 16 19 L 18 21 L 22 17";
+    }
+    if root.kind == 7: Path {
+        x: 6px; y: 6px; width: 16px; height: 16px;
+        viewbox-width: 24; viewbox-height: 24;
+        stroke: root.ink; stroke-width: 1.6px;
+        commands: "M 22 12 A 10 10 0 1 1 2 12 A 10 10 0 1 1 22 12 M 12 11 V 17 M 12 7 V 8";
+    }
+}
+
+export component SetupWindow inherits Window {
+    title: "Sleepy Doll";
+    preferred-width: 720px; preferred-height: 460px;
+    min-width: 720px; max-width: 720px;
+    min-height: 460px; max-height: 460px;
+    no-frame: true;
+    background: SetupTheme.background;
+    default-font-family: "Segoe UI";
+    default-font-size: 12px;
+
+    in property <image> brand-icon;
+    in property <string> heading: "安装 Sleepy Doll";
+    in property <string> status-title;
+    in property <string> description;
+    in property <string> note;
+    in property <string> error;
+    in property <string> detail;
+    in property <string> target-version;
+    in property <string> state-id;
+    in property <[SetupRow]> rows;
+    in property <int> status-icon;
+    in property <bool> bad;
+    in property <bool> show-form;
+    in property <bool> show-progress;
+    in property <bool> show-download;
+    in property <bool> show-steps;
+    in property <int> active-step: 1;
+    in property <float> progress: -1;
+    in property <string> progress-label;
+    in property <bool> progress-caption: true;
+    in property <string> primary-label: "安装";
+    in property <bool> primary-enabled: true;
+    in property <string> cancel-label: "取消";
+    in property <bool> cancel-visible: true;
+    in property <bool> busy;
+    in-out property <string> directory;
+    in-out property <bool> desktop-shortcut: true;
+    in property <bool> modal-visible;
+    in property <string> modal-title;
+    in property <string> modal-description;
+    in property <string> modal-detail;
+    in property <string> modal-primary-label;
+    in property <string> modal-cancel-label;
+    callback primary();
+    callback cancel();
+    callback browse();
+    callback open-download();
+    callback minimize();
+    callback dismiss();
+    callback directory-edited(string);
+    callback modal-primary();
+    callback modal-cancel();
+
+    property <bool> content-ready: true;
+    property <bool> detail-open;
+    property <float> progress-phase;
+    changed state-id => {
+        root.content-ready = false;
+        root.detail-open = false;
+    }
+    Timer {
+        interval: 16ms;
+        running: !root.content-ready;
+        triggered => { root.content-ready = true; }
+    }
+    Timer {
+        interval: 16ms;
+        running: root.show-progress && root.progress < 0;
+        triggered => { root.progress-phase = Math.mod(root.progress-phase + 0.009, 1); }
+    }
+
+    Rectangle {
+        x: 0px; y: 0px; width: parent.width; height: parent.height;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: SetupTheme.line;
+        background: SetupTheme.background;
+        clip: true;
+
+        Rectangle {
+            x: 1px; y: 33px; width: 231px; height: parent.height - 34px;
+            background: SetupTheme.rail;
+            clip: true;
+            Rectangle {
+                x: (parent.width - 300px) / 2; y: -59.64px;
+                width: 300px; height: 300px;
+                background: @radial-gradient(circle, #c5a2513d 0%, #c5a25100 68%);
+            }
+            Rectangle {
+                x: 0; y: 131.921875px;
+                width: parent.width; height: 162.140625px;
+                Image {
+                    x: (parent.width - 96px) / 2; y: 0px; width: 96px; height: 96px;
+                    source: root.brand-icon;
+                    image-fit: contain;
+                }
+                Text {
+                    x: 0px; y: 108px; width: parent.width; height: 33px;
+                    text: "Sleepy Doll";
+                    color: SetupTheme.foreground;
+                    font-size: 20px; font-weight: 700;
+                    letter-spacing: -0.4px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                Text {
+                    x: 0px; y: 144px; width: parent.width; height: 18.140625px;
+                    text: "版本 " + root.target-version;
+                    color: SetupTheme.muted; font-size: 11px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        Rectangle { x: 232px; y: 33px; width: 1px; height: parent.height - 34px; background: SetupTheme.line; }
+
+        Text {
+            x: 259px; y: 55px; width: 434px; height: 26.59375px;
+            text: root.heading;
+            font-family: "Microsoft YaHei UI";
+            font-size: 19px; font-weight: 600;
+            letter-spacing: -0.4px;
+            color: SetupTheme.foreground;
+            vertical-alignment: center;
+        }
+
+        body := Rectangle {
+            x: 259px; y: 97.59375px; width: 434px; height: 295.40625px;
+            opacity: root.content-ready ? 1 : 0.86;
+            animate opacity { duration: 180ms; easing: ease-out; }
+
+            if root.show-form: Rectangle {
+                x: 0px; width: parent.width;
+                y: (parent.height - 118.84375px) / 2;
+                height: 118.84375px;
+                Text {
+                    x: 0px; y: 0px; width: parent.width;
+                    height: 19.796875px; text: "安装位置";
+                    color: SetupTheme.secondary;
+                    vertical-alignment: center;
+                }
+                path-box := Rectangle {
+                    x: 0px; y: 26.796875px; width: parent.width - 80px; height: 32px;
+                    border-radius: 6px; border-width: 1px;
+                    border-color: root.error != "" ? SetupTheme.error : path-input.has-focus ? SetupTheme.secondary : SetupTheme.line;
+                    background: SetupTheme.background;
+                    animate border-color { duration: 180ms; easing: ease-out; }
+                    clip: true;
+                    path-input := TextInput {
+                        property <length> scroll-x: 12px;
+                        x: min(12px, max(parent.width - self.width - 12px, self.scroll-x));
+                        y: 1px;
+                        width: max(parent.width - 24px, self.preferred-width + self.text-cursor-width);
+                        height: 30px;
+                        text <=> root.directory;
+                        font-family: "Consolas"; font-size: 12px;
+                        color: SetupTheme.foreground;
+                        selection-background-color: SetupTheme.accent;
+                        selection-foreground-color: SetupTheme.on-primary;
+                        single-line: true;
+                        read-only: root.busy || root.modal-visible;
+                        vertical-alignment: center;
+                        cursor-position-changed(position) => {
+                            if position.x + self.scroll-x < 12px {
+                                self.scroll-x = 12px - position.x;
+                            } else if position.x + self.scroll-x > parent.width - 12px - self.text-cursor-width {
+                                self.scroll-x = parent.width - 12px - self.text-cursor-width - position.x;
+                            }
+                        }
+                        edited => { root.directory-edited(self.text); }
+                        accepted => { if root.primary-enabled { root.primary(); } }
+                    }
+                }
+                SetupButton {
+                    x: parent.width - 72px; y: 26.796875px; width: 72px;
+                    text: "浏览"; folder-icon: true;
+                    enabled: !root.busy && !root.modal-visible;
+                    clicked => { root.browse(); }
+                }
+                // 提示与校验错误共用固定槽位；红框出现时不会推动输入框、复选框或底部按钮。
+                Rectangle {
+                    x: 0px; y: 65.796875px; width: parent.width; height: 28px;
+                    Text {
+                        x: 0px; y: 0px; width: parent.width; height: 19.25px;
+                        text: "配置和会话记录也会保存在此文件夹中。";
+                        font-family: "Microsoft YaHei UI";
+                        color: SetupTheme.muted; font-size: 11px;
+                        vertical-alignment: center;
+                        opacity: root.error == "" ? 1 : 0;
+                        animate opacity { duration: 180ms; easing: ease-out; }
+                    }
+                    Text {
+                        x: 0px; y: 0px;
+                        text: root.error;
+                        color: SetupTheme.error; font-size: 11px;
+                        width: parent.width; height: parent.height;
+                        wrap: word-wrap;
+                        opacity: root.error == "" ? 0 : 1;
+                        animate opacity { duration: 180ms; easing: ease-out; }
+                        accessible-role: text;
+                    }
+                }
+                Rectangle {
+                    x: 0px; y: 99.046875px; width: parent.width; height: 19.796875px;
+                    Rectangle {
+                        x: 0px; y: 4px; width: 14px; height: 14px;
+                        border-radius: 2px; border-width: 1px;
+                        border-color: SetupTheme.secondary;
+                        background: root.desktop-shortcut ? SetupTheme.foreground : SetupTheme.background;
+                        animate background { duration: 140ms; }
+                        Path {
+                            x: 2px; y: 2px; width: 10px; height: 10px;
+                            viewbox-width: 12; viewbox-height: 12;
+                            stroke: SetupTheme.on-primary; stroke-width: 1.6px;
+                            commands: "M 2 6 L 5 9 L 10 3";
+                            opacity: root.desktop-shortcut ? 1 : 0;
+                            animate opacity { duration: 140ms; }
+                        }
+                    }
+                    Text {
+                        x: 23px; y: 0px; width: parent.width - 23px; height: parent.height;
+                        text: "创建桌面快捷方式";
+                        color: SetupTheme.secondary;
+                        vertical-alignment: center;
+                    }
+                    shortcut-focus := FocusScope {
+                        enabled: !root.busy && !root.modal-visible;
+                        key-pressed(event) => {
+                            if event.text == Key.Space && !root.busy && !root.modal-visible {
+                                root.desktop-shortcut = !root.desktop-shortcut;
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
+                    TouchArea {
+                        enabled: !root.busy && !root.modal-visible;
+                        mouse-cursor: pointer;
+                        clicked => { shortcut-focus.focus(); root.desktop-shortcut = !root.desktop-shortcut; }
+                    }
+                    accessible-role: checkbox;
+                    accessible-label: "创建桌面快捷方式";
+                    accessible-checked: root.desktop-shortcut;
+                    accessible-checkable: true;
+                    accessible-enabled: !root.busy && !root.modal-visible;
+                    accessible-action-default => {
+                        if !root.busy && !root.modal-visible { root.desktop-shortcut = !root.desktop-shortcut; }
+                    }
+                }
+            }
+
+            if !root.show-form: VerticalLayout {
+                x: 0px; y: 20px; width: parent.width;
+                height: parent.height - 40px;
+                alignment: center;
+                spacing: 14px;
+                if root.status-title != "": HorizontalLayout {
+                    height: 28px;
+                    spacing: 10px;
+                    if root.status-icon != 0: StatusIcon { kind: root.status-icon; bad: root.bad; }
+                    Text {
+                        text: root.status-title;
+                        font-family: "Microsoft YaHei UI";
+                        color: SetupTheme.foreground;
+                        font-size: 16px; font-weight: 600;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                }
+                if root.description != "": Text {
+                    text: root.description;
+                    font-family: "Microsoft YaHei UI";
+                    color: SetupTheme.muted;
+                    wrap: word-wrap;
+                }
+                if root.rows.length > 0: Rectangle {
+                    height: root.rows.length * 28.796875px + 19px;
+                    border-width: 1px; border-radius: 8px;
+                    border-color: SetupTheme.line; background: SetupTheme.soft;
+                    for row[index] in root.rows: Rectangle {
+                        x: 15px; y: 14px + index * 28.796875px;
+                        width: parent.width - 30px; height: 19.796875px;
+                        Text {
+                            x: 0px; y: 0px; width: 64px; height: parent.height;
+                            text: row.label; color: SetupTheme.muted;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            x: 74px; y: 0px; width: parent.width - 74px; height: parent.height;
+                            text: row.value; color: row.label == "更新至" ? SetupTheme.foreground : SetupTheme.secondary;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+                if root.show-steps: VerticalLayout {
+                    spacing: 12px;
+                    for step[index] in ["准备运行环境", "安装程序文件", "完成安装"]: HorizontalLayout {
+                        height: 18px; spacing: 10px;
+                        Text {
+                            width: 16px; text: index < root.active-step ? "✓" : "·";
+                            color: index == root.active-step ? SetupTheme.accent : SetupTheme.secondary;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: step;
+                            color: index == root.active-step ? SetupTheme.foreground : SetupTheme.muted;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                }
+                if root.show-progress: VerticalLayout {
+                    spacing: 10px;
+                    if root.progress-caption: HorizontalLayout {
+                        height: 18px;
+                        Text {
+                            text: root.progress-label;
+                            color: SetupTheme.secondary;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: root.progress < 0 ? "请稍候" : round(root.progress) + "%";
+                            color: SetupTheme.secondary;
+                        }
+                    }
+                    Rectangle {
+                        height: 5px; border-radius: 3px;
+                        background: SetupTheme.soft;
+                        clip: true;
+                        Rectangle {
+                            y: 0px;
+                            height: parent.height; border-radius: 3px;
+                            width: root.progress < 0 ? parent.width * 0.31 : parent.width * min(100, max(0, root.progress)) / 100;
+                            x: root.progress < 0 ? (parent.width + self.width) * root.progress-phase - self.width : 0px;
+                            background: SetupTheme.accent;
+                            animate width { duration: 160ms; easing: ease-out; }
+                        }
+                    }
+                }
+                if root.note != "": Text {
+                    font-family: "Microsoft YaHei UI";
+                    text: root.note; color: SetupTheme.muted;
+                    font-size: 11px; wrap: word-wrap;
+                }
+                if root.show-download: Rectangle {
+                    height: 22px;
+                    download-label := Text {
+                        x: 0px; y: 0px; width: parent.width; height: parent.height;
+                        text: "下载 WebView2（微软官网）";
+                        color: SetupTheme.secondary;
+                        font-size: 12px;
+                    }
+                    Rectangle { x: 0px; y: 19px; width: download-label.preferred-width; height: 1px; background: SetupTheme.secondary; }
+                    TouchArea {
+                        x: 0px; y: 0px; width: download-label.preferred-width; height: parent.height; mouse-cursor: pointer;
+                        clicked => { root.open-download(); }
+                    }
+                }
+                if root.detail != "": Rectangle {
+                    // 展开诊断只使用此固定区域，按钮和主内容不会随之重排。
+                    height: 54px;
+                    Text {
+                        x: 0px; y: 0px; width: parent.width; height: 18px; text: "查看详细信息";
+                        color: SetupTheme.muted; font-size: 11px;
+                    }
+                    TouchArea {
+                        x: 0px; y: 0px; width: 90px; height: 18px; mouse-cursor: pointer;
+                        clicked => { root.detail-open = !root.detail-open; }
+                    }
+                    Flickable {
+                        x: 0px; y: 23px; height: 31px; width: parent.width;
+                        content-height: diagnostic.preferred-height;
+                        content-width: self.width;
+                        opacity: root.detail-open ? 1 : 0;
+                        animate opacity { duration: 160ms; easing: ease-out; }
+                        diagnostic := Text {
+                            x: 0px; y: 0px;
+                            width: parent.width;
+                            text: root.detail;
+                            color: SetupTheme.muted;
+                            font-size: 11px; wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+            if !root.show-form: Text {
+                // 运行错误使用预留的底部槽位，显隐不参与内容布局。
+                x: 0px; y: parent.height - 35px;
+                width: parent.width; height: 35px;
+                text: root.error;
+                color: SetupTheme.error; font-size: 11px;
+                wrap: word-wrap;
+                opacity: root.error == "" ? 0 : 1;
+                animate opacity { duration: 180ms; easing: ease-out; }
+            }
+        }
+
+        HorizontalLayout {
+            x: 259px; y: 409px; width: 434px; height: 32px;
+            alignment: end; spacing: 8px;
+            if root.cancel-visible: SetupButton {
+                text: root.cancel-label; quiet: true;
+                enabled: !root.busy && !root.modal-visible;
+                clicked => { root.cancel(); }
+            }
+            SetupButton {
+                text: root.primary-label; primary: true;
+                enabled: root.primary-enabled && !root.modal-visible;
+                clicked => { root.primary(); }
+            }
+        }
+
+        Rectangle {
+            x: parent.width - 92px; y: 0px; width: 46px; height: 32px;
+            accessible-role: button;
+            accessible-label: "最小化";
+            accessible-action-default => { root.minimize(); }
+            background: minimize-area.has-hover ? SetupTheme.hover : transparent;
+            animate background { duration: 120ms; }
+            Path {
+                x: 17px; y: 10px; width: 12px; height: 12px;
+                viewbox-width: 12; viewbox-height: 12;
+                stroke: minimize-area.has-hover ? SetupTheme.foreground : SetupTheme.secondary;
+                stroke-width: 1px;
+                commands: "M 1 6 H 11";
+            }
+            minimize-area := TouchArea {
+                x: 0px; y: 0px; width: 46px; height: 32px;
+                clicked => { root.minimize(); }
+            }
+        }
+        Rectangle {
+            x: parent.width - 46px; y: 0px; width: 46px; height: 32px;
+            accessible-role: button;
+            accessible-label: "关闭";
+            accessible-enabled: !root.busy;
+            accessible-action-default => { if !root.busy { root.dismiss(); } }
+            background: close-area.has-hover && !root.busy ? #e81123 : transparent;
+            opacity: root.busy ? 0.4 : 1;
+            animate background { duration: 120ms; }
+            Path {
+                x: 17px; y: 10px; width: 12px; height: 12px;
+                viewbox-width: 12; viewbox-height: 12;
+                stroke: close-area.has-hover && !root.busy ? #ffffff : SetupTheme.secondary;
+                stroke-width: 1px;
+                commands: "M 1.5 1.5 L 10.5 10.5 M 10.5 1.5 L 1.5 10.5";
+            }
+            close-area := TouchArea {
+                x: 0px; y: 0px; width: 46px; height: 32px;
+                enabled: !root.busy;
+                clicked => { root.dismiss(); }
+            }
+        }
+
+        if root.modal-visible: Rectangle {
+            x: 1px; y: 33px; width: parent.width - 2px; height: parent.height - 34px;
+            background: #00000045;
+            TouchArea { }
+            Rectangle {
+                x: (parent.width - 410px) / 2; y: (parent.height - 220px) / 2;
+                width: 410px; height: 220px;
+                background: SetupTheme.background;
+                border-width: 1px; border-color: SetupTheme.line; border-radius: 8px;
+                Text {
+                    x: 24px; y: 24px; width: parent.width - 48px;
+                    text: root.modal-title; color: SetupTheme.foreground;
+                    font-size: 17px; font-weight: 600;
+                }
+                Text {
+                    x: 24px; y: 60px; width: parent.width - 48px; height: 45px;
+                    text: root.modal-description; color: SetupTheme.secondary;
+                    wrap: word-wrap;
+                }
+                Text {
+                    x: 24px; y: 113px; width: parent.width - 48px; height: 35px;
+                    text: root.modal-detail; color: SetupTheme.muted;
+                    font-size: 11px; wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    x: 24px; y: parent.height - 56px; width: parent.width - 48px; height: 32px;
+                    alignment: end; spacing: 8px;
+                    SetupButton { text: root.modal-cancel-label; clicked => { root.modal-cancel(); } }
+                    SetupButton { text: root.modal-primary-label; primary: true; clicked => { root.modal-primary(); } }
+                }
+            }
+        }
+    }
+}

@@ -64,9 +64,8 @@ function ipcProxy(): Plugin {
 
 /**
  * 主程序的组件样式按「@sleepy-doll/ui/styles.css 排在最后」覆盖同权重的组件样式。
- * 两个窗口共用这份样式后它落进共享 chunk，先于入口 chunk 加载，覆盖关系会反过来。
- * 这里把主窗口的共享样式移回入口样式之后；安装窗口不用动，它的样式本来就压在
- * 共享基础样式上面。
+ * 主窗口与托盘共用这份样式后它落进共享 chunk，先于入口 chunk 加载，覆盖关系会反过来。
+ * 这里把主窗口的共享样式移回入口样式之后。
  */
 function designCssLast(): Plugin {
   const own = (chunk: unknown) =>
@@ -123,10 +122,9 @@ export default defineConfig({
     outDir: "../target/ui",
     emptyOutDir: true,
     rolldownOptions: {
-      // 主窗口、安装程序和主题一致的托盘菜单使用各自入口。
+      // 主窗口与主题一致的托盘菜单使用各自入口。
       input: {
         index: fileURLToPath(new URL("./web/index.html", import.meta.url)),
-        setup: fileURLToPath(new URL("./web/setup.html", import.meta.url)),
         tray: fileURLToPath(new URL("./web/tray.html", import.meta.url)),
       },
     },

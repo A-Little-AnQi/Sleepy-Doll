@@ -27,7 +27,7 @@ export function clientProtectionPlugin() {
     const reachable=(entry)=>{const seen=new Set();const visit=name=>{if(seen.has(name))return;seen.add(name);const c=bundle[name];if(c?.type==='chunk')for(const imported of [...c.imports,...c.dynamicImports])visit(imported);};if(entry)visit(entry.fileName);return seen;};
     const chunks=Object.values(bundle).filter(c=>c.type==='chunk');
     const client=reachable(chunks.find(c=>c.isEntry && /\/web\/index\.html$/.test(c.facadeModuleId?.replaceAll('\\','/')??'')));
-    const excluded=new Set(chunks.filter(c=>c.isEntry && /\/web\/(?:setup|tray)\.html$/.test(c.facadeModuleId?.replaceAll('\\','/')??'')).flatMap(c=>[...reachable(c)]));
+    const excluded=new Set(chunks.filter(c=>c.isEntry && /\/web\/tray\.html$/.test(c.facadeModuleId?.replaceAll('\\','/')??'')).flatMap(c=>[...reachable(c)]));
     const report=[];
     for(const c of chunks) {
       const before=hash(c.code), protect=client.has(c.fileName)&&!excluded.has(c.fileName);
@@ -43,10 +43,10 @@ export function clientProtectionPlugin() {
       report.push({file:c.fileName,protected:protect,excluded:excluded.has(c.fileName),before,after:hash(c.code)});
     }
     if(!report.some(c=>c.protected&&c.before!==c.after))throw Error('No client entry was protected');
-    if(report.some(c=>c.excluded&&c.before!==c.after))throw Error('Installer/tray JavaScript changed');
+    if(report.some(c=>c.excluded&&c.before!==c.after))throw Error('Tray JavaScript changed');
     await mkdir(scratch,{recursive:true});
     await writeFile(join(scratch,'javascript-report.json'),JSON.stringify(report,null,2));
-    console.log(`Protected ${report.filter(c=>c.protected).length} client chunks; installer/tray dependency graph retained`);
+    console.log(`Protected ${report.filter(c=>c.protected).length} client chunks; tray dependency graph retained`);
   }};
 }
 export async function managed() {

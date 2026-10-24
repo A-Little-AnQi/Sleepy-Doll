@@ -40,13 +40,31 @@
 
 GitHub Actions Secrets：`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`CLOUDFLARE_API_TOKEN`、`GA_MEASUREMENT_ID`、`GA_API_SECRET`。凭据不进入源码、安装包或发布清单。
 
+## Windows 自签名
+
+本机首次执行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 -Action Initialize`，创建 RSA 3072 / SHA-256 代码签名证书。证书固定保存在当前用户 Windows 证书库 `Cert:\CurrentUser\My`，私钥不可导出，不写入仓库、安装载荷或发布清单。重复执行复用原证书；公开证书导出到 `target/release/Sleepy-Doll.cer`，仅含公钥。不要删除或重建证书来处理普通构建失败。
+
+之后 `npm run dist` 自动复用名为 `Sleepy Doll Code Signing` 的证书：先签名暂存的主程序及桥 EXE/DLL，再压缩进安装载荷；最后签名安装器，再计算 SHA-256、体积与本地未发布清单。签名采用 DigiCert RFC 3161 时间戳，网络失败、证书失效、签名缺失或摘要不匹配均中止组包。构建缓存中的主程序与桥保持原样。`-Action Verify -Path <target 内的 EXE/DLL>` 可复核文件签名与当前签名身份。
+
+本机回归入口：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign-windows.test.ps1`。它使用已构建的桥 EXE 验证签名、时间戳、篡改拒绝、无签名拒绝、指定证书失败和源码范围拒绝；临时文件只放在 `target/.tmp/windows-signing/` 并在结束时清理，不创建证书或安装可信根。
+
+可以通过 `SLEEPY_DOLL_SIGN_CERT_SHA1` 指定当前用户证书库中的其他代码签名证书；变量中的 SHA-1 只是证书指纹，文件摘要仍是 SHA-256。指定了无效证书时禁止回退为无签名包。未配置签名证书的机器（包括目前的 CI）会明确打印无签名构建提示。CI 需要单独配置可用于该 runner 的固定签名身份；本机不可导出私钥不会自动上传，也不在 CI 每轮生成新身份。
+
+自签名不等于受 Windows 公共信任：本流程不自动安装可信根、不修改目标机器的信任设置。未单独信任公钥的电脑上可能显示未知发布者／信任警告；签名脚本只放行 Windows 校验的成功结果或自签名证书的“不受信任根”错误 `0x800B0109`，其余错误全部拒绝。后者只能说明签名完整性通过，不能宣称系统已信任。PowerShell 可能把该信任错误显示为 `NotTrusted` 或 `UnknownError`，不能只凭这个概括状态判断签名。需要目标电脑信任时，先通过独立渠道核对证书指纹，再由使用者决定是否导入。自签名本身也不建立 SmartScreen 信誉。参见 [Microsoft SignTool 文档](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool) 与 [证书信任说明](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_signing)。
+
+本地重签会改变安装包哈希，必须连同校验文件与未发布清单一起重新生成；不能直接覆盖线上同版本资产，线上替换仍遵守前述同版热修复流程。
+
 ## 客户端行为
+
+安装器使用 Slint 原生界面，启动时请求管理员权限并居中显示。缺少 WebView2 或版本低于要求时，调用微软 Evergreen 安装程序进行整机安装或升级，完成后重新检测；下载失败页提供官方下载链接与重试。安装器本身不依赖 WebView2。
 
 桌面程序启动后后台检查更新，手动检查与通道选择位于设置页「关于」标签（UI 入口：`web/src/pages/settings/AboutPage.tsx` + `web/src/app/ReleaseSettings.tsx`）。只接受 HTTPS 固定下载域名、正确版本路径和 SHA-256。下载安装包位于用户目录的 `data/updates/`；安装前再次校验。
 
 当前版本同时显示构建的正式／测试属性，与用户选择的更新通道分开。新安装默认使用构建自身的通道，已有用户保存的通道选择保留。正式通道只读取 `channels/stable.json`，测试通道只读取 `channels/test.json`；两者不静默互换。官网的主下载选择正式版，测试版使用独立入口，正式版缺失时不会悄悄改下载测试包。
 
 安装更新要求当前程序位于注册安装目录，且没有正在执行的任务。安装器等待原进程退出，再调用原位置更新逻辑并重新启动。未登记的便携目录通过安装器更新。配置、会话和原有快捷方式保留。
+
+同版本仍按原位置更新处理。卸载删除程序及安装目录中的用户数据，同时清理旧版 `bridge/user/` 和漫游回退目录，不提供保留数据选项。
 
 安装缓存位于安装器所在目录的 `.cache/setup/`。验证工具的临时目录必须指向项目 `target/` 下的任务目录。
 

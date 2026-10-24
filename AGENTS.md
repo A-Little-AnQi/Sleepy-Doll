@@ -12,8 +12,8 @@
 
 | 位置 | 唯一职责与限制 |
 | --- | --- |
-| `src/` | Rust 桌面壳、Agent、持久化、桥适配与安装引擎源码。 |
-| `web/` | 主程序、安装器、托盘的 React 页面与应用层样式。生产构建写入 `target/ui/`，不写 `web/dist/`。 |
+| `src/` | Rust 桌面壳、Agent、持久化、桥适配、安装引擎及 Slint 原生安装界面源码。 |
+| `web/` | 主程序、托盘的 React 页面与应用层样式。生产构建写入 `target/ui/`，不写 `web/dist/`。 |
 | `packages/` | 仓库内共享模块，如 `ui/`、`ui-android/`；禁止复制一套组件实现到其他页面目录。 |
 | `bgi-bridge/` | native、managed 桥、恢复工具、宿主资料生成器及其正式测试输入。构建输出进入 `target/bridge/`、`target/dotnet/`。 |
 | `plugins/` | 正式插件、技能和领域资源；禁止存放运行后的缓存或用户配置。 |

@@ -28,7 +28,7 @@ pub fn cleanup_after_exit(removals: &[Removal]) -> Result<(), super::Error> {
     Ok(())
 }
 
-fn validate(removals: &[Removal]) -> Result<(), super::Error> {
+pub(super) fn validate(removals: &[Removal]) -> Result<(), super::Error> {
     use std::path::Component;
     for removal in removals {
         let path = removal.path();
@@ -258,9 +258,8 @@ mod tests {
         )
         .unwrap();
         let archive = crate::setup::Archive::new(b"[]", vec![]).unwrap();
-        assert!(crate::setup::uninstall::remove_files(&archive, &root, false, None).is_empty());
-        let mut child =
-            spawn_cleanup(&crate::setup::uninstall::cleanup_plan(&root, false), 0).unwrap();
+        assert!(crate::setup::uninstall::remove_files(&archive, &root, None).is_empty());
+        let mut child = spawn_cleanup(&crate::setup::uninstall::cleanup_plan(&root), 0).unwrap();
         wait(&mut child);
         assert!(
             !root.exists(),
@@ -269,12 +268,17 @@ mod tests {
     }
 
     #[test]
-    fn uninstall_cleanup_preserves_selected_user_data_but_never_caches() {
-        let root = fixture("keep-user-install");
+    fn uninstall_cleanup_removes_user_data_and_all_runtime_caches() {
+        let root = fixture("remove-user-install");
+        let fallback = fixture("remove-user-roaming");
         fs::create_dir_all(root.join("user")).unwrap();
+        fs::create_dir_all(root.join("bridge/user")).unwrap();
+        fs::create_dir_all(fallback.join("user")).unwrap();
         fs::create_dir_all(root.join(".cache/setup/webview2")).unwrap();
         fs::create_dir_all(root.join("bridge-cache/hash")).unwrap();
-        fs::write(root.join("user/config.json"), b"preserved config").unwrap();
+        fs::write(root.join("user/config.json"), b"local config").unwrap();
+        fs::write(root.join("bridge/user/config.json"), b"legacy config").unwrap();
+        fs::write(fallback.join("user/config.json"), b"roaming config").unwrap();
         fs::write(root.join("uninstall.exe"), b"fixture").unwrap();
         fs::write(root.join(".cache/setup/webview2/cache"), b"cache").unwrap();
         fs::write(
@@ -283,19 +287,15 @@ mod tests {
         )
         .unwrap();
         let archive = crate::setup::Archive::new(b"[]", vec![]).unwrap();
-        assert!(crate::setup::uninstall::remove_files(&archive, &root, false, None).is_empty());
-        let mut child =
-            spawn_cleanup(&crate::setup::uninstall::cleanup_plan(&root, false), 0).unwrap();
-        wait(&mut child);
-        assert_eq!(
-            fs::read(root.join("user/config.json")).unwrap(),
-            b"preserved config"
-        );
-        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
-        // Selecting data removal subsequently removes the retained directory, too.
-        assert!(crate::setup::uninstall::remove_files(&archive, &root, true, None).is_empty());
-        let mut child =
-            spawn_cleanup(&crate::setup::uninstall::cleanup_plan(&root, true), 0).unwrap();
+        assert!(crate::setup::uninstall::remove_files(&archive, &root, Some(&fallback)).is_empty());
+        assert!(!root.join("user").exists());
+        assert!(!root.join("bridge/user").exists());
+        assert!(!fallback.exists());
+        assert!(matches!(
+            crate::setup::uninstall::cleanup_plan(&root).as_slice(),
+            [Removal::Tree(path)] if path == &root
+        ));
+        let mut child = spawn_cleanup(&crate::setup::uninstall::cleanup_plan(&root), 0).unwrap();
         wait(&mut child);
         assert!(!root.exists());
     }

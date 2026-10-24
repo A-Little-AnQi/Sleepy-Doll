@@ -6,7 +6,7 @@
 
 ## 构建与运行
 
-Windows 构建需要 Rust stable、Node.js 22.18+、.NET 8 SDK 和 Visual Studio 2022 C++ Build Tools。桌面运行需要 WebView2 Runtime。
+Windows 构建需要 Rust stable、Node.js 22.18+、.NET 8 SDK 和 Visual Studio 2022 C++ Build Tools。主程序运行需要 WebView2 Runtime；安装器使用 Slint 原生界面，可在缺少 WebView2 时启动并补装运行时。
 
 ```powershell
 npm install
@@ -19,14 +19,14 @@ Web 与安卓组件库作为仓库内部模块维护。Moduloom 预览工具是�
 
 安装后启动 Sleepy Doll，在设置中添加模型，并在 BetterGI 页面连接工具。程序启动时请求管理员权限。默认安装目录为固定 D 盘上的 `D:\Sleepy Doll`；没有固定 D 盘时使用 `%LOCALAPPDATA%\Programs\Sleepy Doll`。
 
-配置、模型密钥、会话和日志位于安装目录的 `user/`。覆盖构建与安装保留该目录，卸载默认保留数据。
+配置、模型密钥、会话和日志位于安装目录的 `user/`。覆盖构建、安装与更新保留该目录，卸载删除程序及用户数据。
 
 ## 工程结构
 
 | 路径 | 内容 |
 | --- | --- |
-| `src/` | Rust 桌面壳、Agent 运行时与安装引擎 |
-| `web/` | React 主程序、安装器与托盘界面 |
+| `src/` | Rust 桌面壳、Agent 运行时、安装引擎与 Slint 安装界面 |
+| `web/` | React 主程序与托盘界面 |
 | `packages/ui/` | 主程序与 Frame 共用的内部组件包 |
 | `frame/` | Loom 组件清单、渲染与主题适配 |
 | `plugins/` | 领域技能与工具接入清单 |

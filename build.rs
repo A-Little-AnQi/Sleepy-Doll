@@ -70,13 +70,38 @@ fn main() {
         )
         .manifest_required()
         .expect("compiling assets/sleepy-doll.rc");
+    }
+    #[cfg(feature = "setup")]
+    build_setup();
+}
+
+#[cfg(feature = "setup")]
+fn build_setup() {
+    let root = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    println!("cargo:rerun-if-changed=src/setup/ui.slint");
+    println!("cargo:rerun-if-changed=packages/ui/src/brand/icon.svg");
+    let original = std::fs::read_to_string(root.join("packages/ui/src/brand/icon.svg")).unwrap();
+    let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    let svg = original
+        .replace("currentColor", "#e9e9e9")
+        .replace("var(--gold, #c9a227)", "#e4bc4a")
+        .replace("var(--gold-bright, #f0d36a)", "#f6e19a");
+    std::fs::write(out.join("setup-brand-dark.svg"), svg).unwrap();
+    slint_build::compile(root.join("src/setup/ui.slint")).expect("compiling native installer UI");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        println!("cargo:rustc-link-arg-bin=sleepy-doll-setup=/MANIFEST:EMBED");
+        println!(
+            "cargo:rustc-link-arg-bin=sleepy-doll-setup=/MANIFESTINPUT:{}",
+            root.join("assets/sleepy-doll.manifest").display()
+        );
+        println!("cargo:rustc-link-arg-bin=sleepy-doll-setup=/MANIFESTUAC:NO");
         embed_resource::compile_for(
             root.join("assets/sleepy-doll-setup.rc"),
             ["sleepy-doll-setup"],
             embed_resource::NONE,
         )
         .manifest_required()
-        .expect("compiling assets/sleepy-doll-setup.rc");
+        .expect("compiling installer icon");
     }
 }
 

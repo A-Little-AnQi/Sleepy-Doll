@@ -18,7 +18,7 @@ export default {
     {
       key: "sleepy-doll",
       name: "Sleepy Doll UI",
-      description: "主程序、安装器和托盘共用的内部组件包。",
+      description: "主程序和托盘共用的内部组件包。",
       catalog: "./frame/catalog.ts",
       renderer: "./frame/renderer.tsx",
       packages: ["@sleepy-doll/ui"],

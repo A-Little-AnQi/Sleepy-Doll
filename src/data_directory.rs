@@ -12,6 +12,21 @@ pub fn path(user_directory: &Path) -> PathBuf {
     user_directory.join(NAME)
 }
 
+/// 为主程序及其子进程使用独立于安装缓存的临时目录。
+///
+/// # Safety
+/// 必须在启动后台线程、插件及数据库连接之前调用。
+/// 调用前先完成旧数据目录迁移，避免提前创建 data/ 阻塞迁移。
+pub unsafe fn configure_process_temp(user_directory: &Path) -> Result<PathBuf> {
+    let temporary = path(user_directory).join("tmp");
+    fs::create_dir_all(&temporary)?;
+    let temporary = ordinary_path(&fs::canonicalize(temporary)?);
+    for key in ["TEMP", "TMP", "TMPDIR"] {
+        unsafe { std::env::set_var(key, &temporary) };
+    }
+    Ok(temporary)
+}
+
 pub fn relocated_path(user_directory: &Path, original: &Path) -> PathBuf {
     relative_path(&user_directory.join(LEGACY_NAME), original)
         .map(|relative| path(user_directory).join(relative))

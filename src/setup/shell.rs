@@ -15,16 +15,11 @@ mod platform {
 
     use windows_sys::{
         Win32::{
-            Foundation::HWND,
             System::Com::{
                 CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
                 CoTaskMemFree, CoUninitialize,
             },
-            UI::Shell::{
-                BIF_EDITBOX, BIF_NEWDIALOGSTYLE, BIF_RETURNONLYFSDIRS, BROWSEINFOW,
-                FOLDERID_Desktop, FOLDERID_Programs, SHBrowseForFolderW, SHGetKnownFolderPath,
-                SHGetPathFromIDListW, ShellExecuteW,
-            },
+            UI::Shell::{FOLDERID_Desktop, FOLDERID_Programs, SHGetKnownFolderPath, ShellExecuteW},
             UI::WindowsAndMessaging::SW_SHOWNORMAL,
         },
         core::GUID,
@@ -205,34 +200,56 @@ mod platform {
     }
 
     /// 系统文件夹选择框。用户取消时返回 `None`。
-    pub fn browse_for_directory(owner: isize, title: &str) -> Result<Option<PathBuf>, Error> {
+    pub fn browse_for_directory(
+        owner: isize,
+        title: &str,
+        initial: &Path,
+    ) -> Result<Option<PathBuf>, Error> {
         let _apartment = Apartment::join()?;
-        let title = wide(OsStr::new(title));
-        // pszDisplayName 由系统填写，缓冲区至少要 MAX_PATH。
-        let mut display = [0u16; 260];
-        let info = BROWSEINFOW {
-            hwndOwner: owner as HWND,
-            pidlRoot: ptr::null_mut(),
-            pszDisplayName: display.as_mut_ptr(),
-            lpszTitle: title.as_ptr(),
-            ulFlags: BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_EDITBOX,
-            lpfn: None,
-            lParam: 0,
-            iImage: 0,
+        use windows::{
+            Win32::{
+                Foundation::HWND,
+                System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree},
+                UI::Shell::{
+                    FOS_FORCEFILESYSTEM, FOS_NOCHANGEDIR, FOS_PATHMUSTEXIST, FOS_PICKFOLDERS,
+                    FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName,
+                    SIGDN_FILESYSPATH,
+                },
+            },
+            core::HSTRING,
         };
-        let pidl = unsafe { SHBrowseForFolderW(&info) };
-        if pidl.is_null() {
-            return Ok(None);
-        }
-        let mut buffer = [0u16; 260];
-        let found = unsafe { SHGetPathFromIDListW(pidl, buffer.as_mut_ptr()) } != 0;
-        unsafe { CoTaskMemFree(pidl.cast()) };
-        if !found {
-            return Ok(None);
-        }
-        Ok(Some(unsafe { wide_to_path(buffer.as_ptr()) }))
+        let result = (|| -> windows::core::Result<Option<PathBuf>> {
+            unsafe {
+                let dialog: IFileOpenDialog =
+                    CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
+                dialog.SetOptions(
+                    dialog.GetOptions()?
+                        | FOS_PICKFOLDERS
+                        | FOS_FORCEFILESYSTEM
+                        | FOS_PATHMUSTEXIST
+                        | FOS_NOCHANGEDIR,
+                )?;
+                dialog.SetTitle(&HSTRING::from(title))?;
+                dialog.SetOkButtonLabel(&HSTRING::from("选择文件夹"))?;
+                if let Some(start) = initial.ancestors().find(|p| p.is_dir()) {
+                    let item: IShellItem =
+                        SHCreateItemFromParsingName(&HSTRING::from(start.as_os_str()), None)?;
+                    dialog.SetFolder(&item)?;
+                }
+                if let Err(error) = dialog.Show(Some(HWND(owner as *mut c_void))) {
+                    if error.code().0 as u32 == 0x800704c7 {
+                        return Ok(None);
+                    }
+                    return Err(error);
+                }
+                let name = dialog.GetResult()?.GetDisplayName(SIGDN_FILESYSPATH)?;
+                let text = name.to_string();
+                CoTaskMemFree(Some(name.0.cast()));
+                Ok(Some(PathBuf::from(text?)))
+            }
+        })();
+        result.map_err(|e| Error::message(format!("无法选择安装文件夹：{e}")))
     }
-
     fn known_folder(id: &GUID) -> Option<PathBuf> {
         let _apartment = Apartment::join().ok()?;
         let mut raw: *mut u16 = ptr::null_mut();
@@ -284,7 +301,11 @@ mod platform {
         None
     }
 
-    pub fn browse_for_directory(_owner: isize, _title: &str) -> Result<Option<PathBuf>, Error> {
+    pub fn browse_for_directory(
+        _owner: isize,
+        _title: &str,
+        _initial: &Path,
+    ) -> Result<Option<PathBuf>, Error> {
         Ok(None)
     }
 }

@@ -22,9 +22,11 @@
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
+  app-region: drag;
 }
 
 .title-bar-controls {
+  app-region: no-drag;
   display: flex;
   height: 100%;
   margin-left: auto;
@@ -66,6 +68,7 @@
 }
 
 .window-resize-handle {
+  app-region: no-drag;
   position: fixed;
   z-index: 301;
   touch-action: none;

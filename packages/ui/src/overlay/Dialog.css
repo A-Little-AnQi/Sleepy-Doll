@@ -1,6 +1,7 @@
 .sd-dialog-layer {
   position: fixed;
   inset: 0;
+  top: var(--title-bar-height, 0px);
   z-index: 600;
   display: grid;
   place-items: center;

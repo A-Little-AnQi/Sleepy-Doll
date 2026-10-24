@@ -194,6 +194,78 @@ fn main() {
     }
 }
 
+/// 在任何 WebView 和后台任务创建之前，交给不依赖 WebView 的安装器修复环境。
+#[cfg(target_os = "windows")]
+fn webview_runtime_ready() -> bool {
+    use std::{os::windows::process::CommandExt, process::Command, ptr};
+    use windows_sys::Win32::{
+        System::Threading::CREATE_NO_WINDOW,
+        UI::{
+            Shell::ShellExecuteW,
+            WindowsAndMessaging::{IDYES, MB_ICONWARNING, MB_YESNO, MessageBoxW, SW_SHOWNORMAL},
+        },
+    };
+
+    log::info!(
+        "WebView2 运行时：{:?}，最低版本 {}",
+        sleepy_doll::webview_runtime::installed_version(),
+        sleepy_doll::webview_runtime::MINIMUM_VERSION,
+    );
+    let Some(message) = sleepy_doll::webview_runtime::requirement_message() else {
+        return true;
+    };
+    log::warn!("{message}");
+    if let Ok(executable) = std::env::current_exe()
+        && let Some(directory) = executable.parent()
+    {
+        let installer = directory.join(sleepy_doll::setup::UNINSTALLER);
+        if installer.is_file() {
+            match Command::new(&installer)
+                .arg("--repair-runtime")
+                .current_dir(directory)
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+            {
+                Ok(_) => return false,
+                Err(error) => log::error!("无法启动运行环境修复：{error}"),
+            }
+        }
+    }
+    let title: Vec<u16> = "Sleepy Doll".encode_utf16().chain(Some(0)).collect();
+    let prompt: Vec<u16> = format!("{message}\n\n打开 WebView2 官方下载页？")
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    if unsafe {
+        MessageBoxW(
+            ptr::null_mut(),
+            prompt.as_ptr(),
+            title.as_ptr(),
+            MB_ICONWARNING | MB_YESNO,
+        )
+    } == IDYES
+    {
+        let url: Vec<u16> = sleepy_doll::webview_runtime::DOWNLOAD_PAGE
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        let result = unsafe {
+            ShellExecuteW(
+                ptr::null_mut(),
+                windows_sys::core::w!("open"),
+                url.as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if result as isize <= 32 {
+            log::error!("无法打开 WebView2 官方下载页（错误码 {}）", result as isize);
+        }
+    }
+    false
+}
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     if sleepy_doll::bridge::mcp::run_stdio_if_requested()? {
         return Ok(());
@@ -215,6 +287,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .parent()
         .ok_or("配置路径没有所在目录，无法定位用户目录")?
         .to_path_buf();
+    let startup_config = sleepy_doll::AppConfig::load(&config_path)?;
+    // 配置加载已完成旧目录迁移，此时尚未启动后台线程和数据库连接。
+    let temporary =
+        unsafe { sleepy_doll::data_directory::configure_process_temp(&user_directory)? };
     if let Err(error) = logging::init(&user_directory) {
         eprintln!("无法写入日志（{error}），本次运行的记录只有标准错误。");
     }
@@ -223,12 +299,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         env!("CARGO_PKG_VERSION"),
         config_path.display()
     );
+    log::info!("程序临时目录：{}", temporary.display());
+    #[cfg(target_os = "windows")]
+    if !webview_runtime_ready() {
+        return Ok(());
+    }
     let controller = Arc::new(AppController::load(&config_path)?);
     {
         let distribution = controller.distribution.clone();
         thread::spawn(move || distribution.startup());
     }
-    let startup_config = sleepy_doll::AppConfig::load(&config_path)?;
     if startup_config.host_plugin_enabled()
         && (startup_config.bridge.auto_start
             || (startup_config.bridge.enabled && sleepy_doll::bridge::control::is_host_running()))
@@ -1331,7 +1411,7 @@ fn dispatch_ipc(
                 return;
             }
             "window.drag" => {
-                // 拖动要在指针还按着的时候进入系统移动循环，绕行事件循环会慢半拍。
+                // 窗口模块投递原生消息，确保 WebView2 回调先返回。
                 #[cfg(target_os = "windows")]
                 window_chrome::begin_system_drag(hwnd);
                 return;

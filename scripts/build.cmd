@@ -6,6 +6,7 @@ set "ROOT=%CD%"
 set "TEMP=%ROOT%\target\tmp"
 set "TMP=%TEMP%"
 set "TMPDIR=%TEMP%"
+set "CARGO_BUILD_BUILD_DIR=%ROOT%\target"
 set "NODE_DISABLE_COMPILE_CACHE=1"
 set "npm_config_logs_max=0"
 if not exist "%TEMP%" mkdir "%TEMP%"
@@ -44,7 +45,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\package-windows.ps1
 if errorlevel 1 goto failed
 powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\pack-payload.ps1"
 if errorlevel 1 goto failed
-"%CARGO%" build --release --features setup --bin sleepy-doll-setup
+"%CARGO%" build --release --no-default-features --features setup --bin sleepy-doll-setup
 if errorlevel 1 goto failed
 powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\package-windows.ps1" -Action Complete
 if errorlevel 1 goto failed

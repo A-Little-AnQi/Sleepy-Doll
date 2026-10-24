@@ -36,7 +36,10 @@ mod platform {
         // 图标取主程序资源里的第一个。
         key.set_text("DisplayIcon", &format!("\"{}\",0", executable.display()))?;
         // 结尾保留分隔符：控制面板把它当目录用。
-        let location = format!("{}\\", directory.display());
+        let location = format!(
+            "{}\\",
+            crate::setup::normalize(&directory.to_string_lossy())
+        );
         key.set_text("InstallLocation", &location)?;
         // 路径可能带空格，必须带引号。
         key.set_text("UninstallString", &format!("\"{}\"", uninstaller.display()))?;
@@ -61,7 +64,7 @@ mod platform {
     pub fn install_location() -> Option<PathBuf> {
         read_text("InstallLocation")
             .filter(|text| !text.is_empty())
-            .map(PathBuf::from)
+            .map(|text| PathBuf::from(crate::setup::normalize(&text)))
     }
 
     pub fn installed_version() -> Option<String> {
