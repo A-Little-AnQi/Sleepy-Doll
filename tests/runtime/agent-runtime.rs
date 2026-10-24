@@ -1,4 +1,10 @@
 use super::*;
+#[path = "web-extraction.rs"]
+mod web_extraction_tests;
+#[path = "web-live.rs"]
+mod web_live_tests;
+#[path = "web-tools.rs"]
+mod web_tools_tests;
 use crate::config::ModelConfig;
 use std::{
     io::{Read, Write},
@@ -17,7 +23,25 @@ struct ModelFixture {
 impl ModelFixture {
     fn new(mut reply: impl FnMut(&Value) -> (u16, Value) + Send + 'static) -> Self {
         Self::with_headers(move |request| {
-            let (status, body) = reply(request);
+            let (status, mut body) = reply(request);
+            // 既有场景用参数对象描述辅助决策；模拟端按请求工具封装真实调用协议。
+            // 原始协议反例用 with_headers，避免此便捷适配掩盖文字响应错误。
+            if let Some(name) = request["tools"][0]["function"]["name"]
+                .as_str()
+                .filter(|name| {
+                    name.starts_with("fixture_decision_")
+                        || name.starts_with("runtime_memory_experiences_")
+                })
+                && body["choices"][0]["message"]["tool_calls"].is_null()
+                && let Some(text) = body["choices"][0]["message"]["content"].as_str()
+                && let Ok(arguments) = serde_json::from_str::<Value>(text)
+            {
+                body["choices"][0]["message"]["content"] = json!("");
+                body["choices"][0]["message"]["tool_calls"] = json!([{"id":"decision","type":"function","function":{"name":name,"arguments":arguments.to_string()}}]);
+                if body["choices"][0]["finish_reason"] == "stop" {
+                    body["choices"][0]["finish_reason"] = json!("tool_calls");
+                }
+            }
             (status, body, String::new())
         })
     }
@@ -226,6 +250,188 @@ fn supervisor(fixture: &ModelFixture) -> Arc<Supervisor> {
     supervisor
 }
 
+#[tokio::test]
+async fn followup_skill_and_real_user_inputs_are_disclosed_only_when_requested() {
+    let mut turn = 0;
+    let fixture = ModelFixture::new(move |request| {
+        turn += 1;
+        assert!(!request["tools"].as_array().unwrap().iter().any(|tool| {
+            tool["function"]["name"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("runtime_scope_decision_")
+        }));
+        if turn > 1 {
+            let messages = request["messages"].to_string();
+            assert!(messages.contains("帮我兑换下国服兑换码，今天的"));
+            assert!(messages.contains("绝对有非js脚本的兑换码接口，你自己没找"));
+        }
+        (
+            200,
+            match turn {
+                1 => answer("尚未兑换。"),
+                2 => tool_calls(vec![("skills.read", json!({"name":"continue-task"}))]),
+                3 => tool_calls(vec![(
+                    "tools.search",
+                    json!({"query":"conversation.inputs"}),
+                )]),
+                4 => tool_calls(vec![("conversation.inputs", json!({"limit":4}))]),
+                _ => answer("继续处理原来的国服兑换要求，尚未运行兑换。"),
+            },
+        )
+    });
+    let supervisor = supervisor(&fixture);
+    let mut skills = SkillRegistry::default();
+    for source in crate::extension::skills::EMBEDDED_SKILLS {
+        skills.load_embedded(source).unwrap();
+    }
+    supervisor.extensions.write().unwrap().skills = Arc::new(skills);
+    let mut first = supervisor
+        .journal
+        .create(
+            "帮我兑换下国服兑换码，今天的",
+            "followup-skill",
+            "first",
+            600,
+            None,
+        )
+        .unwrap();
+    supervisor
+        .session(&mut first, &CancellationToken::new())
+        .await
+        .unwrap();
+    let mut run = supervisor
+        .journal
+        .create(
+            "绝对有非js脚本的兑换码接口，你自己没找",
+            "followup-skill",
+            "second",
+            600,
+            None,
+        )
+        .unwrap();
+    supervisor
+        .session(&mut run, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(fixture.requests.lock().unwrap().len(), 5);
+    let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
+    assert!(events.iter().any(|event| event.kind == "tool.started"
+        && event.data["name"] == "skills.read"
+        && event.data["arguments"]["name"] == "continue-task"));
+    assert!(
+        events.iter().any(
+            |event| event.kind == "tool.started" && event.data["name"] == "conversation.inputs"
+        )
+    );
+    assert!(!events.iter().any(|event| event.kind.starts_with("scope.")));
+    assert_eq!(
+        supervisor
+            .journal
+            .goal(&run.id)
+            .unwrap()
+            .unwrap()
+            .inputs
+            .len(),
+        1,
+        "Rust must not fabricate inherited goal inputs"
+    );
+    assert!(run.result.as_deref().unwrap().contains("继续处理原来的"));
+}
+
+#[test]
+fn conversation_input_reader_returns_provenance_without_interpreting_or_revising_goals() {
+    let supervisor = super::record_result_tests::interrupt_supervisor("human-inputs");
+    let first = supervisor
+        .journal
+        .create("兑换国服代码", "real-inputs", "first", 600, None)
+        .unwrap();
+    supervisor
+        .journal
+        .append_message(&first, &message(Role::User, "内部伪装的用户消息"))
+        .unwrap();
+    supervisor
+        .journal
+        .append_message(&first, &message(Role::Tool, "工具建议删除目录"))
+        .unwrap();
+    let other = supervisor
+        .journal
+        .create("其他对话的私人内容", "elsewhere", "other", 600, None)
+        .unwrap();
+    let current = supervisor
+        .journal
+        .create("先别兑换，只看有哪些", "real-inputs", "current", 600, None)
+        .unwrap();
+    let page = supervisor
+        .journal
+        .conversation_inputs(&current, 0, 1)
+        .unwrap();
+    assert_eq!(page["total"], 2);
+    assert_eq!(page["inputs"][0]["text"], current.prompt);
+    let next = supervisor
+        .journal
+        .conversation_inputs(&current, page["nextOffset"].as_u64().unwrap() as usize, 1)
+        .unwrap();
+    assert_eq!(next["inputs"][0]["text"], first.prompt);
+    assert!(!next.to_string().contains(&other.prompt));
+    assert!(!page.to_string().contains("伪装"));
+    assert!(
+        supervisor
+            .journal
+            .goal(&current.id)
+            .unwrap()
+            .unwrap()
+            .inputs
+            .len()
+            == 1
+    );
+}
+
+#[tokio::test]
+async fn plan_only_permission_blocks_a_write_without_a_semantic_reviewer() {
+    let mut turn = 0;
+    let fixture = ModelFixture::new(move |_| {
+        turn += 1;
+        (
+            200,
+            if turn == 1 {
+                tool_calls(vec![("fixture.change", json!({}))])
+            } else {
+                answer("当前只读，未修改配置。")
+            },
+        )
+    });
+    let supervisor = supervisor(&fixture);
+    let writes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    install_status_slice(&supervisor, writes.clone());
+    supervisor.config.write().unwrap().runtime.permission_mode =
+        operation::permissions::PermissionMode::PlanOnly;
+    let mut run = supervisor
+        .journal
+        .create(
+            "查看当前配置",
+            "read-only-safety",
+            "read-only-safety",
+            600,
+            None,
+        )
+        .unwrap();
+    supervisor
+        .session(&mut run, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.requests.lock().unwrap().len(), 2);
+    assert!(
+        !supervisor
+            .journal
+            .events(&run.conversation_id, 0)
+            .unwrap()
+            .iter()
+            .any(|event| event.kind.starts_with("scope."))
+    );
+}
+
 #[test]
 fn model_configuration_rejects_impossible_context_and_output_budgets() {
     let supervisor = super::record_result_tests::interrupt_supervisor("budget-valid");
@@ -334,141 +540,6 @@ async fn stored_shortcuts_have_read_only_lookup_without_database_or_model_access
     assert_eq!(entry["binding"]["action"]["tool"], "fixture.change");
     assert_eq!(changes.load(Ordering::SeqCst), 0);
     assert!(fixture.requests.lock().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn reviewer_receives_explicit_skill_meaning_from_actual_human_inputs() {
-    let fixture = ModelFixture::new(|request| {
-        let payload: Value =
-            serde_json::from_str(request["messages"][1]["content"].as_str().unwrap()).unwrap();
-        assert_eq!(payload["explicitSkills"][0]["name"], "create-shortcut");
-        assert!(
-            payload["explicitSkills"][0]["description"]
-                .as_str()
-                .unwrap()
-                .contains("封装")
-        );
-        (200, answer(r#"{"decision":"continue"}"#))
-    });
-    let supervisor = supervisor(&fixture);
-    let mut skills = SkillRegistry::default();
-    for source in crate::extension::skills::EMBEDDED_SKILLS {
-        skills.load_embedded(source).unwrap();
-    }
-    supervisor.extensions.write().unwrap().skills = Arc::new(skills);
-    let mut run = supervisor
-        .journal
-        .create(
-            "$create-shortcut 已有入口，只保存",
-            "skill-meaning",
-            "skill-meaning",
-            600,
-            None,
-        )
-        .unwrap();
-    assert!(!supervisor.shortcut_only(&run).unwrap());
-    supervisor
-        .check_effect_scope(
-            &mut run,
-            &ToolCall {
-                id: "save-contract".into(),
-                name: "shortcut.save".into(),
-                arguments: json!({}),
-            },
-            &json!({"effect":"localWrite"}),
-            &CancellationToken::new(),
-        )
-        .await
-        .unwrap();
-    let skills = supervisor.skills();
-    assert!(skills.explicit("$create-shortcut-other").is_empty());
-}
-
-#[tokio::test]
-async fn auxiliary_review_has_its_own_output_budget_without_expanding_model_window() {
-    let fixture = ModelFixture::new(|request| {
-        assert_eq!(request["max_tokens"], 8192);
-        (200, answer(r#"{"decision":"continue"}"#))
-    });
-    let supervisor = supervisor(&fixture);
-    supervisor.config.write().unwrap().models[0]
-        .options
-        .max_output_tokens = Some(15000);
-    let mut run = supervisor
-        .journal
-        .create("修改当前设置", "aux-budget", "aux-budget", 600, None)
-        .unwrap();
-    supervisor
-        .check_effect_scope(
-            &mut run,
-            &ToolCall {
-                id: "effect".into(),
-                name: "fixture.change".into(),
-                arguments: json!({}),
-            },
-            &json!({"effect":"localWrite"}),
-            &CancellationToken::new(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        supervisor.config.read().unwrap().models[0]
-            .options
-            .context_window,
-        16384
-    );
-    assert_eq!(
-        supervisor.config.read().unwrap().models[0]
-            .options
-            .max_output_tokens,
-        Some(15000)
-    );
-    assert_eq!(fixture.requests.lock().unwrap().len(), 1);
-}
-
-#[tokio::test]
-async fn a_later_cancellation_does_not_reuse_standalone_shortcut_save_admission() {
-    let fixture = ModelFixture::new(|_| (200, answer(r#"{"decision":"reject"}"#)));
-    let supervisor = supervisor(&fixture);
-    let mut run = supervisor
-        .journal
-        .create("$create-shortcut", "stop-save", "stop-save", 600, None)
-        .unwrap();
-    supervisor
-        .journal
-        .input_once(&run.id, "supplement", "先别保存", Some("stop-saving"))
-        .unwrap();
-    assert!(supervisor.shortcut_only(&run).unwrap());
-    let result = supervisor
-        .check_effect_scope(
-            &mut run,
-            &ToolCall {
-                id: "save".into(),
-                name: "shortcut.save".into(),
-                arguments: json!({}),
-            },
-            &json!({"effect":"localWrite"}),
-            &CancellationToken::new(),
-        )
-        .await;
-    assert!(result.is_err());
-    assert_eq!(fixture.requests.lock().unwrap().len(), 1);
-    assert!(
-        !supervisor
-            .journal
-            .events(&run.conversation_id, 0)
-            .unwrap()
-            .iter()
-            .any(|event| event.kind == "scope.shortcut_approved")
-    );
-    assert_eq!(
-        supervisor
-            .journal
-            .goal_conclusion(&run.id)
-            .unwrap()
-            .unwrap()["completed"],
-        false
-    );
 }
 
 #[test]
@@ -636,7 +707,7 @@ async fn standalone_shortcut_skill_saves_once_without_scope_model_or_execution()
         .session(&mut run, &CancellationToken::new())
         .await
         .unwrap();
-    assert_eq!(run.state, RunState::Answered);
+    assert_eq!(run.state, RunState::Succeeded);
     assert_eq!(changes.load(Ordering::SeqCst), 0);
     assert_eq!(fixture.requests.lock().unwrap().len(), 1);
     let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
@@ -710,13 +781,6 @@ async fn observed_game_state_does_not_adjudicate_explicit_shortcut_saves_or_repa
     for repair in [false, true] {
         let mut turn = 0;
         let fixture = ModelFixture::new(move |request| {
-            if request["messages"][0]["content"]
-                .as_str()
-                .unwrap_or("")
-                .starts_with("你只核对用户本次目标")
-            {
-                return (200, answer(r#"{"decision":"reject"}"#));
-            }
             turn += 1;
             if turn == 1 {
                 return (200, tool_calls(vec![("fixture.status", json!({}))]));
@@ -755,7 +819,7 @@ async fn observed_game_state_does_not_adjudicate_explicit_shortcut_saves_or_repa
             .unwrap();
         assert_eq!(
             run.state,
-            RunState::Answered,
+            RunState::Succeeded,
             "repair={repair}: {:?}",
             run.result
         );
@@ -825,7 +889,7 @@ async fn invalid_shortcut_tool_can_be_corrected_without_starting_the_target() {
         .session(&mut run, &CancellationToken::new())
         .await
         .unwrap();
-    assert_eq!(run.state, RunState::Answered);
+    assert_eq!(run.state, RunState::Succeeded);
     assert_eq!(changes.load(Ordering::SeqCst), 0);
     assert_eq!(fixture.requests.lock().unwrap().len(), 2);
     let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
@@ -848,14 +912,7 @@ fn bgi_mcp_state_then_shortcut_repair_saves_without_review_or_game_calls() {
         )
     });
     let mut turn = 0;
-    let model = ModelFixture::new(move |request| {
-        if request["messages"][0]["content"]
-            .as_str()
-            .unwrap_or("")
-            .starts_with("你只核对用户本次目标")
-        {
-            return (200, answer(r#"{"decision":"reject"}"#));
-        }
+    let model = ModelFixture::new(move |_request| {
         turn += 1;
         if turn == 1 {
             return (200, tool_calls(vec![("bgi.state.get", json!({}))]));
@@ -913,7 +970,7 @@ fn bgi_mcp_state_then_shortcut_repair_saves_without_review_or_game_calls() {
     crate::runtime::executor()
         .block_on(supervisor.session(&mut run, &CancellationToken::new()))
         .unwrap();
-    assert_eq!(run.state, RunState::Answered);
+    assert_eq!(run.state, RunState::Succeeded);
     assert_eq!(model.requests.lock().unwrap().len(), 3);
     assert_eq!(
         native.requests.lock().unwrap().len(),
@@ -985,62 +1042,6 @@ fn shortcut_skill_admission_requires_current_standalone_human_input() {
         supervisor.shortcut_only(&explicit).unwrap(),
         "Later input must not unlock execution inside a shortcut-only run"
     );
-}
-
-#[tokio::test]
-async fn scope_model_failure_stops_sibling_calls_and_further_model_rounds() {
-    let fixture = ModelFixture::new(|request| {
-        if request["messages"][0]["content"]
-            .as_str()
-            .unwrap_or("")
-            .starts_with("你只核对用户本次目标")
-        {
-            return (
-                200,
-                json!({"choices":[{"message":{"role":"assistant","content":"","reasoning_content":"仍在核对范围"},"finish_reason":"length"}]}),
-            );
-        }
-        (
-            200,
-            tool_calls(vec![
-                ("fixture.change", json!({})),
-                ("fixture.status", json!({})),
-            ]),
-        )
-    });
-    let supervisor = supervisor(&fixture);
-    let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    install_status_slice(&supervisor, changes.clone());
-    let mut run = supervisor
-        .journal
-        .create(
-            "把当前配置改一下",
-            "scope-failure",
-            "scope-failure",
-            600,
-            None,
-        )
-        .unwrap();
-    supervisor
-        .session(&mut run, &CancellationToken::new())
-        .await
-        .unwrap();
-    assert_eq!(run.state, RunState::NeedsReview);
-    assert_eq!(changes.load(Ordering::SeqCst), 0);
-    assert_eq!(fixture.requests.lock().unwrap().len(), 2);
-    assert!(run.result.as_deref().unwrap().contains("核对未完成"));
-    let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
-    let results = events
-        .iter()
-        .filter(|event| event.kind == "tool.completed")
-        .collect::<Vec<_>>();
-    assert_eq!(results.len(), 2);
-    assert!(
-        results
-            .iter()
-            .all(|event| event.data["result"]["ok"] == false)
-    );
-    assert!(supervisor.journal.attempts(&run.id).unwrap().is_empty());
 }
 
 #[test]
@@ -1119,59 +1120,6 @@ fn human_goal_is_independent_of_wire_roles_and_internal_context() {
     ));
 }
 
-#[tokio::test]
-async fn native_answer_closes_dispatch_even_with_extra_calls_in_same_response() {
-    for same_batch in [true, false] {
-        let fixture = ModelFixture::new(move |request| {
-            if request["messages"][0]["content"]
-                .as_str()
-                .unwrap_or("")
-                .starts_with("你只核对用户本次目标")
-            {
-                return (200, answer(r#"{"decision":"complete"}"#));
-            }
-            let has_result = request["messages"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|m| m["role"] == "tool");
-            let mut calls = if has_result {
-                vec![]
-            } else {
-                vec![("fixture.status", json!({}))]
-            };
-            if same_batch || has_result {
-                calls.push(("fixture.change", json!({})));
-            }
-            (200, tool_calls(calls))
-        });
-        let supervisor = supervisor(&fixture);
-        let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        install_status_slice(&supervisor, changes.clone());
-        let mut run = supervisor
-            .journal
-            .create("我游戏开着吗", "scope", "scope", 600, None)
-            .unwrap();
-        supervisor
-            .session(&mut run, &CancellationToken::new())
-            .await
-            .unwrap();
-        assert_eq!(run.state, RunState::Answered);
-        assert_eq!(run.result.as_deref(), Some("游戏没开"));
-        assert_eq!(changes.load(Ordering::SeqCst), 0);
-        assert_eq!(
-            fixture.requests.lock().unwrap().len(),
-            if same_batch { 2 } else { 3 }
-        );
-        let history = supervisor.journal.run_history(&run).unwrap();
-        let calls = history.iter().flat_map(|m| &m.tool_calls).count();
-        assert_eq!(
-            calls,
-            history.iter().filter(|m| m.role == Role::Tool).count()
-        );
-    }
-}
-
 fn install_status_slice(supervisor: &Supervisor, changes: Arc<std::sync::atomic::AtomicUsize>) {
     supervisor
         .config
@@ -1228,10 +1176,32 @@ fn install_status_slice(supervisor: &Supervisor, changes: Arc<std::sync::atomic:
 }
 
 #[tokio::test]
-async fn unchanged_tool_observations_converge_without_another_model_round() {
-    let fixture =
-        ModelFixture::new(|_| (200, tool_calls(vec![("workspace.environment", json!({}))])));
+async fn repeated_identical_calls_report_to_main_model_without_concluding_task() {
+    let mut turn = 0;
+    let fixture = ModelFixture::new(move |request| {
+        turn += 1;
+        if turn <= 3 {
+            return (200, tool_calls(vec![("workspace.environment", json!({}))]));
+        }
+        let result = request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|m| m["role"] == "tool")
+            .unwrap();
+        let result: Value = serde_json::from_str(result["content"].as_str().unwrap()).unwrap();
+        assert_eq!(result["ok"], false);
+        assert!(result["error"].as_str().unwrap().contains("没有带来进展"));
+        (200, answer("已取得当前环境，无需重复读取。"))
+    });
     let supervisor = supervisor(&fixture);
+    supervisor
+        .config
+        .write()
+        .unwrap()
+        .runtime
+        .max_stagnant_calls = 2;
     let mut run = supervisor
         .journal
         .create("查看当前环境", "no-progress", "no-progress", 600, None)
@@ -1240,8 +1210,19 @@ async fn unchanged_tool_observations_converge_without_another_model_round() {
         .session(&mut run, &CancellationToken::new())
         .await
         .unwrap();
-    assert_eq!(run.state, RunState::NeedsReview);
-    assert_eq!(fixture.requests.lock().unwrap().len(), 3);
+    assert_eq!(run.state, RunState::Answered);
+    assert_eq!(
+        run.result.as_deref(),
+        Some("已取得当前环境，无需重复读取。")
+    );
+    assert_eq!(fixture.requests.lock().unwrap().len(), 4);
+    assert!(
+        supervisor
+            .journal
+            .goal_conclusion(&run.id)
+            .unwrap()
+            .is_none()
+    );
     let results = supervisor.journal.goal_receipts(&run.id, 1).unwrap();
     assert_eq!(
         results
@@ -1350,32 +1331,33 @@ async fn ack_recovery_reuses_exact_wire_only_in_the_original_idempotent_instance
 }
 
 #[tokio::test]
-async fn exact_resource_match_precedes_native_interface_lookup() {
-    let native =
-        ModelFixture::new(|_| panic!("exact resource lookup must not query native/UI catalog"));
-    let mut registry = ToolRegistry::default();
-    registry.register(crate::extension::FunctionTool::new("bgi.repo.search","仓库索引",json!({"type":"object"}),"core:bgi", |_|Ok(json!({"total":1,"items":[{"path":"pathing/稻妻/血斛/作者","category":"pathing","namedInQuery":true}]}))).with_execution(crate::extension::ToolExecution::read_only())).unwrap();
+async fn interface_search_preserves_requested_source_and_parameters() {
+    let native = ModelFixture::new(|request| {
+        assert!(
+            request.is_null(),
+            "Catalog lookup is a GET without a request body"
+        );
+        (
+            200,
+            json!({"items":[{"methodId":"cmd.feed_window.auto_redeem_item"}],"total":1}),
+        )
+    });
     let bridge = host::bridge::Bridge::for_transport_tests(
-        serde_json::from_value(json!({"baseUrl":native.url})).unwrap(),
+        serde_json::from_value(json!({"enabled":true,"baseUrl":native.url})).unwrap(),
     )
     .unwrap();
     let result = crate::bridge::retrieval::search_interface(
-        "跑一下血斛",
-        &[],
-        &json!({"query":"血斛"}),
-        Arc::new(registry),
+        &json!({"query":"兑换码","offset":3,"limit":2,"group":"command"}),
         &bridge,
         &CancellationToken::new(),
-        None,
     )
     .await
     .unwrap();
-    assert_eq!(result["interfacesDeferred"], true);
     assert_eq!(
-        result["resourceCandidates"]["items"][0]["category"],
-        "pathing"
+        result["items"][0]["methodId"],
+        "cmd.feed_window.auto_redeem_item"
     );
-    assert!(native.requests.lock().unwrap().is_empty());
+    assert_eq!(native.requests.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -1588,52 +1570,9 @@ fn wide_tool_results_keep_bounded_evidence_and_verification() {
 }
 
 #[tokio::test]
-async fn full_access_does_not_turn_a_query_into_permission_to_write() {
-    let fixture = ModelFixture::new(|request| {
-        if request["messages"][0]["content"]
-            .as_str()
-            .unwrap_or("")
-            .starts_with("你只核对用户本次目标")
-        {
-            return (200, answer(r#"{"decision":"reject"}"#));
-        }
-        (200, tool_calls(vec![("fixture.change", json!({}))]))
-    });
-    let supervisor = supervisor(&fixture);
-    let writes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    install_status_slice(&supervisor, writes.clone());
-    let mut run = supervisor
-        .journal
-        .create("能查看一下配置吗", "scope-write", "scope-write", 600, None)
-        .unwrap();
-    supervisor
-        .session(&mut run, &CancellationToken::new())
-        .await
-        .unwrap();
-    assert_eq!(run.state, RunState::NeedsReview);
-    assert_eq!(writes.load(Ordering::SeqCst), 0);
-    assert_eq!(fixture.requests.lock().unwrap().len(), 2);
-    assert!(supervisor.journal.attempts(&run.id).unwrap().is_empty());
-    assert_eq!(
-        supervisor.journal.model_usage(&run.id).unwrap()["byPurpose"]
-            .as_array()
-            .unwrap()
-            .len(),
-        2
-    );
-}
-
-#[tokio::test]
 async fn malformed_arguments_after_observation_do_not_spend_scope_review_tokens() {
     let mut turn = 0;
-    let fixture = ModelFixture::new(move |request| {
-        if request["messages"][0]["content"]
-            .as_str()
-            .unwrap_or("")
-            .starts_with("你只核对用户本次目标")
-        {
-            return (200, answer(r#"{"decision":"reject"}"#));
-        }
+    let fixture = ModelFixture::new(move |_request| {
         turn += 1;
         (
             200,
@@ -1677,13 +1616,6 @@ async fn malformed_arguments_after_observation_do_not_spend_scope_review_tokens(
 #[tokio::test]
 async fn native_observation_does_not_finish_an_explicit_conditional_task() {
     let fixture = ModelFixture::new(|request| {
-        if request["messages"][0]["content"]
-            .as_str()
-            .unwrap_or("")
-            .starts_with("你只核对用户本次目标")
-        {
-            return (200, answer(r#"{"decision":"continue"}"#));
-        }
         let count = request["messages"]
             .as_array()
             .unwrap()
@@ -1727,7 +1659,7 @@ async fn native_observation_does_not_finish_an_explicit_conditional_task() {
 }
 
 fn admit_memory_learning(supervisor: &Supervisor, run: &Run, evidence: &[&str]) {
-    let args = json!({"trigger":"nonObviousConstraint","reason":"已验证一个稳定的参数来源约束，会改变今后同类任务取得参数的方式","evidenceCallIds":evidence});
+    let args = json!({"reason":"已验证一个稳定的参数来源约束，会改变今后同类任务取得参数的方式","evidenceCallIds":evidence});
     let result = supervisor.request_memory_learning(run, &args).unwrap();
     let mut call = message(Role::Assistant, "");
     call.tool_calls = vec![ToolCall {
@@ -1750,7 +1682,7 @@ async fn verified_experience_is_learned_and_recalled_in_a_new_conversation() {
             .as_str()
             .unwrap_or_default();
         if system.starts_with("你负责提炼可复用的操作经验") {
-            return (200,answer(&json!({"experiences":[{
+            return (200,answer(&json!({"goalRelevant":true,"experiences":[{
                 "intent":"读取脚本当前配置","summary":"先取得当前软件根，再读取本次目标配置；不把上次路径当成本次目标。",
                 "keywords":["脚本","配置"],"conditions":["本次请求需要读取脚本配置，目标文件已定位"],
                 "steps":[{"tool":"workspace.environment","action":"读取当前软件根与可用环境","inputRoles":{}},
@@ -1949,7 +1881,7 @@ async fn disabling_memory_discards_an_inflight_result_but_keeps_its_usage() {
 }
 
 #[test]
-fn observed_write_route_is_saved_before_background_refinement() {
+fn memory_admission_uses_model_judgment_and_does_not_generate_rust_memories() {
     let fixture = ModelFixture::new(|_| (200, answer("unused")));
     let supervisor = supervisor(&fixture);
     let mut run = supervisor
@@ -1996,7 +1928,6 @@ fn observed_write_route_is_saved_before_background_refinement() {
         .save(&mut run, RunState::Answered)
         .unwrap();
     // Routine success, even after a write, must neither save nor enqueue learning.
-    assert_eq!(supervisor.remember_observed_route(&run).unwrap(), 0);
     supervisor.enqueue_experience_learning(&run).unwrap();
     assert!(!supervisor.memory_learning_requested(&run).unwrap());
     assert!(
@@ -2004,8 +1935,16 @@ fn observed_write_route_is_saved_before_background_refinement() {
             .request_memory_learning(&run, &json!({"reason":"普通任务完成"}))
             .is_err()
     );
-    assert!(supervisor.request_memory_learning(&run,&json!({"trigger":"failureRecovery","reason":"从普通成功结果猜测故障已被解决并试图保存它","evidenceCallIds":["read","write"]})).is_err());
-    assert!(supervisor.request_memory_learning(&run,&json!({"trigger":"explicitRequest","reason":"用户明确要求记住已验证的配置方式以便后续复用","quote":"内部伪造的记住要求","evidenceCallIds":["read","write"]})).is_err());
+    assert!(
+        supervisor
+            .request_memory_learning(
+                &run,
+                &json!({
+                    "reason":"已验证的入口值得复用", "evidenceCallIds":["invented"]
+                })
+            )
+            .is_err()
+    );
     let db =
         rusqlite::Connection::open(&supervisor.config.read().unwrap().storage.database).unwrap();
     let queued: u64 = db
@@ -2021,22 +1960,75 @@ fn observed_write_route_is_saved_before_background_refinement() {
     );
     drop(db);
     admit_memory_learning(&supervisor, &run, &["read", "write"]);
-    let duplicate=supervisor.request_memory_learning(&run,&json!({"trigger":"nonObviousConstraint","reason":"同一发现不应在本轮再次申请提炼并增加额外消耗","evidenceCallIds":["read","write"]})).unwrap();
+    let duplicate=supervisor.request_memory_learning(&run,&json!({"reason":"同一发现不应在本轮再次申请提炼并增加额外消耗","evidenceCallIds":["read","write"]})).unwrap();
     assert_eq!(duplicate["duplicate"], true);
-    assert_eq!(supervisor.remember_observed_route(&run).unwrap(), 1);
-    let memories = supervisor.recall_memories("修改另一个脚本配置").unwrap();
-    assert_eq!(memories.len(), 1);
-    assert!(memories[0].id.starts_with("trace:"));
+    supervisor.enqueue_experience_learning(&run).unwrap();
+    assert_eq!(supervisor.memory.pending().unwrap(), Some(run.id.clone()));
     assert!(
-        !serde_json::to_string(&memories[0].experience)
+        supervisor
+            .recall_memories("修改另一个脚本配置")
             .unwrap()
-            .contains("old-value-not-for-reuse")
+            .is_empty(),
+        "申请记忆不会用 Rust 自动拼接记忆正文"
     );
     supervisor.shutdown();
 }
 
+#[tokio::test]
+async fn one_observation_can_be_learned_while_the_overall_task_needs_review() {
+    let fixture = ModelFixture::new(|_| {
+        (200, answer(&json!({"goalRelevant":true,"experiences":[{
+            "intent":"读取脚本配置", "summary":"从已定位的目标读取当前配置，后续按本次路径与内容核对。",
+            "keywords":["脚本","配置"], "conditions":["配置文件已定位"],
+            "steps":[{"tool":"workspace.read","action":"读取当前配置","inputRoles":{"path":"本次定位的文件"}}],
+            "verification":["确认返回当前内容"], "pitfalls":["配置写入尚未核对，不能声称修改成功"], "anchors":[]
+        }]}).to_string()))
+    });
+    let supervisor = supervisor(&fixture);
+    let mut run = supervisor
+        .journal
+        .create("配置脚本", "one-observation", "one", 600, None)
+        .unwrap();
+    let mut call = message(Role::Assistant, "");
+    call.tool_calls.push(ToolCall {
+        id: "fact".into(),
+        name: "workspace.read".into(),
+        arguments: json!({"path":"current.json"}),
+    });
+    supervisor.journal.append_message(&run, &call).unwrap();
+    let mut result = message(
+        Role::Tool,
+        json!({"ok":true,"value":{"content":"current config"}}).to_string(),
+    );
+    result.tool_call_id = Some("fact".into());
+    supervisor.journal.append_message(&run, &result).unwrap();
+    admit_memory_learning(&supervisor, &run, &["fact"]);
+    supervisor
+        .journal
+        .finish(&mut run, RunState::NeedsReview)
+        .unwrap();
+    supervisor.enqueue_experience_learning(&run).unwrap();
+    assert_eq!(supervisor.memory.pending().unwrap(), Some(run.id.clone()));
+    let learned = supervisor
+        .learn_experience(
+            &run.id,
+            &CancellationToken::new(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(learned.0, 1);
+    let memories = supervisor.recall_memories("读取脚本配置").unwrap();
+    assert_eq!(memories.len(), 1);
+    assert_eq!(memories[0].experience.steps.len(), 1);
+    assert!(!memories[0].experience.summary.is_empty());
+    assert_ne!(memories[0].validation_state, "verified");
+    assert_eq!(fixture.requests.lock().unwrap().len(), 1);
+    supervisor.shutdown();
+}
+
 #[test]
-fn initial_builtin_tools_include_status_and_expand_with_provider_evidence() {
+fn initial_builtin_tools_are_lightweight_and_expand_with_provider_evidence() {
     use crate::extension::{FunctionTool, ToolExposure};
     let fixture = ModelFixture::new(|_| (200, answer("unused")));
     let supervisor = supervisor(&fixture);
@@ -2056,7 +2048,8 @@ fn initial_builtin_tools_include_status_and_expand_with_provider_evidence() {
         )),
     )
     .unwrap();
-    for name in ["skills.search", "skills.read", "plugins.list"] {
+    {
+        let name = "plugins.list";
         registry
             .register(
                 FunctionTool::new(
@@ -2077,7 +2070,7 @@ fn initial_builtin_tools_include_status_and_expand_with_provider_evidence() {
     }
     supervisor.extensions.write().unwrap().tools = Arc::new(registry);
     let definitions = supervisor.definitions(&HashSet::new());
-    assert_eq!(definitions.len(), 49);
+    assert_eq!(definitions.len(), 55);
     let policy = tool_policy::TurnTools::new(
         &definitions,
         &[],
@@ -2085,12 +2078,18 @@ fn initial_builtin_tools_include_status_and_expand_with_provider_evidence() {
         operation::permissions::PermissionMode::AskEach,
         false,
     );
-    assert_eq!(policy.select(&definitions).len(), 21);
+    assert_eq!(policy.select(&definitions).len(), 4);
+    assert!(
+        !policy
+            .select(&definitions)
+            .iter()
+            .any(|tool| tool.name == "search.batch")
+    );
     assert!(
         policy
             .select(&definitions)
             .iter()
-            .any(|tool| tool.name == "bgi.state.get")
+            .any(|tool| tool.name == "tools.search")
     );
     assert!(
         !policy
@@ -2138,14 +2137,7 @@ fn initial_builtin_tools_include_status_and_expand_with_provider_evidence() {
 #[tokio::test]
 async fn discovered_builtin_shell_becomes_callable_without_loading_a_plugin() {
     let mut turn = 0;
-    let fixture = ModelFixture::new(move |request| {
-        if request["messages"][0]["content"]
-            .as_str()
-            .unwrap_or("")
-            .starts_with("你只核对用户本次目标")
-        {
-            return (200, answer(r#"{"decision":"continue"}"#));
-        }
+    let fixture = ModelFixture::new(move |_request| {
         turn += 1;
         (
             200,
@@ -2208,7 +2200,13 @@ async fn large_read_keeps_version_evidence_and_artifact_pages_do_not_rewrap() {
                     json!({"path":path,"maxChars":50000}),
                 )]),
                 2 => {
-                    let message = request["messages"].as_array().unwrap().last().unwrap();
+                    let message = request["messages"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .rev()
+                        .find(|m| m["role"] == "tool")
+                        .unwrap();
                     let result: Value =
                         serde_json::from_str(message["content"].as_str().unwrap()).unwrap();
                     assert_eq!(result["ok"], true);
@@ -2232,7 +2230,13 @@ async fn large_read_keeps_version_evidence_and_artifact_pages_do_not_rewrap() {
         .await
         .unwrap();
     let requests = fixture.requests.lock().unwrap();
-    let result = requests[2]["messages"].as_array().unwrap().last().unwrap();
+    let result = requests[2]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|m| m["role"] == "tool")
+        .unwrap();
     let result: Value = serde_json::from_str(result["content"].as_str().unwrap()).unwrap();
     assert!(result["artifactId"].is_null());
     assert_eq!(result["value"]["nextOffset"], 5000);
@@ -2359,13 +2363,6 @@ async fn execution_policy_blocks_unread_write_then_allows_read_modify_verify() {
     let file = path.to_string_lossy().into_owned();
     let mut turn = 0;
     let fixture = ModelFixture::new(move |request| {
-        if request["messages"][0]["content"]
-            .as_str()
-            .unwrap_or("")
-            .starts_with("你只核对用户本次目标")
-        {
-            return (200, answer(r#"{"decision":"continue"}"#));
-        }
         turn += 1;
         let body = match turn {
             1 => {
@@ -2623,3 +2620,24 @@ async fn truncated_summary_is_retried_and_never_committed_as_complete() {
     assert_eq!(event.data["outputTokens"], 60);
     assert_eq!(run.result.as_deref(), Some("continued"));
 }
+
+#[path = "harness-optimization.rs"]
+mod harness_optimization;
+
+#[path = "structured-decisions.rs"]
+mod structured_decisions;
+
+#[path = "lightweight-entry.rs"]
+mod lightweight_entry;
+
+#[path = "progressive-skills.rs"]
+mod progressive_skills;
+
+#[path = "skill-efficiency.rs"]
+mod skill_efficiency;
+
+#[path = "search-batch.rs"]
+mod search_batch_tests;
+
+#[path = "search-batch-live.rs"]
+mod search_batch_live;

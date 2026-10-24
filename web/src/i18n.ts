@@ -368,6 +368,16 @@ const zh = {
       "本机模型未报告容量，沿用 32k 起始值；请按实际加载的窗口设置。",
     maxOutputLabel: "最大输出",
     promptCacheLabel: "提示缓存",
+    webProviderLabel: "联网提供方",
+    webModelLabel: "网页内容提取模型",
+    webModelCurrent: "沿用当前模型",
+    webModelHelp:
+      "用独立上下文提取问题相关内容，不接收完整对话或执行工具。可选择已配置的轻量模型；提取用量单独记录，原文仍可继续读取。",
+    webProviderAuto: "自动识别官方服务",
+    webProviderDisabled: "不使用联网工具",
+    webProviderZhipu: "智谱 / Z.ai",
+    webProviderHelp:
+      "沿用此模型的地址和密钥。中转节点需选择其支持的原生联网服务；搜索和网页读取的可用性、费用由服务商决定。不会因此自动联网，普通聊天和一般知识问答不搜索。",
     setDefault: "设为默认",
     deleteNote: (name: string) =>
       `删除「${name}」。已绑定它的对话会改用默认模型。`,
@@ -515,33 +525,6 @@ const zh = {
     saving: "保存中…",
     editConfig: "编辑配置",
     fileContent: "配置文件内容",
-  },
-
-  setup: {
-    uninstall: "卸载",
-    install: "安装",
-    update: "更新",
-    preparing: "正在准备…",
-    notStarted: "启动失败。请从安装目录运行 sleepy-doll.exe。",
-    uninstallNote: "卸载会删除程序文件，数据默认保留。",
-    installNote: "程序与数据都装在所选目录下。",
-    updateNote: "在原安装位置更新程序，保留配置、会话数据和已有快捷方式。",
-    currentVersion: "当前版本",
-    targetVersion: "目标版本",
-    unknown: "未知",
-    dataDeleted: "数据已删除。",
-    dataKept: "数据已保留。",
-    bridgeFailed: "安装程序返回失败",
-    bridgeUnreachable: "无法连接安装程序。",
-    bridgeNoResponse: "安装程序没有响应。",
-    progressLabel: (action: string) => `${action}中…`,
-    progressAria: (action: string) => `${action}进度`,
-    keepWindowOpen: "过程中请不要关闭窗口。",
-    incomplete: (action: string) => `${action}没有完成。`,
-    retryHint: "点击「返回重试」可调整选项。",
-    installLocation: "安装位置",
-    version: "版本",
-    createShortcut: "创建桌面快捷方式",
   },
 
   ipc: {
@@ -959,6 +942,16 @@ const en: Dict = {
       "The local model did not report capacity. Start at 32k and use the window actually loaded.",
     maxOutputLabel: "Max output",
     promptCacheLabel: "Prompt cache",
+    webProviderLabel: "Web provider",
+    webModelLabel: "Web content extraction model",
+    webModelCurrent: "Use the current model",
+    webModelHelp:
+      "Extracts relevant content in an isolated context without the full conversation or action tools. You can select a configured lightweight model. Usage is recorded separately and source text remains readable.",
+    webProviderAuto: "Detect official service",
+    webProviderDisabled: "Disable web tools",
+    webProviderZhipu: "Zhipu / Z.ai",
+    webProviderHelp:
+      "Uses this model's endpoint and key. For relays, select the native web service they support. Availability and charges depend on the provider. This does not enable automatic browsing for ordinary chat or general questions.",
     setDefault: "Set as default",
     deleteNote: (name: string) =>
       `Delete “${name}”? Chats bound to it will fall back to the default model.`,
@@ -1112,37 +1105,6 @@ const en: Dict = {
     saving: "Saving…",
     editConfig: "Edit config",
     fileContent: "Config file content",
-  },
-
-  setup: {
-    uninstall: "Uninstall",
-    install: "Install",
-    update: "Update",
-    preparing: "Preparing…",
-    notStarted:
-      "Launch failed. Run sleepy-doll.exe from the install directory.",
-    uninstallNote:
-      "Uninstalling removes program files; your data is kept by default.",
-    installNote: "Program and data both live in the chosen directory.",
-    updateNote:
-      "Update in the existing location, keeping settings, sessions, and shortcuts.",
-    currentVersion: "Current version",
-    targetVersion: "Target version",
-    unknown: "Unknown",
-    dataDeleted: "Data was deleted.",
-    dataKept: "Data was kept.",
-    bridgeFailed: "The installer reported a failure",
-    bridgeUnreachable: "Cannot reach the installer.",
-    bridgeNoResponse: "The installer did not respond.",
-    progressLabel: (action: string) => `${action} in progress…`,
-    progressAria: (action: string) => `${action} progress`,
-    keepWindowOpen: "Keep this window open until it finishes.",
-    incomplete: (action: string) =>
-      `The ${action.toLowerCase()} did not complete.`,
-    retryHint: "Go back to adjust the options before retrying.",
-    installLocation: "Install location",
-    version: "Version",
-    createShortcut: "Create desktop shortcut",
   },
 
   ipc: {

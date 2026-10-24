@@ -287,6 +287,8 @@ export const api = {
     maxOutputTokens?: number;
     auth?: string;
     promptCache?: boolean;
+    webModel?: string | null;
+    webProvider?: import("./types").ModelInfo["webProvider"];
   }) => invoke<{ saved: boolean }>("model.save", { model }),
   listModels: (probe: {
     id?: string;

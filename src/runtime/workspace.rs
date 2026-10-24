@@ -439,7 +439,7 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
             move |arguments| workspace_io::search_excluding(&files.root, arguments, std::slice::from_ref(&files.config_path)),
         )
         .with_label("搜索文件内容")
-        .with_execution(read),
+        .with_execution(ToolExecution {search_provider:true,..read}),
     )?;
     let files = workspace.clone();
     registry.register(

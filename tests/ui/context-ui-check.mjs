@@ -1,6 +1,7 @@
 import { uiStylesheetUrl } from "./runtime.mjs";
 // Real session, transcript and model settings, with fake IPC and no model calls.
 import assert from "node:assert/strict";
+import { env } from "node:process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
@@ -56,7 +57,12 @@ try {
   console.log(
     JSON.stringify({ port, cleanup: "finally closes Vite and Chromium" }),
   );
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    ...(env.SLEEPY_DOLL_BROWSER_CHANNEL
+      ? { channel: env.SLEEPY_DOLL_BROWSER_CHANNEL }
+      : {}),
+  });
   const page = await browser.newPage({
     viewport: { width: 1100, height: 900 },
   });

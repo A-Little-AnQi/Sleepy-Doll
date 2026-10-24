@@ -53,7 +53,10 @@ pub(super) fn search(tools: Vec<ToolDefinition>, query: &str, limit: usize) -> V
                             + usize::from(description.contains(token)) * 8
                     })
                     .sum::<usize>();
-            (score > 0).then_some((score, tool))
+            // 公开网络是补充来源；明确按工具名查询仍能命中，泛查时让直接来源在前。
+            let priority = if tool.source == "core:web" { -500 } else { 0 };
+            let ranked_score = (score as i64 + priority).max(1);
+            (score > 0).then_some((ranked_score, tool))
         })
         .collect::<Vec<_>>();
     ranked.sort_by(|(a, left), (b, right)| b.cmp(a).then_with(|| left.name.cmp(&right.name)));

@@ -33,7 +33,10 @@ try {
       screenshot: path.join(os.tmpdir(), "sleepy-doll-shortcut-ui.png"),
     }),
   );
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
+  });
   const page = await browser.newPage({
     viewport: { width: 1400, height: 900 },
   });
@@ -192,6 +195,29 @@ try {
     .click();
   await shelf.getByRole("button", { name: "血斛采集", exact: true }).waitFor();
   assert.equal(await shelf.getByText("原配置对话", { exact: true }).count(), 0);
+  await page.locator(".app-new").click();
+  assert.equal(
+    await page.locator(".app-shell").getAttribute("data-details"),
+    "false",
+  );
+  assert.equal(
+    await page.locator("[data-details-trigger]").getAttribute("aria-pressed"),
+    "false",
+  );
+  await shelf.waitFor({ state: "detached" });
+  await page.getByRole("heading", { name: "开始一项新任务" }).waitFor();
+  // 已在主页时再次新建也必须关闭刚主动打开的任务栏。
+  await page.locator("[data-details-trigger]").click();
+  await shelf.waitFor();
+  await page.locator(".app-new").click();
+  await shelf.waitFor({ state: "detached" });
+  await page.locator('[data-sd-id="chat-b"] > button').click();
+  assert.equal(
+    await page.locator(".app-shell").getAttribute("data-details"),
+    "false",
+  );
+  await page.locator("[data-details-trigger]").click();
+  await shelf.waitFor();
   const before = requests.filter(
     (q) => q.method === "task.submit" || q.method === "shortcut.configure",
   ).length;
@@ -242,7 +268,10 @@ try {
   const composer = page.locator(".sd-composer-field");
   await composer.fill("把血斛采集加入快捷任务");
   await page.locator(".skill-menu-trigger").click();
-  const option = page.getByRole("menuitem", { name: "创建快捷任务", exact: true });
+  const option = page.getByRole("menuitem", {
+    name: "创建快捷任务",
+    exact: true,
+  });
   await option.waitFor();
   await option.click();
   await page.locator(".skill-menu-popover").waitFor({ state: "detached" });
@@ -297,10 +326,9 @@ try {
     "Task page guides to the conversation instead of a dialog",
   );
   assert(
-    (await page
-      .locator(".tasks-page .tasks-intro")
-      .innerText())
-      .includes("创建快捷任务"),
+    (await page.locator(".tasks-page .tasks-intro").innerText()).includes(
+      "创建快捷任务",
+    ),
   );
   await page
     .locator(".tasks-page")
@@ -345,10 +373,40 @@ try {
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.waitForTimeout(1200);
 
+  // 从快捷任务页回主页，宽、窄窗口都不携带右栏。
+  const expandSidebar = page.getByRole("button", {
+    name: "展开侧栏",
+    exact: true,
+  });
+  if (await expandSidebar.isVisible()) await expandSidebar.click();
+  await page.locator(".app-new").click();
+  await shelf.waitFor({ state: "detached" });
+  const screenshots = process.argv.includes("--screenshots")
+    ? path.join(root, "target/.tmp/shortcut-home")
+    : null;
+  if (screenshots) fs.mkdirSync(screenshots, { recursive: true });
+  for (const [label, width, height] of [
+    ["wide", 1440, 900],
+    ["narrow", 980, 700],
+  ]) {
+    await page.setViewportSize({ width, height });
+    await page.waitForTimeout(350);
+    assert.equal(
+      await page.locator(".app-shell").getAttribute("data-details"),
+      "false",
+    );
+    assert.equal(await page.locator(".details-panel").count(), 0);
+    assert(await page.locator(".chat-workspace.is-welcome").isVisible());
+    if (screenshots)
+      await page.screenshot({ path: path.join(screenshots, `${label}.png`) });
+  }
+
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
       globalShelf: true,
+      newChatClosesShelf: true,
+      homeDoesNotRestoreShelf: true,
       chatSaveRefreshesShelf: true,
       searchBySelectedTask: true,
       narrowWindowLayout: true,

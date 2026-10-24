@@ -9,7 +9,12 @@ use serde::{Serialize, Serializer};
 use crate::error::{Error, Result};
 
 /// 随二进制分发的产品技能清单。
-pub const EMBEDDED_SKILLS: &[&str] = &[include_str!("skills/create-shortcut.md")];
+pub const EMBEDDED_SKILLS: &[&str] = &[
+    include_str!("skills/operate-task.md"),
+    include_str!("skills/create-shortcut.md"),
+    include_str!("skills/continue-task.md"),
+    include_str!("skills/web-search.md"),
+];
 
 /// 技能的归属，决定谁开关它。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,8 +61,11 @@ pub struct Skill {
     pub resource_kinds: Vec<String>,
     pub platforms: Vec<String>,
     pub allowed_tools: Vec<String>,
-    /// 领域级操作手册随每次运行一起装载。
+    /// 已启用的短入口说明；完整操作手册按需读取。
     pub always_load: bool,
+    /// 是否出现在用户技能列表和手动选择菜单；不影响模型发现与读取。
+    #[serde(skip)]
+    pub user_visible: bool,
     #[serde(skip)]
     pub body: String,
     #[serde(skip)]
@@ -118,6 +126,9 @@ impl SkillRegistry {
                         always_load: fields
                             .get("alwaysLoad")
                             .is_some_and(|value| value.eq_ignore_ascii_case("true")),
+                        user_visible: fields
+                            .get("userVisible")
+                            .is_none_or(|value| !value.eq_ignore_ascii_case("false")),
                         body,
                         path,
                     },
@@ -157,6 +168,9 @@ impl SkillRegistry {
                 always_load: fields
                     .get("alwaysLoad")
                     .is_some_and(|value| value.eq_ignore_ascii_case("true")),
+                user_visible: fields
+                    .get("userVisible")
+                    .is_none_or(|value| !value.eq_ignore_ascii_case("false")),
                 body,
                 path: PathBuf::new(),
             },
@@ -190,6 +204,7 @@ impl SkillRegistry {
                 platforms: vec![],
                 allowed_tools: vec![],
                 always_load: true,
+                user_visible: false,
                 body: body.into(),
                 path: PathBuf::new(),
             },
@@ -210,9 +225,9 @@ impl SkillRegistry {
         self.skills.is_empty()
     }
 
-    /// 界面列出的技能，不含插件带来的。
+    /// 用户可见的独立技能；内部说明和插件附带技能不单独列出。
     pub fn standalone(&self) -> Vec<Skill> {
-        self.sorted(|skill| skill.source.plugin().is_none())
+        self.sorted(|skill| skill.user_visible && skill.source.plugin().is_none())
     }
 
     fn sorted(&self, keep: impl Fn(&Skill) -> bool) -> Vec<Skill> {
@@ -527,4 +542,40 @@ fn tokens(text: &str) -> HashSet<String> {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod visibility_tests {
+    use super::*;
+
+    #[test]
+    fn internal_product_guides_remain_discoverable_without_user_controls() {
+        let mut registry = SkillRegistry::default();
+        for source in EMBEDDED_SKILLS {
+            registry.load_embedded(source).unwrap();
+        }
+        let visible = registry.standalone();
+        assert_eq!(visible.len(), 2);
+        assert_eq!(visible[0].name, "create-shortcut");
+        assert!(visible.iter().any(|skill| skill.name == "网络搜索"
+            && skill.body.contains("web.search")
+            && skill.body.contains("web.fetch")));
+        for name in ["operate-task", "continue-task"] {
+            let skill = registry.get(name).unwrap();
+            assert!(!skill.body.is_empty());
+            assert!(!skill.user_visible);
+            assert!(registry.search(name, 8).iter().any(|s| s.name == name));
+        }
+        assert_eq!(registry.list().len(), 4);
+    }
+
+    #[test]
+    fn ordinary_skills_keep_their_default_visibility() {
+        let mut registry = SkillRegistry::default();
+        registry
+            .load_embedded("---\nname: my-skill\ndescription: 用户自己的操作说明\n---\n正文")
+            .unwrap();
+        assert_eq!(registry.standalone()[0].name, "my-skill");
+        assert!(registry.get("my-skill").unwrap().user_visible);
+    }
 }

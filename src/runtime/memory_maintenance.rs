@@ -179,41 +179,14 @@ impl crate::runtime::Supervisor {
         }
     }
 
-    fn memory_write_trigger(
+    fn memory_write_evidence(
         &self,
-        run: &Run,
         arguments: &Value,
         history: &[crate::model::Message],
     ) -> Result<BTreeSet<String>> {
-        let trigger = arguments["trigger"].as_str().unwrap_or_default();
-        if ![
-            "explicitRequest",
-            "contradictedMemory",
-            "failureRecovery",
-            "nonObviousConstraint",
-        ]
-        .contains(&trigger)
-        {
-            return Err(Error::Tool(
-                "没有有效的记忆触发条件；普通任务完成或成功调用不触发保存".into(),
-            ));
-        }
         let reason = arguments["reason"].as_str().unwrap_or_default().trim();
-        if !(12..=400).contains(&reason.chars().count()) {
-            return Err(Error::Tool(
-                "说明具体的新事实、可复用价值以及为何需要改变已有做法，不能只写任务已完成".into(),
-            ));
-        }
-        if trigger == "explicitRequest" {
-            let quote = arguments["quote"].as_str().unwrap_or_default().trim();
-            let goal = self.journal.goal(&run.id)?;
-            if quote.is_empty()
-                || !goal.is_some_and(|g| g.inputs.iter().any(|input| input.text.contains(quote)))
-            {
-                return Err(Error::Tool(
-                    "用户要求记忆时，必须引用本轮真实用户输入中的原话".into(),
-                ));
-            }
+        if reason.is_empty() || reason.chars().count() > 400 {
+            return Err(Error::Tool("请简要说明已核实的发现及其复用价值".into()));
         }
         let evidence = arguments["evidenceCallIds"]
             .as_array()
@@ -223,7 +196,7 @@ impl crate::runtime::Supervisor {
             .map(str::to_owned)
             .collect::<BTreeSet<_>>();
         if evidence.is_empty() || evidence.len() > 8 {
-            return Err(Error::Tool("记忆触发需要本轮一到八条真实工具结果".into()));
+            return Err(Error::Tool("记忆依据需要本轮一到八条真实工具结果".into()));
         }
         let calls = history
             .iter()
@@ -244,15 +217,6 @@ impl crate::runtime::Supervisor {
         if !evidence.iter().all(|id| observed.contains_key(id.as_str())) {
             return Err(Error::Tool(
                 "依据必须是本轮真实返回的非记忆工具结果，不能用虚构、其它会话或记忆自身作为证据"
-                    .into(),
-            ));
-        }
-        if trigger == "failureRecovery"
-            && !(evidence.iter().any(|id| observed[id.as_str()])
-                && evidence.iter().any(|id| !observed[id.as_str()]))
-        {
-            return Err(Error::Tool(
-                "故障恢复必须同时引用实际失败和修复后的成功结果，单纯试错或常规成功不触发记忆"
                     .into(),
             ));
         }
@@ -291,16 +255,9 @@ impl crate::runtime::Supervisor {
             return Ok(json!({"admitted":false,"duplicate":true,"silent":true}));
         }
         let history = self.journal.run_history(run)?;
-        self.memory_write_trigger(run, arguments, &history)?;
-        if arguments["trigger"] == "contradictedMemory" {
-            return Err(Error::Tool(
-                "旧记忆被证伪时请修订原条目，不创建重复记忆".into(),
-            ));
-        }
+        self.memory_write_evidence(arguments, &history)?;
         if source_trace(&history, &run.prompt, &self.memory_definitions()).is_none() {
-            return Err(Error::Tool(
-                "尚无足够的真实操作关系可提炼，不为单次观察触发记忆".into(),
-            ));
+            return Err(Error::Tool("尚无可供提炼的真实工具观测".into()));
         }
         Ok(json!({"admitted":true,"silent":true}))
     }
@@ -318,7 +275,7 @@ impl crate::runtime::Supervisor {
             return Err(Error::Tool("固定任务不修订记忆".into()));
         }
         let history = self.journal.run_history(run)?;
-        let evidence = self.memory_write_trigger(run, arguments, &history)?;
+        let evidence = self.memory_write_evidence(arguments, &history)?;
         let reads = history
             .iter()
             .flat_map(|m| &m.tool_calls)

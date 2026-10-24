@@ -41,7 +41,6 @@ import { ContextMeter } from "../../components/chat/ContextMeter";
 import { ComposerDeck } from "@sleepy-doll/ui/chat/ComposerDeck";
 import { ComposerField } from "@sleepy-doll/ui/chat/ComposerField";
 import { PendingRequestLayer } from "../../components/chat/QuestionCard";
-import { estimateMessagesTokens } from "../../session/context-usage";
 import { useT } from "../../i18n";
 import type { Plan } from "../../session";
 import { DEFAULT_CONTEXT_WINDOW } from "../../models/presets";
@@ -130,6 +129,7 @@ export function ChatPage({
     task,
     stream,
     contextActivities,
+    contextUsage,
     question,
     questionRequests,
     approval,
@@ -176,12 +176,11 @@ export function ChatPage({
     pendingModel,
   );
   const contextWindow =
-    (busy ? task?.contextWindow : undefined) ||
+    (busy ? contextUsage?.window : undefined) ||
     bootstrap.models.find((entry) => entry.id === selectedModel)
       ?.contextWindow ||
     DEFAULT_CONTEXT_WINDOW;
-  const contextUsed =
-    task?.contextTokens ?? estimateMessagesTokens(messages, [stream, prompt]);
+  const contextUsed = contextUsage?.used ?? (conversationId ? undefined : 0);
   const current = useRef(conversationId);
   current.current = conversationId;
   const alive = useRef(true);
@@ -526,6 +525,8 @@ export function ChatPage({
                 className="welcome-mascot"
                 src={mascot}
                 alt={t.chat.mascotAlt}
+                draggable={false}
+                onDragStart={(event) => event.preventDefault()}
               />
               <h2>{t.chat.startNew}</h2>
               {!bootstrap.models.length &&
@@ -770,7 +771,7 @@ export function ChatPage({
               <ContextMeter
                 used={contextUsed}
                 window={contextWindow}
-                cacheHit={task?.cacheReadTokens ?? 0}
+                cacheHit={contextUsage?.cacheHit ?? 0}
               />
               <div className="composer-menu composer-model">
                 <Select

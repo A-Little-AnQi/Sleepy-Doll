@@ -133,7 +133,8 @@ pub struct Run {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub usage_estimated: bool,
-    /// 最近一次实际发给模型的上下文占用（token，含系统提示与已压缩后的历史）。
+    /// 最近一次已完成主模型请求的输入上下文占用；有厂商用量时采用实报，
+    /// 否则在请求完成时采用该次预算估算。派发与流式期间不改展示值。
     #[serde(default)]
     pub context_tokens: u64,
     /// 该次请求所用的窗口上限。

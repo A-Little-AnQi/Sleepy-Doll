@@ -9,7 +9,7 @@ export function ContextMeter({
   window,
   cacheHit = 0,
 }: {
-  used: number;
+  used?: number | undefined;
   window: number;
   cacheHit?: number;
 }) {
@@ -17,11 +17,12 @@ export function ContextMeter({
   const english = useLocale() === "en";
   const hintId = useId();
   const [hintDismissed, setHintDismissed] = useState(false);
-  const safeUsed = Number.isFinite(used) ? Math.max(0, used) : 0;
+  const measured = used != null && Number.isFinite(used);
+  const safeUsed = measured ? Math.max(0, used) : 0;
   const safeWindow = Number.isFinite(window) ? Math.max(0, window) : 0;
   const ratio = safeWindow > 0 ? Math.min(1, safeUsed / safeWindow) : 0;
   const percent = Math.round(ratio * 100);
-  const usage = `${formatTokens(safeUsed)} / ${safeWindow > 0 ? formatTokens(safeWindow) : "—"}`;
+  const usage = `${measured ? formatTokens(safeUsed) : "—"} / ${safeWindow > 0 ? formatTokens(safeWindow) : "—"}`;
   return (
     <div
       className={`sd-context${ratio >= 0.85 ? " is-high" : ""}`}
@@ -43,7 +44,7 @@ export function ContextMeter({
         aria-label={t.context.inModel}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={safeWindow > 0 ? percent : undefined}
+        aria-valuenow={measured && safeWindow > 0 ? percent : undefined}
         aria-valuetext={usage}
       >
         <circle className="sd-context-track" cx="10" cy="10" r="8" />
@@ -60,10 +61,10 @@ export function ContextMeter({
       <span className="sd-context-hint" id={hintId} role="tooltip">
         <span className="sd-context-hint-title">
           <span>{english ? "Context usage" : "上下文用量"}</span>
-          <span>{safeWindow > 0 ? `${percent}%` : "—"}</span>
+          <span>{measured && safeWindow > 0 ? `${percent}%` : "—"}</span>
         </span>
         <span className="sd-context-hint-row">
-          <span>{english ? "Used / limit" : "已用 / 总量"}</span>
+          <span>{english ? "Last request / limit" : "最近请求 / 上限"}</span>
           <span>{usage}</span>
         </span>
         {cacheHit > 0 && Number.isFinite(cacheHit) ? (

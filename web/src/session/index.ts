@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { api } from "../ipc/api";
+import { latestContextUsage, type ContextUsage } from "./context-usage";
 import type {
   ContextActivity,
   ShortcutProposal,
@@ -87,6 +88,7 @@ export interface Plan {
   steps: Array<{ id: string; title: string; tool?: string; outcome?: string }>;
 }
 export interface Snapshot {
+  contextUsage: ContextUsage | undefined;
   shortcutProposal: ShortcutProposal | undefined;
   messages: MessageInfo[];
   task: TaskInfo | undefined;
@@ -101,6 +103,7 @@ export interface Snapshot {
   error: string;
 }
 const empty: Snapshot = {
+  contextUsage: undefined,
   shortcutProposal: undefined,
   messages: [],
   task: undefined,
@@ -118,6 +121,8 @@ class Session {
   listeners = new Set<() => void>();
   private cursor = 0;
   private running = false;
+  private needsHistory = true;
+  private historyLoading = false;
   private disposed = false;
   private runs = new Map<string, TaskInfo>();
   private pendingRuns = new Map<string, TaskInfo>();
@@ -156,7 +161,11 @@ class Session {
   };
   read = () => this.snapshot;
   private publish(patch: Partial<Snapshot>) {
-    this.snapshot = { ...this.snapshot, ...patch };
+    this.snapshot = {
+      ...this.snapshot,
+      ...patch,
+      contextUsage: latestContextUsage(this.runs.values(), this.currentTask()),
+    };
     this.listeners.forEach((listener) => listener());
   }
   private acceptRun(run: TaskInfo) {
@@ -314,7 +323,22 @@ class Session {
     if (this.disposed) return;
     if (!this.running) {
       this.running = true;
+      this.needsHistory = true;
       void this.consume();
+    }
+  }
+  /** 进入对话时重取快照；后台事件循环仍在运行时也不能只使用页面缓存。 */
+  refresh() {
+    if (this.disposed) return;
+    if (!this.historyLoading) this.needsHistory = true;
+    this.start();
+  }
+  private async readHistory() {
+    this.historyLoading = true;
+    try {
+      return await api.conversation(this.id);
+    } finally {
+      this.historyLoading = false;
     }
   }
   dispose() {
@@ -336,13 +360,12 @@ class Session {
   }
   private async consume() {
     let failures = 0;
-    let needsHistory = true;
     try {
       // 卸载页面不中断运行。
       do {
         try {
-          if (needsHistory) {
-            const history = await api.conversation(this.id);
+          if (this.needsHistory) {
+            const history = await this.readHistory();
             if (this.disposed) break;
             this.acceptHistory(history.messages);
             this.acceptContext(history);
@@ -359,7 +382,7 @@ class Session {
               ),
               loading: false,
             });
-            needsHistory = false;
+            this.needsHistory = false;
           }
           const batch = await api.events(this.id, this.cursor);
           if (this.disposed) break;
@@ -369,7 +392,7 @@ class Session {
             this.streams.clear();
             this.contextActivities.clear();
             this.contextActivityBoundary = 0;
-            needsHistory = true;
+            this.needsHistory = true;
             continue;
           }
           let refresh = false;
@@ -514,9 +537,12 @@ class Session {
           // Commit persisted messages and their stream replacement together.
           // Publishing in between briefly duplicates answers and changes height.
           const history =
-            refresh || failures ? await api.conversation(this.id) : undefined;
+            refresh || failures || this.needsHistory
+              ? await this.readHistory()
+              : undefined;
           if (this.disposed) break;
           if (history) {
+            this.needsHistory = false;
             this.acceptHistory(history.messages);
             this.acceptContext(history);
             this.acceptRunSnapshot(history);
@@ -618,7 +644,7 @@ const readEmpty = () => empty;
 export function useSession(id?: string) {
   const entry = id ? session(id) : undefined;
   useEffect(() => {
-    entry?.start();
+    entry?.refresh();
   }, [entry]);
   return useSyncExternalStore(
     entry?.subscribe ?? noSubscribe,

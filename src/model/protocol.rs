@@ -336,7 +336,9 @@ pub(super) fn gemini_body(
             contents.push(json!({"role":role,"parts":parts}));
         }
     }
-    json!({"systemInstruction":{"parts":[{"text":system}]},"contents":contents,"tools":[{"functionDeclarations":tools.iter().map(|tool| json!({"name":tool.name,"description":tool.description,"parameters":tool.input_schema})).collect::<Vec<_>>()}],"generationConfig":{"temperature":config.options.temperature,"maxOutputTokens":config.options.max_output_tokens}})
+    // 工具定义是 JSON Schema；parameters 是 Gemini 的 Schema 消息，不能承载
+    // additionalProperties 等 JSON Schema 关键字。
+    json!({"systemInstruction":{"parts":[{"text":system}]},"contents":contents,"tools":[{"functionDeclarations":tools.iter().map(|tool| json!({"name":tool.name,"description":tool.description,"parametersJsonSchema":tool.input_schema})).collect::<Vec<_>>()}],"generationConfig":{"temperature":config.options.temperature,"maxOutputTokens":config.options.max_output_tokens}})
 }
 
 pub(super) fn ollama_body(
@@ -829,6 +831,44 @@ mod tests {
         serde_json::from_value(json!({"id":"fixture","name":"fixture","model":model,
             "protocol":protocol,"baseUrl":"https://example.invalid/v1"}))
         .unwrap()
+    }
+
+    #[test]
+    fn gemini_tool_json_schema_preserves_nested_constraints() {
+        let tool: ToolDefinition = serde_json::from_value(json!({
+            "name": "fixture.lookup",
+            "description": "Look up entries",
+            "source": "fixture",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}},
+                        "required": ["name"],
+                        "additionalProperties": false
+                    },
+                    "labels": {"type": "object", "additionalProperties": {"type": "string"}}
+                },
+                "required": ["filter"],
+                "additionalProperties": false
+            }
+        }))
+        .unwrap();
+        let body = ProtocolModel::new(config("gemini", ModelProtocol::Gemini))
+            .body(&[], std::slice::from_ref(&tool))
+            .unwrap();
+        let declaration = &body["tools"][0]["functionDeclarations"][0];
+        assert!(declaration.get("parameters").is_none());
+        assert_eq!(declaration["parametersJsonSchema"], tool.input_schema);
+        // 其他协议仍沿用各自的参数字段。
+        let openai = ProtocolModel::new(config("fixture", ModelProtocol::OpenaiChat))
+            .body(&[], std::slice::from_ref(&tool))
+            .unwrap();
+        assert_eq!(
+            openai["tools"][0]["function"]["parameters"],
+            tool.input_schema
+        );
     }
 
     #[test]

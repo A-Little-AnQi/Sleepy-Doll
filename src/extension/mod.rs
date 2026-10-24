@@ -163,6 +163,8 @@ pub struct ToolExecution {
     pub always_load: bool,
     pub exposure: ToolExposure,
     pub search_hint: Option<String>,
+    /// 可由检索批次调用的只读搜索入口；不是任意工具的批量执行许可。
+    pub search_provider: bool,
     pub model_usage: ModelUsage,
     pub scope: ScopeKind,
     /// 受影响目标所在的参数名。
@@ -204,6 +206,7 @@ impl Default for ToolExecution {
             always_load: false,
             exposure: ToolExposure::Always,
             search_hint: None,
+            search_provider: false,
             model_usage: ModelUsage::Unknown,
             scope: ScopeKind::Unknown,
             scope_target: None,
@@ -241,6 +244,9 @@ impl ToolExecution {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if self.search_provider && (self.effect != ToolEffect::ReadOnly || self.effect_is_dynamic) {
+            return Err(Error::Config("批量检索入口必须是效果明确的只读工具".into()));
+        }
         if self.max_result_chars < 256 || self.max_result_chars > 1_000_000 {
             return Err(Error::Config(
                 "工具结果上限必须在 256 到 1000000 字符之间".into(),

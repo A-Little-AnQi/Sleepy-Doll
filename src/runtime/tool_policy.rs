@@ -13,6 +13,7 @@ pub struct TurnTools {
     read: HashSet<String>,
     written: HashSet<String>,
     discovered: HashSet<String>,
+    used: HashSet<String>,
     mode: PermissionMode,
     shortcut: bool,
 }
@@ -34,12 +35,14 @@ impl TurnTools {
             read: HashSet::new(),
             written: HashSet::new(),
             discovered: discovered.clone(),
+            used: HashSet::new(),
             mode,
             shortcut,
         };
         for message in history {
             for call in &message.tool_calls {
                 calls.insert(call.id.as_str(), call.name.as_str());
+                policy.used.insert(call.name.clone());
             }
             if message.role != Role::Tool {
                 continue;
@@ -56,6 +59,27 @@ impl TurnTools {
                 continue;
             };
             if result["ok"] != true || result["value"].is_null() {
+                continue;
+            }
+            if result["value"]["untrusted"] == true || tool.source == "core:web" {
+                continue;
+            }
+            if tool.name == "search.batch" {
+                for name in result["value"]["searchEvidence"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                {
+                    if let Some(provider) = by_name.get(name)
+                        && provider.execution.search_provider
+                        && provider.execution.effect == ToolEffect::ReadOnly
+                        && name != "tools.search"
+                        && provider.source != "core:web"
+                    {
+                        policy.read.insert(provider.source.clone());
+                    }
+                }
                 continue;
             }
             if tool.execution.effect == ToolEffect::ReadOnly {
@@ -111,6 +135,22 @@ impl TurnTools {
         definitions
             .iter()
             .filter(|tool| self.allows(tool))
+            .filter(|tool| {
+                matches!(
+                    tool.name.as_str(),
+                    "tools.search" | "skills.search" | "skills.read" | "skills.reference"
+                ) || self.discovered.contains(&tool.name)
+                    || self.used.contains(&tool.name)
+                    || matches!(
+                        tool.execution.exposure,
+                        ToolExposure::AfterRead | ToolExposure::AfterWrite
+                    )
+                    || (self.shortcut
+                        && matches!(
+                            tool.name.as_str(),
+                            "shortcut.save" | "task.save" | "user.ask"
+                        ))
+            })
             .cloned()
             .collect()
     }

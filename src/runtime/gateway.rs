@@ -12,6 +12,60 @@ use serde_json::{Value, json};
 use std::{collections::BTreeMap, time::Duration};
 use tokio_util::sync::CancellationToken;
 
+/// 原生联网只发送一次：超时或响应丢失可能已计费，不自动重放。
+pub(super) async fn native_web(
+    config: &ModelConfig,
+    endpoint: &str,
+    body: &Value,
+    cancel: &CancellationToken,
+) -> Result<Value> {
+    let model = ProtocolModel::new(config.clone());
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_millis(
+            config.options.timeout_ms.clamp(1000, 180_000),
+        ))
+        .build()?;
+    let mut request = client.post(endpoint).json(body);
+    for (name, value) in model.headers() {
+        request = request.header(name, value);
+    }
+    let response = tokio::select! {
+        _ = cancel.cancelled() => return Err(Error::Cancelled),
+        result = request.send() => result?,
+    };
+    if !response.status().is_success() {
+        return Err(Error::Tool(format!(
+            "当前模型节点未完成原生联网请求（HTTP {}）。请核对该节点、协议及联网权限；没有自动重试或切换收费服务。",
+            response.status().as_u16()
+        )));
+    }
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    loop {
+        let next = tokio::select! {
+            _ = cancel.cancelled() => return Err(Error::Cancelled),
+            result = stream.next() => result,
+        };
+        let Some(chunk) = next else {
+            break;
+        };
+        let chunk = chunk?;
+        if bytes.len().saturating_add(chunk.len()) > 10 * 1024 * 1024 {
+            return Err(Error::Tool(
+                "联网响应超过10MiB读取上限；未继续读取，已发送请求的用量仍按未知估算保留。".into(),
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&bytes).map_err(|_| {
+        Error::Tool(
+            "模型节点未返回可解析的原生联网JSON响应，未把普通网页或流式文本当作检索结果。".into(),
+        )
+    })
+}
+
 /// 每一次模型调用都从这里过，请求与结果的记录放在这一层。
 pub async fn complete(
     config: ModelConfig,
@@ -49,6 +103,37 @@ pub async fn complete_with_allowed(
     cancel: &CancellationToken,
     emit: impl FnMut(&str) -> Result<()>,
 ) -> Result<ModelResponse> {
+    complete_request(config, messages, tools, allowed, None, cancel, emit).await
+}
+
+pub(super) async fn complete_tool(
+    config: ModelConfig,
+    messages: &[Message],
+    tool: &ToolDefinition,
+    cancel: &CancellationToken,
+    emit: impl FnMut(&str) -> Result<()>,
+) -> Result<ModelResponse> {
+    complete_request(
+        config,
+        messages,
+        std::slice::from_ref(tool),
+        None,
+        Some(&tool.name),
+        cancel,
+        emit,
+    )
+    .await
+}
+
+async fn complete_request(
+    config: ModelConfig,
+    messages: &[Message],
+    tools: &[ToolDefinition],
+    allowed: Option<&[String]>,
+    required: Option<&str>,
+    cancel: &CancellationToken,
+    emit: impl FnMut(&str) -> Result<()>,
+) -> Result<ModelResponse> {
     let started = std::time::Instant::now();
     let logged = format!("{}（{}）", config.model, config.protocol);
     log::info!(
@@ -56,7 +141,7 @@ pub async fn complete_with_allowed(
         messages.len(),
         tools.len()
     );
-    let result = complete_inner(config, messages, tools, allowed, cancel, emit).await;
+    let result = complete_inner(config, messages, tools, allowed, required, cancel, emit).await;
     match &result {
         Ok(response) => log::info!(
             "模型 {logged} 返回：{} 字，{} 个调用，输入 {} / 输出 {} token，{:.1}s",
@@ -74,11 +159,42 @@ pub async fn complete_with_allowed(
     result
 }
 
+/// 协议支持时指定函数；其余协议通过单工具提示及响应校验要求唯一结果。
+fn apply_required_tool(body: &mut Value, protocol: ModelProtocol, name: &str) {
+    let name = wire_name(name);
+    match protocol {
+        ModelProtocol::OpenaiChat => {
+            body["tool_choice"] = json!({"type":"function","function":{"name":name}})
+        }
+        ModelProtocol::OpenaiResponses => {
+            body["tool_choice"] = json!({"type":"function","name":name});
+            // 保留可选字段和字典的原始契约，避免 Responses 自动规范化为另一份 schema。
+            if let Some(tool) = body
+                .get_mut("tools")
+                .and_then(Value::as_array_mut)
+                .and_then(|tools| tools.iter_mut().find(|tool| tool["name"] == name))
+            {
+                tool["strict"] = json!(false);
+            }
+        }
+        ModelProtocol::Gemini => {
+            body["toolConfig"] =
+                json!({"functionCallingConfig":{"mode":"ANY","allowedFunctionNames":[name]}})
+        }
+        // 部分 Anthropic 模型拒绝强制 tool；auto 仍只提供一个候选并禁止并行。
+        ModelProtocol::AnthropicMessages => {
+            body["tool_choice"] = json!({"type":"auto","disable_parallel_tool_use":true})
+        }
+        ModelProtocol::OllamaChat => {}
+    }
+}
+
 async fn complete_inner(
     mut config: ModelConfig,
     messages: &[Message],
     tools: &[ToolDefinition],
     allowed: Option<&[String]>,
+    required: Option<&str>,
     cancel: &CancellationToken,
     mut emit: impl FnMut(&str) -> Result<()>,
 ) -> Result<ModelResponse> {
@@ -113,6 +229,9 @@ async fn complete_inner(
     let mut body = model.body(&wire_messages, &wire_tools)?;
     if let Some(allowed) = allowed {
         apply_allowed_tools(&mut body, allowed);
+    }
+    if let Some(name) = required {
+        apply_required_tool(&mut body, config.protocol, name);
     }
     let mut endpoint = model.endpoint();
     if config.protocol == ModelProtocol::Gemini {
@@ -911,5 +1030,51 @@ mod tool_mask_tests {
         config.protocol = ModelProtocol::OpenaiChat;
         config.base_url = "https://api.openai.com/v1".into();
         assert!(!supports_tool_mask(&config));
+    }
+    #[test]
+    fn auxiliary_tool_choice_uses_each_protocol_shape_without_mutating_schema() {
+        for protocol in [
+            ModelProtocol::OpenaiChat,
+            ModelProtocol::OpenaiResponses,
+            ModelProtocol::AnthropicMessages,
+            ModelProtocol::Gemini,
+            ModelProtocol::OllamaChat,
+        ] {
+            let definitions = json!([{"name":"original","parameters":{"type":"object"}}]);
+            let mut body = json!({"tools":definitions});
+            apply_required_tool(&mut body, protocol, "runtime.scope_decision");
+            assert_eq!(body["tools"], definitions);
+            let name = wire_name("runtime.scope_decision");
+            match protocol {
+                ModelProtocol::OpenaiChat => {
+                    assert_eq!(body["tool_choice"]["function"]["name"], name)
+                }
+                ModelProtocol::OpenaiResponses => {
+                    assert_eq!(body["tool_choice"], json!({"type":"function","name":name}))
+                }
+                ModelProtocol::Gemini => assert_eq!(
+                    body["toolConfig"]["functionCallingConfig"],
+                    json!({"mode":"ANY","allowedFunctionNames":[name]})
+                ),
+                ModelProtocol::AnthropicMessages => assert_eq!(
+                    body["tool_choice"],
+                    json!({"type":"auto","disable_parallel_tool_use":true})
+                ),
+                ModelProtocol::OllamaChat => assert!(body.get("tool_choice").is_none()),
+            }
+        }
+    }
+    #[test]
+    fn response_decision_keeps_optional_fields_without_strict_normalization() {
+        let name = wire_name("runtime.scope_decision");
+        let schema = json!({"type":"object","properties":{"decision":{"type":"string"},"reason":{"type":"string"}},"required":["decision"],"additionalProperties":false});
+        let mut body = json!({"tools":[{"type":"function","name":name,"parameters":schema}]});
+        apply_required_tool(
+            &mut body,
+            ModelProtocol::OpenaiResponses,
+            "runtime.scope_decision",
+        );
+        assert_eq!(body["tools"][0]["strict"], false);
+        assert_eq!(body["tools"][0]["parameters"], schema);
     }
 }

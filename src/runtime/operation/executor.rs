@@ -358,7 +358,7 @@ impl<'a> TaskExecutor<'a> {
             // 已有未成功的尝试：不再重放。
             return Err(match result {
                 StepResult::Unknown => {
-                    Error::Conflict("该步骤先前的结果未确认，已保留执行锁等待核对".into())
+                    Error::Conflict("上一次执行的结果还没确认，暂未重复运行。".into())
                 }
                 _ => Error::Conflict("该步骤先前未成功".into()),
             });
@@ -376,11 +376,11 @@ impl<'a> TaskExecutor<'a> {
             {
                 Ok(output) => {
                     let result = verification_of(&output);
-                    // launch 交接只代表宿主接了计划：卡片写「已提交」，不当
+                    // launch 交接只代表宿主接了计划：卡片写「已安排运行」，不当
                     // 同步完成；其余步骤按各自核验结论表述。
                     let submitted = result == StepResult::Succeeded && launch_submitted(&output);
                     let detail = if submitted {
-                        format!("已提交「{}」运行", node.title)
+                        format!("已安排运行「{}」", node.title)
                     } else {
                         verification_detail(result, &output)
                     };
@@ -661,7 +661,7 @@ impl<'a> TaskExecutor<'a> {
         self.push_report(id, title, result, detail, false)
     }
 
-    /// launch 交接步骤的记账：与同步完成区分，收尾聚合据此写「已提交」。
+    /// launch 交接步骤的记账：与同步完成区分，收尾聚合据此写「已安排运行」。
     fn report_submitted(
         &mut self,
         id: &str,
@@ -755,7 +755,7 @@ fn shortcut_outcome(
     total_nodes: usize,
     name: &str,
 ) -> (RunState, Option<String>, String) {
-    // 只要有一步是 launch 交接，整体成功也只能表述为「已提交」：宿主还在
+    // 只要有一步是 launch 交接，整体成功也只能表述为「已安排运行」：宿主还在
     // 后台执行，不能宣称业务已完成。
     let submitted = reports.iter().any(|report| report.submitted);
     let state = if reports
@@ -777,9 +777,9 @@ fn shortcut_outcome(
         .find(|report| matches!(report.result, StepResult::Failed | StepResult::Unknown))
         .map(|report| report.detail.clone());
     let result = match state {
-        RunState::Succeeded if submitted => format!("已提交「{name}」运行"),
+        RunState::Succeeded if submitted => format!("已安排运行「{name}」"),
         RunState::Succeeded => format!("已完成「{name}」"),
-        RunState::NeedsReview => format!("「{name}」的运行结果需要核对"),
+        RunState::NeedsReview => format!("暂时无法确认「{name}」是否执行成功"),
         _ => format!("未能运行「{name}」"),
     };
     (state, error, result)
@@ -978,11 +978,13 @@ fn summary(
     skipped: usize,
     unknown: usize,
 ) -> String {
-    // 同步步骤保持「已完成」；只有真实 launch 交接的步骤单独按提交计数，
-    // 不把整批说成已提交。
+    // 同步完成与仅安排到后台的步骤分别计数，不能把请求已受理算作任务完成。
     let submitted = reports.iter().filter(|report| report.submitted).count();
-    let mut text = if submitted > 0 {
-        format!("已完成 {succeeded} 个步骤，其中 {submitted} 个为后台提交")
+    let completed = succeeded.saturating_sub(submitted);
+    let mut text = if submitted > 0 && completed > 0 {
+        format!("已完成 {completed} 项，另有 {submitted} 项已安排运行")
+    } else if submitted > 0 {
+        format!("已安排运行 {submitted} 项")
     } else {
         format!("已完成 {succeeded} 个步骤")
     };
@@ -993,7 +995,7 @@ fn summary(
         text.push_str(&format!("，{skipped} 个跳过"));
     }
     if unknown > 0 {
-        text.push_str(&format!("，{unknown} 个结果待核对"));
+        text.push_str(&format!("，{unknown} 个尚未确认结果"));
     }
     if let Some(report) = reports
         .iter()
@@ -1165,6 +1167,17 @@ mod tests {
         // 有步骤根本没跑到（不是跳过记账）：不算完成。
         let (state, _, _) = shortcut_outcome(&[report(StepResult::Succeeded)], 2, "t");
         assert_eq!(state, RunState::Failed);
+    }
+
+    #[test]
+    fn pending_launches_are_not_counted_as_completed_tasks_in_summary() {
+        let mut launch = report(StepResult::Succeeded);
+        launch.submitted = true;
+        assert_eq!(summary(&[launch.clone()], 1, 0, 0, 0), "已安排运行 1 项");
+        assert_eq!(
+            summary(&[report(StepResult::Succeeded), launch], 2, 0, 0, 0),
+            "已完成 1 项，另有 1 项已安排运行"
+        );
     }
 
     fn launch_output(outcome: &str, result: Value) -> Value {

@@ -268,6 +268,71 @@ mod context_activity_tests {
     }
 
     #[test]
+    fn file_deletion_survives_expired_installer_temp() {
+        const CHILD_ROOT: &str = "SLEEPY_DOLL_DELETE_TEST_CHILD";
+        let Some(root) = std::env::var_os(CHILD_ROOT) else {
+            let root = crate::test_root("chat-delete");
+            std::fs::create_dir_all(&root).unwrap();
+            let expired = root.join("expired-installer/tmp");
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "runtime::store::journal::context_activity_tests::file_deletion_survives_expired_installer_temp",
+                    "--nocapture",
+                ])
+                .env(CHILD_ROOT, &root)
+                .env("TEMP", &expired)
+                .env("TMP", &expired)
+                .env("TMPDIR", &expired)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        assert!(!std::env::temp_dir().exists());
+        // 独立子进程只运行本项测试，没有后台线程、插件或数据库连接。
+        let temporary = unsafe { crate::data_directory::configure_process_temp(&root).unwrap() };
+        assert!(temporary.is_dir());
+        assert_eq!(std::env::temp_dir(), temporary);
+        let database = root.join("history.db");
+        let seed = deletion_journal();
+        seed.connection
+            .lock()
+            .unwrap()
+            .execute("VACUUM INTO ?1", [database.to_str().unwrap()])
+            .unwrap();
+        drop(seed);
+        let journal = Journal::open(&database).unwrap();
+        let mut run = journal.create("delete", "chat", "key", 300, None).unwrap();
+        journal.save(&mut run, RunState::Cancelled).unwrap();
+        journal
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<256)
+             INSERT INTO runtime_events(conversation_id,run_id,kind,data)
+             SELECT 'chat',?1,'test',hex(zeroblob(4096)) FROM n",
+                [&run.id],
+            )
+            .unwrap();
+        assert_eq!(
+            journal.delete_conversation("chat").unwrap()["deleted"],
+            true
+        );
+        drop(journal);
+        let reopened = Journal::open(&database).unwrap();
+        assert!(reopened.conversations().unwrap().is_empty());
+        assert!(reopened.get(&run.id).is_err());
+    }
+
+    #[test]
     fn leased_execution_prevents_partial_conversation_deletion() {
         let journal = deletion_journal();
         let mut run = journal
@@ -721,6 +786,49 @@ impl Journal {
             .map(|s| serde_json::from_str(&s).map_err(Into::into))
             .transpose()
     }
+    /// Raw human inputs only: no inferred continuation, task selection or authorization.
+    pub fn conversation_inputs(&self, run: &Run, offset: usize, limit: usize) -> Result<Value> {
+        self.ensure_current_goal(run)?;
+        let db = self.connection.lock().unwrap();
+        let mut query=db.prepare("SELECT r.id,r.payload,g.payload FROM runtime_runs r JOIN runtime_goals g ON g.run_id=r.id WHERE r.conversation_id=?1 AND r.rowid<=(SELECT rowid FROM runtime_runs WHERE id=?2) ORDER BY r.rowid")?;
+        let rows = query.query_map(params![run.conversation_id, run.id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut inputs = Vec::new();
+        for row in rows {
+            let (id, payload, goal) = row?;
+            let source: Run = serde_json::from_str(&payload)?;
+            if !matches!(source.source, RunSource::Agent) {
+                continue;
+            }
+            let goal: Goal = serde_json::from_str(&goal)?;
+            for input in goal.inputs {
+                if matches!(
+                    input.origin,
+                    InputOrigin::HumanMessage
+                        | InputOrigin::HumanSupplement
+                        | InputOrigin::HumanAnswer { .. }
+                ) {
+                    inputs.push(json!({"runId":id,"runStartedAt":source.created_at,"runState":source.state,"inputRevision":input.revision,"origin":input.origin,"text":input.text}));
+                }
+            }
+        }
+        inputs.reverse();
+        let total = inputs.len();
+        let page = inputs
+            .into_iter()
+            .skip(offset)
+            .take(limit.clamp(1, 20))
+            .collect::<Vec<_>>();
+        let next = (offset + page.len() < total).then_some(offset + page.len());
+        Ok(
+            json!({"order":"newestFirst","total":total,"offset":offset,"nextOffset":next,"inputs":page,"source":"runtimeRecordedHumanInputs"}),
+        )
+    }
     pub fn begin_model_request(
         &self,
         run: &Run,
@@ -733,7 +841,8 @@ impl Journal {
         let model_key = hash(
             &json!({"model":model.model,"protocol":model.protocol,"baseUrl":model.base_url,"id":model.id}),
         );
-        self.connection.lock().unwrap().execute("INSERT INTO runtime_model_requests(id,run_id,purpose,model_key,started_at,input_tokens,output_tokens) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![id,run.id,purpose,model_key,now(),input,output])?;
+        let db = self.connection.lock().unwrap();
+        db.execute("INSERT INTO runtime_model_requests(id,run_id,purpose,model_key,started_at,input_tokens,output_tokens) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![id,run.id,purpose,model_key,now(),input,output])?;
         Ok(id)
     }
     pub fn finish_model_request(
@@ -790,8 +899,13 @@ impl Journal {
         }
         Ok(())
     }
-    pub fn scope_approved(&self, run: &str, key: &str) -> Result<bool> {
-        Ok(self.connection.lock().unwrap().query_row("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE run_id=?1 AND kind='scope.effect_approved' AND json_extract(data,'$.bindingKey')=?2)",params![run,key],|r|r.get(0))?)
+    pub fn goal_understanding(&self, run: &str, revision: u64) -> Result<Option<Value>> {
+        let payload:Option<String>=self.connection.lock().unwrap().query_row(
+            "SELECT json_extract(data,'$.interpretation') FROM runtime_events WHERE run_id=?1 AND kind='goal.understood' AND json_extract(data,'$.goalRevision')=?2 ORDER BY sequence DESC LIMIT 1",
+            params![run,revision],|row|row.get(0)).optional()?;
+        payload
+            .map(|text| serde_json::from_str(&text).map_err(Into::into))
+            .transpose()
     }
     pub fn record_evidence(&self, run: &Run, receipt: &EvidenceReceipt) -> Result<()> {
         let mut db = self.connection.lock().unwrap();
@@ -1764,6 +1878,14 @@ impl Journal {
             ],
         )?;
         Ok(())
+    }
+
+    /// 只读取当前会话且位于本次运行边界内的原始观测，不重新执行工具。
+    pub fn read_observation(&self, run: &Run, call_id: &str) -> Result<String> {
+        self.connection.lock().unwrap().query_row(
+            "SELECT t.result_json FROM tool_calls t JOIN messages m ON m.conversation_id=t.conversation_id AND m.tool_call_id=t.call_id AND m.role='tool' LEFT JOIN runtime_message_owners o ON o.message_id=m.id LEFT JOIN runtime_runs r ON r.id=o.run_id WHERE t.conversation_id=?1 AND t.call_id=?2 AND COALESCE(json_extract(r.payload,'$.messageBoundary'),m.id)<=?3 ORDER BY m.id DESC LIMIT 1",
+            params![run.conversation_id,call_id,run.message_boundary], |row| row.get(0)
+        ).optional()?.ok_or_else(|| Error::Tool("原始观测不存在或不属于本次会话可读取的历史".into()))
     }
 
     pub fn history(&self, run: &Run) -> Result<Vec<crate::model::Message>> {

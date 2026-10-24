@@ -566,7 +566,7 @@ impl Bridge {
                         prep.evidence = json!({"reason":e.to_string()});
                         journal.attempt(&prep)?;
                         return Err(Error::Conflict(
-                            "就绪准备提交结果未知；证据已保留，需要对账".into(),
+                            "暂时无法确认游戏是否已准备好，没有再次发送启动请求。".into(),
                         ));
                     }
                 }
@@ -802,7 +802,7 @@ impl Bridge {
                 a.evidence = json!({"reason":e.to_string()});
                 journal.attempt(&a)?;
                 return Err(Error::Conflict(
-                    "提交结果未知；已保留游戏执行锁，需要对账".into(),
+                    "暂时无法确认这次操作是否执行成功，没有重复执行。".into(),
                 ));
             }
         }
@@ -1228,8 +1228,9 @@ mod invoke_protocol_tests {
             })
             .unwrap();
 
-            let database =
-                std::env::temp_dir().join(format!("bridge-proto-{}.db", uuid::Uuid::new_v4()));
+            let test_directory = crate::test_root("bridge-proto");
+            std::fs::create_dir_all(&test_directory).unwrap();
+            let database = test_directory.join("journal.db");
             let journal = Arc::new(Journal::open(&database).unwrap());
             let mut run = journal
                 .create("跑一下兽怪暴徒", "conv-1", "key", 600, None)

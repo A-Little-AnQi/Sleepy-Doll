@@ -32,6 +32,8 @@ struct ModelView<'a> {
     max_output_tokens: Option<u64>,
     auth: crate::config::ModelAuth,
     prompt_cache: bool,
+    web_provider: crate::config::WebProvider,
+    web_model: &'a Option<String>,
     api_key: &'a Option<String>,
 }
 
@@ -96,7 +98,6 @@ impl AppController {
         let plugins = Arc::new(plugins);
         register_builtin_tools(
             &mut tools,
-            skills.clone(),
             plugins.clone(),
             Arc::new(crate::runtime::workspace::Workspace::from_config(
                 &config_path,
@@ -1388,6 +1389,8 @@ impl AppController {
                 max_output_tokens: model.options.max_output_tokens,
                 auth: model.auth,
                 prompt_cache: model.options.prompt_cache,
+                web_provider: model.options.web_provider,
+                web_model: &model.options.web_model,
                 api_key: &model.api_key,
             })
             .collect::<Vec<_>>();
@@ -1487,7 +1490,6 @@ impl AppController {
         let plugins = Arc::new(plugins);
         register_builtin_tools(
             &mut tools,
-            skills.clone(),
             plugins.clone(),
             Arc::new(crate::runtime::workspace::Workspace::from_config(
                 &self.config_path,
@@ -1667,7 +1669,6 @@ fn required<'a>(params: &'a Value, field: &str) -> Result<&'a str> {
 
 fn register_builtin_tools(
     registry: &mut ToolRegistry,
-    skills: Arc<SkillRegistry>,
     plugins: Arc<PluginManager>,
     workspace: Arc<crate::runtime::workspace::Workspace>,
 ) -> Result<()> {
@@ -1676,17 +1677,6 @@ fn register_builtin_tools(
         always_load: true,
         ..ToolExecution::read_only()
     };
-    let skills_search = skills.clone();
-    registry.register(
-        FunctionTool::new("skills.search", "仅在任务需要额外的已安装操作手册时搜索 Skill。已经自动加载的手册不需要先搜索或读取。", json!({"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"],"additionalProperties":false}), "core:skills", move |arguments| serde_json::to_value(skills_search.search(arguments["query"].as_str().unwrap_or_default(), arguments["limit"].as_u64().unwrap_or(8) as usize)).map_err(Error::from))
-            .with_label("检索技能")
-            .with_execution(core_read()),
-    )?;
-    registry.register(
-        FunctionTool::new("skills.read", "读取已发现但未自动加载的 Skill。当前上下文已有完整说明时不要重复读取。", json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}), "core:skills", move |arguments| skills.get(arguments["name"].as_str().unwrap_or_default()).map(|skill| json!({"name":skill.name,"description":skill.description,"instructions":skill.body})).ok_or_else(|| Error::Tool("skill not found".into())))
-            .with_label("读取技能")
-            .with_execution(core_read()),
-    )?;
     registry.register(
         FunctionTool::new(
             "plugins.list",

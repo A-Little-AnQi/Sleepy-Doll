@@ -44,6 +44,19 @@ pub enum ModelAuth {
     Bearer,
 }
 
+/// 联网是当前模型服务的能力，不能由兼容协议或模型名称推断。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WebProvider {
+    #[default]
+    Auto,
+    Disabled,
+    Openai,
+    Anthropic,
+    Gemini,
+    Zhipu,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelOptions {
@@ -62,6 +75,11 @@ pub struct ModelOptions {
     /// 不支持 `cache_control` 的 Claude 中转要关掉，否则请求返回 400。
     #[serde(default = "default_true")]
     pub prompt_cache: bool,
+    #[serde(default)]
+    pub web_provider: WebProvider,
+    /// 网页内容提取所用的已配置模型；留空沿用本次会话模型。
+    #[serde(default)]
+    pub web_model: Option<String>,
 }
 
 /// 未获知模型容量时的起始窗口；模型列表返回容量时由设置界面采用。
@@ -77,6 +95,8 @@ impl Default for ModelOptions {
             reasoning_effort: None,
             context_window: default_context_window(),
             prompt_cache: true,
+            web_provider: WebProvider::Auto,
+            web_model: None,
         }
     }
 }
@@ -114,8 +134,10 @@ pub struct AgentConfig {
     #[serde(default)]
     pub skill_directories: Vec<PathBuf>,
     #[serde(default = "default_true")]
+    /// 自动装载已参与插件的 alwaysLoad 短入口；子技能由模型按需读取。
     pub auto_load_skills: bool,
     #[serde(default = "default_max_skills")]
+    /// 自动装载的短入口数量上限，不限制显式读取。
     pub max_loaded_skills: usize,
     #[serde(default)]
     pub disabled_skills: Vec<String>,
@@ -627,7 +649,37 @@ impl AppConfig {
             let prompt_cache = input
                 .get("promptCache")
                 .and_then(serde_json::Value::as_bool);
+            let web_model = input
+                .get("webModel")
+                .map(|value| {
+                    if value.is_null() || value.as_str() == Some("") {
+                        Ok(serde_json::Value::Null)
+                    } else {
+                        value
+                            .as_str()
+                            .filter(|id| !id.trim().is_empty())
+                            .map(|id| serde_json::json!(id))
+                            .ok_or_else(|| {
+                                Error::Config("网页提取模型必须是已配置模型的标识".into())
+                            })
+                    }
+                })
+                .transpose()?;
+            let web_provider = input
+                .get("webProvider")
+                .map(|value| {
+                    serde_json::from_value::<WebProvider>(value.clone())
+                        .map(|provider| serde_json::json!(provider))
+                        .map_err(|_| Error::Config("未知的联网提供方".into()))
+                })
+                .transpose()?;
             if let Some(model) = existing {
+                if let Some(selected) = web_model {
+                    model["options"]["webModel"] = selected;
+                }
+                if let Some(provider) = web_provider {
+                    model["options"]["webProvider"] = provider;
+                }
                 if let Some(timeout) = timeout {
                     model["options"]["timeoutMs"] = serde_json::json!(timeout);
                 }
@@ -651,6 +703,12 @@ impl AppConfig {
                 }
             } else {
                 let mut options = serde_json::json!({"timeoutMs":timeout.unwrap_or(120_000)});
+                if let Some(selected) = web_model {
+                    options["webModel"] = selected;
+                }
+                if let Some(provider) = web_provider {
+                    options["webProvider"] = provider;
+                }
                 if let Some(window) = context_window {
                     options["contextWindow"] = serde_json::json!(window);
                 }

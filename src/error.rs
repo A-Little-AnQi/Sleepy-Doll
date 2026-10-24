@@ -54,7 +54,7 @@ impl Error {
             Self::Http(message) if message.starts_with("模型") => message.clone(),
             Self::Http(_) => "连接中断或服务未响应，请稍后核对运行结果。".into(),
             Self::Timeout(message) => message.clone(),
-            Self::Storage(_) => "本地记录保存失败，已停止派发新动作。".into(),
+            Self::Storage(_) => "本地记录无法保存，请检查磁盘空间和目录权限。".into(),
             Self::Cancelled => "已停止。".into(),
             Self::Io(_) => "本地文件或插件进程无法访问，请检查路径与权限。".into(),
             Self::Json(_) => "收到的数据格式不完整或不正确。".into(),

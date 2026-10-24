@@ -1,24 +1,37 @@
-/** 粗略 token 估算，与运行时 `context::estimate_tokens` 同口径。 */
-export function estimateTokens(text: string) {
-  let ascii = 0;
-  let wide = 0;
-  for (const char of text) {
-    if (char.charCodeAt(0) < 128) ascii += 1;
-    else wide += 1;
-  }
-  return Math.ceil(ascii / 4) + wide;
+import type { TaskInfo } from "../ipc/types";
+
+export interface ContextUsage {
+  used: number;
+  window: number;
+  cacheHit: number;
 }
 
-export function estimateMessagesTokens(
-  messages: ReadonlyArray<{ content?: string | null }>,
-  extra: ReadonlyArray<string> = [],
-) {
-  return (
-    messages.reduce(
-      (sum, message) => sum + estimateTokens(message.content ?? "") + 8,
-      0,
-    ) + extra.reduce((sum, text) => sum + estimateTokens(text), 0)
-  );
+/** 后端只提交已结算的主请求用量；新运行尚无统计时沿用本会话上一份。 */
+export function latestContextUsage(
+  runs: Iterable<TaskInfo>,
+  current?: TaskInfo,
+): ContextUsage | undefined {
+  const measured = (run: TaskInfo) =>
+    (!run.source || run.source.kind === "agent") &&
+    Number.isFinite(run.contextTokens) &&
+    (run.contextTokens ?? 0) > 0;
+  const run =
+    current && measured(current)
+      ? current
+      : [...runs]
+          .filter(measured)
+          .sort(
+            (a, b) =>
+              b.createdAt.localeCompare(a.createdAt) ||
+              b.id.localeCompare(a.id),
+          )[0];
+  return run
+    ? {
+        used: run.contextTokens!,
+        window: run.contextWindow ?? 0,
+        cacheHit: run.cacheReadTokens ?? 0,
+      }
+    : undefined;
 }
 
 export function formatTokens(value: number) {
