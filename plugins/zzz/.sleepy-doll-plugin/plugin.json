@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "zzz",
+  "name": "绝区零一条龙 MCP",
+  "version": "0.1.0",
+  "description": "连接绝区零一条龙 MCP 服务，运行自动化任务、管理应用配置、识别游戏画面并执行游戏操作。",
+  "skills": ["./skills"],
+  "mcpServers": [
+    {
+      "id": "onedragon",
+      "transport": "streamableHttp",
+      "url": "http://127.0.0.1:23001/mcp",
+      "timeoutMs": 30000,
+      "toolExecution": {
+        "check_game_window": { "effect": "readOnly", "risk": "observe", "modelUsage": "none" },
+        "capture_game_screen": { "effect": "readOnly", "risk": "observe", "modelUsage": "none" },
+        "analyze_screen": { "effect": "readOnly", "risk": "observe", "modelUsage": "none", "maxResultChars": 24000 },
+        "list_applications": { "effect": "readOnly", "risk": "observe", "modelUsage": "none", "maxResultChars": 24000 },
+        "get_predefined_teams": { "effect": "readOnly", "risk": "observe", "modelUsage": "none" },
+        "list_operations": { "effect": "readOnly", "risk": "observe", "modelUsage": "none", "maxResultChars": 48000 },
+        "describe_operation": { "effect": "readOnly", "risk": "observe", "modelUsage": "none" },
+        "get_run_status": { "effect": "readOnly", "risk": "observe", "modelUsage": "none" },
+        "get_config": { "effect": "readOnly", "risk": "observe", "modelUsage": "none" },
+        "describe_config": { "effect": "readOnly", "risk": "observe", "modelUsage": "none", "maxResultChars": 24000 },
+        "list_app_configs": { "effect": "readOnly", "risk": "observe", "modelUsage": "none" },
+        "list_mcp_usage_guides": { "effect": "readOnly", "risk": "observe", "modelUsage": "none" },
+        "get_mcp_usage_guide": { "effect": "readOnly", "risk": "observe", "modelUsage": "none", "maxResultChars": 24000 },
+        "open_game": { "effect": "gameWrite", "modelUsage": "none", "concurrency": "gameExclusive", "leaseScope": "game:zzz" },
+        "close_game": { "effect": "gameWrite", "risk": "high", "modelUsage": "none", "concurrency": "gameExclusive", "leaseScope": "game:zzz" },
+        "click_game": { "effect": "gameWrite", "modelUsage": "none", "concurrency": "gameExclusive", "leaseScope": "game:zzz" },
+        "key_tap": { "effect": "gameWrite", "modelUsage": "none", "concurrency": "gameExclusive", "leaseScope": "game:zzz" },
+        "drag": { "effect": "gameWrite", "modelUsage": "none", "concurrency": "gameExclusive", "leaseScope": "game:zzz" },
+        "input_text": { "effect": "gameWrite", "modelUsage": "none", "concurrency": "gameExclusive", "leaseScope": "game:zzz" },
+        "run_one_dragon": { "effect": "gameWrite", "risk": "high", "modelUsage": "none", "concurrency": "gameExclusive", "leaseScope": "game:zzz" },
+        "run_standalone_app": { "effect": "gameWrite", "risk": "high", "modelUsage": "none", "concurrency": "gameExclusive", "leaseScope": "game:zzz" },
+        "run_operation": { "effect": "gameWrite", "risk": "high", "modelUsage": "none", "concurrency": "gameExclusive", "leaseScope": "game:zzz" },
+        "stop_run": { "effect": "gameWrite", "modelUsage": "none", "concurrency": "gameExclusive", "leaseScope": "game:zzz" },
+        "set_config": { "effect": "localWrite", "modelUsage": "none" },
+        "add_config_item": { "effect": "localWrite", "modelUsage": "none" },
+        "delete_config_item": { "effect": "localWrite", "risk": "high", "modelUsage": "none", "scope": "delete" },
+        "upsert_screen_area": { "effect": "localWrite", "modelUsage": "none" },
+        "delete_screen_area": { "effect": "localWrite", "risk": "high", "modelUsage": "none", "scope": "delete" }
+      }
+    }
+  ]
+}
