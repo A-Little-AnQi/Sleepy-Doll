@@ -56,11 +56,12 @@ npm run dist
 
 构建与安装覆盖程序文件，保留用户数据和凭据。安装器按文件清单打包并使用空凭据模板，排除 `user/`。安装与发布细节见 [发布文档](distribution.md)，数据解析规则见 [配置文档](configuration.md)。
 
-Rust 缓存清理保留 EXE、用户数据、桥、前端、安装载荷和 `dist/`，只清理 debug/release 中的 deps、build、incremental、.fingerprint 与顶层调试符号、Rust 库文件。编译进行中或目录含链接时拒绝清理。删除通道为 `E:\tools\Remove-Directory.ps1`；不要使用 `cargo clean` 或删除整个 `target/`。
+Rust 缓存清理保留 EXE、用户数据、桥、前端、安装载荷和 `dist/`，只清理 debug/release 中的 deps、build、incremental、.fingerprint 与顶层调试符号、Rust 库文件。编译进行中或目录含链接时拒绝清理。工程清理入口为 `scripts/remove-build-output.ps1`，在维护工作站自动转交规定的本机删除通道；不要使用 `cargo clean` 或删除整个 `target/`。
 
 ## 验证
 
 ```powershell
+npm run check:repo
 npm run build
 npm test
 cargo fmt --all -- --check
@@ -115,4 +116,4 @@ python bgi-bridge/dev/coverage-audit.py <BGI源码根目录>
 
 ### 基础工具的效率对比
 
-`tests/runtime/skill-efficiency.rs` 的显式真实模型检查走生产 Supervisor、实际 BGI 工具登记及文件读写；仅测试目录位置由本地夹具提供。设置模型配置、模型名、阶段、报告路径及测试根目录对应的 SLEEPY_DOLL 环境变量后，运行 `cargo test --no-default-features --lib live_bgi_skill_efficiency -- --ignored --nocapture`。每个阶段包含只读查询、修改真实配置开关和源码符号关系，各两次。运行时不加载真实游戏，不把测试期望传给模型。报告记录成功率、请求、工具、实际用量及网络耗时，不能用静态目录命中代替模型任务通过。旧阶段无效字段的样本须单列排除，不纳入有效效率比较。
+`tests/runtime/skill-efficiency.rs` 的显式真实模型检查走生产 Supervisor、实际 BGI 工具登记及文件读写；仅测试目录位置由本地夹具提供。设置模型配置、模型名、阶段、报告路径及测试根目录对应的 SLEEPY_DOLL 环境变量后，运行 `cargo test --no-default-features --lib live_bgi_skill_efficiency -- --ignored --nocapture`。每个阶段包含只读查询、修改真实配置开关和源码符号关系，各两次。运行时不加载真实游戏，不把测试期望传给模型。报告记录成功率、请求、工具、实际用量及网络耗时，不能用静态目录命中代替模型任务通过。无效或不符合场景约束的样本须单列排除，不纳入有效效率比较。

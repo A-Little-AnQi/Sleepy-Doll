@@ -23,13 +23,13 @@
 | `assets/` | 产品实际引用、需要维护的正式资源。不收纳生成截图、设计候选、提示词、录屏和未采用的素材。 |
 | `scripts/` | 可复用的构建、发布、校验与清理入口。一次性脚本归本任务的 `target/.tmp/<任务名>/`，完成后清理。 |
 | `tests/` | 可维护的测试源码及固定测试输入。运行生成的数据库、截图、报告不得回写此目录。 |
-| `docs/` | 维护文档；按现有专题组织。不写构建日志、自动报告和逐轮任务记录。 |
+| `docs/` | 维护文档；入口为 `docs/README.md`，领域资料归 `bgi/`，概念教程归 `guides/`。不写构建日志、自动报告和逐轮任务记录。 |
 | `video/` | 既有宣传片源码、制作入口与正式输入；最终成片及其配套交付文件只放 `video/output/`，制作缓存归 `target/video-build/`。不得向 `dist/` 写海报、封面、提示词或宣传文案。 |
 | `target/` | 本工程统一构建、开发运行、缓存和验证区域，具体分工见下表；不得整目录删除。 |
 | `dist/` | 经过校验、可直接交给用户的最终软件交付物。不是工作安装目录、启动目录、缓存目录或素材目录。 |
 | `node_modules/`、`.git/`、现有编辑器目录 | 各工具自身管理的数据。不得当作本任务的产物目录，也不得通过复制、挪动它们绕过构建或清理问题。 |
 
-根目录只保留上述正式模块、工程入口和必要配置，如 `AGENTS.md`、`CLAUDE.md`、README、LICENSE、Cargo/npm 清单与本机锁文件、`build.rs`、Vite/TypeScript/Frame/发布通道配置、配置示例与已有启动入口。锁文件继续遵守当前 Git 忽略策略。禁止在根目录新增日志、截图、压缩包、测试数据库、临时脚本或报告。
+根目录只保留上述正式模块、工程入口和必要配置，如 `AGENTS.md`、`CLAUDE.md`、README、LICENSE、CONTRIBUTING、SECURITY、Cargo/npm 清单与本机锁文件、`build.rs`、Vite/TypeScript/Frame/发布通道配置、配置示例与已有启动入口。锁文件继续遵守当前 Git 忽略策略。禁止在根目录新增日志、截图、压缩包、测试数据库、临时脚本或报告。
 
 ### `target/` 内部分工
 
@@ -93,7 +93,7 @@ dist/
 
 本机删除目录、整棵树、批量文件及任何被策略拒绝的删除，必须使用 `E:\tools\Remove-Directory.ps1`。禁止目录树直接使用 `Remove-Item -Recurse -Force`、`rm -rf`、`rd /s /q`、`del /s` 等形式。
 
-本机工具的绝对路径不得成为 CI 依赖。GitHub Actions 中的组包清理由 `scripts/package-windows.ps1` 执行：必须确认 `GITHUB_WORKSPACE` 等于当前源码根，并限定在 `target/setup/` 的明确暂存项内，拒绝链接和未知文件。CI 分支不能用于绕过本机删除通道。
+本机工具的绝对路径不得成为 CI 依赖。GitHub Actions 中的组包清理由 `scripts/package-windows.ps1` 执行：必须确认 `GITHUB_WORKSPACE` 等于当前源码根，并限定在 `target/setup/` 的明确暂存项内，拒绝链接和未知文件。CI 分支不能用于绕过本机删除通道。可复用入口 `scripts/remove-build-output.ps1` 在本维护工作站自动转交上述脚本，其他开发机只清理仓库内白名单构建输出；拒绝后不得切换后端重试。
 
 ```powershell
 & E:\tools\Remove-Directory.ps1 -Path 'E:\已核实的绝对路径' -WhatIf

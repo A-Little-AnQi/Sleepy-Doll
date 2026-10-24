@@ -16,7 +16,7 @@ Sleepy Doll 是游戏脚本工具的通用本地桌面助手，目前适配 Bett
 - 构建覆盖程序文件，保留 `user/` 与含 token 的现有配置；打包按 `scripts/pack-payload.ps1` 的清单执行，不能直接压缩工作安装目录。
 - `package-lock.json` 与 `Cargo.lock` 只保留本机，不进 Git；不使用 `npm ci` 或依赖锁文件的 CI 缓存配置。
 - 生成报告不进 Git；桥内嵌的 `managed/generated/host-documentation.json`、插件功能索引与 `dev/fixtures/` 是构建或测试输入，更新时核对生成来源。
-- 删除走 `E:\tools\Remove-Directory.ps1`；仅删除已核实属于目标范围的资源，检查退出码与路径是否还存在。
+- 工程脚本通过 `scripts/remove-build-output.ps1` 清理白名单输出，本维护工作站自动转交 `E:\tools\Remove-Directory.ps1`；仅删除已核实属于目标范围的资源，检查退出码与路径是否还存在。
 
 ## 修改与验证
 

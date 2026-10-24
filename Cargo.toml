@@ -6,8 +6,6 @@ description = "General desktop agent for game scripting tools, with a BetterGI p
 license = "MIT"
 
 [features]
-client-resources-test = ["client-protection"]
-client-protection = ["dep:obfstr"]
 default = ["desktop"]
 desktop = ["dep:tao", "dep:wry", "dep:rust-embed", "dep:mime_guess"]
 dev-ipc = ["dep:tiny_http"]
@@ -15,7 +13,6 @@ dev-ipc = ["dep:tiny_http"]
 setup = ["dep:flate2", "dep:slint", "dep:slint-build", "dep:raw-window-handle", "dep:png"]
 
 [dependencies]
-obfstr = { version = "=0.4.6", optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.145"
 thiserror = "2.0.16"

@@ -113,7 +113,7 @@ child.on("close", (code) => {
       "-ExecutionPolicy",
       "Bypass",
       "-File",
-      "E:\\tools\\Remove-Directory.ps1",
+      resolve(root, "scripts/remove-build-output.ps1"),
       "-Path",
       scratch,
       "-Json",

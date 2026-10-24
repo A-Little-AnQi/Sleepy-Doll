@@ -17,7 +17,6 @@ use std::{
     time::Duration,
 };
 
-#[cfg(not(feature = "client-protection"))]
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -102,14 +101,9 @@ fn shell_icon(size: u32) -> Option<tao::window::Icon> {
     }
 }
 
-#[cfg(not(feature = "client-protection"))]
 #[derive(RustEmbed)]
 #[folder = "target/ui/"]
 struct UiAssets;
-#[cfg(feature = "client-protection")]
-mod protected_ui_assets;
-#[cfg(feature = "client-protection")]
-use protected_ui_assets::UiAssets;
 
 /// 界面靠这两个标记判断自己运行在桌面壳里、以及标题栏要不要自绘。
 #[cfg(target_os = "windows")]

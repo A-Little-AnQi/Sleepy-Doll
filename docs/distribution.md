@@ -4,14 +4,14 @@
 
 ## 地址与资源
 
-- 官网（Vercel）：`https://sleepy-doll.restless-nh3.com`，源码 `E:\BetterGIProject\sleepy-doll-website`，公开仓库 `A-Little-AnQi/sleepy-doll-website`。
+- 官网（Vercel）：`https://sleepy-doll.restless-nh3.com`，源码见 [官网仓库](https://github.com/A-Little-AnQi/sleepy-doll-website)。
 - 更新与统计 API（Cloudflare Worker）：`https://sleepy-doll-api.restless-nh3.com`。官网通过 Vercel `/api/*` 外部重写保留旧 API 地址，兼容已发布的 0.0.1。
 - 安装包：`https://sleepy-doll-download.restless-nh3.com/releases/<版本>/Sleepy-Doll-<版本>-setup.exe`
 - R2 桶：`sleepy-doll-releases`，Standard 存储。
 - Worker：`sleepy-doll-distribution`。
 - GA4：独立的 Sleepy Doll 媒体资源，衡量 ID `G-PBWX0V3ESR`。
 
-发布属性由 `release-channel.json` 明确指定，当前 `0.1.3` 为 `stable` 正式版。`0.x` 不代表测试版，`1.x` 也不代表正式版。测试发布不会修改正式通道。
+发布属性由 `release-channel.json` 明确指定，构建时以该文件及产品版本清单为准。`0.x` 不代表测试版，`1.x` 也不代表正式版。测试发布不会修改正式通道。
 
 - `stable`：正式通道，GitHub Release 取消 Pre-release 并标记 Latest，不接受带预发布后缀的版本。
 - `test`：测试通道，GitHub Release 标记 Pre-release，不标记 Latest。
@@ -32,7 +32,7 @@
 
 ### 明确授权的同版热修复
 
-只有用户明确要求覆盖已发布包体时，使用 `replace-release` 工作流；普通 `release` 仍禁止不同内容覆盖同版本。提供精确的产品源码提交 `source_commit` 和当前正式包的 SHA-256，工作流在单一检出目录构建该提交，只从工具提交加载覆盖脚本，不混入本机未提交的功能开发。
+只有用户明确要求覆盖已发布包体时，使用 `replace-release` 工作流；普通 `release` 仍禁止不同内容覆盖同版本。提供精确的产品源码提交 `source_commit`、当前正式包的 SHA-256 和本次修复说明 `note`，工作流在单一检出目录构建该提交，只从工具提交加载覆盖脚本，不混入本机未提交的功能开发。
 
 覆盖前核对原包、校验文件、归档清单、GitHub 资产和存储容量，仅暂停目标版本的下载。同步替换 R2 与 GitHub 资产、正式清单并验证公开下载的新 SHA-256 后，以原引用校验更新版本标签到产品修复提交；失败恢复原资产、清单和标签，恢复不完整时保持下载暂停并报告。GitHub Actions 使用自身令牌更新标签，避免再次触发普通发布。
 
@@ -68,29 +68,17 @@ GitHub Actions Secrets：`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`CLOUDFLA
 
 安装缓存位于安装器所在目录的 `.cache/setup/`。验证工具的临时目录必须指向项目 `target/` 下的任务目录。
 
-## 基础统计
+## 基础统计与数据边界
 
-客户端统计默认开启，新安装会在启动、检查更新和更新完成时上报匿名事件，业务埋点参数为版本、通道、平台、事件名、目标版本、`sessionId` 与随机 `clientId`，Google tag 还会附带标准会话和浏览器/设备信息，不含对话、模型密钥或文件路径。用户显式保存过 `analyticsEnabled=false` 的停用选择会被保留，修改更新通道不会改动统计开关。
+客户端的匿名统计默认开启，保留用户已经保存的停用选择；设置页可关闭。事件覆盖启动、更新检查、下载校验和更新结果，包括版本、通道、平台、随机安装标识与会话标识，不发送对话、模型密钥、文档或本机文件路径。
 
-客户端上报不再经过官网或 Worker：原生层把白名单事件经内存事件出口转交给界面，由界面内的官方 gtag.js（`https://www.googletagmanager.com/gtag/js?id=G-J691D7H7BY`）直连 Google Analytics。GA 资源 557227178 下使用独立的「桌面客户端」web 数据流（16041216887，测量 ID `G-J691D7H7BY`，`https://sleepy-doll.localhost`），增强型衡量关闭；上报带固定虚拟 `page_location=https://sleepy-doll.localhost/app`，这只是 GA 里的数据标签，客户端从不访问该网址；Google tag 直连无需任何 secret，客户端不保存任何 GA API 密钥，也不手工拼未公开的收集协议。`client_id` 沿用偏好文件里的随机 UUID，consent 中广告三项始终拒绝、analytics 仅在用户开启后授予，不发送页面浏览，也不读取对话、标题、URL 或文件路径。事件在界面就绪前最多缓冲 32 条、超过 30 秒丢弃；脚本加载失败或离线不影响任何功能，不弹提示、不重试。关闭统计（`analyticsEnabled=false`）后重启即完全停用：不加载脚本、置 `ga-disable` 标记，连无 Cookie ping 也不发送。以下统计描述仅适用于官网。
+客户端通过官方 gtag.js 直连独立的 Google Analytics 数据流，不持有 GA 服务端密钥；关闭后重启不会加载统计脚本。事件队列有上限和过期时间，离线或加载失败不影响产品功能。官网与 Worker 使用各自的同意和事件校验流程；服务端密钥只放在部署环境。
 
-官网统计默认关闭，用户在网站主动同意后启用 GA4，发送匿名访问与下载点击事件。不发送对话、提示词、模型密钥、文件路径或用户文档。官网与 Worker 的统计链路保持原样，仅为兼容已发布的 0.0.1 客户端保留 `/api/events`，不因客户端直连而修改网站实现。
-
-事件包括官网访问与下载点击。官网点击不代表文件下载完成，下载校验完成不代表安装完成。
-
-Worker 校验事件白名单、字段格式、请求体大小和来源，并限流。GA 密钥仅保存在 Worker 服务端。统计接口失败不影响启动、下载或更新。测试通道事件启用 GA4 DebugView。
-
-### 在 GA 中查看
-
-资源：Sleepy Doll（557227178）。客户端直连事件进入独立的「桌面客户端」数据流（`G-J691D7H7BY`），与官网 web 数据流分开查看；旧版 0.0.1 经 Worker 上报的历史数据仍在原有探索里。报告导航「客户端统计 / 使用情况」中的「日活与启动」「版本与通道」「更新结果」。
-
-「日活与启动」按 `app_start` 的日期分组：`totalUsers` 是去重匿名安装，`eventCount` 是启动次数，不含官网流量。它不是实名人数，也不符合 GA 的互动时长口径——跨日持续运行但没有再次启动的安装，不会计入新一天的启动日活，当前按「启动日活」理解。报告时区已核实为 GMT+08 中国时间。统计默认开启但用户可显式关闭，因此这些数字不代表全部安装量。
-
-「更新结果」按 `update_check` / `update_available` / `update_download_complete` / `update_success` / `update_failed` 事件查看。数据里包含既有验证运行产生的记录，不能当作真实客户增长解读。
+客户端、官网和旧版兼容事件须分别分析。启动次数不等于活跃用户，下载点击不等于完成下载，下载校验通过不等于安装完成。测试运行也可能产生事件，不能当作真实用户增长。部署使用的数据流、资源编号与控制台报表属于运营配置，不作为仓库中的现状快照维护。
 
 ## 验收
 
-GitHub 构建、公开下载哈希、软件更新状态和 GA4 实际事件分别核验。国内连通性需要关闭代理后实测；成功的单条线路不能代表所有地区和运营商。`verify-update` 工作流在 GitHub Actions 的 Windows 环境构建不发布的 0.0.0 基线，使用真实界面下载已发布的 0.0.1，执行原位置安装与重启，并校验配置、数据库、bridge 配置和标记文件保留。2026-10-04 首次验证通过，运行 ID 37136132020。
+GitHub 构建、公开下载哈希、软件更新状态和 GA4 实际事件分别核验。国内连通性需要关闭代理后实测；成功的单条线路不能代表所有地区和运营商。安装更新应在隔离 Windows 环境验证原位置安装、重启及配置、数据库、桥令牌的保留。曾经固定验证 0.0.0 → 0.0.1 的一次性工作流已移除；当前仓库没有自动执行最新版桌面更新全流程的 CI 任务，不能用历史结果代替本次版本验收。
 
 官网 main 提交由 Vercel 自动构建。分发服务单独由 `deploy-service` 部署，修改官网或 API 无需重新发布安装包。正式域名使用 Vercel 提供的 DNS-only CNAME，API 和下载分别使用一级子域名，避免多级通配证书问题。
 
@@ -98,7 +86,7 @@ GitHub 构建、公开下载哈希、软件更新状态和 GA4 实际事件分�
 
 安装包下载由 Workers Free 的 `sleepy-doll-distribution` 读取私有 R2 桶，下载域名和版本路径不变。桶的 R2 自定义公共域名和 r2.dev 均关闭；下载域名作为 Worker Custom Domain 使用。
 
-- 保持 Workers Free。当前账号每日动态请求上限 100,000，UTC 零点（北京时间 08:00）重置，耗尽后请求失败。
+- 保持 Workers Free。本部署按每日 100,000 次动态请求预算设计；平台实际额度与计费以账号和当前服务条款为准，不能把本文当作实时额度证明。
 - 每个下载 GET/HEAD 最多执行一次 R2 get/head，不列目录、不重试；命中缓存则不读取 R2。更新清单每次请求也只读取一次。
 - 下载仅接受规范版本路径和 GET/HEAD，不接受查询参数或多段 Range。每 IP 每分钟 120 次下载请求的绑定限流是辅助保护，计数按 Cloudflare 本地执行位置维护，不是精确全球计费限额。
 - 在以上条件下，跨 UTC 日边界的 31 天窗口最多覆盖 32 个每日额度，公网 Worker 请求最多对应约 320 万次 R2 读取，低于 Standard 每月 1,000 万次 Class B 免费额度。CI、管理工具及其他桶的操作另计。
@@ -109,4 +97,4 @@ GitHub 构建、公开下载哈希、软件更新状态和 GA4 实际事件分�
 
 保护范围是本发布链路的公网读取与受控 CI 上传；不保证整个账号零账单。升级 Workers Paid、启用付费产品、上传到其他桶或泄露管理凭据会改变这个边界。
 
-下载域名另有免费 WAF 自定义规则 `Sleepy Doll - canonical download requests`：在 Worker 前阻断查询参数、GET/HEAD 以外的方法和非 `/releases/` 路径，减少明显异常请求消耗 Worker 免费额度。该规则由控制台管理，记录在 `docs/distribution-security.json`；现有部署 token 不包含 WAF 编辑权限。规则不使用验证码，避免阻断软件内下载。
+下载域名另有免费 WAF 自定义规则 `Sleepy Doll - canonical download requests`：在 Worker 前阻断查询参数、GET/HEAD 以外的方法和非 `/releases/` 路径，减少明显异常请求消耗 Worker 免费额度。该规则由部署方在控制台管理：限定下载主机、GET/HEAD、空查询串及 `/releases/` 路径。规则 ID、启用状态和当前 token 权限应在部署现场核对，不在源码中维护控制台快照。规则不使用验证码，避免阻断软件内下载。

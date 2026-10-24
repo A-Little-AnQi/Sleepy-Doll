@@ -240,7 +240,7 @@ finally:
     resolved = TEMP.resolve()
     if resolved.parent == TASK_TEMP.resolve() and resolved != TASK_TEMP.resolve():
         subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                        r"E:\tools\Remove-Directory.ps1", "-Path", str(resolved)], check=True)
+                        str(ROOT / "scripts/remove-build-output.ps1"), "-Path", str(resolved)], check=True)
         if resolved.exists():
             raise RuntimeError(f"Fixture cleanup failed: {resolved}")
     else:

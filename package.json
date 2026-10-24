@@ -32,7 +32,8 @@
     "video:build": "tsc -p video/tsconfig.json --noEmit && vite build --config video/vite.config.ts",
     "video:film": "node video/make-video.mjs",
     "video:preview": "node video/make-video.mjs --preview",
-    "video:check": "node video/make-video.mjs --check"
+    "video:check": "node video/make-video.mjs --check",
+    "check:repo": "node scripts/check-repository.mjs"
   },
   "engines": {
     "node": ">=22.18"

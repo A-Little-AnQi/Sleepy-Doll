@@ -27,7 +27,8 @@ Web 与安卓组件库作为仓库内部模块维护。Moduloom 预览工具是�
 | --- | --- |
 | `src/` | Rust 桌面壳、Agent 运行时、安装引擎与 Slint 安装界面 |
 | `web/` | React 主程序与托盘界面 |
-| `packages/ui/` | 主程序与 Frame 共用的内部组件包 |
+| `packages/` | 共用 Web 组件与 Android 模块 |
+| `android/` | Android 工程与构建入口 |
 | `frame/` | Loom 组件清单、渲染与主题适配 |
 | `plugins/` | 领域技能与工具接入清单 |
 | `bgi-bridge/` | BGI 进程内桥、源码索引与桥专项验证 |
@@ -43,6 +44,8 @@ Web 与安卓组件库作为仓库内部模块维护。Moduloom 预览工具是�
 
 ## 文档
 
+- [完整文档导航](docs/README.md)
+- [贡献指南](CONTRIBUTING.md)与[安全报告](SECURITY.md)
 - [开发与验证](docs/development.md)
 - [配置与数据](docs/configuration.md)
 - [运行内核与调用链路](docs/internals.md)

@@ -88,7 +88,7 @@ try {
 
     foreach ($item in $items) {
         if ($PSCmdlet.ShouldProcess($item.FullName, 'Remove regenerable Rust build cache')) {
-            & 'E:\tools\Remove-Directory.ps1' -Path $item.FullName
+            & (Join-Path $PSScriptRoot 'remove-build-output.ps1') -Path $item.FullName
             if ($LASTEXITCODE -ne 0 -or (Test-Path -LiteralPath $item.FullName)) {
                 throw "Cache deletion failed: $($item.FullName)"
             }

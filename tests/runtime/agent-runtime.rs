@@ -2251,7 +2251,7 @@ async fn compaction_preserves_current_user_authority_after_summarizing_its_messa
     let fixture = ModelFixture::new(|request| {
         (
             200,
-            if request["messages"][0]["content"] == protected_compaction_prompt() {
+            if request["messages"][0]["content"] == CONTEXT_COMPACTION_PROMPT {
                 answer("压缩后的事实摘要")
             } else {
                 answer("done")
@@ -2436,7 +2436,7 @@ async fn oversized_tool_history_is_compacted_without_losing_input_or_pairing() {
     let mut rejected_summary = false;
     let fixture =
         ModelFixture::new(move |request| {
-            let summarizing = request["messages"][0]["content"] == protected_compaction_prompt();
+            let summarizing = request["messages"][0]["content"] == CONTEXT_COMPACTION_PROMPT;
             if summarizing {
                 assert!(request["tools"].as_array().unwrap().is_empty());
                 assert!(request["messages"].as_array().unwrap().iter().all(|message|
@@ -2527,7 +2527,7 @@ async fn oversized_tool_history_is_compacted_without_losing_input_or_pairing() {
 async fn server_context_overflow_forces_summary_even_when_estimate_fits() {
     let mut rejected = false;
     let fixture = ModelFixture::new(move |request| {
-        if request["messages"][0]["content"] == protected_compaction_prompt() {
+        if request["messages"][0]["content"] == CONTEXT_COMPACTION_PROMPT {
             return (200, answer("已确认旧目标与旧结果；继续当前目标。"));
         }
         if !rejected {
@@ -2563,7 +2563,7 @@ async fn server_context_overflow_forces_summary_even_when_estimate_fits() {
             .lock()
             .unwrap()
             .iter()
-            .any(|request| request["messages"][0]["content"] == protected_compaction_prompt())
+            .any(|request| request["messages"][0]["content"] == CONTEXT_COMPACTION_PROMPT)
     );
 }
 
@@ -2572,7 +2572,7 @@ async fn truncated_summary_is_retried_and_never_committed_as_complete() {
     let mut rejected = false;
     let mut summary_attempts = 0;
     let fixture = ModelFixture::new(move |request| {
-        if request["messages"][0]["content"] == protected_compaction_prompt() {
+        if request["messages"][0]["content"] == CONTEXT_COMPACTION_PROMPT {
             summary_attempts += 1;
             if summary_attempts == 1 {
                 let mut response = answer("PARTIAL_SUMMARY");

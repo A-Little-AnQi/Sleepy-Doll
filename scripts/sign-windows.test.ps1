@@ -40,6 +40,6 @@ try {
     Assert-Rejected { & $sign -Action Sign -Path (Join-Path $root 'Cargo.toml') } 'Source path'
 } finally {
     # Fixed owned directory only. The local test is not a dependency of CI.
-    & E:\tools\Remove-Directory.ps1 -Path $scratch -Json
+    & (Join-Path $PSScriptRoot 'remove-build-output.ps1') -Path $scratch -Json
     if ($LASTEXITCODE -ne 0 -or (Test-Path -LiteralPath $scratch)) { throw "Signing test cleanup failed: $scratch" }
 }

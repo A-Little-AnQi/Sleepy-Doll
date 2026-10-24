@@ -24,7 +24,3 @@ pub(crate) fn test_root(name: &str) -> std::path::PathBuf {
         .join(name)
         .join(uuid::Uuid::new_v4().to_string())
 }
-
-#[cfg(all(test, feature = "client-resources-test"))]
-#[path = "protected_ui_assets.rs"]
-mod protected_resources_validation;

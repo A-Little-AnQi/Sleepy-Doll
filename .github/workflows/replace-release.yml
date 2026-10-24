@@ -8,6 +8,9 @@ on:
       expected_sha256:
         description: Verified current stable package SHA-256
         required: true
+      note:
+        description: Description of this exact hotfix for the release notes
+        required: true
 permissions:
   contents: write
 concurrency:
@@ -28,7 +31,7 @@ jobs:
       REPLACE_SOURCE_COMMIT: ${{ inputs.source_commit }}
       REPLACE_EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
       TOOL_SOURCE: ${{ github.sha }}
-      REPLACE_NOTE: "- 修复回退旧版后，旧界面缓存与已迁移数据共存导致启动退出的问题。"
+      REPLACE_NOTE: ${{ inputs.note }}
     steps:
       - name: Validate replacement inputs
         shell: pwsh

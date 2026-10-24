@@ -79,43 +79,43 @@ try {
   const port = httpServer.address().port;
   browser = await chromium.launch();
   {
-  const page = await browser.newPage();
-  await page.goto(`http://127.0.0.1:${port}/transcript-note-check-blank`, {
-    waitUntil: "domcontentloaded",
-  });
-  // 经 vite 的 /@fs/ 管道加载 shim，裸导入才会被依赖预打包解析。
-  const shimUrl = `/@fs/${shimPath.split("\\").join("/")}`;
-  await page.evaluate((url) => import(url), shimUrl);
-  await page.waitForFunction(() => Boolean(window.__RESULTS), null, {
-    timeout: 20_000,
-  });
-  const results = await page.evaluate(() => window.__RESULTS);
-  const failures = [];
-  const expect = (ok, what) => {
-    if (!ok) failures.push(what);
-  };
-  const needsReview = results.needsReview ?? "";
-  const cancelled = results.cancelled ?? "";
-  expect(needsReview.includes("已提交后台计划"), "needsReview: 助手正文仍在");
-  expect(
-    !needsReview.includes("turn-outcome-note"),
-    "needsReview: 不渲染 turn-outcome-note",
-  );
-  expect(
-    !needsReview.includes("结果待核对"),
-    "needsReview: 不出现「结果待核对」",
-  );
-  expect(
-    cancelled.includes("turn-outcome-note"),
-    "cancelled: 保留 turn-outcome-note",
-  );
-  expect(cancelled.includes("已停止"), "cancelled: 显示「已停止」");
-  if (failures.length > 0) {
-    for (const item of failures) console.error(`FAIL ${item}`);
-    process.exitCode = 1;
-  } else {
-    console.log("transcript-note-check: ok");
-  }
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${port}/transcript-note-check-blank`, {
+      waitUntil: "domcontentloaded",
+    });
+    // 经 vite 的 /@fs/ 管道加载 shim，裸导入才会被依赖预打包解析。
+    const shimUrl = `/@fs/${shimPath.split("\\").join("/")}`;
+    await page.evaluate((url) => import(url), shimUrl);
+    await page.waitForFunction(() => Boolean(window.__RESULTS), null, {
+      timeout: 20_000,
+    });
+    const results = await page.evaluate(() => window.__RESULTS);
+    const failures = [];
+    const expect = (ok, what) => {
+      if (!ok) failures.push(what);
+    };
+    const needsReview = results.needsReview ?? "";
+    const cancelled = results.cancelled ?? "";
+    expect(needsReview.includes("已提交后台计划"), "needsReview: 助手正文仍在");
+    expect(
+      !needsReview.includes("turn-outcome-note"),
+      "needsReview: 不渲染 turn-outcome-note",
+    );
+    expect(
+      !needsReview.includes("结果待核对"),
+      "needsReview: 不出现「结果待核对」",
+    );
+    expect(
+      cancelled.includes("turn-outcome-note"),
+      "cancelled: 保留 turn-outcome-note",
+    );
+    expect(cancelled.includes("已停止"), "cancelled: 显示「已停止」");
+    if (failures.length > 0) {
+      for (const item of failures) console.error(`FAIL ${item}`);
+      process.exitCode = 1;
+    } else {
+      console.log("transcript-note-check: ok");
+    }
   }
 } finally {
   await closeQuietly(browser, "close");
@@ -132,7 +132,9 @@ try {
         "-ExecutionPolicy",
         "Bypass",
         "-File",
-        "E:\\tools\\Remove-Directory.ps1",
+        fileURLToPath(
+          new URL("../../scripts/remove-build-output.ps1", import.meta.url),
+        ),
         "-Path",
         shimPath,
         "-Json",

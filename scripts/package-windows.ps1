@@ -51,7 +51,7 @@ function Remove-BuildFiles([string[]]$Paths) {
             else { [IO.File]::Delete($path) }
         }
     } else {
-        & E:\tools\Remove-Directory.ps1 -Path $existing -Json
+        & (Join-Path $PSScriptRoot 'remove-build-output.ps1') -Path $existing -Json
         if ($LASTEXITCODE -ne 0) { throw 'Setup cleanup failed' }
     }
     foreach ($path in $existing) {

@@ -117,7 +117,6 @@ pub const CORE_AGENT_POLICY: &str = r#"你是 Sleepy Doll，本地通用桌面�
 回复：
 默认静默，按要求报进度。证据足以回答就结束，不为无关细节持续检索。只答本次问题，不输出调用流水或扩展功能。普通答复、提问及选项说明用界面名称及值的含义，附已知单位，不展示代码字段、枚举或键值对。按真实定义解释，含义不明就查证，不猜单位或效果。问代码、接口或具体报错时保留必要原名。失败先查因、修正自己的调用；只说未完成项、原因和确需用户做的事，不照抄内部错误或猜原因，不说“结果已保留”。区分完成、启动与安排。用 user.ask 提问，给真实选项，正文不重复。"#;
 
-#[cfg(not(feature = "client-protection"))]
 pub fn configured_agent_instructions(prompt: &str) -> &str {
     // 早期版本生成的默认提示词，内容与当前政策重复；用户自己写的保留。
     if prompt.starts_with("你是 Sleepy Doll，一个操作 BetterGI 的桌面 Agent。")
@@ -1200,7 +1199,7 @@ impl Supervisor {
         let mut output_reserve = policy::auxiliary_output_reserve(model)
             .min(token_budget / 4)
             .max(1);
-        let fixed_cost = context::estimate_tokens(protected_compaction_prompt()) + 256;
+        let fixed_cost = context::estimate_tokens(CONTEXT_COMPACTION_PROMPT) + 256;
         let chunk_budget = token_budget.saturating_sub(output_reserve * 2 + fixed_cost + 512);
         if chunk_budget < 256 {
             return Err(Error::Conflict(
@@ -1219,7 +1218,7 @@ impl Supervisor {
         let _guard = self.model_gate.read().await;
         while let Some(chunk) = chunks.pop_front() {
             let messages = vec![
-                message(Role::System, protected_compaction_prompt()),
+                message(Role::System, CONTEXT_COMPACTION_PROMPT),
                 context::summary_message(&summary),
                 message(
                     Role::User,
@@ -1552,7 +1551,7 @@ impl Supervisor {
             // 缓存前缀；需要恢复的事实由持久消息、计划和工具结果承担。
             let system = format!(
                 "{}\n\n技能目录只含简介，不代表已读正文。按任务选择 skills.read 读取技能，引用资料用 skills.reference，仅加载当前需要的部分。工具契约按需提供：用 tools.search 按名称或简短关键词发现；已发现、已使用及证据解锁的工具会继续提供。技能和工具发现不扩大用户授权。\n\n用户自定义指令：\n{}",
-                protected_core_policy(),
+                CORE_AGENT_POLICY,
                 if configured.is_empty() {
                     "无"
                 } else {
@@ -5349,35 +5348,6 @@ mod record_result_tests {
 #[path = "../../tests/runtime/agent-runtime.rs"]
 mod agent_runtime_tests;
 
-#[cfg(feature = "client-protection")]
-fn protected_core_policy() -> &'static str {
-    static POLICY: OnceLock<String> = OnceLock::new();
-    POLICY.get_or_init(|| { let mut text=String::new(); obfstr::obfstmt! { text.push_str(obfstr::obfstr!(CORE_AGENT_POLICY)); text.shrink_to_fit(); } text }).as_str()
-}
-#[cfg(not(feature = "client-protection"))]
-fn protected_core_policy() -> &'static str {
-    CORE_AGENT_POLICY
-}
-#[cfg(feature = "client-protection")]
-fn protected_compaction_prompt() -> &'static str {
-    static PROMPT: OnceLock<String> = OnceLock::new();
-    PROMPT.get_or_init(|| { let mut text=String::new(); obfstr::obfstmt! { text.push_str(obfstr::obfstr!(CONTEXT_COMPACTION_PROMPT)); text.shrink_to_fit(); } text }).as_str()
-}
-#[cfg(not(feature = "client-protection"))]
-fn protected_compaction_prompt() -> &'static str {
-    CONTEXT_COMPACTION_PROMPT
-}
-#[cfg(feature = "client-protection")]
-pub fn configured_agent_instructions(prompt: &str) -> &str {
-    let mut legacy = false;
-    let mut result = prompt;
-    obfstr::obfstmt! {
-        legacy=prompt.starts_with(obfstr::obfstr!("你是 Sleepy Doll，一个操作 BetterGI 的桌面 Agent。"));
-        legacy=legacy && (prompt.contains(obfstr::obfstr!("# 接口分两层")) || prompt.contains(obfstr::obfstr!("# 用户配置在文件里")));
-        result=if legacy { "" } else { prompt.trim() };
-    }
-    result
-}
 #[cfg(test)]
 mod prompt_contract_tests {
     use super::*;
@@ -5416,28 +5386,5 @@ mod prompt_contract_tests {
             );
         }
         supervisor.shutdown();
-    }
-}
-
-#[cfg(all(test, feature = "client-protection"))]
-mod protection_contract_tests {
-    use super::*;
-    #[test]
-    fn protected_policy_keeps_exact_model_instructions() {
-        assert_eq!(protected_core_policy(), CORE_AGENT_POLICY);
-        assert_eq!(protected_compaction_prompt(), CONTEXT_COMPACTION_PROMPT);
-    }
-    #[test]
-    fn protected_instruction_filter_preserves_user_text() {
-        assert_eq!(
-            configured_agent_instructions("  自己的要求  "),
-            "自己的要求"
-        );
-        assert_eq!(
-            configured_agent_instructions(
-                "你是 Sleepy Doll，一个操作 BetterGI 的桌面 Agent。# 接口分两层"
-            ),
-            ""
-        );
     }
 }

@@ -128,7 +128,7 @@ finally:
         model_thread.join(timeout=3)
     if fixture_owned:
         cleanup = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                                  r"E:\tools\Remove-Directory.ps1", "-Path", str(FIXTURE), "-Json"],
+                                  str(ROOT / "scripts/remove-build-output.ps1"), "-Path", str(FIXTURE), "-Json"],
                                  env=dict(os.environ, TEMP=str(RUNTIME), TMP=str(RUNTIME), TMPDIR=str(RUNTIME)),
                                  capture_output=True, text=True)
         if cleanup.returncode != 0 or FIXTURE.exists():
