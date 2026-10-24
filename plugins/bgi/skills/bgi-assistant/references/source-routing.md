@@ -1,51 +1,9 @@
-# 三个 BetterGI 仓库的检索路由
+# 选择资料来源
 
-这些路径用于接入本地或远程知识检索。路径可能随版本微调，应先搜索文件名或标题，不因某个固定路径不存在就停止。
+当前配置、接口可用性、版本和运行状态以现场数据为准；功能含义以对应版本的说明与源码声明为依据；脚本参数和条件以实际脚本的定义及必要源码为依据。
 
-## 用户文档 `bettergi-docs`
+官方文档、软件源码和脚本仓库解决不同问题。按实际目录、返回的源码位置和清单引用定位，不固定仓库布局、类名或文件路径。资料不足时查真实对象与调用关系，不从名称猜用途；不同版本的资料不混用。
 
-| 问题领域 | 优先路径 |
-| --- | --- |
-| 安装、启动、截图、系统要求 | `src/quickstart.md`、`src/faq.md`、`src/download.md` |
-| 功能总览 | `src/doc.md`、`src/feats/README.md` |
-| 实时任务 | `src/feats/timer/` |
-| 独立任务 | `src/feats/task/` |
-| 调度器、JS、地图追踪、键鼠、仓库 | `src/feats/autos/` |
-| 操控辅助与宏 | `src/feats/macro/` |
-| 命令行、桌面分身 | `src/feats/command/` |
-| 分辨率、文件、按键码 | `src/feats/append/` |
-| 通知、远程和专项教程 | `src/tutorial/` |
-| JS API、路径制作、识别、任务调用 | `src/dev/` |
+中央仓库内容可能尚未展开到磁盘，通过当前仓库读取能力取得真实文件，不扫描内部存储或为阅读先订阅。查询失败、分类未命中、名称不同和资源不存在分开判断。已命中且资料完整时不例行刷新，不无限换同义词。
 
-先搜索标题和章节，再读取完整小节。FAQ 用于已知问题，不应压过某项功能自己的文档。
-
-## 本体 `better-genshin-impact`
-
-| 要核对的内容 | 优先路径 |
-| --- | --- |
-| 当前页面和可见选项 | `BetterGenshinImpact/View/Pages/`、`View/Windows/` |
-| 页面命令和联动行为 | `BetterGenshinImpact/ViewModel/Pages/`、`ViewModel/Windows/` |
-| 全局设置字段与默认值 | `BetterGenshinImpact/Core/Config/AllConfig.cs` 及同目录具体配置类 |
-| 独立/实时任务行为和参数 | `BetterGenshinImpact/GameTask/` |
-| 一条龙 | `View/Pages/OneDragonFlowPage.xaml`、`ViewModel/Pages/OneDragonFlowViewModel.cs`、`Core/Config/OneDragonFlowConfig.cs` |
-| 调度器和配置组 | `View/Pages/ScriptControlPage.xaml`、`ViewModel/Pages/ScriptControlViewModel.cs` |
-| 仓库更新、订阅和读取 | `Core/Script/ScriptRepoUpdater.cs`、`Core/Script/WebView/RepoWebBridge.cs` |
-| 页面导航 | `App.xaml.cs`、`Service/ApplicationHostService.cs`、对应 ViewModel |
-| 服务和通知渠道 | `BetterGenshinImpact/Service/` |
-
-用户文档没有覆盖新版功能时，先看 XAML 中的真实标签和提示，再看 ViewModel 命令、配置默认值与任务实现。不要只凭类名推断用途。
-
-## 脚本仓库 `bettergi-scripts-list`
-
-`bgi.repo.search` 搜索当前渠道的 repo.json，`bgi.repo.read` 通过宿主读取器从 Git Blob 或文件式仓库读文本。path 从 `js/`、`pathing/`、`combat/`、`tcg/` 开始，不带 `repo/`。未订阅内容通常不在磁盘工作目录中，不扫描 `.git` 或 Sleepy Doll 安装目录，也不为阅读资料更新订阅。
-
-| 内容 | 优先路径 |
-| --- | --- |
-| 仓库树、节点、描述和更新时间 | `repo.json` |
-| 地图追踪 | `pathing/<分类>/<目标>/` |
-| JavaScript 脚本 | `js/<脚本>/manifest.json`、manifest 指定的 settings_ui/main、`README.md` 与引用模块（文件名不固定） |
-| 战斗策略 | `combat/` |
-| 七圣召唤策略 | `tcg/` |
-| BetterGI JS 可用 API | `bettergi.d.ts` |
-
-地图追踪选择先看 `bgi.user.resolve` 返回的父节点与直接子目录名。不要读取完整候选父节点下的全部叶子元数据。只有 `verdict=create` 且必须区分互斥作者包时，才读取该父节点的一份 README。
+检索只负责找资料，不替用户选消耗、覆盖、删除或通知范围。工作流由助手结合原要求、当前证据和当前契约形成，不使用预先整理的问法对应表。

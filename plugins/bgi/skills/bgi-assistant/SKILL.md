@@ -1,30 +1,20 @@
 ---
 name: bgi-assistant
-description: BGI 插件的简短目标路由。用于 BetterGI 的脚本、路线、配置、任务、设置、页面和故障；具体链路按功能索引读取。
+description: BetterGI 的领域约定、对象边界与结果含义；资料和操作入口从当前工具与能力目录按需发现。
 tags: BetterGI, BGI, 原神, 游戏脚本
 alwaysLoad: true
 ---
+# BetterGI 使用约定
 
-# BGI 目标入口
+只处理 BetterGI，其他应用不套用本插件知识。区分游戏事实、已保存配置、脚本行为与当前运行状态；一个来源不能代替另一个。用配置组、地图追踪、脚本参数和实际结果与用户交流，不要求用户理解内部连接。
 
-仅用于 BetterGI；其他应用不套此规则。以熟悉 BGI 日常用法的助手表达：直接称 BetterGI/BGI，用配置组、调度器、地图追踪、脚本参数、战斗策略、订阅说明操作和结果；不说“宿主/注入”，不写研究接口的探路旁白。现场事实自行核实，不凭熟悉感编造版本或脚本行为。开发排错保留真实代码名称与错误线索。
+根据用户要完成的事，从当前可用工具和能力说明中选择入口。技能不指定业务接口、类名、参数路径或页面标识；这些都可能随版本变化。已知符号也先核对当前声明，不凭记忆调用。工具说明和现有证据已经足够时直接处理，不为例行装载手册增加调用；需要额外知识时只读相关资料。
 
-## 选择下一步
+- 操作资源、设置和任务：读取 bgi-operator，按需要选择一份资料。
+- 阅读或开发 JavaScript：读取 bgi-javascript；已有配置能完成的事不默认写脚本。
+- 排查配置与效果：读 [guide-workflow.md](references/guide-workflow.md)。
+- 封装已有任务：读 [quick-tasks.md](references/quick-tasks.md)，保存与运行分开。
 
-- 运行／采集材料、路线或脚本：`bgi.user.resolve`，按 verdict 准备、运行。现成路线改参数走组直配，战斗配置读 bgi.inspect_group_effective；不送 JS 编写。
-- 路线组配置：读取 bgi-operator 的 references/resources.md；prepare_pathing_group 后按需 set_pathing_party 并回读，不改叶子路线。
-- 配队仅按工具证实的 Pathing 必要条件补缺项；inspectionRequired 是资源检查。JS 依据自身参数和校验，选填或已有队伍不重问；不例行重配。
-- 必要意图缺失才 user.ask；用户已明确或委托选择的不重复问。运行已有组沿用保存参数，不例行查队伍或读源码。
-- 脚本参数或源码含义：本机 `bgi.user.inspect_script/read`，仓库 `bgi.repo.search/read`。写 JS／OCR／BGI API 加载 `bgi-javascript`。
-- 配置诊断：读 [guide-workflow.md](references/guide-workflow.md)，结合有效配置、本机脚本和运行证据；选填留空不算缺陷，只检查时不修改、不运行。
-- 界面交互：读 bgi-operator 的 references/native-ui.md。
-- 删除配置组：定位精确 name/sha256 后 describe/invoke `bgi.delete_script_group`，不操作界面。删除资源走 inspect_local_resource → delete_local_resource。
-- 停止任务：等待中的 Job 用 `bgi.job.cancel`；已交接启动 Job 已终态，用 `bgi.stop_current_task` 并核对原目标。
-- 对象不明确：bgi.feature.search/read 定位功能，live:true 按 nextMethodOffset 补读当前契约；已知 ID 直接 describe。
-- 口语目标选域：读 references/user-goals.md。封装快捷入口时读 [quick-tasks.md](references/quick-tasks.md)，按 describe 返回的 agentCall 绑定；工具名是 bgi.api.invoke/read，接口标识放 arguments.methodId，业务参数放 arguments.arguments。保存不运行。
+优先数据和完整任务能力；用户要求界面操作或直接能力确实不适用时才操作页面。已有组沿用保存参数，只问无法观测的必要取舍；脚本有队伍字段不代表必须重新配队。查询配置与保存入口不要求游戏运行。普通启动收到真实接纳结果后结束对话，不在后台持续监控；用户明确要求等待结果时按当前任务能力处理。
 
-状态接口响应即已连接；gameReady（旧 bridgeReady）为 false 只说明游戏未就绪，不阻止配置读写或保存入口。绑定错误按具体错误修复，不解释成断连。
-
-多组用 run_script_groups，默认启动即交接；仅明确要求等结果才 waitForCompletion=true。详见 references/action-policy.md。
-
-按功能卡 references 读资料，权限由运行时处理；只报告核实结果与实际阻塞。
+只报告核实结果。已找到入口、已保存、已接纳、已开始、已完成分别判断。自己的参数或对象错误先修正，不将内部检查意见当作最终答复。

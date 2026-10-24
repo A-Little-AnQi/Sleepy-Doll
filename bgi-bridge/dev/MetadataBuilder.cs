@@ -280,21 +280,23 @@ object Parameters(ParameterListSyntax list) => list.Parameters.Select(parameter 
 }).ToArray();
 var scriptBindings = new List<object>();
 var jsRoots = new Queue<string>();
-foreach (var (path, tree) in trees.Where(pair => Path.GetFileName(pair.Path) == "EngineExtend.cs"))
-foreach (var call in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>().Where(call => call.Expression.ToString() is "engine.AddHostObject" or "engine.AddHostType"))
+foreach (var (path, tree) in trees)
+foreach (var call in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>().Where(call => call.Expression is MemberAccessExpressionSyntax access && access.Name.Identifier.ValueText is "AddHostObject" or "AddHostType"))
 {
     var argsList = call.ArgumentList.Arguments.Select(arg => arg.Expression).ToArray();
+    if (argsList.Length == 0 || argsList[0] is not (LiteralExpressionSyntax or TypeOfExpressionSyntax)) continue;
     var alias = argsList[0] is LiteralExpressionSyntax text ? text.Token.ValueText : ((TypeOfExpressionSyntax)argsList[0]).Type.ToString();
     var value = argsList[^1];
     var kind = call.Expression.ToString().EndsWith("AddHostType", StringComparison.Ordinal) ? "type" : value is MemberAccessExpressionSyntax ? "function" : "object";
     var clr = value switch { TypeOfExpressionSyntax t => ResolveType(t.Type.ToString(),call), ObjectCreationExpressionSyntax c => ResolveType(c.Type.ToString(),call), MemberAccessExpressionSyntax m => ResolveType(m.Expression.ToString(),call), _ => "dynamic" };
     if (value is ObjectCreationExpressionSyntax collection && collection.Type.ToString() == "HostTypeCollection")
     { kind = "namespace"; clr = ((LiteralExpressionSyntax)collection.ArgumentList!.Arguments[0].Expression).Token.ValueText; }
+    if (clr == "dynamic") kind = "dynamic";
     scriptBindings.Add(new { alias, kind, clrType = clr, member = value is MemberAccessExpressionSyntax function ? function.Name.ToString() : null,
         source = Path.GetRelativePath(root,path).Replace('\\','/'), line = tree.GetLineSpan(call.Span).StartLinePosition.Line+1 });
     jsRoots.Enqueue(clr);
 }
-scriptBindings.Add(new { alias="settings",kind="dynamic",clrType="System.Dynamic.ExpandoObject",member=(string?)null,source="BetterGenshinImpact/Core/Script/Project/ScriptProject.cs",line=114 });
+
 while (jsRoots.TryDequeue(out var name))
 {
     if (scriptTypes.ContainsKey(name) || !typeMap.TryGetValue(name, out var definition)) continue;
@@ -309,7 +311,13 @@ while (jsRoots.TryDequeue(out var name))
             var returns = member switch { MethodDeclarationSyntax m => m.ReturnType.ToString(), PropertyDeclarationSyntax p => p.Type.ToString(), FieldDeclarationSyntax f => f.Declaration.Type.ToString(), _ => name };
             var parameters = member switch { MethodDeclarationSyntax m => Parameters(m.ParameterList), ConstructorDeclarationSyntax c => Parameters(c.ParameterList), _ => null };
             var memberKind = member is ConstructorDeclarationSyntax ? "constructor" : member is MethodDeclarationSyntax ? "method" : member is FieldDeclarationSyntax ? "field" : "property";
-            members.Add(new { name=memberName,kind=memberKind,returnType=returns,parameters,isStatic=member.Modifiers.Any(SyntaxKind.StaticKeyword),summary=Summary(member),
+            var implementation = member switch {
+                MethodDeclarationSyntax m => m.ExpressionBody?.Expression.ToString() ?? m.Body?.ToString(),
+                ConstructorDeclarationSyntax c => c.ExpressionBody?.Expression.ToString() ?? c.Body?.ToString(),
+                _ => null };
+            members.Add(new { name=memberName,kind=memberKind,returnType=returns,
+                implementation=implementation is null ? null : implementation[..Math.Min(implementation.Length,4096)],
+                implementationTruncated=implementation?.Length>4096,resolvedReturnType=ResolveType(returns,member),parameters,isStatic=member.Modifiers.Any(SyntaxKind.StaticKeyword),summary=Summary(member),
                 deprecated=member.AttributeLists.SelectMany(list=>list.Attributes).Any(a=>a.Name.ToString().EndsWith("Obsolete")),
                 source=Path.GetRelativePath(root,definition.Path).Replace('\\','/'),line=definition.Tree.GetLineSpan(member.Span).StartLinePosition.Line+1 });
             foreach (var token in Regex.Matches(returns + " " + member.ToString().Split('{')[0], @"\b[A-Z]\w+\b").Cast<Match>().Select(m=>m.Value))
@@ -322,7 +330,8 @@ while (jsRoots.TryDequeue(out var name))
         }
         foreach (var baseType in type.BaseList?.Types.Select(b=>ResolveType(b.Type.ToString(),type)) ?? []) jsRoots.Enqueue(baseType);
     }
-    scriptTypes[name] = new { name,kind=declaration is EnumDeclarationSyntax ? "enum":"type",members,
+    scriptTypes[name] = new { name,kind=declaration is EnumDeclarationSyntax ? "enum":"type",
+        summary=Summary(declaration),source=Path.GetRelativePath(root,definition.Path).Replace('\\','/'),line=definition.Tree.GetLineSpan(declaration.Span).StartLinePosition.Line+1,members,
         enumValues=declaration is EnumDeclarationSyntax e ? e.Members.Select(m=>m.Identifier.ValueText).ToArray():null,
         bases=declaration is TypeDeclarationSyntax t ? t.BaseList?.Types.Select(b=>ResolveType(b.Type.ToString(),t)).ToArray():null };
 }

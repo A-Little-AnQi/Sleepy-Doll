@@ -1,7 +1,6 @@
 //! BetterGI task grouping and launch semantics belong to the adapter.
 use crate::error::Result;
 use crate::{
-    error::Error,
     model::ToolCall,
     runtime::{
         operation,
@@ -166,16 +165,6 @@ pub(crate) fn handoff_message(names: &[String], close: bool, pending_tasks: usiz
     text
 }
 
-/// 后台交接后未执行调用的占位结果：历史里每个工具调用都要有配对结果。
-/// 守护查询与业务任务分开表述，业务未执行会体现在最终答复里。
-pub(crate) fn handoff_skipped_error(guard: bool) -> Error {
-    if guard {
-        Error::Tool("后台计划已交接并结束本轮，此查询未执行。".into())
-    } else {
-        Error::Tool("后台计划已交接并结束本轮，此任务未执行；需要时请再发起。".into())
-    }
-}
-
 /// 同批配置组启动调用归一成一次 run_script_groups 的执行计划。
 pub(crate) struct GroupLaunchPlan {
     /// 运行时内部使用的合并调用；不进入 assistant 轮，不单独记工具历史。
@@ -232,4 +221,41 @@ pub(crate) async fn group_launch_plan(
         close,
         wait,
     }))
+}
+
+impl crate::runtime::host::bridge::Bridge {
+    pub(crate) fn requires_order(&self, calls: &[ToolCall]) -> bool {
+        calls.iter().any(is_group_invoke)
+    }
+
+    pub(crate) async fn prepare_batch(
+        &self,
+        calls: &[ToolCall],
+        cancel: &CancellationToken,
+        exposed: &mut HashSet<String>,
+    ) -> Result<Option<crate::runtime::host::dispatch::BatchPlan>> {
+        Ok(group_launch_plan(calls, self, cancel, exposed)
+            .await?
+            .map(|plan| crate::runtime::host::dispatch::BatchPlan {
+                merged: plan.merged,
+                member_indexes: plan.member_indexes,
+                result_kind: "bgi.run_script_groups".into(),
+                handoff: (!plan.wait).then(|| crate::runtime::host::dispatch::Handoff {
+                    summary: handoff_message(&plan.names, plan.close, 0),
+                }),
+            }))
+    }
+
+    pub(crate) fn task_handoff(
+        &self,
+        call: &ToolCall,
+        run: &Run,
+        output: &Value,
+    ) -> Option<crate::runtime::host::dispatch::Handoff> {
+        launch_handoff(call, run, output).map(|(names, close)| {
+            crate::runtime::host::dispatch::Handoff {
+                summary: handoff_message(&names, close, 0),
+            }
+        })
+    }
 }

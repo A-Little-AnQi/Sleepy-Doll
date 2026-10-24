@@ -99,7 +99,7 @@ public static partial class CommandCatalog
                     var guide = new AgentGuide(
                         title, purpose,
                         unavailable is null
-                            ? [$"需要执行“{title}”，且目标就是 {viewModelName} 当前界面上下文时。"]
+                            ? [$"用户要求“{title}”，或已确认它是完成当前目标所必需的准备步骤时；参数绑定 {viewModelName} 的真实上下文。页面打开本身不表示最终任务完成。"]
                             : ["仅用于审计 BetterGI 行为或理解相关界面；当前接口不安排直接调用。"],
                         unavailable is null
                             ? ["命令可调用且 CanExecute=true。", "list_command_targets 定位上下文；多实例／泛型使用 contextId，复杂参数使用真实 objectId。", parameterType is null ? "没有 argument 参数；可传 contextId。" : $"argument 满足 parameterSchema（{parameterType.FullName}）。"]

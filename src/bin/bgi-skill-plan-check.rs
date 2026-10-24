@@ -566,7 +566,11 @@ fn dispatch(
             call.arguments["offset"].as_u64().unwrap_or(0) as usize,
             call.arguments["limit"].as_u64().unwrap_or(5) as usize,
         ),
-        "bgi.feature.read" => index.read(call.arguments["id"].as_str().unwrap_or_default()),
+        "bgi.feature.read" => index.read_page(
+            call.arguments["id"].as_str().unwrap_or_default(),
+            call.arguments["memberOffset"].as_u64().unwrap_or(0) as usize,
+            call.arguments["memberLimit"].as_u64().unwrap_or(8) as usize,
+        ),
         "skills.read" => {
             let skill = skills
                 .get(call.arguments["name"].as_str().unwrap_or_default())
@@ -1325,29 +1329,23 @@ fn system_context(
             configured
         }
     );
-    let matched_names: Vec<String> = if auto_load {
-        skills
-            .search(query, max_skills)
-            .iter()
-            .map(|skill| skill.name.clone())
-            .collect()
-    } else {
-        vec![]
-    };
-    let matched: std::collections::HashSet<&str> =
-        matched_names.iter().map(String::as_str).collect();
-    for skill in skills
-        .list()
+    let explicit = skills
+        .explicit(query)
         .into_iter()
-        .filter(|skill| skill.always_load || matched.contains(skill.name.as_str()))
-    {
-        context.push_str(&format!(
-            "
-
-# 技能 {}
-{}",
-            skill.name, skill.body
-        ));
+        .map(|skill| skill.name)
+        .collect::<std::collections::HashSet<_>>();
+    let mut implicit_count = 0;
+    for skill in skills.list().into_iter().filter(|skill| {
+        if explicit.contains(&skill.name) {
+            true
+        } else if auto_load && skill.always_load && implicit_count < max_skills {
+            implicit_count += 1;
+            true
+        } else {
+            false
+        }
+    }) {
+        context.push_str(&format!("\n\n# 技能 {}\n{}", skill.name, skill.body));
     }
     context
 }
@@ -1538,18 +1536,12 @@ fn fixture_checks(
         context.starts_with("你是 Sleepy Doll") && context.contains("用户自定义指令"),
         format!("{} 字", context.chars().count()),
     );
-    for (query, expected) in [
-        ("地图追踪 队伍切换", "workflow.group.edit"),
-        ("路线换队", "workflow.group.edit"),
-        ("全局设置恢复", "workflow.settings.recovery"),
-    ] {
-        let found = index.search(query, None, 0, 5)?;
+    for id in method_metadata().as_object().unwrap().keys() {
+        let found = index.search(id, None, 0, 1)?;
         check(
-            &format!("语义检索 {query}"),
-            found["items"]
-                .as_array()
-                .is_some_and(|items| items.iter().any(|item| item["id"] == expected)),
-            format!("期望 {expected}"),
+            &format!("实际声明 {id}"),
+            found["items"][0]["id"] == *id,
+            "按真实接口标识查询".into(),
         );
     }
     let state: Sim = Arc::new(Mutex::new(initial_state()));

@@ -12,6 +12,8 @@ public static class CommandDocumentation
         ["MainWindow.Loaded"] = "初始化 BetterGI 主窗口",
         ["MainWindow.DismissRedeemCode"] = "关闭兑换码更新提示",
         ["MainWindow.OpenFeed"] = "打开兑换码动态窗口",
+        ["FeedWindow.AutoRedeemItem"] = "兑换所选条目的兑换码",
+        ["TaskSettingsPage.SwitchAutoRedeemCode"] = "输入兑换码并执行兑换",
         ["MaskWindow.Loaded"] = "初始化游戏遮罩",
         ["MaskWindow.OverlayLayoutCommitted"] = "保存遮罩控件布局",
         ["MaskWindow.WindowSizeChanged"] = "同步遮罩窗口尺寸",
@@ -87,7 +89,7 @@ public static class CommandDocumentation
         ["ShowOrHide"]="切换主窗口显示状态，不停止后台任务。",
         ["Exit"]="退出 BetterGI，桥随它一起退出；不能把连接断开当成可重试错误。",
         ["CheckUpdate"]="检查 BetterGI 更新信息，可能访问网络并打开更新界面。",
-        ["OpenFeed"]="打开动态订阅窗口。",
+        ["OpenFeed"]="打开动态订阅窗口并加载最新国服／国际服兑换码条目，供读取日期、代码及后续一键兑换使用；它是取数据的准备步骤，本身不执行兑换。",
         ["DismissRedeemCode"]="只关闭主窗口中的兑换码更新提示卡片；不打开动态窗口、不读取兑换码，也不执行兑换。",
         ["ToggleHidden"]="切换当前地图点位的隐藏状态。",
         ["ToggleMapPointHidden"]="切换指定地图点位的隐藏状态。",
@@ -179,6 +181,7 @@ public static class CommandDocumentation
             ("ScriptControl", "StartScriptGroup") or
             ("TaskSettingsPage", "SOneDragonFlow") or
             ("TaskSettingsPage", "RunInventoryCountComparison") => true,
+            ("FeedWindow", "AutoRedeemItem") => true,
             _ => false,
         };
     }
@@ -186,6 +189,8 @@ public static class CommandDocumentation
     public static string[] SideEffects(string viewModel, string command)
     {
         var name = Normalize(command);
+        if (viewModel.Replace("ViewModel", "") == "MainWindow" && name == "OpenFeed")
+            return ["打开兑换码窗口、读取远程兑换码数据，并将当前兑换码通知标记为已读；不改变通知订阅开关，不执行兑换。"];
         if (RequiresGameReady(viewModel, command))
             return ["可能启动任务或向游戏窗口发送输入；范围由用途说明限定。"];
         if (name.Contains("Notification", StringComparison.Ordinal)
@@ -228,6 +233,10 @@ public static class CommandDocumentation
         var name = Normalize(command);
         var scope = Terms.GetValueOrDefault(viewModel.Replace("ViewModel", ""), viewModel.Replace("ViewModel", ""));
         var owner = viewModel.Replace("ViewModel", "");
+        if (owner == "FeedWindow" && name == "AutoRedeemItem")
+            return "读取传入 FeedItem.Codes，非空时使用 TaskRunner 运行 UseRedemptionCodeTask，在游戏中兑换这些代码；必须使用真实条目对象，不能伪造 objectId。";
+        if (owner == "TaskSettingsPage" && name == "SwitchAutoRedeemCode")
+            return "打开输入兑换码窗口，确认后按行拆分、去空白并过滤空项，使用 TaskRunner 运行 UseRedemptionCodeTask；代码来自本次输入而非现有全局配置。";
         if (owner == "MainWindow" && name == "Activated")
             return "BetterGI 主窗口再次获得焦点时读取不超过 1000 字符的剪贴板文本，并依次尝试导入脚本和识别兑换码；首次激活跳过。此流程读取用户剪贴板，识别成功时可能写入脚本或兑换码数据。";
         if (owner == "MainWindow" && name == "Closing")

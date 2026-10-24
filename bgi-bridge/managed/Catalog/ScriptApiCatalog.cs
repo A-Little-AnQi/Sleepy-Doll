@@ -58,7 +58,7 @@ public static class ScriptApiCatalog
             if (!KnownTypes.Contains(clr) && !clr.StartsWith("OpenCvSharp.",StringComparison.Ordinal)) throw BridgeException.NotFound("类型不属于已注册 JS 环境或其返回／参数类型。");
         }
         if (binding.ValueKind != JsonValueKind.Undefined && Text(binding,"kind") == "dynamic")
-            return new { id,kind="dynamic",usage="settings 是 manifest.settings_ui 对应的当前用户参数；先 inspect_script/read 取得定义，不能从 CLR 固定字段猜测。" };
+            return new { id,kind="dynamic",usage="动态宿主参数对象；字段以本次脚本配置定义为准，不从固定 CLR 属性猜测。" };
         var delegateMember = binding.ValueKind != JsonValueKind.Undefined ? Text(binding,"member") : "";
         if (delegateMember.Length>0) member=delegateMember;
         var type = TypeOf(clr);
@@ -84,7 +84,7 @@ public static class ScriptApiCatalog
         foreach (var field in type.GetFields(BindingFlags.Public|BindingFlags.Static|BindingFlags.Instance))
             if (member.Length==0 || field.Name.Contains(member,StringComparison.OrdinalIgnoreCase))
             { Remember(field.FieldType); records.Add(new { name=field.Name,kind="field",returnType=Friendly(field.FieldType),isStatic=field.IsStatic,writable=!field.IsInitOnly&&!field.IsLiteral }); }
-        return new { id,clrType=type.FullName,kind=type.IsEnum?"enum":"type",runtimeVerified=true,total=records.Count,members=records.Skip(offset).Take(limit),
+        return new { id,clrType=type.FullName,kind=type.IsEnum?"enum":"type",runtimeVerified=true,baseType=type.BaseType?.FullName,interfaces=type.GetInterfaces().Select(t=>t.FullName).ToArray(),total=records.Count,members=records.Skip(offset).Take(limit),
             nextOffset=offset+limit<records.Count?(int?)(offset+limit):null,enumValues=type.IsEnum?Enum.GetNames(type):null,
             binding=binding.ValueKind==JsonValueKind.Undefined?(object?)null:binding, usage=binding.ValueKind==JsonValueKind.Undefined?"实例成员通过返回对象访问；只有已注入类型或 OpenCvSharp 导出类型才有全局构造名。":BindingUsage(binding),
             conventions="成员名绑定不区分大小写；Task 自动转 Promise，需要 await。重载保留真实参数、可选默认值、ref/out 与 params；图像区域用完 Dispose，不将已释放对象继续用于 OCR／点击。" };
@@ -98,7 +98,8 @@ public static class ScriptApiCatalog
             records.AddRange(declaration.GetProperty("members").EnumerateArray().Where(m=>member.Length==0||Text(m,"name").Contains(member,StringComparison.OrdinalIgnoreCase)).Select(m=>m.Clone()));
             if(declaration.TryGetProperty("bases",out var bases)&&bases.ValueKind==JsonValueKind.Array)foreach(var parent in bases.EnumerateArray())pending.Enqueue(parent.GetString()!);
         }
-        return new { id,clrType=clr,runtimeVerified=false,total=records.Count,members=records.Skip(offset).Take(limit),nextOffset=offset+limit<records.Count?(int?)(offset+limit):null,note };
+        SourceDocumentation.ScriptTypes.TryGetProperty(clr,out var typeDeclaration);
+        return new { id,clrType=clr,runtimeVerified=false,declaration=typeDeclaration.ValueKind==JsonValueKind.Undefined?(object?)null:new {name=Text(typeDeclaration,"name"),kind=Text(typeDeclaration,"kind"),summary=Text(typeDeclaration,"summary"),source=Text(typeDeclaration,"source"),bases=typeDeclaration.TryGetProperty("bases",out var declaredBases)?declaredBases:(object?)null}, total=records.Count,members=records.Skip(offset).Take(limit),nextOffset=offset+limit<records.Count?(int?)(offset+limit):null,note };
     }
     private static object Describe(MethodBase method,string name,string kind,string clr)
     {

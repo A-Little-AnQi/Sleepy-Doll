@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-/// 明确的战斗动作：出现即认为路线含战斗，运行前需要配队确认。
+/// 原生路线动作分类；只记录机制事实，不决定是否询问用户。
 const BATTLE_ACTIONS: [&str; 2] = ["fight", "combat_script"];
 /// 已知绑定特定角色的特殊机制动作。
 const SPECIAL_ACTIONS: [&str; 2] = ["up_down_grab_leaf", "linnea_mining"];
@@ -51,22 +51,12 @@ pub fn resolve_target(
             let found = repository["total"].as_u64().unwrap_or(0) > 0;
             local["lookupScope"] = json!("localAndCentralRepository");
             local["verdict"] = json!(if found { "resourceFound" } else { "notFound" });
-            local["next"] = if found {
-                repository["next"].clone()
-            } else {
-                json!(
-                    "本机与当前全仓索引均未命中。核对目标名称；索引需要更新时只刷新一次再查询，不扫描程序集，不把查询失败当成不存在。"
-                )
-            };
             local["repository"] = repository;
         }
         Err(Error::Cancelled) => return Err(Error::Cancelled),
         Err(error) => {
             local["verdict"] = json!("lookupFailed");
             local["repositoryError"] = json!(error.to_string());
-            local["next"] = json!(
-                "仅本机未命中，中央仓库查询失败，目标是否存在尚未确定。处理 repositoryError 后重试，不声称仓库没有资源。"
-            );
         }
     }
     Ok(local)
@@ -170,7 +160,17 @@ pub fn resolve_local(root: &Path, query: &str) -> Value {
         }
         return report_requirements(query, "create", None, &[], &candidates, &[], requirements);
     }
-    report_requirements(query, "notFound", None, &[], &[], &[], Value::Null)
+    let mut report = report_requirements(query, "notFound", None, &[], &[], &[], Value::Null);
+    // Literal matching cannot resolve every user nickname. Expose bounded local
+    // names for semantic selection without guessing a runnable group or aliases.
+    report["availableGroups"] =
+        json!(groups.iter().take(20).map(|group| json!({
+        "name":group.name,"file":path_display(&group.file),
+        "enabledProjects":group.projects.iter().filter(|project|project.enabled).count(),
+    })).collect::<Vec<_>>());
+    report["availableGroupCount"] = json!(groups.len());
+    report["groupListing"] = json!({"tool":"bgi.user.list","arguments":{"path":"ScriptGroup","jsonKeys":["name","index"]}});
+    report
 }
 
 /// 仅组内已启用的地图追踪文件适用路线配队分析。
@@ -188,9 +188,9 @@ fn project_requirement_files(root: &Path, group: &Group) -> Vec<PathBuf> {
 }
 
 fn unresolved_route_requirements() -> Value {
-    json!({"scope":"pathingOnly","status":"unknown","partyConfirmationRequired":false,
+    json!({"scope":"pathingOnly","status":"unknown","containsPartySensitiveActions":false,
         "inspectionRequired":true,"scannedFiles":0,"unreadableFiles":0,
-        "note":"路线内容未能读取，需要检查实际路线资源；这不等于缺少配队，不用配队提问代替资源检查。"})
+        "note":"路线内容未能读取，角色相关机制未知。"})
 }
 
 /// 递归收集目录下的 JSON 文件（带上限），供候选目录的需求聚合。
@@ -223,10 +223,10 @@ fn collect_json_files(directory: &Path, out: &mut Vec<PathBuf>, limit: usize) {
 fn scan_requirements(root: &Path, files: &[PathBuf]) -> Value {
     if files.is_empty() {
         return json!({"scope":"pathingOnly","status":"notApplicable","battle":false,
-            "specialActions":[],"unrecognizedActions":[],"partyConfirmationRequired":false,
+            "specialActions":[],"unrecognizedActions":[],"containsPartySensitiveActions":false,
             "inspectionRequired":false,"scannedFiles":0,"unreadableFiles":0,"truncated":false,"sources":[],
             "scriptPreconditions":"scriptDefined",
-            "note":"没有已启用的地图追踪项目，路线配队规则不适用。此结论不代表 JS 没有队伍要求；JS 沿用已有脚本设置，仅在脚本明确缺少必需信息或校验失败时处理，不凭脚本名、玩法类别或路线扫描失败要求配队。"});
+            "note":"没有已启用的地图追踪项目；此扫描不覆盖 JS 的参数或角色前提。"});
     }
     let mut actions: BTreeMap<String, usize> = BTreeMap::new();
     let mut scanned = 0usize;
@@ -274,7 +274,7 @@ fn scan_requirements(root: &Path, files: &[PathBuf]) -> Value {
         truncated = true;
     }
     let verdict = classify_actions(&actions, unreadable > 0 || truncated);
-    let required = verdict.party_confirmation_required;
+    let required = verdict.party_sensitive_actions;
     json!({
         "scope":"pathingOnly",
         "status": verdict.status,
@@ -282,18 +282,11 @@ fn scan_requirements(root: &Path, files: &[PathBuf]) -> Value {
         "battle": verdict.battle,
         "specialActions": verdict.special.iter().map(|(name, count)| json!({"action":name,"count":count})).collect::<Vec<_>>(),
         "unrecognizedActions": verdict.unrecognized.iter().map(|(name, count)| json!({"action":name,"count":count})).collect::<Vec<_>>(),
-        "partyConfirmationRequired": required,
+        "containsPartySensitiveActions": required,
         "scannedFiles": scanned,
         "unreadableFiles": unreadable,
         "truncated": truncated,
         "sources": sources,
-        "note": if required {
-            "已启用路线包含明确的战斗或特定角色机制；仅缺少且无法观测的必要配队信息才问，已有配队不重复确认。"
-        } else if verdict.inspection_required {
-            "路线需求未知，需要读取或修复实际路线；未知不是配队要求，不用询问队伍代替资源检查。"
-        } else {
-            "路线已读且没有战斗或特定角色机制，不额外询问配队。"
-        },
     })
 }
 
@@ -331,7 +324,7 @@ fn classify_actions(actions: &BTreeMap<String, usize>, incomplete: bool) -> Acti
         battle,
         special,
         unrecognized,
-        party_confirmation_required: required,
+        party_sensitive_actions: required,
         inspection_required,
     }
 }
@@ -341,7 +334,7 @@ struct ActionVerdict {
     battle: bool,
     special: Vec<(String, usize)>,
     unrecognized: Vec<(String, usize)>,
-    party_confirmation_required: bool,
+    party_sensitive_actions: bool,
     inspection_required: bool,
 }
 
@@ -421,18 +414,6 @@ fn report_requirements(
     groups: &[Group],
     requirements: Value,
 ) -> Value {
-    let party_required = requirements["partyConfirmationRequired"] == true;
-    let mut next = next_action(verdict).to_string();
-    if requirements["inspectionRequired"] == true && matches!(verdict, "run" | "create") {
-        next="路线需求尚未查清，先检查返回的来源、不可读文件或未知动作；不要把资源未知解释为缺配队，不启动未知路线。".into();
-    } else if party_required && matches!(verdict, "run" | "create") {
-        next.push_str(
-            " 该目标含战斗/特殊机制前提，按序执行：缺配队信息先用 user.ask 问清（已给的队名/队员不重复问，未答复不启动）；配队已明确后用 bgi.inspect_group_effective 读实际生效配置来源与策略（file 策略读原文要求，auto 策略按该队确认可用策略），按角色与策略要求适配现成组并回读核验；以上完成才 bgi.run_script_group。普通采集路线不额外发问。",
-        );
-    }
-    if requirements["status"] == "notApplicable" && matches!(verdict, "run" | "create") {
-        next.push_str(" 没有启用地图追踪项目，不走路线配队确认；JS 的队伍/角色要求按脚本自身设置与明确校验处理。已有组按已保存参数运行，不先例行查队伍、读战斗策略或重新配置脚本。");
-    }
     json!({
         "query": query,
         "verdict": if requirements["inspectionRequired"]==true && matches!(verdict,"run"|"create") {"inspect"} else {verdict},
@@ -457,24 +438,8 @@ fn report_requirements(
                 "enabled": project.enabled,
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
-        "next": next,
+        "references": [{"skill":"bgi-operator","path":"references/resources.md"}],
     })
-}
-
-fn next_action(verdict: &str) -> &'static str {
-    match verdict {
-        "run" => {
-            "组引用完整；比对本次目标，未要求修改时沿用已有配置。用户明确要改地图追踪队伍/赶路角色时才使用 bgi.set_pathing_party；不要把 JS 脚本设置写到路线槽位。不重复搜索或读取路线叶子文件。"
-        }
-        "repair" => "只补 missing 里的路径（更新/订阅），不要重写无关配置，补完后再 resolve",
-        "create" => {
-            "本机已有资源；Pathing 用完整父目录准备配置组，不读取叶子 JSON；Javascript 先 inspect_script 读取 manifest 指定的设置定义，再用 bgi.prepare_js_group，使用返回的 groupName 运行。"
-        }
-        "ambiguous" => "只问真正不同的配置组，不要并列所有路线文件",
-        _ => {
-            "仅本机未安装，不代表仓库不存在。采集/地图追踪用 bgi.repo.search category=pathing（或 all）查询完整父节点；已有索引先查询，不先反复刷新。选择作者包后直接 describe/invoke bgi.subscribe_script_resources、bgi.prepare_pathing_group；游戏就绪再 bgi.run_script_group。不要扫描软件目录或桥程序集。"
-        }
-    }
 }
 
 fn scan_javascript(root: &Path, query: &str) -> Vec<Candidate> {
@@ -655,6 +620,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unmatched_names_expose_bounded_local_groups_without_guessing_a_target() {
+        let root = crate::test_root("resolve-group-names");
+        fs::create_dir_all(root.join("ScriptGroup")).unwrap();
+        fs::write(
+            root.join("ScriptGroup/锄地一条龙.json"),
+            r#"{"name":"锄地一条龙","projects":[]}"#,
+        )
+        .unwrap();
+        let initial = resolve_local(&root, "锄大地");
+        assert_eq!(initial["availableGroups"][0]["name"], "锄地一条龙");
+        assert!(
+            initial["groupName"].is_null(),
+            "a nickname must not select a group implicitly"
+        );
+        for index in 0..25 {
+            let name = format!("组{index:02}");
+            fs::write(
+                root.join("ScriptGroup").join(format!("{name}.json")),
+                json!({"name":name,"projects":[]}).to_string(),
+            )
+            .unwrap();
+        }
+        let local = resolve_local(&root, "锄大地");
+        assert_eq!(local["verdict"], "notFound");
+        assert!(local["groupName"].is_null());
+        assert_eq!(local["availableGroups"].as_array().unwrap().len(), 20);
+        assert_eq!(local["availableGroupCount"], 26);
+        assert_eq!(local["groupListing"]["arguments"]["path"], "ScriptGroup");
+        let result = resolve_target(local, |_| Ok(json!({"total":0,"items":[]}))).unwrap();
+        assert_eq!(result["references"][0]["skill"], "bgi-operator");
+        assert_eq!(result["availableGroupCount"], 26);
+    }
+
+    #[test]
     #[ignore = "需要隔离的本机 JS 资源目录"]
     fn installed_custom_js_is_found_without_a_repository_or_group() {
         let root = PathBuf::from(
@@ -701,7 +700,10 @@ mod tests {
             result["requirements"]["scriptPreconditions"],
             "scriptDefined"
         );
-        assert_eq!(result["requirements"]["partyConfirmationRequired"], false);
+        assert_eq!(
+            result["requirements"]["containsPartySensitiveActions"],
+            false
+        );
         assert_eq!(result["requirements"]["inspectionRequired"], false);
         assert_eq!(result["requirements"]["unreadableFiles"], 0);
         assert_eq!(result["groups"][0]["projects"][1]["enabled"], false);
@@ -740,7 +742,10 @@ mod tests {
         let result = resolve_local(&root, "混合");
         assert_eq!(result["verdict"], "run");
         assert_eq!(result["requirements"]["scannedFiles"], 1);
-        assert_eq!(result["requirements"]["partyConfirmationRequired"], false);
+        assert_eq!(
+            result["requirements"]["containsPartySensitiveActions"],
+            false
+        );
         assert_eq!(
             serde_json::from_str::<Value>(&fs::read_to_string(&file).unwrap()).unwrap()["projects"]
                 [0]["jsScriptSettingsObject"]["partyName"],
@@ -750,7 +755,10 @@ mod tests {
         enabled["projects"][2]["status"] = json!("Enabled");
         fs::write(file, enabled.to_string()).unwrap();
         let result = resolve_local(&root, "混合");
-        assert_eq!(result["requirements"]["partyConfirmationRequired"], true);
+        assert_eq!(
+            result["requirements"]["containsPartySensitiveActions"],
+            true
+        );
         assert_eq!(result["requirements"]["scannedFiles"], 2);
     }
 
@@ -763,7 +771,10 @@ mod tests {
         let result = resolve_local(&root, "损坏路线");
         assert_eq!(result["verdict"], "inspect");
         assert_eq!(result["requirements"]["status"], "unknown");
-        assert_eq!(result["requirements"]["partyConfirmationRequired"], false);
+        assert_eq!(
+            result["requirements"]["containsPartySensitiveActions"],
+            false
+        );
         assert_eq!(result["requirements"]["inspectionRequired"], true);
     }
 
@@ -781,7 +792,10 @@ mod tests {
         );
         assert_eq!(result["verdict"], "run");
         assert_eq!(result["requirements"]["status"], "notApplicable");
-        assert_eq!(result["requirements"]["partyConfirmationRequired"], false);
+        assert_eq!(
+            result["requirements"]["containsPartySensitiveActions"],
+            false
+        );
     }
 
     #[test]
@@ -806,16 +820,6 @@ mod tests {
         assert_eq!(group.config_slots["partyName"], "蒸发");
         assert_eq!(group.config_slots["enabled"], false);
         assert_eq!(group.config_slots["hurryOnAvatar"], "");
-        // run 只是"组完整可运行"；next 必须要求先比对目标与配置，不能跳回"直接运行"。
-        let next = next_action("run");
-        assert!(
-            next.contains("比对"),
-            "next must ask for goal/config comparison: {next}"
-        );
-        assert!(
-            !next.starts_with("直接运行"),
-            "next must not tell the model to run directly"
-        );
         // 未安装的引用（root 不存在）如实进入 missing，不猜测存在。
         assert_eq!(group.missing.len(), 1);
         assert_eq!(group.missing[0], "AutoPathing/兽怪暴徒");
@@ -846,7 +850,7 @@ mod tests {
             "known benign tokens must not be unrecognized"
         );
         assert_eq!(verdict.status, "preconditionsFound");
-        assert!(verdict.party_confirmation_required);
+        assert!(verdict.party_sensitive_actions);
         actions.insert("linnea_mining".to_string(), 2);
         let verdict = classify_actions(&actions, false);
         assert!(verdict.battle);
@@ -866,7 +870,7 @@ mod tests {
         let verdict = classify_actions(&plain, false);
         assert!(!verdict.battle && verdict.special.is_empty());
         assert_eq!(verdict.status, "noPreconditions");
-        assert!(!verdict.party_confirmation_required);
+        assert!(!verdict.party_sensitive_actions);
         // 未登记动作不冒充良性：unknown 且同样要求确认。
         let odd = {
             let mut map = BTreeMap::new();
@@ -876,7 +880,7 @@ mod tests {
         let verdict = classify_actions(&odd, false);
         assert_eq!(verdict.status, "unknown");
         assert!(
-            !verdict.party_confirmation_required,
+            !verdict.party_sensitive_actions,
             "unknown actions require inspection, not an invented party requirement"
         );
         assert!(!verdict.unrecognized.is_empty());
@@ -884,7 +888,7 @@ mod tests {
         let empty = BTreeMap::new();
         let verdict = classify_actions(&empty, true);
         assert_eq!(verdict.status, "unknown");
-        assert!(!verdict.party_confirmation_required);
+        assert!(!verdict.party_sensitive_actions);
         assert!(verdict.inspection_required);
     }
 

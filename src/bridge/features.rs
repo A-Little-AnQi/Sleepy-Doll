@@ -10,11 +10,24 @@ pub struct FeatureIndex {
     items: Vec<Value>,
     ids: HashMap<String, usize>,
     revision: String,
+    search_documents: Vec<SearchDocument>,
+    inverse_frequency: HashMap<String, f64>,
+    script_types: serde_json::Map<String, Value>,
+    source_snapshot_hash: String,
+}
+
+struct SearchDocument {
+    id: HashSet<String>,
+    title: HashSet<String>,
+    all: HashSet<String>,
 }
 
 impl FeatureIndex {
     pub fn parse(text: &str) -> Result<Self> {
         let data: Value = serde_json::from_str(text)?;
+        if data["format"] != 2 {
+            return Err(Error::Config("BGI 能力索引格式不支持".into()));
+        }
         let items = data["items"]
             .as_array()
             .ok_or_else(|| Error::Config("BGI 功能索引缺少 items".into()))?
@@ -28,21 +41,69 @@ impl FeatureIndex {
             if ids.insert(id.to_owned(), index).is_some() {
                 return Err(Error::Config("BGI 功能条目 ID 重复".into()));
             }
-            for key in ["title", "kind", "availability", "verification"] {
+            for key in ["title", "kind", "availability"] {
                 if item[key].as_str().is_none() {
                     return Err(Error::Config(format!("BGI 功能 {id} 缺少 {key}")));
                 }
             }
-            for key in ["steps", "branches", "inputSources", "references"] {
+            for key in ["inputSources", "references"] {
                 if item[key].as_array().is_none() {
                     return Err(Error::Config(format!("BGI 功能 {id} 缺少 {key}")));
                 }
             }
         }
+        let search_documents = items
+            .iter()
+            .map(|item| {
+                let id = terms(item["id"].as_str().unwrap_or_default());
+                let title = terms(item["title"].as_str().unwrap_or_default());
+                let text = format!(
+                    "{} {} {} {}",
+                    item["id"].as_str().unwrap_or_default(),
+                    item["title"].as_str().unwrap_or_default(),
+                    item["summary"].as_str().unwrap_or_default(),
+                    item["keywords"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                );
+                SearchDocument {
+                    id,
+                    title,
+                    all: terms(&text),
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut frequency = HashMap::<String, usize>::new();
+        for document in &search_documents {
+            for term in &document.all {
+                *frequency.entry(term.clone()).or_default() += 1;
+            }
+        }
+        let total = search_documents.len() as f64;
+        let inverse_frequency = frequency
+            .into_iter()
+            .map(|(term, count)| {
+                (
+                    term,
+                    (1.0 + (total - count as f64 + 0.5) / (count as f64 + 0.5)).ln(),
+                )
+            })
+            .collect();
         Ok(Self {
             items,
             ids,
             revision: data["sourceRevision"].as_str().unwrap_or("").into(),
+            search_documents,
+            inverse_frequency,
+            script_types: data["scriptTypes"].as_object().cloned().unwrap_or_default(),
+            source_snapshot_hash: data["sourceSnapshotHash"]
+                .as_str()
+                .unwrap_or_default()
+                .into(),
         })
     }
 
@@ -59,14 +120,189 @@ impl FeatureIndex {
     }
 
     pub fn read(&self, id: &str) -> Result<Value> {
+        self.read_page(id, 0, 8)
+    }
+
+    pub fn read_page(&self, id: &str, member_offset: usize, member_limit: usize) -> Result<Value> {
         let index = self
             .ids
             .get(id)
-            .ok_or_else(|| Error::Tool("BGI 功能条目不存在；使用 search 返回的精确 ID".into()))?;
+            .ok_or_else(|| Error::Tool("BGI 能力声明不存在；使用查询返回的精确标识".into()))?;
+        let item = &self.items[*index];
+        let declaration = &item["declaration"];
+        let mut value = json!({"source":"bgiPluginFeatureIndex", "sourceRevision":self.revision,
+            "sourceSnapshotHash":self.source_snapshot_hash,"capabilityState":"referenceOnly","declarationVerified":true,"executionVerified":false,"item":item,
+            "next":"本结果是源码事实，非现场执行证明。类型成员按 nextMemberOffset 分页；需要执行时取得当前契约。"});
+        if item["kind"] == "scriptApi" {
+            let mut symbol = json!({"runtimeVerified":false,"kind":declaration["kind"]});
+            if let Some(owner) = declaration["clrType"].as_str() {
+                symbol["binding"] = declaration.clone();
+                if let Some(member) = declaration["member"].as_str() {
+                    let overloads = self
+                        .script_types
+                        .get(owner)
+                        .and_then(|definition| definition["members"].as_array())
+                        .into_iter()
+                        .flatten()
+                        .filter(|entry| entry["name"] == member)
+                        .map(|entry| self.member_view(entry))
+                        .collect::<Vec<_>>();
+                    symbol["ownerType"] = json!(owner);
+                    symbol["overloads"] = json!(overloads);
+                } else {
+                    symbol["type"] = self.type_view(owner, member_offset, member_limit);
+                }
+            } else if let Some(name) = id.strip_prefix("T:") {
+                symbol["type"] = self.type_view(name, member_offset, member_limit);
+            } else if declaration["owner"].is_string() {
+                symbol["declaration"] = self.member_view(declaration);
+            }
+            value["symbol"] = symbol;
+            // Return each fact once: script details live in the structured symbol,
+            // while search-only terms and duplicate declaration payloads stay internal.
+            if let Some(summary) = value["item"].as_object_mut() {
+                for key in ["keywords", "declaration", "inputSources", "availability"] {
+                    summary.remove(key);
+                }
+            }
+        }
+        Ok(value)
+    }
+
+    /// Resolve supplied symbol identities and join declaration facts. No intent classification or execution.
+    pub fn inspect_symbols(&self, symbols: &[String]) -> Result<Value> {
+        if symbols.is_empty() || symbols.len() > 8 {
+            return Err(Error::Tool("一次检查 1 到 8 个符号".into()));
+        }
+        let mut profiles = Vec::new();
+        let mut unresolved = Vec::new();
+        let mut relationships = Vec::new();
+        for symbol in symbols {
+            let exact = self.ids.get(symbol.trim()).copied();
+            let aliases = self
+                .items
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| item["declaration"]["alias"] == *symbol)
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            let candidates = if let Some(index) = exact {
+                vec![index]
+            } else if !aliases.is_empty() {
+                aliases
+            } else {
+                self.items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, item)| {
+                        item["title"]
+                            .as_str()
+                            .is_some_and(|title| title.eq_ignore_ascii_case(symbol.trim()))
+                            || item["declaration"]["name"] == *symbol
+                    })
+                    .map(|(index, _)| index)
+                    .collect::<Vec<_>>()
+            };
+            if candidates.len() != 1 {
+                unresolved.push(json!({"symbol":symbol,"status":if candidates.is_empty(){"notFound"}else{"ambiguous"},
+                    "candidates":candidates.iter().take(8).map(|index|json!({"id":self.items[*index]["id"],"title":self.items[*index]["title"]})).collect::<Vec<_>>()}));
+                continue;
+            }
+            let item = &self.items[candidates[0]];
+            let mut profile = self.read_page(item["id"].as_str().unwrap(), 0, 2)?;
+            profile["requestedSymbol"] = json!(symbol);
+            for overload in profile["symbol"]["overloads"]
+                .as_array()
+                .into_iter()
+                .flatten()
+            {
+                if let Some(target) = overload["returns"]["resolvedType"].as_str() {
+                    relationships.push(json!({"from":symbol,"kind":"returns","to":target,"source":overload["source"],"line":overload["line"]}));
+                    for base in overload["returns"]["declaredBases"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                    {
+                        relationships.push(json!({"from":target,"kind":"inherits","to":base}));
+                    }
+                }
+            }
+            let type_view = &profile["symbol"]["type"];
+            for base in type_view["bases"].as_array().into_iter().flatten() {
+                relationships.push(json!({"from":type_view["name"],"kind":"inherits","to":base,"source":type_view["source"],"line":type_view["line"]}));
+            }
+            let mut definition = json!({"symbol":symbol,"id":item["id"],"kind":profile["symbol"]["kind"],
+                "source":item["source"],"summary":item["summary"]});
+            if let Some(overloads) = profile["symbol"]["overloads"].as_array() {
+                definition["overloads"] = json!(overloads.iter().map(|entry| json!({"parameters":entry["parameters"],
+                    "returns":entry["returns"],"isStatic":entry["isStatic"],"source":entry["source"],"line":entry["line"]})).collect::<Vec<_>>());
+            }
+            if type_view.is_object() {
+                definition["type"] = json!({"name":type_view["name"],"bases":type_view["bases"],"memberTotal":type_view["totalMembers"],
+                    "summary":type_view["summary"],"source":type_view["source"],"line":type_view["line"]});
+            }
+            profiles.push(definition);
+        }
+        let mut seen = HashSet::new();
+        relationships.retain(|edge| {
+            seen.insert(format!("{}:{}:{}", edge["from"], edge["kind"], edge["to"]))
+        });
         Ok(
-            json!({"source":"bgiPluginFeatureIndex", "sourceRevision":self.revision,"capabilityState":"referenceOnly",
-            "item": self.items[*index], "next":"只读取当前条目给出的相关参考资料与当前接口契约。静态索引不证明现场接口可调用，不授予执行权限。"}),
+            json!({"source":"compilerDeclarations","sourceSnapshotHash":self.source_snapshot_hash,
+            "declarationVerified":true,"execution":"notRequested","resolutionStatus":if unresolved.is_empty(){"complete"}else{"partial"},"definitions":profiles,"relationships":relationships,"unresolved":unresolved,
+            "scope":"已确定的声明、别名、输入/返回和直接继承关系；不执行、不验证当前运行环境。未解析的部分单独列出，不影响其他已确定的源码事实。"}),
         )
+    }
+
+    fn member_view(&self, member: &Value) -> Value {
+        let mut value = member.clone();
+        if let Some(return_type) = member["resolvedReturnType"]
+            .as_str()
+            .or_else(|| member["returnType"].as_str())
+        {
+            let definition = self.script_types.get(return_type);
+            value["returns"] = json!({"declaredType":member["returnType"],"resolvedType":return_type,
+                "definitionId":definition.map(|_|format!("T:{return_type}")),
+                "declaredBases":definition.map(|value|&value["bases"]),"runtimeVerified":false});
+        }
+        if let Some(fields) = value.as_object_mut() {
+            fields.remove("returnType");
+            fields.remove("resolvedReturnType");
+        }
+        value
+    }
+
+    fn type_view(&self, name: &str, offset: usize, limit: usize) -> Value {
+        let Some(definition) = self.script_types.get(name) else {
+            return Value::Null;
+        };
+        let members = definition["members"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let mut value = definition.clone();
+        let page = members
+            .iter()
+            .skip(offset)
+            .take(limit.clamp(1, 30))
+            .map(|entry| {
+                let mut member = self.member_view(entry);
+                let implementation_available = member
+                    .get("implementation")
+                    .is_some_and(|value| !value.is_null());
+                member.as_object_mut().unwrap().remove("implementation");
+                member["implementationAvailable"] = json!(implementation_available);
+                member
+            })
+            .collect::<Vec<_>>();
+        let next = offset.saturating_add(page.len());
+        value["members"] = json!(page);
+        value["totalMembers"] = json!(members.len());
+        value["memberOffset"] = json!(offset);
+        value["nextMemberOffset"] = json!((next < members.len()).then_some(next));
+        value["definitionId"] = json!(format!("T:{name}"));
+        value["runtimeVerified"] = json!(false);
+        value
     }
 
     pub fn search(
@@ -76,71 +312,74 @@ impl FeatureIndex {
         offset: usize,
         limit: usize,
     ) -> Result<Value> {
-        if query.trim().is_empty() || query.chars().count() > 200 {
+        if query.chars().count() > 200 {
             return Err(Error::Tool(
-                "query 必须是 1 到 200 字符的用户目标或功能词".into(),
+                "query 最多 200 字符；留空按页浏览真实能力目录".into(),
             ));
         }
+        if let Some(index) = self.ids.get(query.trim()) {
+            let item = &self.items[*index];
+            if kind.is_none_or(|kind| item["kind"] == kind) {
+                let items = if offset == 0 {
+                    vec![
+                        json!({"id":item["id"],"kind":item["kind"],"title":item["title"],"summary":item["summary"].as_str().unwrap_or_default().chars().take(240).collect::<String>(),"declarationKind":item["declaration"]["kind"],"availability":item["availability"]}),
+                    ]
+                } else {
+                    vec![]
+                };
+                return Ok(
+                    json!({"source":"bgiPluginFeatureIndex","query":query,"total":1,"offset":offset,"nextOffset":null,"items":items}),
+                );
+            }
+        }
         let needle = normalize(query);
-        let browse = matches!(needle.as_str(), "功能目录" | "全部功能" | "功能总览");
-        let tokens = terms(&needle);
+        let tokens = terms(query);
         let mut matches = self
             .items
             .iter()
-            .filter(|item| kind.is_none_or(|kind| item["kind"] == kind))
-            .filter_map(|item| {
-                let id = item["id"].as_str().unwrap_or("");
-                let title = item["title"].as_str().unwrap_or("");
-                if browse {
-                    return (kind.is_some() || item["kind"] == "workflow").then_some((1, id, item));
+            .zip(&self.search_documents)
+            .filter(|(item, _)| kind.is_none_or(|kind| item["kind"] == kind))
+            .filter_map(|(item, document)| {
+                let id = item["id"].as_str().unwrap_or_default();
+                if query.trim().is_empty() {
+                    return Some((1.0, id, item));
                 }
-                let keywords = item["keywords"]
-                    .as_array()
-                    .map(|words| words.iter().filter_map(Value::as_str).collect::<Vec<_>>())
-                    .unwrap_or_default();
-                let text = normalize(&format!(
-                    "{id} {title} {} {}",
-                    item["summary"].as_str().unwrap_or(""),
-                    keywords.join(" ")
-                ));
-                let overlap = tokens.intersection(&terms(&text)).count() as i32;
-                let exact = normalize(id) == needle || normalize(title) == needle;
-                let mut score = if exact { 2000 } else { overlap * 2 };
-                if item["kind"] == "workflow" {
-                    let hit = |key: &str| {
-                        item[key].as_array().is_some_and(|words| {
-                            words
-                                .iter()
-                                .filter_map(Value::as_str)
-                                .any(|word| needle.contains(&normalize(word)))
-                        })
+                let exact = normalize(id) == needle
+                    || normalize(item["title"].as_str().unwrap_or_default()) == needle;
+                let mut score = if id.eq_ignore_ascii_case(query.trim()) {
+                    20_000.0
+                } else if exact {
+                    10_000.0
+                } else {
+                    0.0
+                };
+                for term in tokens.intersection(&document.all) {
+                    let weight = if document.id.contains(term) {
+                        3.0
+                    } else if document.title.contains(term) {
+                        2.0
+                    } else {
+                        1.0
                     };
-                    if hit("nouns") && hit("actions") {
-                        score += 200;
-                    } else if item["id"] == "workflow.resource.run" && hit("actions") {
-                        // 材料或自建脚本名称不要求预先出现在源码功能索引中。
-                        score += 80;
-                    } else if tokens.is_empty() && (hit("nouns") || hit("actions")) {
-                        // 单字等无法分词的查询：名词或动作单侧命中也计分，
-                        // 否则这类口语词永远检索不到。
-                        score += 200;
-                    }
+                    score += self
+                        .inverse_frequency
+                        .get(term)
+                        .copied()
+                        .unwrap_or_default()
+                        * weight;
                 }
-                if score <= 0 {
-                    return None;
-                }
-                Some((score, id, item))
+                (score > 0.0).then_some((score, id, item))
             })
             .collect::<Vec<_>>();
-        matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+        matches.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(b.1)));
         let limit = limit.clamp(1, 12);
         let items = matches.iter().skip(offset).take(limit).map(|(_,_,item)| json!({
             "id":item["id"], "kind":item["kind"], "title":item["title"].as_str().unwrap_or("").chars().take(140).collect::<String>(),
-            "availability":item["availability"], "next":"bgi.feature.read 读取这一条的链路"})).collect::<Vec<_>>();
+            "summary":item["summary"].as_str().unwrap_or_default().chars().take(240).collect::<String>(),"declarationKind":item["declaration"]["kind"],"availability":item["availability"], "next":"bgi.feature.read 读取这一项声明"})).collect::<Vec<_>>();
         Ok(
             json!({"source":"bgiPluginFeatureIndex","query":query,"total":matches.len(),"offset":offset,
             "nextOffset": (offset + items.len() < matches.len()).then_some(offset + items.len()),"items":items,
-            "next":"使用精确 ID 读取最相关条目；只展开当前任务的链路，不加载整份索引。"}),
+            "next":"使用精确 ID 读取最相关条目；只展开本次需要的声明，不加载整份索引。"}),
         )
     }
 }
@@ -231,18 +470,33 @@ fn terms(value: &str) -> HashSet<String> {
         .filter(|pair| pair.iter().all(|c| ('\u{3400}'..='\u{9fff}').contains(c)))
         .map(|pair| pair.iter().collect())
         .collect::<HashSet<_>>();
-    result.extend(
-        value
-            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-            .filter(|word| word.len() >= 3)
-            .map(str::to_owned),
-    );
+    for word in value.split(|c: char| !c.is_ascii_alphanumeric() && c != '_') {
+        if word.len() < 2 {
+            continue;
+        }
+        result.insert(word.to_ascii_lowercase());
+        let mut start = 0;
+        for (at, byte) in word.bytes().enumerate() {
+            let camel_boundary =
+                at > 0 && byte.is_ascii_uppercase() && word.as_bytes()[at - 1].is_ascii_lowercase();
+            if byte == b'_' || camel_boundary {
+                if at - start >= 2 {
+                    result.insert(word[start..at].to_ascii_lowercase());
+                }
+                start = if byte == b'_' { at + 1 } else { at };
+            }
+        }
+        if word.len() - start >= 2 {
+            result.insert(word[start..].to_ascii_lowercase());
+        }
+    }
     result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn all_source_features_have_progressive_cards() {
         let index = FeatureIndex::bundled().unwrap();
@@ -261,7 +515,7 @@ mod tests {
                 continue;
             }
             let card = index.read(item["methodId"].as_str().unwrap()).unwrap();
-            assert!(!card["item"]["steps"].as_array().unwrap().is_empty());
+            assert!(card["item"]["source"]["path"].is_string());
             assert!(!card["item"]["references"].as_array().unwrap().is_empty());
         }
         for item in audit["scriptApis"]
@@ -287,13 +541,6 @@ mod tests {
         }
         for item in audit["uiDeclarations"].as_array().unwrap() {
             let card = index.read(item["id"].as_str().unwrap()).unwrap();
-            assert!(
-                card["item"]["methodIds"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|id| id == "bgi.ui.read")
-            );
             assert_eq!(card["item"]["declaration"]["bindings"], item["bindings"]);
         }
         for binding in audit["scriptBindings"].as_array().unwrap() {
@@ -309,55 +556,42 @@ mod tests {
         assert_eq!(index.revision, audit["sourceRevision"].as_str().unwrap());
     }
     #[test]
-    fn user_intents_discover_exact_workflows_without_full_manuals() {
+    fn factual_catalog_search_and_browse_have_no_scenario_overlay() {
         let index = FeatureIndex::bundled().unwrap();
-        for (query, expected) in [
-            ("帮我把植绒草那个配置组删一下", "workflow.group.delete"),
-            ("帮我跑下血斛", "workflow.resource.run"),
-            ("血斛的配置组还有路线也删一下", "workflow.resource.delete"),
-            ("帮我编写 OCR 识别脚本", "workflow.javascript.write"),
-            ("打开调度器页面", "workflow.navigation"),
-            ("停一下刚才的任务", "workflow.task.stop"),
-            ("run_script_group", "bgi.run_script_group"),
-            ("把配置组重命名", "workflow.group.edit"),
-            ("开启自动拾取", "workflow.settings"),
-            ("配置恢复", "workflow.settings.recovery"),
-            ("开始刷首领", "workflow.task.run"),
-            ("解释脚本参数什么意思", "workflow.javascript"),
-            ("更新订阅路线", "workflow.repository"),
-            ("排查脚本报错", "workflow.logs"),
-            ("执行一条龙", "workflow.one-dragon"),
-            ("关闭原神", "workflow.game-ready"),
-            ("暂停音乐", "workflow.music"),
-            ("测试Webhook通知", "workflow.notifications"),
-            ("打开点位编辑器", "workflow.editor"),
-            ("启动桌面分身", "workflow.child-session"),
-        ] {
-            let found = index.search(query, None, 0, 5).unwrap();
-            assert!(
-                found["items"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|item| item["id"] == expected),
-                "{query}: {found}"
+        for item in &index.items {
+            assert_ne!(item["kind"], "workflow");
+            assert!(!item["id"].as_str().unwrap().starts_with("workflow."));
+            for key in [
+                "nouns",
+                "actions",
+                "openVocabulary",
+                "steps",
+                "branches",
+                "routingPriority",
+            ] {
+                assert!(item.get(key).is_none(), "{}: {key}", item["id"]);
+            }
+            let id = item["id"].as_str().unwrap();
+            let found = index.search(id, None, 0, 1).unwrap();
+            assert_eq!(
+                found["items"][0]["id"], id,
+                "Exact declaration lookup: {id}"
             );
-            assert!(found.to_string().len() < 6000);
-            assert!(
-                found["items"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .all(|item| item.get("steps").is_none())
-            );
+            assert!(found["items"][0].get("declaration").is_none());
         }
         assert!(index.read("untrusted-guessed-id").is_err());
-        let first = index.search("功能目录", None, 0, 12).unwrap();
-        let second = index.search("功能目录", None, 12, 12).unwrap();
-        assert_eq!(first["total"], 19);
+        let first = index.search("", None, 0, 12).unwrap();
+        let second = index.search("", None, 12, 12).unwrap();
+        assert_eq!(first["total"], index.items.len());
         assert_eq!(first["nextOffset"], 12);
-        assert_eq!(second["items"].as_array().unwrap().len(), 7);
-        assert!(second["nextOffset"].is_null());
+        assert_eq!(second["items"].as_array().unwrap().len(), 12);
+        assert!(first["items"].as_array().unwrap().iter().all(|item| {
+            !second["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|other| other["id"] == item["id"])
+        }));
     }
 
     #[test]
@@ -406,21 +640,6 @@ mod tests {
                 .sum::<usize>();
             assert!(body_chars < 5500, "{query}: {body_chars}");
         }
-    }
-
-    /// 从 Markdown 中提取全部 ```json 围栏代码块。
-    fn json_blocks(text: &str) -> Vec<Value> {
-        let mut blocks = Vec::new();
-        let mut rest = text;
-        while let Some(start) = rest.find("```json") {
-            let body = &rest[start + 7..];
-            let Some(end) = body.find("```") else { break };
-            if let Ok(value) = serde_json::from_str::<Value>(body[..end].trim()) {
-                blocks.push(value);
-            }
-            rest = &body[end + 3..];
-        }
-        blocks
     }
 
     /// 生产工具目录：全部契约来自 BgiClient::register_tools 的实际登记，不手写镜像。
@@ -480,79 +699,43 @@ mod tests {
     }
 
     #[test]
-    fn shortcut_examples_compile_through_production_metadata() {
+    fn shortcut_binding_uses_current_contract_without_shipped_api_examples() {
         use crate::runtime::operation::shortcuts::{ShortcutBinding, nodes};
-        let (_registry, catalog) = production_catalog();
-        let quick_tasks =
-            include_str!("../../plugins/bgi/skills/bgi-assistant/references/quick-tasks.md");
-        let mut examples: Vec<(String, Value)> = crate::extension::skills::EMBEDDED_SKILLS
-            .iter()
-            .map(|text| ("embedded create-shortcut".into(), json_blocks(text)))
-            .flat_map(|(source, blocks): (String, Vec<Value>)| {
-                blocks.into_iter().map(move |b| (source.clone(), b))
-            })
-            .collect();
-        examples.extend(
-            json_blocks(quick_tasks)
-                .into_iter()
-                .map(|b| ("quick-tasks".into(), b)),
-        );
-        assert!(!examples.is_empty(), "没有从手册中解析到 JSON 示例");
-        for (source, example) in &examples {
-            let binding: ShortcutBinding = serde_json::from_value(example["binding"].clone())
-                .unwrap_or_else(|e| panic!("{source}: 示例绑定不符合生产 binding 结构：{e}"));
-            let action = binding.action.as_ref().unwrap_or_else(|| {
-                panic!("{source}: 组合入口示例必须用单动作 binding.action");
-            });
-            // 调用工具与应用接口分层；单组、多组都必须可由生产目录编译。
-            assert_eq!(
-                action.tool, "bgi.api.invoke",
-                "{source}: canonical 动作工具名"
-            );
-            let method_id = action.arguments["methodId"].as_str().unwrap_or("");
-            assert!(
-                matches!(method_id, "bgi.run_script_group" | "bgi.run_script_groups"),
-                "{source}: 配置组 methodId"
-            );
-            let parameters = &action.arguments["arguments"];
-            if method_id == "bgi.run_script_group" {
-                assert!(parameters["groupName"].is_string());
-                assert!(parameters.get("groupNames").is_none());
-            } else {
-                assert!(parameters["groupNames"].is_array());
-                assert!(parameters.get("groupName").is_none());
-            }
-            assert_eq!(
-                action.arguments["arguments"]["waitForCompletion"],
-                json!(false),
-                "{source}: 默认后台交接 waitForCompletion=false"
-            );
-            // prepare 必须非空，且每一条都核对同一目标 methodId。
-            assert!(!binding.prepare.is_empty(), "{source}: prepare 不能为空");
-            for call in &binding.prepare {
-                assert_eq!(call.tool, "bgi.api.describe", "{source}: 准备读取契约");
-                assert_eq!(
-                    call.arguments["methodId"].as_str().unwrap_or(""),
-                    method_id,
-                    "{source}: prepare 与 action 使用同一 methodId"
-                );
-            }
-            let compiled = nodes(&binding, &catalog)
-                .unwrap_or_else(|e| panic!("{source}: 生产目录编译失败：{e}"));
-            assert!(!compiled.is_empty(), "{source}: 编译后应有节点");
-        }
-    }
-
-    /// 真实用户场景对功能索引的路由回归：feature.search 入口的场景必须用
-    /// 该 query+kind 在真实索引前 5 命中 expectedWorkflow；guidance 等其他
-    /// 入口不冒充索引命中，只核 expectedWorkflow 存在、id 唯一、domain 属于
-    ///声明域、skill 引用真实可读。
-    #[test]
-    fn user_scenarios_route_through_the_real_feature_index() {
-        let scenarios: Value = serde_json::from_str(include_str!(
-            "../../bgi-bridge/dev/fixtures/user-scenarios.json"
+        let (registry, catalog) = production_catalog();
+        let descriptors: Value = serde_json::from_str(include_str!(
+            "../../bgi-bridge/dev/bgi-method-metadata.json"
         ))
         .unwrap();
+        let (id, descriptor) = descriptors
+            .as_object()
+            .unwrap()
+            .iter()
+            .find(|(_, d)| {
+                d["readOnly"] == true
+                    && d["inputSchema"]["required"]
+                        .as_array()
+                        .is_none_or(|r| r.is_empty())
+            })
+            .unwrap();
+        let tool = registry
+            .definitions()
+            .into_iter()
+            .find(|definition| {
+                definition.name.ends_with(".api.read")
+                    && definition.execution.effect == crate::extension::ToolEffect::ReadOnly
+            })
+            .unwrap();
+        assert!(crate::extension::validate(&json!({}), &descriptor["inputSchema"], "$").is_empty());
+        let binding: ShortcutBinding = serde_json::from_value(
+            json!({"applicationName":"BetterGI","targetName":"本次发现的只读能力",
+            "action":{"tool":tool.name,"arguments":{"methodId":id,"arguments":{}}}}),
+        )
+        .unwrap();
+        assert!(!nodes(&binding, &catalog).unwrap().is_empty());
+    }
+
+    #[test]
+    fn plugin_skills_do_not_pin_native_interfaces_or_engine_symbols() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut skills = crate::extension::skills::SkillRegistry::default();
         skills
@@ -561,93 +744,196 @@ mod tests {
                 crate::extension::skills::SkillSource::Plugin("bgi".into()),
             )])
             .unwrap();
-        let index = FeatureIndex::bundled().unwrap();
-        let domains: Vec<&str> = scenarios["domains"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(Value::as_str)
-            .collect();
-        let mut ids = std::collections::HashSet::new();
-        let cases = scenarios["scenarios"].as_array().unwrap();
-        assert_eq!(cases.len(), 98, "场景数量应为 98");
-        let mut searched = 0usize;
-        let mut misses: Vec<String> = vec![];
-        for case in cases {
-            let id = case["id"].as_str().unwrap();
-            assert!(ids.insert(id.to_owned()), "场景 id 重复：{id}");
-            let domain = case["domain"].as_str().unwrap();
-            assert!(
-                domains.contains(&domain),
-                "{id} 声明了未列出的 domain：{domain}"
-            );
-            let expected = case["expectedWorkflow"].as_str().unwrap();
-            // guidance 场景不指向具体链路，不冒充索引命中。
-            if expected != "guidance" {
-                assert!(
-                    index.read(expected).is_ok(),
-                    "{id} 的 expectedWorkflow 不在索引：{expected}"
-                );
+        let descriptors: Value = serde_json::from_str(include_str!(
+            "../../bgi-bridge/dev/bgi-method-metadata.json"
+        ))
+        .unwrap();
+        let bindings: Value = serde_json::from_str(include_str!(
+            "../../bgi-bridge/managed/generated/host-documentation.json"
+        ))
+        .unwrap();
+        for skill in skills.list() {
+            let mut bodies = vec![skill.body.clone()];
+            for file in std::fs::read_dir(skill.path.parent().unwrap().join("references")).unwrap()
+            {
+                let path = file.unwrap().path();
+                if path.extension().is_some_and(|extension| extension == "md") {
+                    bodies.push(std::fs::read_to_string(path).unwrap());
+                }
             }
-            let surface = &case["discoverySurface"];
-            if surface["entry"] == "feature.search" {
-                searched += 1;
-                let found = index
-                    .search(
-                        surface["query"].as_str().unwrap(),
-                        surface["kind"].as_str(),
-                        0,
-                        5,
-                    )
-                    .unwrap();
-                let items = found["items"].as_array().unwrap();
-                if !items.iter().any(|item| item["id"] == expected) {
-                    misses.push(format!(
-                        "{id}：query「{}」期望 {expected}，实际 {:?}",
-                        surface["query"].as_str().unwrap(),
-                        items
-                            .iter()
-                            .filter_map(|item| item["id"].as_str())
-                            .collect::<Vec<_>>()
-                    ));
+            for body in bodies {
+                for id in descriptors.as_object().unwrap().keys() {
+                    assert!(!body.contains(id), "{} pins {id}", skill.name);
+                }
+                for binding in bindings["scriptBindings"].as_array().unwrap() {
+                    let alias = binding["alias"].as_str().unwrap();
+                    for (start, _) in body.match_indices(alias) {
+                        let end = start + alias.len();
+                        let adjacent = |value: Option<char>| {
+                            value.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+                        };
+                        let part_of_word = adjacent(body[..start].chars().next_back())
+                            || adjacent(body[end..].chars().next());
+                        let path_suffix = body[end..]
+                            .chars()
+                            .take_while(|c| {
+                                c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '/')
+                            })
+                            .collect::<String>();
+                        if !part_of_word && !path_suffix.ends_with(".md") {
+                            panic!(
+                                "{} pins an engine binding instead of discovering it: {alias}",
+                                skill.name
+                            );
+                        }
+                    }
+                }
+                for prefix in ["cmd.", "setting."] {
+                    assert!(
+                        !body.contains(prefix),
+                        "{} pins a native identifier",
+                        skill.name
+                    );
                 }
             }
         }
-        assert!(searched >= 30, "feature.search 场景数量异常：{searched}");
-        assert!(
-            misses.is_empty(),
-            "{} 个场景未命中索引前 5：
-{}",
-            misses.len(),
-            misses.join(
-                "
-"
-            )
-        );
     }
 
     #[test]
-    fn route_native_config_intents_resolve_to_existing_entries() {
-        let index = FeatureIndex::bundled().unwrap();
-        for (query, expected) in [
-            ("地图追踪 队伍切换", "workflow.group.edit"),
-            ("路线换队", "workflow.group.edit"),
-            ("全局设置恢复", "workflow.settings.recovery"),
-        ] {
-            let found = index.search(query, None, 0, 5).unwrap();
-            let ids: Vec<String> = found["items"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter_map(|item| item["id"].as_str().map(str::to_owned))
-                .collect();
-            assert!(
-                ids.iter().any(|id| id == expected),
-                "{query}: 未命中 {expected}，实际 {ids:?}"
-            );
-            // 检索到语义条目后必须能读到完整链路，不存在悬空摘要。
-            let card = index.read(expected).unwrap();
-            assert!(!card["item"]["steps"].as_array().unwrap().is_empty());
+    fn behavioral_fixtures_keep_raw_requests_and_outcomes_without_retrieval_answers() {
+        let scenarios: Value = serde_json::from_str(include_str!(
+            "../../bgi-bridge/dev/fixtures/user-scenarios.json"
+        ))
+        .unwrap();
+        let domains = scenarios["domains"].as_array().unwrap();
+        let mut ids = HashSet::new();
+        for case in scenarios["scenarios"].as_array().unwrap() {
+            assert!(ids.insert(case["id"].as_str().unwrap()));
+            assert!(domains.contains(&case["domain"]));
+            assert!(!case["utterance"].as_str().unwrap().is_empty());
+            assert!(!case["expectedOutcome"].as_str().unwrap().is_empty());
+            assert!(!case["sourceAnchors"].as_array().unwrap().is_empty());
+            for key in ["expectedWorkflow", "normalizedQuery", "discoverySurface"] {
+                assert!(
+                    case.get(key).is_none(),
+                    "Fixture must not provide retrieval answers: {key}"
+                );
+            }
         }
+    }
+
+    #[test]
+    fn structured_symbols_follow_new_names_types_and_parameter_shapes() {
+        for (owner, member, alias, returned, base, parameter) in [
+            (
+                "First.Source",
+                "Acquire",
+                "capture",
+                "First.Frame",
+                "First.Area",
+                "scope",
+            ),
+            (
+                "Refactored.Provider",
+                "ReadNow",
+                "takeImage",
+                "Refactored.Picture",
+                "Refactored.Surface",
+                "region",
+            ),
+        ] {
+            let data = json!({"format":2,"sourceRevision":"fixture","sourceSnapshotHash":"snapshot",
+            "scriptTypes":{
+                owner:{"name":owner,"kind":"type","bases":[],"members":[{"name":member,"kind":"method","parameters":[{"name":parameter,"type":"int"}],"returnType":returned,"resolvedReturnType":returned}]},
+                returned:{"name":returned,"kind":"type","bases":[base],"members":[{"name":"A","kind":"property","returnType":"int"},{"name":"B","kind":"property","returnType":"string"}]}
+            },"items":[
+                {"id":format!("js.binding.{alias}"),"kind":"scriptApi","title":alias,"summary":"source binding","availability":"sourceDeclaration","inputSources":[],"references":[],"source":{"path":"fixture.cs"},"declaration":{"alias":alias,"kind":"function","clrType":owner,"member":member}},
+                {"id":format!("T:{returned}"),"kind":"scriptApi","title":returned,"summary":"source type","availability":"sourceDeclaration","inputSources":[],"references":[],"source":{"path":"fixture.cs"},"declaration":{"kind":"type"}}
+            ]});
+            let index = FeatureIndex::parse(&data.to_string()).unwrap();
+            let binding = index.read(&format!("js.binding.{alias}")).unwrap();
+            assert_eq!(
+                binding["symbol"]["overloads"][0]["parameters"][0]["name"],
+                parameter
+            );
+            assert_eq!(
+                binding["symbol"]["overloads"][0]["returns"]["resolvedType"],
+                returned
+            );
+            assert_eq!(
+                binding["symbol"]["overloads"][0]["returns"]["declaredBases"][0],
+                base
+            );
+            let inspection = index
+                .inspect_symbols(&[alias.into(), returned.into()])
+                .unwrap();
+            assert_eq!(inspection["resolutionStatus"], "complete");
+            assert_eq!(inspection["definitions"].as_array().unwrap().len(), 2);
+            assert!(inspection["relationships"].as_array().unwrap().iter().any(
+                |edge| edge["kind"] == "returns" && edge["from"] == alias && edge["to"] == returned
+            ));
+            assert!(inspection["relationships"].as_array().unwrap().iter().any(
+                |edge| edge["kind"] == "inherits" && edge["from"] == returned && edge["to"] == base
+            ));
+            let missing = index.inspect_symbols(&["missing-symbol".into()]).unwrap();
+            assert_eq!(missing["resolutionStatus"], "partial");
+            assert_eq!(missing["unresolved"][0]["status"], "notFound");
+            let first = index.read_page(&format!("T:{returned}"), 0, 1).unwrap();
+            let second = index.read_page(&format!("T:{returned}"), 1, 1).unwrap();
+            assert_eq!(first["symbol"]["type"]["nextMemberOffset"], 1);
+            assert_eq!(first["symbol"]["type"]["members"][0]["name"], "A");
+            assert_eq!(second["symbol"]["type"]["members"][0]["name"], "B");
+            assert!(second["symbol"]["type"]["nextMemberOffset"].is_null());
+        }
+    }
+
+    #[test]
+    fn registered_contract_descriptions_are_searchable_as_real_metadata() {
+        let index = FeatureIndex::bundled().unwrap();
+        let descriptors: Value = serde_json::from_str(include_str!(
+            "../../bgi-bridge/dev/bgi-method-metadata.json"
+        ))
+        .unwrap();
+        for (id, descriptor) in descriptors.as_object().unwrap() {
+            let card = index.read(id).unwrap();
+            assert_eq!(card["item"]["title"], descriptor["guide"]["title"]);
+            assert_eq!(card["item"]["summary"], descriptor["guide"]["purpose"]);
+            assert_eq!(card["item"]["effect"], descriptor["effect"]);
+            let found = index
+                .search(
+                    descriptor["guide"]["title"].as_str().unwrap(),
+                    Some("stable"),
+                    0,
+                    12,
+                )
+                .unwrap();
+            assert!(
+                found["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|item| item["id"] == *id)
+            );
+        }
+    }
+
+    #[test]
+    fn lexical_terms_preserve_word_boundaries_camel_case_and_chinese() {
+        let tokens = terms("ReadImageRegion script_config OCR 队伍 切换");
+        for token in [
+            "readimageregion",
+            "read",
+            "image",
+            "region",
+            "script_config",
+            "script",
+            "config",
+            "ocr",
+            "队伍",
+            "切换",
+        ] {
+            assert!(tokens.contains(token), "{token}");
+        }
+        assert!(!tokens.contains("伍切"));
     }
 }

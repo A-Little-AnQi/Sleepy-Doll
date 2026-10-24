@@ -1,4 +1,486 @@
 {
+  "bgi.commit_settings": {
+    "group": "settings",
+    "summary": "提交 preview_settings 生成的计划，创建恢复记录并原子写入。",
+    "readOnly": false,
+    "destructive": true,
+    "effect": "configurationWrite",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "planId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "preview_settings 返回且尚未过期的计划 ID。"
+        }
+      },
+      "required": [
+        "planId"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "提交设置计划",
+      "purpose": "提交 preview_settings 生成的计划，创建恢复记录并原子写入。",
+      "whenToUse": [
+        "预览差异已经符合目标时；运行时审批负责确认"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "修改 BetterGI 内存配置并原子更新 User/config.json。"
+      ],
+      "resultMeaning": "verified=true 才表示内存和磁盘均已核验。changeId 标识本次事务。",
+      "verification": "回读目标 path，并保留 changeId。",
+      "rollback": "用 bgi.rollback_settings；字段后来被修改时回退会拒绝覆盖。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.create_command_argument": {
+    "group": "command",
+    "summary": "仅构造当前命令声明的参数类型；不能指定任意 CLR 类型。泛型从真实 contextId 取得具体类型，已有资源仍使用引用。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "cmd. 前缀可保留，使用目录返回的精确命令 ID。"
+        },
+        "arguments": {
+          "type": "object",
+          "maxProperties": 32
+        },
+        "contextId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "command",
+        "arguments"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "建立参数对象",
+      "purpose": "仅构造当前命令声明的参数类型；不能指定任意 CLR 类型。泛型从真实 contextId 取得具体类型，已有资源仍使用引用。",
+      "whenToUse": [
+        "已发现精确 cmd ID，需要绑定对象参数、窗口、子 ViewModel 或泛型实例。"
+      ],
+      "preconditions": [
+        "使用当前引用；多实例不猜目标。"
+      ],
+      "sideEffects": [
+        "可能构造BetterGI对象或释放桥创建的上下文。"
+      ],
+      "resultMeaning": "对象引用与构造／释放结果；不证明命令或游戏目标完成。",
+      "verification": "继续绑定精确 contextId/objectId，执行后核对业务证据。",
+      "rollback": "只释放桥创建的上下文；用户已有对象保留。",
+      "documentationSource": "bridge-native-object-binding"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.create_command_target": {
+    "group": "command",
+    "summary": "显式构造未注册的BetterGI对象；服务依赖从原容器取得，未知／歧义参数拒绝。目录查询不偷偷实例化。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "cmd. 前缀可保留，使用目录返回的精确命令 ID。"
+        },
+        "arguments": {
+          "type": "object",
+          "maxProperties": 32,
+          "description": "来自当前构造契约的命名参数；复杂输入使用真实 objectId。"
+        }
+      },
+      "required": [
+        "command",
+        "arguments"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "建立命令上下文",
+      "purpose": "显式构造未注册的BetterGI对象；服务依赖从原容器取得，未知／歧义参数拒绝。目录查询不偷偷实例化。",
+      "whenToUse": [
+        "已发现精确 cmd ID，需要绑定对象参数、窗口、子 ViewModel 或泛型实例。"
+      ],
+      "preconditions": [
+        "使用当前引用；多实例不猜目标。"
+      ],
+      "sideEffects": [
+        "可能构造BetterGI对象或释放桥创建的上下文。"
+      ],
+      "resultMeaning": "对象引用与构造／释放结果；不证明命令或游戏目标完成。",
+      "verification": "继续绑定精确 contextId/objectId，执行后核对业务证据。",
+      "rollback": "只释放桥创建的上下文；用户已有对象保留。",
+      "documentationSource": "bridge-native-object-binding"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.delete_local_resource": {
+    "group": "resources",
+    "summary": "按已经找到的真实路径直接删除完整作者包／材料目录或单文件；保留同卷恢复备份、版本核对和范围证据，不要求界面选中。",
+    "readOnly": false,
+    "destructive": true,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "已定位的 User 相对资源路径，例如 AutoPathing/地方特产/稻妻/血斛 或 JsScript/脚本目录；不能删除分类根目录。"
+        },
+        "expectedVersion": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "allowBrokenReferences": {
+          "type": "boolean",
+          "description": "默认 false；只有用户明确允许保留指向缺失资源的其他配置组时才为 true。"
+        }
+      },
+      "required": [
+        "path",
+        "expectedVersion"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "删除路线或脚本资源",
+      "purpose": "按已经找到的真实路径直接删除完整作者包／材料目录或单文件；保留同卷恢复备份、版本核对和范围证据，不要求界面选中。",
+      "whenToUse": [
+        "用户要求删除或恢复已定位的路线、JS、键鼠、战斗或七圣资源；只删配置组仍使用 delete_script_group。"
+      ],
+      "preconditions": [
+        "路径来自 user.list/read/resolve；删除前 inspect_local_resource 获取实际文件、引用与版本。",
+        "资源删除不需要游戏、页面、选中项或 UI 树；任务运行时不删除。"
+      ],
+      "sideEffects": [
+        "将精确资源移入 User 的恢复区或移回；其他资源、配置组及订阅保留。"
+      ],
+      "resultMeaning": "deleted/restored=true 且 verified=true 才完成；backupId 可恢复。订阅保留，未来更新可能重新导入，结果明确列出覆盖订阅。",
+      "verification": "已验证结果返回后停止；不再搜索删除命令、构造上下文、导航、展开树或枚举选项。",
+      "rollback": "用 restore_local_resource 恢复同一备份；原路径已存在则拒绝覆盖。",
+      "documentationSource": "bridge-stable-resource-lifecycle"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.delete_script_group": {
+    "group": "scheduler",
+    "summary": "按精确名称删除一个调度器配置组，不依赖界面当前选择；保留脚本、地图追踪路线和订阅。",
+    "readOnly": false,
+    "destructive": true,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "groupName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "从 User/ScriptGroup 读取到的精确 name；只删除该配置组。"
+        },
+        "expectedSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$",
+          "description": "bgi.user.read 返回的目标配置组 SHA-256，不允许猜测。"
+        }
+      },
+      "required": [
+        "groupName",
+        "expectedSha256"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "删除配置组",
+      "purpose": "按精确名称删除一个调度器配置组，不依赖界面当前选择；保留脚本、地图追踪路线和订阅。",
+      "whenToUse": [
+        "用户要求删除一个已定位的配置组时；不是停用任务，也不是卸载路线。"
+      ],
+      "preconditions": [
+        "groupName 来自配置组的 name；expectedSha256 来自 bgi.user.read。",
+        "没有独立任务正在执行；不需要启动游戏或截图器。"
+      ],
+      "sideEffects": [
+        "保存目标文件备份后删除该组，更新组列表；其他配置组文件、路线、JS 和订阅不变。"
+      ],
+      "resultMeaning": "deleted=true、verified=true 表示目标文件和BetterGI组列表均已移除；backup 是 User 下的恢复文件。",
+      "verification": "返回已验证结果即完成，不再查生命周期、导航或游戏状态。",
+      "rollback": "需要撤销时读取 backup，用 bgi.user.write 在原 path 新建原始内容；已有同名文件时不得覆盖。",
+      "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.ensure_game_ready": {
+    "group": "lifecycle",
+    "summary": "按真实状态分类处理：无进程→BetterGI命令启动；有进程无截图→挂截图器；加载→阻塞等主界面；非 16:9/超时如实失败。",
+    "readOnly": false,
+    "destructive": true,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "统一就绪准备",
+      "purpose": "按真实状态分类处理：无进程→BetterGI命令启动；有进程无截图→挂截图器；加载→阻塞等主界面；非 16:9/超时如实失败。",
+      "whenToUse": [
+        "运行类接口在提交前需要就绪准备时（通常由运行时按契约自动执行）；排障时显式调用一次。"
+      ],
+      "preconditions": [
+        "BetterGI 桥已连接。"
+      ],
+      "sideEffects": [
+        "可能启动原神进程或挂上截图器；不发送游戏输入，不改配置。"
+      ],
+      "resultMeaning": "prepared=true 且 ready=true 表示就绪完成；失败时按返回的具体阻碍处理。",
+      "verification": "以 ready 与 runtime 状态为准；超时/非 16:9 是失败不是就绪。",
+      "rollback": "就绪状态是观测事实，无需回滚；游戏可按需关闭。",
+      "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/StatusTools.cs",
+      "registrationType": "BgiBridge.Tools.StatusTools"
+    }
+  },
+  "bgi.exit_game": {
+    "group": "scheduler",
+    "summary": "结束原神游戏进程。等价于 BetterGI 一条龙收尾的退出方式：先请求正常关闭，5 秒未退再结束进程。任务收尾、切换账号前使用。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "退出原神",
+      "purpose": "结束原神游戏进程。等价于 BetterGI 一条龙收尾的退出方式：先请求正常关闭，5 秒未退再结束进程。任务收尾、切换账号前使用。",
+      "whenToUse": [
+        "用户要求退出/关闭原神，或一条龙与任务链结束后按约定收尾时。"
+      ],
+      "preconditions": [
+        "原神正在运行。"
+      ],
+      "sideEffects": [
+        "结束原神进程；BetterGI 与本工具继续运行。未保存的钓鱼杆数量等游戏内状态由游戏自己落盘。"
+      ],
+      "resultMeaning": "调用返回即已发出关闭；进程在 5 秒内未自行退出会被强制结束。",
+      "verification": "调用后读一次 bgi.get_status：gameHandle 变 0 或 captureReady 回落即已退出；不要反复调用。",
+      "rollback": "只结束游戏进程，不改任何配置；重新进入用 bgi.start_game。",
+      "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.get_script_errors": {
+    "group": "lifecycle",
+    "summary": "从BetterGI日志里提取脚本执行失败：报错原文、JS 层错误、出错的脚本名、涉及的用户文件路径和BetterGI源位置。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "宿主日志的日期，yyyyMMdd 或 yyyy-MM-dd；省略为当天。"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 30,
+          "description": "最多返回条数；默认 30，上限 100。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "脚本报错",
+      "purpose": "从BetterGI日志里提取脚本执行失败：报错原文、JS 层错误、出错的脚本名、涉及的用户文件路径和BetterGI源位置。",
+      "whenToUse": [
+        "用户报告脚本报错、任务中途失败，或要求排查脚本问题时，先用它拿到确切报错，再去读脚本源码。",
+        "需要确认一个报错属于哪个脚本、哪一次运行时。"
+      ],
+      "preconditions": [
+        "桥已连接。",
+        "失败发生在当天或用户指定的日期；日志按天分文件。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "failures 按时间升序，只包含BetterGI记录了「执行脚本时发生异常」的失败。error 是BetterGI给出的一手报错原文；jsError 非空表示错误由 JS 引擎抛出，否则来自BetterGI或用户资源。script 是从同一次运行的日志里读到的脚本名，可能为 null。locations 里 kind=userFile 的路径相对 User 目录，可直接用 bgi.user.read 读取；kind=hostSource 是BetterGI源码位置，与接口说明里的 source 字段同一种写法；kind=absolute 是报错原文里的其他绝对路径，可能来自打包机而不在本机。count=0 表示该日期没有脚本失败记录。",
+      "verification": "按 script 读取 User/JsScript 下的源码核对 error 指出的位置；需要完整过程时用 bgi.read_host_log 按同一 thread 读取那次运行。",
+      "rollback": "只读。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/HostLogTools.cs",
+      "registrationType": "BgiBridge.Tools.HostLogTools"
+    }
+  },
+  "bgi.get_setting": {
+    "group": "settings",
+    "summary": "读取一个精确 path 的当前值、Schema、写入限制和并发版本。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "从设置目录取得的精确点分路径，例如 triggerInterval。"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "读取设置",
+      "purpose": "读取一个精确 path 的当前值、Schema、写入限制和并发版本。",
+      "whenToUse": [
+        "修改前取最新版本，或提交后回读"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "currentValue 是当前内存值；敏感值被遮蔽。",
+      "verification": "保存 valueVersion；按 valueSchema 生成新值。",
+      "rollback": "只读。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.get_setting_change": {
+    "group": "settings",
+    "summary": "读取一个 changeId 的脱敏差异、状态和恢复记录。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "changeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "由 commit_settings、set_setting 或变更记录返回的事务 ID。"
+        }
+      },
+      "required": [
+        "changeId"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "设置变更详情",
+      "purpose": "读取一个 changeId 的脱敏差异、状态和恢复记录。",
+      "whenToUse": [
+        "解释某次修改或准备回退时"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "只描述该事务涉及的字段。",
+      "verification": "核对 changeId、状态和目标 path。",
+      "rollback": "只读；回退使用 bgi.rollback_settings。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.get_status": {
+    "group": "lifecycle",
+    "summary": "读取截图器、游戏句柄、窗口前台状态和独立任务锁。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "BetterGI 运行状态",
+      "purpose": "读取截图器、游戏句柄、窗口前台状态和独立任务锁。",
+      "whenToUse": [
+        "执行前、执行后或排障时；纯 User 文件操作不调用"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "一次带时间戳的游戏状态快照。ready 只表示截图器与主界面就绪，不是 BetterGI 连接状态或业务完成标记；保存配置和快捷入口不要求 ready。",
+      "verification": "检查 observedAt；执行结果按目标接口另行核验。",
+      "rollback": "只读。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/StatusTools.cs",
+      "registrationType": "BgiBridge.Tools.StatusTools"
+    }
+  },
   "bgi.inspect_group_effective": {
     "group": "scheduler",
     "summary": "只读揭示一个配置组各运行字段实际生效的值与来源（组内覆盖 vs 与全局当前值一致），以及有效战斗策略的类型/文件/版本与开头要求原文。",
@@ -36,6 +518,604 @@
       "verification": "以 fields[].source 与 strategy.version 为准；source=groupOverride 表示该字段与全局不同，需判断是有意自定义还是历史默认覆盖。",
       "rollback": "无需回滚。",
       "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.inspect_local_resource": {
+    "group": "resources",
+    "summary": "按 User 相对路径直接核对完整目录／单文件、文件 SHA、配置组引用及订阅覆盖；不操作懒加载界面树。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "已定位的 User 相对资源路径，例如 AutoPathing/地方特产/稻妻/血斛 或 JsScript/脚本目录；不能删除分类根目录。"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "检查资源删除范围",
+      "purpose": "按 User 相对路径直接核对完整目录／单文件、文件 SHA、配置组引用及订阅覆盖；不操作懒加载界面树。",
+      "whenToUse": [
+        "用户要求删除或恢复已定位的路线、JS、键鼠、战斗或七圣资源；只删配置组仍使用 delete_script_group。"
+      ],
+      "preconditions": [
+        "路径来自 user.list/read/resolve；删除前 inspect_local_resource 获取实际文件、引用与版本。",
+        "资源删除不需要游戏、页面、选中项或 UI 树；任务运行时不删除。"
+      ],
+      "sideEffects": [
+        "只读文件清单、引用、订阅覆盖与版本。"
+      ],
+      "resultMeaning": "deleted/restored=true 且 verified=true 才完成；backupId 可恢复。订阅保留，未来更新可能重新导入，结果明确列出覆盖订阅。",
+      "verification": "已验证结果返回后停止；不再搜索删除命令、构造上下文、导航、展开树或枚举选项。",
+      "rollback": "用 restore_local_resource 恢复同一备份；原路径已存在则拒绝覆盖。",
+      "documentationSource": "bridge-stable-resource-lifecycle"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.invoke_command": {
+    "group": "command",
+    "summary": "执行已确定且当前可调用的界面命令；异步命令等待处理器返回。",
+    "readOnly": false,
+    "destructive": true,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "来自命令目录的精确 name。"
+        },
+        "argument": {
+          "description": "必须符合该命令的 parameterSchema；无参命令省略此字段。"
+        },
+        "contextId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "真实上下文引用。"
+        },
+        "selection": {
+          "type": "object",
+          "maxProperties": 32
+        },
+        "dialogInput": {
+          "type": "object",
+          "minProperties": 1,
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 8192
+            },
+            "filePath": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "selectedValues": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 512,
+              "items": {
+                "type": "string",
+                "maxLength": 1024
+              }
+            },
+            "confirm": {
+              "type": "boolean"
+            },
+            "values": {
+              "type": "object",
+              "maxProperties": 64
+            }
+          },
+          "additionalProperties": false,
+          "description": "本次命令的明确输入。text 用于名称／文本，filePath 用于文件或目录选择，selectedValues 必须是资源返回的原生 Tag 路径或 folderName；confirm 仅确认本次已授权操作；values 是新窗口数据上下文中的已定义字段。"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "执行界面命令",
+      "purpose": "执行已确定且当前可调用的界面命令；异步命令等待处理器返回。",
+      "whenToUse": [
+        "命令目标、界面上下文和参数都已确认时；运行时审批负责确认"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "影响由具体命令决定；以该命令独立契约为准。"
+      ],
+      "resultMeaning": "executed=true 只表示处理器返回，configurationCheckpoint 只保护配置。",
+      "verification": "按具体命令契约读取状态或资源；超时后不盲目重发。",
+      "rollback": "配置可从检查点恢复；文件、通知、进程和游戏副作用通常不能自动撤销。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.js_api.read": {
+    "group": "javascript",
+    "summary": "读取当前类型的构造器、静态／实例方法、继承成员、属性、枚举、默认参数与 Task→Promise 约定。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "已注册 JS 别名、已返回的类型或 OpenCvSharp 完整类型名。"
+        },
+        "member": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "可选成员名，包含所有匹配重载。"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "读取 JS API",
+      "purpose": "读取当前类型的构造器、静态／实例方法、继承成员、属性、枚举、默认参数与 Task→Promise 约定。",
+      "whenToUse": [
+        "用户要求编写／修改 JS，或需要确认 OCR、图像、输入、任务、模块 API 时。"
+      ],
+      "preconditions": [
+        "来自实际 EngineExtend 注入声明；不会创建脚本引擎或执行方法。"
+      ],
+      "sideEffects": [
+        "只读契约；不截图、不点击、不发送消息。"
+      ],
+      "resultMeaning": "返回别名、CLR 类型、真实重载、参数默认值、返回类型、继承成员与源码；runtimeVerified 分别标注。",
+      "verification": "从已注册别名开始读；按 nextOffset 补齐需要的成员与返回对象。写 JS 时用真实名称、参数与 await。",
+      "rollback": "只读，无回退。",
+      "documentationSource": "js-engine-bindings-and-reflection"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.js_api.search": {
+    "group": "javascript",
+    "summary": "从当前脚本引擎实际注入的别名和可达类型发现 OCR、图像区域、BvPage/BvLocator、OpenCV、输入和任务 API。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "检索 JS BetterGI API",
+      "purpose": "从当前脚本引擎实际注入的别名和可达类型发现 OCR、图像区域、BvPage/BvLocator、OpenCV、输入和任务 API。",
+      "whenToUse": [
+        "用户要求编写／修改 JS，或需要确认 OCR、图像、输入、任务、模块 API 时。"
+      ],
+      "preconditions": [
+        "来自实际 EngineExtend 注入声明；不会创建脚本引擎或执行方法。"
+      ],
+      "sideEffects": [
+        "只读契约；不截图、不点击、不发送消息。"
+      ],
+      "resultMeaning": "返回别名、CLR 类型、真实重载、参数默认值、返回类型、继承成员与源码；runtimeVerified 分别标注。",
+      "verification": "从已注册别名开始读；按 nextOffset 补齐需要的成员与返回对象。写 JS 时用真实名称、参数与 await。",
+      "rollback": "只读，无回退。",
+      "documentationSource": "js-engine-bindings-and-reflection"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.list_command_targets": {
+    "group": "command",
+    "summary": "反射当前窗口、数据上下文和BetterGI集合；返回真实 objectId 与构造参数，不靠界面当前选中猜目标。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "cmd. 前缀可保留，使用目录返回的精确命令 ID。"
+        },
+        "query": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "读取命令目标",
+      "purpose": "反射当前窗口、数据上下文和BetterGI集合；返回真实 objectId 与构造参数，不靠界面当前选中猜目标。",
+      "whenToUse": [
+        "已发现精确 cmd ID，需要绑定对象参数、窗口、子 ViewModel 或泛型实例。"
+      ],
+      "preconditions": [
+        "使用当前引用；多实例不猜目标。"
+      ],
+      "sideEffects": [
+        "只枚举当前对象与构造契约，不构造服务或窗口。"
+      ],
+      "resultMeaning": "对象引用与构造／释放结果；不证明命令或游戏目标完成。",
+      "verification": "继续绑定精确 contextId/objectId，执行后核对业务证据。",
+      "rollback": "只释放桥创建的上下文；用户已有对象保留。",
+      "documentationSource": "bridge-native-object-binding"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.list_commands": {
+    "group": "command",
+    "summary": "列出低层 WPF 命令的目标、参数、可调用状态和影响。命令通常作用于界面当前选择。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "filter": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "命令名或用途关键词。"
+        },
+        "includeDangerous": {
+          "type": "boolean",
+          "description": "是否同时列出有破坏性副作用的命令；不影响调用权限。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "界面命令目录",
+      "purpose": "列出低层 WPF 命令的目标、参数、可调用状态和影响。命令通常作用于界面当前选择。",
+      "whenToUse": [
+        "确实需要界面动作且尚无精确 command ID 时"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "目录项不是用户资源，也不证明当前界面选择正确。",
+      "verification": "选择一个命令后读取其独立契约。",
+      "rollback": "只读。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.list_pages": {
+    "group": "navigation",
+    "summary": "列出 BetterGI 主窗口的明确页面标识与名称。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "列出页面",
+      "purpose": "列出 BetterGI 主窗口的明确页面标识与名称。",
+      "whenToUse": [
+        "用户要求打开、切换或显示某个 BetterGI 页面时；打开页面不代替配置或任务执行。"
+      ],
+      "preconditions": [
+        "桥已连接；不要求游戏或截图器。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "pages 返回可用页面。",
+      "verification": "使用返回的页面标识；不查生命周期命令，不猜类名。",
+      "rollback": "可再打开另一页面。",
+      "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.list_setting_changes": {
+    "group": "settings",
+    "summary": "列出桥创建的配置事务和命令前检查点，不返回敏感原文。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "设置变更记录",
+      "purpose": "列出桥创建的配置事务和命令前检查点，不返回敏感原文。",
+      "whenToUse": [
+        "查找 changeId 或排查未完成事务时"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "prepared 或 recoveryRequired 需要进一步检查。",
+      "verification": "对目标 changeId 调用 bgi.get_setting_change。",
+      "rollback": "只读。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.list_setting_sections": {
+    "group": "settings",
+    "summary": "列出 AllConfig 的设置分区及可读、可写、敏感字段数量。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "设置分区",
+      "purpose": "列出 AllConfig 的设置分区及可读、可写、敏感字段数量。",
+      "whenToUse": [
+        "尚不知道设置属于哪个分区时"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "分区摘要，不包含设置当前值。",
+      "verification": "选定分区后调用 bgi.search_settings。",
+      "rollback": "只读。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.open_page": {
+    "group": "navigation",
+    "summary": "按明确页面标识打开 BetterGI 页面并核验导航选择。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "page": {
+          "type": "string",
+          "enum": [
+            "home",
+            "triggers",
+            "tasks",
+            "scheduler",
+            "oneDragon",
+            "javascript",
+            "pathing",
+            "keyMouse",
+            "macros",
+            "music",
+            "hotkeys",
+            "keyBindings",
+            "notifications",
+            "settings"
+          ],
+          "description": "来自 bgi.list_pages 的页面标识。"
+        }
+      },
+      "required": [
+        "page"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "打开页面",
+      "purpose": "按明确页面标识打开 BetterGI 页面并核验导航选择。",
+      "whenToUse": [
+        "用户要求打开、切换或显示某个 BetterGI 页面时；打开页面不代替配置或任务执行。"
+      ],
+      "preconditions": [
+        "桥已连接；不要求游戏或截图器。"
+      ],
+      "sideEffects": [
+        "显示 BetterGI 主窗口并切换页面，不启动游戏任务。"
+      ],
+      "resultMeaning": "opened=true、verified=true 表示主窗口可见且导航选择为请求页面。",
+      "verification": "使用返回的页面标识；不查生命周期命令，不猜类名。",
+      "rollback": "可再打开另一页面。",
+      "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.ping": {
+    "group": "lifecycle",
+    "summary": "检查与 BetterGI 的连接是否正常，不检查游戏画面。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "BetterGI 连接状态",
+      "purpose": "检查与 BetterGI 的连接是否正常，不检查游戏画面。",
+      "whenToUse": [
+        "仅用于连接诊断；正常业务接口已经返回时无需调用"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "ok=true 仅表示桥响应。hostLoaded 不代表截图器或游戏就绪。",
+      "verification": "需要执行环境时读取 bgi.get_status。",
+      "rollback": "只读。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/StatusTools.cs",
+      "registrationType": "BgiBridge.Tools.StatusTools"
+    }
+  },
+  "bgi.prepare_js_group": {
+    "group": "scheduler",
+    "summary": "用已安装 JS 脚本的BetterGI构造器与真实设置定义建立单任务配置组，不执行脚本。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folderName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "已安装 JsScript 的单层目录名。"
+        },
+        "groupName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "description": "可选；缺省时按脚本 manifest.Name 自动取简短自然名。给出时必须是有效文件名，按用户原话或目标取如“莉奈娅挖矿”，不拼目录、作者、时间或参数。"
+        },
+        "settings": {
+          "type": "object",
+          "maxProperties": 100,
+          "description": "来自脚本 settingsUi 定义的参数值；省略时沿用脚本默认值。"
+        }
+      },
+      "required": [
+        "folderName"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "准备 JS 配置组",
+      "purpose": "用已安装 JS 脚本的BetterGI构造器与真实设置定义建立单任务配置组，不执行脚本。",
+      "whenToUse": [
+        "用户要求运行已安装或刚订阅的 JS，且没有可复用配置组时。"
+      ],
+      "preconditions": [
+        "folderName 来自 JsScript；先读取 manifest、settingsUi 和 README；settings 只填写已定义参数。groupName 依据用户目标直接取简短自然名，如“莉奈娅挖矿”“兽怪暴徒”；不拼目录、作者、时间或参数长句，不为命名再次提问，缺省时自动生成。"
+      ],
+      "sideEffects": [
+        "新建一个配置组，已有不同内容的同名组不覆盖。"
+      ],
+      "resultMeaning": "prepared=true 返回实际 groupName，之后使用 run_script_group。",
+      "verification": "prepared 只表示配置准备完成，用户要求运行时继续执行。",
+      "rollback": "可删除生成的配置组，脚本保留。",
+      "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
     }
   },
   "bgi.prepare_pathing_group": {
@@ -81,6 +1161,480 @@
       "verification": "以返回的 inheritedSettings、requirements（含 sources）与 autoFightStrategy（exists/requirementsExcerpt）为准；队伍与赶路角色用 bgi.set_pathing_party 写入。只有用户明确要求运行时才运行；游戏未就绪时运行接口会按真实状态自行准备。",
       "rollback": "删除该配置组后重新 prepare 即回到继承基线；不动路线与订阅。",
       "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.preview_setting_restore": {
+    "group": "settings",
+    "summary": "读取历史记录的修改前值，生成当前设置到目标值的恢复预览；不会立即恢复，不覆盖其他设置。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "changeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "历史变更 ID。"
+        },
+        "recordVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "变更记录的当前版本。"
+        },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          },
+          "description": "明确选择这份记录中的设置路径。"
+        }
+      },
+      "required": [
+        "changeId",
+        "recordVersion",
+        "paths"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "预览恢复所选设置",
+      "purpose": "读取历史记录的修改前值，生成当前设置到目标值的恢复预览；不会立即恢复，不覆盖其他设置。",
+      "whenToUse": [
+        "用户明确要求把特定设置恢复到某次历史记录中的值。"
+      ],
+      "preconditions": [
+        "记录属于当前 BetterGI；路径是记录中明确选中的项。"
+      ],
+      "sideEffects": [
+        "只建立十分钟有效的预览计划。"
+      ],
+      "resultMeaning": "canApply=true 才可确认；differences 包含当前值、恢复值、联动项以及此项后来是否改过。敏感内容不显示。",
+      "verification": "确认后使用 commit_settings(planId)，核验变更后的内存值与文件；目标项变化会拒绝恢复，不影响无关后续修改。",
+      "rollback": "恢复本身产生新变更记录，可再次选择其修改前值撤销。",
+      "documentationSource": "bridge-setting-recovery"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.preview_settings": {
+    "group": "settings",
+    "summary": "校验 1–20 项变更并生成绑定当前内存和磁盘版本的计划，不写配置。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "changes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "description": "待修改设置，不得包含重复路径。",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "description": "从设置目录取得的精确点分路径，例如 triggerInterval。"
+              },
+              "value": {
+                "description": "新值，必须符合 get_setting 返回的 valueSchema；不得将遮蔽值当作原值提交。"
+              },
+              "expectedVersion": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "description": "目标设置当前的 valueVersion；不允许省略或猜测。"
+              }
+            },
+            "required": [
+              "path",
+              "value",
+              "expectedVersion"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "changes"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "预览多项设置",
+      "purpose": "校验 1–20 项变更并生成绑定当前内存和磁盘版本的计划，不写配置。",
+      "whenToUse": [
+        "一次修改多个设置时"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "differences 是将要提交的脱敏差异；planId 十分钟有效。",
+      "verification": "差异与用户目标一致后提交同一 planId。",
+      "rollback": "预览不需要回退。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.probe": {
+    "group": "lifecycle",
+    "summary": "检查当前 BetterGI 版本是否支持需要的功能。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "BetterGI 兼容性",
+      "purpose": "检查当前 BetterGI 版本是否支持需要的功能。",
+      "whenToUse": [
+        "接口报告成员缺失或版本不兼容时"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "每个探测项独立表示可用、缺失或不可达。",
+      "verification": "按目标接口所需依赖判断；不把探测成功当作任务成功。",
+      "rollback": "只读。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/StatusTools.cs",
+      "registrationType": "BgiBridge.Tools.StatusTools"
+    }
+  },
+  "bgi.read_host_log": {
+    "group": "lifecycle",
+    "summary": "读取 BetterGI 自己写的按天日志。脚本的 log() 输出、BetterGI异常和脚本异常都在里面，不需要用户复制粘贴。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "宿主日志的日期，yyyyMMdd 或 yyyy-MM-dd；省略为当天。"
+        },
+        "level": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "日志级别，例如 ERR、WRN、INF、DBG；省略为全部级别。"
+        },
+        "logger": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "记录器名的一部分，例如 ScriptService；省略为全部记录器。"
+        },
+        "contains": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "消息正文包含的文本，用报错原文。"
+        },
+        "thread": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "线程号，例如 T1789426568302 或其中的数字；用于只看一次运行。"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 30,
+          "description": "最多返回条数；默认 30，上限 100。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "BetterGI运行日志",
+      "purpose": "读取 BetterGI 自己写的按天日志。脚本的 log() 输出、BetterGI异常和脚本异常都在里面，不需要用户复制粘贴。",
+      "whenToUse": [
+        "用户描述的现象需要看BetterGI内部过程时，例如脚本失败、启动失败、界面命令报错。",
+        "已经拿到报错原文，需要确认它出现在哪一次运行、哪个脚本、哪个BetterGI文件。"
+      ],
+      "preconditions": [
+        "桥已连接。",
+        "只读取桥所在 BetterGI 安装目录下的 log 目录；日志按天分文件。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "entries 按时间升序，是读取范围内命中筛选条件的记录。headTruncated=true 表示文件较大，只读了尾部，更早的记录没有读到。exists=false 表示这一天没有日志文件，此时看 availableDates 换日期。",
+      "verification": "改变 date、level、logger、contains 或 thread 重新读取；重复同一条查询不算新证据。",
+      "rollback": "只读。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/HostLogTools.cs",
+      "registrationType": "BgiBridge.Tools.HostLogTools"
+    }
+  },
+  "bgi.read_script_repository_file": {
+    "group": "repository",
+    "summary": "直接读取中央 Git 仓库中的 README、settings、manifest、JS 与模块源码；未订阅文件同样可读，不检出、不订阅、不执行。支持行号分页和关键词上下文。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "仓库内容相对路径，来自搜索结果，如 js/脚本目录/settings.json。"
+        },
+        "startLine": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "maxLines": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 240,
+          "default": 160
+        },
+        "contains": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "定位参数、函数或导入模块，返回命中行与周围上下文。"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "读取中央仓库文件",
+      "purpose": "直接读取中央 Git 仓库中的 README、settings、manifest、JS 与模块源码；未订阅文件同样可读，不检出、不订阅、不执行。支持行号分页和关键词上下文。",
+      "whenToUse": [
+        "解释脚本参数、实际执行逻辑或排查源码时，包括脚本尚未订阅的情况。"
+      ],
+      "preconditions": [
+        "桥已连接；当前渠道的中央仓库已存在。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "返回中央仓库来源、精确路径、搜索候选或带行号文本；truncated=true 时按 nextLine 继续读取。",
+      "verification": "脚本参数以 settings 与 JS 的实际读取、分支和调用为准；已安装版本可能与中央仓库版本不同。",
+      "rollback": "只读，不更改订阅和用户文件。",
+      "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.release_command_target": {
+    "group": "command",
+    "summary": "结束使用后释放由桥创建的对象，用户已有窗口和对象不能通过此入口释放。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "objectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "objectId"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "释放命令上下文",
+      "purpose": "结束使用后释放由桥创建的对象，用户已有窗口和对象不能通过此入口释放。",
+      "whenToUse": [
+        "已发现精确 cmd ID，需要绑定对象参数、窗口、子 ViewModel 或泛型实例。"
+      ],
+      "preconditions": [
+        "使用当前引用；多实例不猜目标。"
+      ],
+      "sideEffects": [
+        "可能构造BetterGI对象或释放桥创建的上下文。"
+      ],
+      "resultMeaning": "对象引用与构造／释放结果；不证明命令或游戏目标完成。",
+      "verification": "继续绑定精确 contextId/objectId，执行后核对业务证据。",
+      "rollback": "只释放桥创建的上下文；用户已有对象保留。",
+      "documentationSource": "bridge-native-object-binding"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.restore_local_resource": {
+    "group": "resources",
+    "summary": "按返回的 backupId 恢复原始资源字节与相对位置；目标已存在时拒绝覆盖。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "backupId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        }
+      },
+      "required": [
+        "backupId"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "恢复被删除资源",
+      "purpose": "按返回的 backupId 恢复原始资源字节与相对位置；目标已存在时拒绝覆盖。",
+      "whenToUse": [
+        "用户要求删除或恢复已定位的路线、JS、键鼠、战斗或七圣资源；只删配置组仍使用 delete_script_group。"
+      ],
+      "preconditions": [
+        "路径来自 user.list/read/resolve；删除前 inspect_local_resource 获取实际文件、引用与版本。",
+        "资源删除不需要游戏、页面、选中项或 UI 树；任务运行时不删除。"
+      ],
+      "sideEffects": [
+        "将精确资源移入 User 的恢复区或移回；其他资源、配置组及订阅保留。"
+      ],
+      "resultMeaning": "deleted/restored=true 且 verified=true 才完成；backupId 可恢复。订阅保留，未来更新可能重新导入，结果明确列出覆盖订阅。",
+      "verification": "已验证结果返回后停止；不再搜索删除命令、构造上下文、导航、展开树或枚举选项。",
+      "rollback": "用 restore_local_resource 恢复同一备份；原路径已存在则拒绝覆盖。",
+      "documentationSource": "bridge-stable-resource-lifecycle"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.rollback_settings": {
+    "group": "settings",
+    "summary": "仅在目标字段仍等于该事务提交值时恢复旧值；保留其他后续修改。",
+    "readOnly": false,
+    "destructive": true,
+    "effect": "configurationWrite",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "changeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "由 commit_settings、set_setting 或变更记录返回的事务 ID。"
+        }
+      },
+      "required": [
+        "changeId"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "回退设置事务",
+      "purpose": "仅在目标字段仍等于该事务提交值时恢复旧值；保留其他后续修改。",
+      "whenToUse": [
+        "用户要求撤销已确定的 changeId 时；运行时审批负责确认"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "修改 BetterGI 内存配置并原子更新 User/config.json。"
+      ],
+      "resultMeaning": "verified=true 表示回退后的内存与磁盘已核验。",
+      "verification": "回读目标 path。CONFIG_CONFLICT 表示未覆盖后续修改。",
+      "rollback": "回退本身生成新记录。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.run_one_dragon": {
+    "group": "scheduler",
+    "summary": "运行 BetterGI 的「一条龙」日常流程（领邮件、合成树脂、自动秘境、首领讨伐、幽境危战、地脉花、每日奖励、尘歌壶等，按该配置启用的任务执行）。执行完按配置可能自动退出游戏。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "gameWrite",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "configName": {
+          "type": "string",
+          "description": "User/OneDragon 里的配置名；省略用当前选中的配置"
+        },
+        "waitForCompletion": {
+          "type": "boolean",
+          "default": false,
+          "description": "默认 false：入口派发并核验任务锁被占用后即交接返回，不守护整条一条龙；true 时等宿主方法返回并核验任务锁释放。只有用户明确要求等结果才设 true。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "运行一条龙",
+      "purpose": "运行 BetterGI 的「一条龙」日常流程（领邮件、合成树脂、自动秘境、首领讨伐、幽境危战、地脉花、每日奖励、尘歌壶等，按该配置启用的任务执行）。执行完按配置可能自动退出游戏。",
+      "whenToUse": [
+        "用户要求做每日/一条龙/清体力，且 BetterGI 的 User/OneDragon 里已有对应配置时。",
+        "与 run_script_group 的区别：一条龙是BetterGI原生任务链，带自己的等待、领奖与收尾逻辑。"
+      ],
+      "preconditions": [
+        "游戏未就绪时接口会按真实状态自动准备：启动游戏或挂上截图器并阻塞等待至主界面（至多 120 秒）；非 16:9 或超时如实失败。",
+        "窗口分辨率为 16:9。",
+        "没有其他独立任务持锁。"
+      ],
+      "sideEffects": [
+        "按所选一条龙配置串行执行启用的日常任务；过程中会自动传送、领取与点击游戏界面；配置开启时收尾自动退出游戏。"
+      ],
+      "resultMeaning": "默认 waitForCompletion=false：accepted=true 表示BetterGI入口已派发且任务锁已被占用，交接后立即返回，不守护整条一条龙。只有用户明确要求等结果才设 true（等待BetterGI方法返回并核验任务锁释放）。",
+      "verification": "普通运行请求用返回证据给一次最终总结并结束。不继续 job.get、查任务状态、日志或截图，不重跑；仅用户明确要求监控等结果才继续，查看当前状态与排障只是当前请求的一次读取。",
+      "rollback": "一条龙只做日常任务范围内的操作；已消耗的体力与已领取的奖励不可回退。需要中途停止时用任务停止操作。",
+      "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
     }
   },
   "bgi.run_script_group": {
@@ -129,6 +1683,10 @@
       "verification": "普通运行请求用返回证据总结本次已提交或执行方法已返回，并结束本轮。不继续 job.get、查任务状态、日志或截图，不重跑。只有用户明确要求监控等结果才继续；查看当前状态与排障只是当前请求的一次读取，不自动持续盯。",
       "rollback": "已经发送的游戏输入和脚本副作用不能自动撤销；需要停止时使用对应停止操作并核验终态。",
       "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
     }
   },
   "bgi.run_script_groups": {
@@ -187,11 +1745,205 @@
       "verification": "普通多组运行请求用返回证据总结本次已交接，并结束本轮。不轮询进度、不查任务状态或日志。",
       "rollback": "已发送的游戏输入和脚本副作用不能自动撤销；closeGameAfter 只在整个 EndTime 存在、全部历史成功且未手动取消时才会关闭游戏，缺证一律不关。",
       "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.search_script_repository": {
+    "group": "repository",
+    "summary": "按脚本标题或功能词搜索当前中央仓库索引，包括未订阅脚本；返回精确内容路径，不搜索BetterGI设置。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "脚本标题或一个功能词；可包含原始问题中的脚本名称。"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "all",
+            "js",
+            "pathing",
+            "combat",
+            "tcg"
+          ],
+          "default": "all"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 8
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "检索中央脚本仓库",
+      "purpose": "按脚本标题或功能词搜索当前中央仓库索引，包括未订阅脚本；返回精确内容路径，不搜索BetterGI设置。",
+      "whenToUse": [
+        "解释脚本参数、实际执行逻辑或排查源码时，包括脚本尚未订阅的情况。"
+      ],
+      "preconditions": [
+        "桥已连接；当前渠道的中央仓库已存在。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "返回中央仓库来源、精确路径、搜索候选或带行号文本；truncated=true 时按 nextLine 继续读取。",
+      "verification": "脚本参数以 settings 与 JS 的实际读取、分支和调用为准；已安装版本可能与中央仓库版本不同。",
+      "rollback": "只读，不更改订阅和用户文件。",
+      "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.search_settings": {
+    "group": "settings",
+    "summary": "按业务词、路径、分区和值类型查找 AllConfig 设置；不搜索配置组、脚本或路线。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "terms": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "description": "搜索词数组，所有词均需匹配路径或用途说明；空数组表示不限定。"
+        },
+        "section": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "分区名，来自 list_setting_sections。"
+        },
+        "valueType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "按目录 valueType 过滤，例如 boolean、integer、string。"
+        },
+        "writableOnly": {
+          "type": "boolean",
+          "description": "为 true 时仅返回可由事务接口修改的设置。"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 30,
+          "description": "最多返回条数；默认 30，上限 100。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "查找设置",
+      "purpose": "按业务词、路径、分区和值类型查找 AllConfig 设置；不搜索配置组、脚本或路线。",
+      "whenToUse": [
+        "需要把设置需求映射到精确 path 时"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "无写入副作用。"
+      ],
+      "resultMeaning": "items 包含当前值摘要、写入能力和 valueVersion。",
+      "verification": "只对选中的 path 再调用 bgi.get_setting。",
+      "rollback": "只读。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.set_game_resolution": {
+    "group": "lifecycle",
+    "summary": "把 BetterGI 当前要启动的原神显示记录改为目标值。仅写入注册表不保证启动后的实际窗口尺寸；远程桌面会话太小时游戏会覆盖它。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "width",
+        "height"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 640,
+          "maximum": 7680
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 480,
+          "maximum": 4320
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "windowed",
+            "borderless",
+            "fullscreen"
+          ],
+          "description": "窗口模式，默认 borderless（无边框）"
+        }
+      },
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "设置原神分辨率",
+      "purpose": "把 BetterGI 当前要启动的原神显示记录改为目标值。仅写入注册表不保证启动后的实际窗口尺寸；远程桌面会话太小时游戏会覆盖它。",
+      "whenToUse": [
+        "游戏当前分辨率非 16:9 导致任务无法运行，且原神已关闭（先用 bgi.exit_game）。",
+        "用户明确要求改游戏分辨率。"
+      ],
+      "preconditions": [
+        "原神处于关闭状态；当前桌面会话能容纳目标客户区。"
+      ],
+      "sideEffects": [
+        "只写当前用户注册表 HKCU 下原神的显示记录（宽/高/窗口模式）；不动其他任何配置。"
+      ],
+      "resultMeaning": "written=true 只表示当前游戏的三条显示记录已写入；不能当作实际 16:9 成功，必须在下次 bgi.start_game 后读取 gameResolution。",
+      "verification": "下次启动后用 bgi.get_status 的 gameResolution 确认目标分辨率已生效。",
+      "rollback": "再次调用传回原值即可恢复。",
+      "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
     }
   },
   "bgi.set_pathing_party": {
     "group": "scheduler",
-    "summary": "把用户点名的队伍与赶路角色写入配置组的 pathingConfig；其他配置字段原样保留。",
+    "summary": "把用户点名的队伍与赶路角色写入配置组的 pathingConfig；仅当组内战斗配置被证实是未配置的原生默认时，同步为全局当前有效值，自定义战斗配置保留。",
     "readOnly": false,
     "destructive": false,
     "effect": "hostCommand",
@@ -230,7 +1982,7 @@
     },
     "guide": {
       "title": "设置配置组队伍与赶路角色",
-      "purpose": "把用户点名的队伍与赶路角色写入配置组的 pathingConfig；其他配置字段原样保留。",
+      "purpose": "把用户点名的队伍与赶路角色写入配置组的 pathingConfig；仅当组内战斗配置被证实是未配置的原生默认时，同步为全局当前有效值，自定义战斗配置保留。",
       "whenToUse": [
         "用户为现成配置组指定队伍、赶路/加速角色等运行偏好时；角色俗称由本接口做数据映射，不需要模型猜字段。"
       ],
@@ -241,12 +1993,185 @@
         "hurryAvatar 接受本机支持列表内的角色名、常见俗称或“自动”；空字符串表示不使用技能赶路。"
       ],
       "sideEffects": [
-        "只修改该组 config.pathingConfig 的对应字段；写 partyName 时同时置 enabled=true，否则新队名不生效。文件其余字段不动。"
+        "修改对应队伍/赶路字段；写 partyName 会置 enabled=true。若 fightAlignedToGlobal=true，还会把已证实的原生默认 autoFightConfig 对齐全局现值；其余字段保留，按 changedFields 与回读结果核对。"
       ],
       "resultMeaning": "configured=true 表示字段已写入并回读核验；不代表已运行任何脚本。",
       "verification": "以返回的 partyName、partySwitchEnabled、hurryOnAvatar 与回读核验为准。",
-      "rollback": "再次调用同一接口改回原值即可；不删除组、不动路线。",
+      "rollback": "本接口不自动保留完整回退记录；需保留修改前的完整配置。撤销时重新读取当前文件版本，只恢复本次改变的字段并保留后续修改；不删除组或路线。",
       "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.set_setting": {
+    "group": "settings",
+    "summary": "使用最新 expectedVersion 修改一个设置，执行完整备份、提交和核验。",
+    "readOnly": false,
+    "destructive": true,
+    "effect": "configurationWrite",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "从设置目录取得的精确点分路径，例如 triggerInterval。"
+        },
+        "value": {
+          "description": "新值，必须符合 get_setting 返回的 valueSchema；不得将遮蔽值当作原值提交。"
+        },
+        "expectedVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "目标设置当前的 valueVersion；不允许省略或猜测。"
+        }
+      },
+      "required": [
+        "path",
+        "value",
+        "expectedVersion"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "修改单项设置",
+      "purpose": "使用最新 expectedVersion 修改一个设置，执行完整备份、提交和核验。",
+      "whenToUse": [
+        "只改一个已读取的设置时，代替 preview+commit"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "修改 BetterGI 内存配置并原子更新 User/config.json。"
+      ],
+      "resultMeaning": "verified=true 表示本次单项提交已核验。",
+      "verification": "回读目标 path；保留 changeId。",
+      "rollback": "用 bgi.rollback_settings。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.start_game": {
+    "group": "lifecycle",
+    "summary": "让 BetterGI 按「联动启动」的配置拉起原神并开始截图，随后返回最新状态。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "启动原神",
+      "purpose": "让 BetterGI 按「联动启动」的配置拉起原神并开始截图，随后返回最新状态。",
+      "whenToUse": [
+        "游戏或截图器没就绪、而用户要求运行游戏任务时（用户说「启动游戏」「打开原神」也是这个意思）；由你调用，不要反过来要求用户自己启动"
+      ],
+      "preconditions": [
+        "桥已连接；目标接口的 callable=true。"
+      ],
+      "sideEffects": [
+        "按 BetterGI 已配置的安装路径启动原神进程，并启动截图器与实时触发器；BetterGI 自身配置可能同时改注册表关闭原神 HDR。"
+      ],
+      "resultMeaning": "started 表示已经发出启动；ready 以进入游戏主界面为准，ready=true 才可以执行任务。stillLoading=true 是加载中的过程状态，不是失败。BetterGI 拒绝启动时本接口直接失败并说明缺哪一项，那类错误要把缺项讲给用户。",
+      "verification": "stillLoading=true 时用 bgi.wait_ready 一次阻塞等待，不用模型轮询；原目标是启动游戏时按启动证据结束，不自行执行其他任务。",
+      "rollback": "只启动进程与截图器；不改变已保存的配置。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/StatusTools.cs",
+      "registrationType": "BgiBridge.Tools.StatusTools"
+    }
+  },
+  "bgi.stop_current_task": {
+    "group": "lifecycle",
+    "summary": "向 BetterGI 当前独立任务的取消上下文发送停止请求，并以BetterGI任务锁是否释放为权威核验。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "停止当前任务",
+      "purpose": "向 BetterGI 当前独立任务的取消上下文发送停止请求，并以BetterGI任务锁是否释放为权威核验。",
+      "whenToUse": [
+        "用户要求停止当前执行的配置组、一条龙、路线或独立任务；没有桥 Job ID 也可调用。"
+      ],
+      "preconditions": [
+        "桥已连接；不要求游戏主界面、截图器或 16:9。"
+      ],
+      "sideEffects": [
+        "取消当前BetterGI独立任务，不删除配置与路线。"
+      ],
+      "resultMeaning": "stopped=true 且 verified=true 表示已真实观察到任务锁释放（alreadyIdle 为调用前已空闲）；stopped=false、outcome=timeout 表示停止请求已发出但未观察到锁释放，是未核验的 unknown，不能报告已经停止。",
+      "verification": "verified 只在观察到BetterGI任务锁空闲时为 true；有桥 Job 时继续跟踪原 Job，请求发出或 cancellationRequested 不能证明停止。",
+      "rollback": "已执行的游戏输入不回退，配置保持不变。",
+      "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.subscribe_script_resources": {
+    "group": "repository",
+    "summary": "按精确中央仓库路径导入路线或脚本，调用 BetterGI 的订阅器，不手工重写 JSON。",
+    "readOnly": false,
+    "destructive": true,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "description": "来自仓库结果的精确完整目录或脚本路径，如 pathing/地方特产/稻妻/血斛/作者包。"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "订阅仓库资源",
+      "purpose": "按精确中央仓库路径导入路线或脚本，调用 BetterGI 的订阅器，不手工重写 JSON。",
+      "whenToUse": [
+        "已从仓库结果选择完整父目录或脚本，需要安装到 User 后运行。"
+      ],
+      "preconditions": [
+        "桥已连接；paths 来自仓库实际结果。"
+      ],
+      "sideEffects": [
+        "记录订阅并导入所选资源；未订阅的同路径本地资源不覆盖。"
+      ],
+      "resultMeaning": "installed=true 且各目标已在 User 中存在才表示准备完成。",
+      "verification": "订阅完成后准备配置组并运行；不把准备当作执行完成。",
+      "rollback": "不自动删除已有资源。",
+      "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
     }
   },
   "bgi.sync_group_effective_config": {
@@ -303,8 +2228,620 @@
       ],
       "resultMeaning": "synced=true 且 otherFieldsPreserved=true 表示替换完成并回读核验；SHA 不匹配返回 VERSION_CONFLICT 未写入。",
       "verification": "回读 replacedFields 的值与全局当前值一致；其他字段与改前逐字段一致。",
-      "rollback": "再次调用同一接口换回原值即可；不删除组。",
+      "rollback": "再次调用仍是同步到全局现值，不能恢复任意旧值。需用修改前保留的字段值，在重新读取当前版本后恢复；本接口没有自动回退计划，不删除组。",
       "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.ui.cancel": {
+    "group": "ui",
+    "summary": "请求取消该 operation 的输入／命令；仍开放的编辑窗口用真实取消按钮或 ui.close 收尾，再核对终态。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "来自当前 ui.read 或执行结果的真实 ID。"
+        }
+      },
+      "required": [
+        "operationId"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "取消界面操作",
+      "purpose": "请求取消该 operation 的输入／命令；仍开放的编辑窗口用真实取消按钮或 ui.close 收尾，再核对终态。",
+      "whenToUse": [
+        "当前可见功能没有合适稳定入口，或正在处理原生编辑器／列表行／弹窗时。"
+      ],
+      "preconditions": [
+        "先打开目标页面，ui.read 定位真实控件、字段、选项及版本；不能猜 ID。"
+      ],
+      "sideEffects": [
+        "触发BetterGI原生控件、绑定、保存或关闭事件；可能改变配置／资源／游戏。"
+      ],
+      "resultMeaning": "控件或原生命令阶段结果；runningOrAwaitingInput 需续接，completed 不代表用户目标完成。",
+      "verification": "通过 ui.read 取得实际字段、按钮和窗口；填写后执行真实保存／确认，再 ui.operation 与资源／设置／日志核验。",
+      "rollback": "输入前保存配置检查点；已执行的原生事件及游戏操作不能自动撤销。",
+      "documentationSource": "native-wpf-bindings-and-continuation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.ui.close": {
+    "group": "ui",
+    "summary": "对 ui.read 的真实窗口调用 Close；可能触发关闭保存或主窗口关闭到托盘，优先使用明确保存／取消按钮。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "controlId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "来自当前 ui.read 或执行结果的真实 ID。"
+        }
+      },
+      "required": [
+        "controlId"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "关闭原生窗口",
+      "purpose": "对 ui.read 的真实窗口调用 Close；可能触发关闭保存或主窗口关闭到托盘，优先使用明确保存／取消按钮。",
+      "whenToUse": [
+        "当前可见功能没有合适稳定入口，或正在处理原生编辑器／列表行／弹窗时。"
+      ],
+      "preconditions": [
+        "先打开目标页面，ui.read 定位真实控件、字段、选项及版本；不能猜 ID。"
+      ],
+      "sideEffects": [
+        "触发BetterGI原生控件、绑定、保存或关闭事件；可能改变配置／资源／游戏。"
+      ],
+      "resultMeaning": "控件或原生命令阶段结果；runningOrAwaitingInput 需续接，completed 不代表用户目标完成。",
+      "verification": "通过 ui.read 取得实际字段、按钮和窗口；填写后执行真实保存／确认，再 ui.operation 与资源／设置／日志核验。",
+      "rollback": "输入前保存配置检查点；已执行的原生事件及游戏操作不能自动撤销。",
+      "documentationSource": "native-wpf-bindings-and-continuation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.ui.invoke": {
+    "group": "ui",
+    "summary": "执行当前真实控件 ICommand 或 OnClick；弹窗和异步动作返回 operationId，不能把初始阶段误报为完成。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "controlId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "来自当前 ui.read 或执行结果的真实 ID。"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "click",
+            "expand",
+            "collapse",
+            "contextMenu",
+            "focus"
+          ]
+        },
+        "dialogInput": {
+          "type": "object",
+          "minProperties": 1,
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 8192
+            },
+            "filePath": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "selectedValues": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 512,
+              "items": {
+                "type": "string",
+                "maxLength": 1024
+              }
+            },
+            "confirm": {
+              "type": "boolean"
+            },
+            "values": {
+              "type": "object",
+              "maxProperties": 64
+            }
+          },
+          "additionalProperties": false,
+          "description": "本次命令的明确输入。text 用于名称／文本，filePath 用于文件或目录选择，selectedValues 必须是资源返回的原生 Tag 路径或 folderName；confirm 仅确认本次已授权操作；values 是新窗口数据上下文中的已定义字段。"
+        }
+      },
+      "required": [
+        "controlId"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "执行原生界面动作",
+      "purpose": "执行当前真实控件 ICommand 或 OnClick；弹窗和异步动作返回 operationId，不能把初始阶段误报为完成。",
+      "whenToUse": [
+        "当前可见功能没有合适稳定入口，或正在处理原生编辑器／列表行／弹窗时。"
+      ],
+      "preconditions": [
+        "先打开目标页面，ui.read 定位真实控件、字段、选项及版本；不能猜 ID。"
+      ],
+      "sideEffects": [
+        "触发BetterGI原生控件、绑定、保存或关闭事件；可能改变配置／资源／游戏。"
+      ],
+      "resultMeaning": "控件或原生命令阶段结果；runningOrAwaitingInput 需续接，completed 不代表用户目标完成。",
+      "verification": "通过 ui.read 取得实际字段、按钮和窗口；填写后执行真实保存／确认，再 ui.operation 与资源／设置／日志核验。",
+      "rollback": "输入前保存配置检查点；已执行的原生事件及游戏操作不能自动撤销。",
+      "documentationSource": "native-wpf-bindings-and-continuation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.ui.operation": {
+    "group": "ui",
+    "summary": "读取原生命令的完成、异常或取消；如果仍在等待输入，用 ui.read/ respond / invoke 续接。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "来自当前 ui.read 或执行结果的真实 ID。"
+        }
+      },
+      "required": [
+        "operationId"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "读取界面操作结果",
+      "purpose": "读取原生命令的完成、异常或取消；如果仍在等待输入，用 ui.read/ respond / invoke 续接。",
+      "whenToUse": [
+        "当前可见功能没有合适稳定入口，或正在处理原生编辑器／列表行／弹窗时。"
+      ],
+      "preconditions": [
+        "先打开目标页面，ui.read 定位真实控件、字段、选项及版本；不能猜 ID。"
+      ],
+      "sideEffects": [
+        "只读实际界面绑定和操作状态；敏感值遮蔽。"
+      ],
+      "resultMeaning": "控件或原生命令阶段结果；runningOrAwaitingInput 需续接，completed 不代表用户目标完成。",
+      "verification": "通过 ui.read 取得实际字段、按钮和窗口；填写后执行真实保存／确认，再 ui.operation 与资源／设置／日志核验。",
+      "rollback": "输入前保存配置检查点；已执行的原生事件及游戏操作不能自动撤销。",
+      "documentationSource": "native-wpf-bindings-and-continuation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.ui.options": {
+    "group": "ui",
+    "summary": "ui.read 只附带首批选项；用当前 fieldId 与分页游标读取后续真实 optionId。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "fieldId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "来自当前 ui.read 或执行结果的真实 ID。"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "fieldId"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "读取全部原生选项",
+      "purpose": "ui.read 只附带首批选项；用当前 fieldId 与分页游标读取后续真实 optionId。",
+      "whenToUse": [
+        "当前可见功能没有合适稳定入口，或正在处理原生编辑器／列表行／弹窗时。"
+      ],
+      "preconditions": [
+        "先打开目标页面，ui.read 定位真实控件、字段、选项及版本；不能猜 ID。"
+      ],
+      "sideEffects": [
+        "只读实际界面绑定和操作状态；敏感值遮蔽。"
+      ],
+      "resultMeaning": "控件或原生命令阶段结果；runningOrAwaitingInput 需续接，completed 不代表用户目标完成。",
+      "verification": "通过 ui.read 取得实际字段、按钮和窗口；填写后执行真实保存／确认，再 ui.operation 与资源／设置／日志核验。",
+      "rollback": "输入前保存配置检查点；已执行的原生事件及游戏操作不能自动撤销。",
+      "documentationSource": "native-wpf-bindings-and-continuation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.ui.read": {
+    "group": "ui",
+    "summary": "反射当前实际 WPF 绑定、列表行、弹窗、按钮及选项；包括不属于 AllConfig 的可编辑设置。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "读取原生可见界面",
+      "purpose": "反射当前实际 WPF 绑定、列表行、弹窗、按钮及选项；包括不属于 AllConfig 的可编辑设置。",
+      "whenToUse": [
+        "当前可见功能没有合适稳定入口，或正在处理原生编辑器／列表行／弹窗时。"
+      ],
+      "preconditions": [
+        "先打开目标页面，ui.read 定位真实控件、字段、选项及版本；不能猜 ID。"
+      ],
+      "sideEffects": [
+        "只读实际界面绑定和操作状态；敏感值遮蔽。"
+      ],
+      "resultMeaning": "控件或原生命令阶段结果；runningOrAwaitingInput 需续接，completed 不代表用户目标完成。",
+      "verification": "通过 ui.read 取得实际字段、按钮和窗口；填写后执行真实保存／确认，再 ui.operation 与资源／设置／日志核验。",
+      "rollback": "输入前保存配置检查点；已执行的原生事件及游戏操作不能自动撤销。",
+      "documentationSource": "native-wpf-bindings-and-continuation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.ui.reorder": {
+    "group": "ui",
+    "summary": "使用原生 ObservableCollection.Move 触发当前界面与保存回调，不复制或重建BetterGI集合；索引来自当前 options。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "fieldId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "来自当前 ui.read 或执行结果的真实 ID。"
+        },
+        "expectedVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "来自当前 ui.read 或执行结果的真实 ID。"
+        },
+        "from": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "to": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "fieldId",
+        "expectedVersion",
+        "from",
+        "to"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "排序原生列表",
+      "purpose": "使用原生 ObservableCollection.Move 触发当前界面与保存回调，不复制或重建BetterGI集合；索引来自当前 options。",
+      "whenToUse": [
+        "当前可见功能没有合适稳定入口，或正在处理原生编辑器／列表行／弹窗时。"
+      ],
+      "preconditions": [
+        "先打开目标页面，ui.read 定位真实控件、字段、选项及版本；不能猜 ID。"
+      ],
+      "sideEffects": [
+        "触发BetterGI原生控件、绑定、保存或关闭事件；可能改变配置／资源／游戏。"
+      ],
+      "resultMeaning": "控件或原生命令阶段结果；runningOrAwaitingInput 需续接，completed 不代表用户目标完成。",
+      "verification": "通过 ui.read 取得实际字段、按钮和窗口；填写后执行真实保存／确认，再 ui.operation 与资源／设置／日志核验。",
+      "rollback": "输入前保存配置检查点；已执行的原生事件及游戏操作不能自动撤销。",
+      "documentationSource": "native-wpf-bindings-and-continuation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.ui.respond": {
+    "group": "ui",
+    "summary": "将 text、filePath、selectedValues 或确认信息交给该 operation 的原始窗口作用域；不排除已经打开的本次弹窗。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "来自当前 ui.read 或执行结果的真实 ID。"
+        },
+        "dialogInput": {
+          "type": "object",
+          "minProperties": 1,
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 8192
+            },
+            "filePath": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "selectedValues": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 512,
+              "items": {
+                "type": "string",
+                "maxLength": 1024
+              }
+            },
+            "confirm": {
+              "type": "boolean"
+            },
+            "values": {
+              "type": "object",
+              "maxProperties": 64
+            }
+          },
+          "additionalProperties": false,
+          "description": "本次命令的明确输入。text 用于名称／文本，filePath 用于文件或目录选择，selectedValues 必须是资源返回的原生 Tag 路径或 folderName；confirm 仅确认本次已授权操作；values 是新窗口数据上下文中的已定义字段。"
+        }
+      },
+      "required": [
+        "operationId",
+        "dialogInput"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "填写本次原生弹窗",
+      "purpose": "将 text、filePath、selectedValues 或确认信息交给该 operation 的原始窗口作用域；不排除已经打开的本次弹窗。",
+      "whenToUse": [
+        "当前可见功能没有合适稳定入口，或正在处理原生编辑器／列表行／弹窗时。"
+      ],
+      "preconditions": [
+        "先打开目标页面，ui.read 定位真实控件、字段、选项及版本；不能猜 ID。"
+      ],
+      "sideEffects": [
+        "触发BetterGI原生控件、绑定、保存或关闭事件；可能改变配置／资源／游戏。"
+      ],
+      "resultMeaning": "控件或原生命令阶段结果；runningOrAwaitingInput 需续接，completed 不代表用户目标完成。",
+      "verification": "通过 ui.read 取得实际字段、按钮和窗口；填写后执行真实保存／确认，再 ui.operation 与资源／设置／日志核验。",
+      "rollback": "输入前保存配置检查点；已执行的原生事件及游戏操作不能自动撤销。",
+      "documentationSource": "native-wpf-bindings-and-continuation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.ui.write": {
+    "group": "ui",
+    "summary": "通过 WPF 原生绑定与校验修改字段，保留选择变更和控件事件；需要保存的编辑器继续点击保存。",
+    "readOnly": false,
+    "destructive": false,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "fieldId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "来自当前 ui.read 或执行结果的真实 ID。"
+        },
+        "expectedVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "来自当前 ui.read 或执行结果的真实 ID。"
+        },
+        "value": {
+          "description": "满足当前字段 valueSchema；选项使用 ui.read 返回的 {optionId}，不会从 JSON 伪造宿主对象。"
+        }
+      },
+      "required": [
+        "fieldId",
+        "expectedVersion",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "修改原生可见字段",
+      "purpose": "通过 WPF 原生绑定与校验修改字段，保留选择变更和控件事件；需要保存的编辑器继续点击保存。",
+      "whenToUse": [
+        "当前可见功能没有合适稳定入口，或正在处理原生编辑器／列表行／弹窗时。"
+      ],
+      "preconditions": [
+        "先打开目标页面，ui.read 定位真实控件、字段、选项及版本；不能猜 ID。"
+      ],
+      "sideEffects": [
+        "触发BetterGI原生控件、绑定、保存或关闭事件；可能改变配置／资源／游戏。"
+      ],
+      "resultMeaning": "控件或原生命令阶段结果；runningOrAwaitingInput 需续接，completed 不代表用户目标完成。",
+      "verification": "通过 ui.read 取得实际字段、按钮和窗口；填写后执行真实保存／确认，再 ui.operation 与资源／设置／日志核验。",
+      "rollback": "输入前保存配置检查点；已执行的原生事件及游戏操作不能自动撤销。",
+      "documentationSource": "native-wpf-bindings-and-continuation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.update_subscribed_scripts": {
+    "group": "repository",
+    "summary": "调用 BetterGI 自带仓库更新器。可只刷新中央仓库、只更新指定的已订阅路径，或更新全部当前订阅；不需要打开脚本仓库窗口。",
+    "readOnly": false,
+    "destructive": true,
+    "effect": "hostCommand",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "repositoryOnly",
+            "selected",
+            "all"
+          ],
+          "description": "repositoryOnly 只刷新中央仓库；selected 只更新 paths；all 更新全部当前订阅。"
+        },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "description": "mode=selected 时必填；值来自 User/Subscriptions，例如 js/AutoHoeingOneDragon。"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "更新脚本仓库与订阅内容",
+      "purpose": "调用 BetterGI 自带仓库更新器。可只刷新中央仓库、只更新指定的已订阅路径，或更新全部当前订阅；不需要打开脚本仓库窗口。",
+      "whenToUse": [
+        "用户要求立即刷新脚本仓库，或更新一个、多个、全部已订阅脚本和路线时。"
+      ],
+      "preconditions": [
+        "桥已连接。",
+        "selected 模式的 paths 来自 User/Subscriptions 的真实当前订阅。",
+        "当前没有另一项仓库导入或更新操作。"
+      ],
+      "sideEffects": [
+        "访问当前配置的仓库渠道；selected/all 会覆盖订阅资源的程序文件，并由 BetterGI 保留其支持的脚本配置文件。"
+      ],
+      "resultMeaning": "completed=true 表示 BetterGI 更新函数已返回；repositoryChanged 仅报告中央仓库是否拉到新内容，不证明每个目标文件符合预期。",
+      "verification": "selected/all 完成后回读目标 manifest、版本或关键文件；repositoryOnly 可结合 repositoryChanged 与更新时间判断。",
+      "rollback": "中央仓库和脚本程序文件没有通用自动回退；BetterGI 只保留其更新器明确支持的脚本配置。更新前必须由运行时审批确认范围。",
+      "documentationSource": "bridge-stable-operation"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/CatalogTools.cs",
+      "registrationType": "BgiBridge.Tools.CatalogTools"
+    }
+  },
+  "bgi.wait_ready": {
+    "group": "lifecycle",
+    "summary": "在游戏启动后默认阻塞等待最多 120 秒，返回最新状态；发现非 16:9 时不继续等主界面。",
+    "readOnly": true,
+    "destructive": false,
+    "effect": "readOnly",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 180,
+          "default": 120,
+          "description": "等待主界面的最长秒数；默认 120，整个等待在工具内阻塞，不逐次调用模型。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "guide": {
+      "title": "等待游戏就绪",
+      "purpose": "在游戏启动后默认阻塞等待最多 120 秒，返回最新状态；发现非 16:9 时不继续等主界面。",
+      "whenToUse": [
+        "bgi.start_game 返回仍在加载，需要等待游戏进入主界面时。"
+      ],
+      "preconditions": [
+        "BetterGI 桥已连接。"
+      ],
+      "sideEffects": [
+        "只观测状态，不操作游戏。"
+      ],
+      "resultMeaning": "outcome=ready 才能继续游戏任务；resolution 应先修正分辨率；notRunning 表示游戏进程未运行；timeout 只表示本次限时内尚未就绪。",
+      "verification": "以 ready 与 runtime.gameResolution 核对；timeout 后向用户报告仍未就绪，不继续模型轮询或 PowerShell 睡眠。",
+      "rollback": "只读。",
+      "documentationSource": "bridge-contract"
+    },
+    "source": {
+      "path": "bgi-bridge/managed/Tools/StatusTools.cs",
+      "registrationType": "BgiBridge.Tools.StatusTools"
     }
   }
 }

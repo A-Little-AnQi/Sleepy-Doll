@@ -1,54 +1,66 @@
-﻿# Export pure method metadata (InputSchema + AgentGuide) for the isolated
-# skill-plan CLI. Loads the compiled BgiBridge.dll, registers only the tool
-# classes the CLI needs, and never invokes any handler, loads BGI, or opens
-# windows. Regenerate after editing AgentSchemas.cs or an AgentGuide:
-#   dotnet build managed -o target/dotnet/managed
-#   pwsh -File bgi-bridge/dev/export-method-metadata.ps1
-# Output: bgi-bridge/dev/bgi-method-metadata.json (committed; CLI embeds it).
-
+# Export actual bridge registrations without invoking handlers or loading BetterGI.
+# Build bgi-bridge/managed/BgiBridge.csproj first; output is a maintained test/index input.
+param([string]$AssemblyPath)
 $ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $PSScriptRoot
-$bin = Join-Path $root '..\target\dotnet\managed'
+$projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+if (-not $AssemblyPath) {
+    $AssemblyPath = Join-Path $projectRoot 'target/dotnet/managed/net8.0-windows/win-x64/BgiBridge.dll'
+}
+$AssemblyPath = (Resolve-Path -LiteralPath $AssemblyPath).Path
+$bin = Split-Path -Parent $AssemblyPath
 $context = [System.Runtime.Loader.AssemblyLoadContext]::Default
 $context.add_Resolving({ param($context, $name)
     $candidate = Join-Path $bin "$($name.Name).dll"
-    if (Test-Path $candidate) { return $context.LoadFromAssemblyPath($candidate) }
-    return $null })
-$assembly = $context.LoadFromAssemblyPath((Join-Path $bin 'BgiBridge.dll'))
-$registry = $assembly.CreateInstance('BgiBridge.Catalog.MethodRegistry')
-if ($null -eq $registry) { throw 'MethodRegistry instance creation failed' }
-foreach ($tools in @(
-        'BgiBridge.Tools.PathingPreparationTools',
-        'BgiBridge.Tools.ScriptGroupTools',
-        'BgiBridge.Tools.ScriptGroupPlanTools')) {
-    $type = $assembly.GetType($tools)
-    if ($null -eq $type) { throw "type not found: $tools" }
-    $type.GetMethod('Register').Invoke($null, @($registry)) | Out-Null
-}
-
-$out = [ordered]@{}
-foreach ($descriptor in $registry.All | Sort-Object Id) {
-    $guide = $descriptor.Guide
-    $out[$descriptor.Id] = [ordered]@{
-        group       = $descriptor.Group
-        summary     = $descriptor.Summary
-        readOnly    = $descriptor.ReadOnly
-        destructive = $descriptor.Destructive
-        effect      = $descriptor.Effect
-        inputSchema = $descriptor.InputSchema.GetRawText() | ConvertFrom-Json
-        guide       = [ordered]@{
-            title               = $guide.Title
-            purpose             = $guide.Purpose
-            whenToUse           = $guide.WhenToUse
-            preconditions       = $guide.Preconditions
-            sideEffects         = $guide.SideEffects
-            resultMeaning       = $guide.ResultMeaning
-            verification        = $guide.Verification
-            rollback            = $guide.Rollback
-            documentationSource = $guide.DocumentationSource
+    if (Test-Path -LiteralPath $candidate) { return $context.LoadFromAssemblyPath($candidate) }
+    return $null
+})
+$assembly = $context.LoadFromAssemblyPath($AssemblyPath)
+$registryType = $assembly.GetType('BgiBridge.Catalog.MethodRegistry', $true)
+$registrations = @{}
+foreach ($type in ($assembly.GetTypes() | Where-Object Namespace -eq 'BgiBridge.Tools' | Sort-Object FullName)) {
+    $register = $type.GetMethods() | Where-Object {
+        $_.Name -eq 'Register' -and $_.IsStatic -and $_.GetParameters().Length -eq 1 -and
+        $_.GetParameters()[0].ParameterType -eq $registryType
+    }
+    if (-not $register) { continue }
+    # Each registration root gets its own registry. Delegated registrations may recur;
+    # identical descriptors are deduplicated, conflicting contracts fail the export.
+    $registry = [Activator]::CreateInstance($registryType)
+    $register.Invoke($null, [object[]]@($registry)) | Out-Null
+    foreach ($descriptor in $registry.All) {
+        $guide = $descriptor.Guide
+        $entry = [ordered]@{
+            group = $descriptor.Group
+            summary = $descriptor.Summary
+            readOnly = $descriptor.ReadOnly
+            destructive = $descriptor.Destructive
+            effect = $descriptor.Effect
+            inputSchema = $descriptor.InputSchema.GetRawText() | ConvertFrom-Json
+            guide = [ordered]@{
+                title = $guide.Title; purpose = $guide.Purpose
+                whenToUse = $guide.WhenToUse; preconditions = $guide.Preconditions
+                sideEffects = $guide.SideEffects; resultMeaning = $guide.ResultMeaning
+                verification = $guide.Verification; rollback = $guide.Rollback
+                documentationSource = $guide.DocumentationSource
+            }
         }
+        $serialized = $entry | ConvertTo-Json -Depth 30 -Compress
+        if ($registrations.ContainsKey($descriptor.Id)) {
+            if ($registrations[$descriptor.Id].Serialized -ne $serialized) {
+                throw "Conflicting registration: $($descriptor.Id)"
+            }
+            continue
+        }
+        $registrations[$descriptor.Id] = @{ Entry = $entry; Serialized = $serialized; Type = $type }
     }
 }
+$out = [ordered]@{}
+foreach ($id in ($registrations.Keys | Sort-Object)) {
+    $record = $registrations[$id]
+    $entry = $record.Entry
+    $entry.source = [ordered]@{path = "bgi-bridge/managed/Tools/$($record.Type.Name).cs"; registrationType = $record.Type.FullName}
+    $out[$id] = $entry
+}
 $destination = Join-Path $PSScriptRoot 'bgi-method-metadata.json'
-$out | ConvertTo-Json -Depth 12 | Out-File -FilePath $destination -Encoding utf8
-Write-Host "exported $($out.Count) methods -> $destination"
+$out | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $destination -Encoding utf8
+Write-Host "Exported $($out.Count) registered contracts -> $destination"

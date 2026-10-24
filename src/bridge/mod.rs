@@ -436,7 +436,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
         (
             "bgi.capability.search",
-            "检索插件能力",
+            "检索已安装扩展能力",
             "搜索已安装扩展登记的语义能力和资源。它不包含 BetterGI 自身接口，也不用于查用户配置；没有扩展时调用一次空结果即结束。",
             json!({"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}),
             {
@@ -488,13 +488,17 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
     ];
     definitions.extend([
-        ("bgi.feature.search", "查找 BGI 功能链路", "离线检索 BGI 插件的全量功能与流程索引；只返回少量摘要。用户目标或设置/命令不明确时用它，明确运行资源仍先 user.resolve。静态命中不代表现场可调用；用 feature.read 读取单项链路，再 describe 当前接口。", json!({"type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":200},"kind":{"type":"string","enum":["workflow","command","setting","page","scriptApi","resourceModel","stable"]},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":12,"default":5}},"required":["query"],"additionalProperties":false}), {
+        ("bgi.symbols.inspect", "解析接口、类型定义和符号关系", "直接输入一个或多个已知符号名字即可，不需先搜索标识或读取类文件。确定性解析别名、输入参数、返回类型和继承，自动关联返回对象与所给类型，输出精简定义和关系图；解析完成明确标记。只问这些信息时无需追踪实现调用链或补读手册。实现/成员细节由单项声明工具按需读取。仅查离线声明，不连接、不运行；歧义及未找到单独列出。", json!({"type":"object","properties":{"symbols":{"type":"array","minItems":1,"maxItems":8,"items":{"type":"string","minLength":1,"maxLength":200}}},"required":["symbols"],"additionalProperties":false}), {
+            let features=features.clone();
+            Arc::new(move |a: &Value| features.inspect_symbols(&a["symbols"].as_array().unwrap().iter().filter_map(Value::as_str).map(str::to_owned).collect::<Vec<_>>())) as BridgeToolFn
+        }),
+        ("bgi.feature.search", "检索离线源码声明", "离线检索软件源码、接口登记、配置设置、JavaScript 引擎注入、类型和成员声明；无需连接或启动 BetterGI。按真实名称、符号或说明查询，摘要带来源；空 query 分页浏览。静态资料不证明现场可调用，需要执行时再读取当前契约。", json!({"type":"object","properties":{"query":{"type":"string","maxLength":200,"default":""},"kind":{"type":"string","enum":["command","setting","page","scriptApi","resourceModel","stable"]},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":12,"default":5}},"required":[],"additionalProperties":false}), {
             let features = features.clone();
             Arc::new(move |a: &Value| features.search(a["query"].as_str().unwrap_or(""),a["kind"].as_str(),a["offset"].as_u64().unwrap_or(0) as usize,a["limit"].as_u64().unwrap_or(5) as usize)) as BridgeToolFn
         }),
-        ("bgi.feature.read", "读取单项 BGI 链路", "读取 feature.search 返回的一个精确 ID，取得输入来源、步骤、分支、验证方法与相关参考资料。live=true 时分页读取当前接口契约并区分 executable/referenceOnly/unavailable/unknown；默认只读静态参考，不加载全量手册。", json!({"type":"object","properties":{"id":{"type":"string","minLength":1},"live":{"type":"boolean","default":false},"methodOffset":{"type":"integer","minimum":0}},"required":["id"],"additionalProperties":false}), {
+        ("bgi.feature.read", "读取声明与结构化类型信息", "按精确 ID 读取实际声明、来源、函数参数与返回类型、对象继承及成员；类型成员分页，不需模型解析 C# 代码。live=true 时分页读取所引用的当前接口契约，区分 executable/referenceOnly/unavailable/unknown。默认读取源码声明与已有实现片段。declarationVerified 表示解析得到的声明事实，executionVerified=false 只表示未做运行校验，不代表离线资料无效；足以回答源码问题时不需连接软件。", json!({"type":"object","properties":{"id":{"type":"string","minLength":1},"live":{"type":"boolean","default":false},"methodOffset":{"type":"integer","minimum":0},"memberOffset":{"type":"integer","minimum":0},"memberLimit":{"type":"integer","minimum":1,"maximum":30,"default":8}},"required":["id"],"additionalProperties":false}), {
             let features = features.clone();
-            Arc::new(move |a: &Value| features.read(a["id"].as_str().unwrap_or(""))) as BridgeToolFn
+            Arc::new(move |a: &Value| features.read_page(a["id"].as_str().unwrap_or(""),a["memberOffset"].as_u64().unwrap_or(0) as usize,a["memberLimit"].as_u64().unwrap_or(8) as usize)) as BridgeToolFn
         }),
         ("bgi.repo.search", "检索脚本仓库", "搜索中央仓库全部资源，默认 all；JS 参数用 js，采集/地图追踪必须用 pathing。地图追踪返回完整目标目录和作者包、requirements，不返回散落叶子供拼接。分类无命中不等于全仓库没有。用精确路径阅读、订阅并准备运行，不要扫描桥程序集。", json!({"type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":200},"category":{"type":"string","enum":["all","js","pathing","combat","tcg"],"default":"all"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":20,"default":8}},"required":["query"],"additionalProperties":false}), {
             let client = client.clone();
@@ -504,7 +508,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             let client = client.clone();
             Arc::new(move |a: &Value| client.repository_read("bgi.read_script_repository_file", a)) as BridgeToolFn
         }),
-        ("bgi.api.search", "检索 BetterGI 接口", "查找当前 BetterGI 可用的设置和操作。它不搜索配置组、路线、脚本等用户资源。group 必须来自目录实际返回的分组；用一个业务词查询，一次零结果后检查证据源。", json!({"type":"object","properties":{"query":{"type":"string","description":"一个核心业务词、动作词或精确 methodId；空字符串用于浏览分组"},"group":{"type":"string","description":"可选；使用目录实际返回的分组，例如 settings、command、scheduler、repository"},"offset":{"type":"integer","minimum":0,"description":"仅在响应给出 nextOffset 时继续"},"limit":{"type":"integer","minimum":1,"maximum":50,"default":8,"description":"候选数量；默认 8，只有响应给出 nextOffset 且确有必要时增加"}},"required":["query"],"additionalProperties":false}), {
+        ("bgi.api.search", "检索运行中的 BetterGI 接口", "需要连接正在运行的 BetterGI，查找其当前可用的设置和操作。命中相关候选或必要准备步骤后，先用 bgi.api.describe 读取其契约和调用映射，再决定执行或补查。它不搜索配置组、路线、脚本等用户资源。group 必须来自目录实际返回的分组；用一个业务词查询，一次零结果后检查证据源。", json!({"type":"object","properties":{"query":{"type":"string","description":"一个核心业务词、动作词或精确 methodId；空字符串用于浏览分组"},"group":{"type":"string","description":"可选；使用目录实际返回的分组，例如 settings、command、scheduler、repository"},"offset":{"type":"integer","minimum":0,"description":"仅在响应给出 nextOffset 时继续"},"limit":{"type":"integer","minimum":1,"maximum":50,"default":8,"description":"候选数量；默认 8，只有响应给出 nextOffset 且确有必要时增加"}},"required":["query"],"additionalProperties":false}), {
             let client = client.clone();
             Arc::new(move |a: &Value| client.catalog_page_with_limit(a["query"].as_str().unwrap_or(""),a["group"].as_str(),a["offset"].as_u64().unwrap_or(0),a["limit"].as_u64().unwrap_or(8))) as BridgeToolFn
         }),
@@ -521,9 +525,9 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         (
             "bgi.user.list",
             "查看用户资源",
-            "列出 BetterGI User 目录下指定位置的一层真实文件和目录。jsonKeys 可在同一次调用中投影每个 JSON 文件的顶层字段，避免逐文件读取；不用于查找 BetterGI 的操作功能。",
+            "列出 BetterGI User 目录下指定位置的一层真实文件和目录。列调度器配置组使用 path=ScriptGroup，可配 jsonKeys=[name,index,projects]；config.json 是文件，不是配置组目录，不猜 config 路径。jsonKeys 可在同一次调用中投影每个 JSON 文件的顶层字段，避免逐文件读取；不用于查找 BetterGI 的操作功能。",
             json!({"type":"object","properties":{
-                "path":{"type":"string","description":"相对 User 目录；空字符串表示根目录"},
+                "path":{"type":"string","description":"相对 User 目录；配置组用 ScriptGroup，脚本用 JsScript，路线用 AutoPathing；空字符串表示根目录"},
                 "jsonKeys":{"type":"array","maxItems":32,"items":{"type":"string"},"description":"可选；为目录内每个 JSON 返回这些顶层字段"}
             },"additionalProperties":false}),
             {
@@ -621,7 +625,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         (
             "bgi.user.inspect_script",
             "读取脚本说明",
-            "一次读取一个已知 JS 脚本包的 manifest、README、settings 参数定义、目录条目和 settings 下的账户配置。folderName 必须来自配置组任务或 User/JsScript 目录；不要再分别 list/read 同一脚本。",
+            "一次读取一个已知 JS 脚本包的 manifest、README、settings 参数定义、目录条目和 settings 下的账户配置。folderName 必须来自配置组任务或 User/JsScript 目录；不要再分别 list/read 同一脚本。普通配置答复与提问按 settings 的 label、选项和说明解释当前值；name 是读写定位键，不是用户文案。",
             json!({"type":"object","properties":{"folderName":{"type":"string","minLength":1,"description":"配置组 Javascript 任务中的精确 folderName"}},"required":["folderName"],"additionalProperties":false}),
             {
                 let client = client.clone();
@@ -675,8 +679,8 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
         (
             "bgi.user.resolve",
-            "查找可运行任务",
-            "查找用户要求运行的实际资源：先匹配本机配置组、核验引用和地图追踪父目录；未命中自动搜索当前中央仓库全部分类。不要扫描路线 JSON 或先刷新仓库。run 表示已启用引用完整，按已有配置运行；仅用户要求修改时改对应槽位。requirements.scope=pathingOnly 只分析已启用路线，不代表 JS 无队伍要求；JS 按自身设置与明确校验处理，不为选填队伍字段例行提问。inspect 表示路线需求待查，检查资源而不是问配队；repair 补 missing；create 准备本地父目录；resourceFound 按 repository 候选订阅、配置并继续运行；lookupFailed 是查询失败，不能称资源不存在；notFound 才是本机和当前全仓索引均未命中。",
+            "定位任务资源与配置组",
+            "按名称定位本机任务资源和配置组，直接返回已读取的组名、启用项、队伍等运行设置摘要、引用完整性和资源候选；只读，不运行任务。只查询这些摘要事实时无需再遍历目录。只有需要未返回的字段或完整替换文件时再读取详细内容。本机未命中时附中央仓库查询结果。verdict 描述资源匹配及读取情况，不代表已经运行或得到授权。requirements 只统计已启用地图追踪的实际动作，不覆盖 JS 前提。containsPartySensitiveActions 表示含战斗或角色机制，不代表缺配队。查询失败与名称未命中分开返回。后续流程读取 bgi-operator 的 references/resources.md。",
             json!({"type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":200,"description":"用户原话或材料/脚本/配置组名称，例如帮我跑下血斛"}},"required":["query"],"additionalProperties":false}),
             {
                 let client = client.clone();
@@ -852,12 +856,21 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
                 ..ToolExecution::read_only()
             }
         };
+        execution.search_provider = matches!(
+            name,
+            "bgi.feature.search" | "bgi.api.search" | "bgi.repo.search" | "bgi.capability.search"
+        );
         execution.exposure = match name {
             "bgi.state.get" => crate::extension::ToolExposure::Always,
-            "bgi.user.resolve" | "bgi.user.list" | "bgi.user.read" | "bgi.repo.search"
-            | "bgi.repo.read" | "bgi.feature.search" | "bgi.feature.read" | "bgi.api.describe" => {
-                crate::extension::ToolExposure::Always
-            }
+            "bgi.user.resolve"
+            | "bgi.user.list"
+            | "bgi.user.read"
+            | "bgi.repo.search"
+            | "bgi.repo.read"
+            | "bgi.symbols.inspect"
+            | "bgi.feature.search"
+            | "bgi.feature.read"
+            | "bgi.api.describe" => crate::extension::ToolExposure::Always,
             "bgi.job.get" | "bgi.job.cancel" => crate::extension::ToolExposure::AfterWrite,
             "bgi.capability.search" | "bgi.capability.describe" | "bgi.capability.invoke" => {
                 crate::extension::ToolExposure::OnDemand

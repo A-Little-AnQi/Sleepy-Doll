@@ -1,26 +1,24 @@
 ---
 name: bgi-operator
-description: 执行 BGI 操作时按任务读取资源、设置、运行、仓库或脚本排障流程；不常驻完整手册。
+description: BetterGI 的资源管理、设置修改、任务运行和排障；按需读取判断依据，接口与参数由当前能力目录提供。
 tags: BGI操作
 ---
+# BetterGI 操作
 
-# BGI 操作说明
+先理解用户对象和操作范围，再从当前能力的名称、说明、前置条件和影响中选择。读取真实契约后使用其返回的标识、参数和对象；不从技能复制接口名、页面名或数据路径。离线源码资料只能解释所对应版本，不能证明当前软件可调用。
 
-按当前目标读取一份相关流程，已取得的路径、版本和接口 ID 可复用。bgi.feature.search/read 返回单项卡片，bgi.api.describe 返回当前调用契约；静态索引不授予执行权限，不证明运行中的版本有该接口。
+已有工具说明足以完成一次读取或修改时直接处理；涉及不清楚的对象含义、影响或核验方法时，再读下列相关资料。不要为每次操作都依次加载全部手册。
 
-直接资源、设置和领域数据接口优先；界面命令、页面上下文和 ui.* 是最低优先级。先 describe 当前直接接口；read/invoke 按本次契约 effect 选择。删除路线无需先选中路线、打开页面或建立上下文。
-
-路线／配置组文件的关键层：组 JSON 的运行参数在 config.pathingConfig（enabled、partyName、hurryOnAvatar、autoFightConfig、collectTimeout 等），projects 是任务清单不改内容；队伍与赶路角色用 `bgi.set_pathing_party` 原生写入，其余参数=全文读→只改点名的 pathingConfig 字段→保留其余字段与完整 SHA 写回→回读。
-
-| 当前目标 | skills.reference 的 path |
+| 所需知识 | 资料 |
 |---|---|
-| 查询、创建、修改或删除配置组／用户资源 | [references/resources.md](references/resources.md) |
-| 修改全局设置与联动事务 | [references/settings.md](references/settings.md) |
-| 准备运行、检查游戏、停止或核对任务 | [references/execution.md](references/execution.md) |
-| 更新仓库与订阅 | [references/repository.md](references/repository.md) |
-| JS 参数、资料与脚本报错 | [references/script-analysis.md](references/script-analysis.md) |
-| 需要澄清或遇到阻塞 | [references/shared.md](references/shared.md) |
+| 用户资源、配置组与删除边界 | [references/resources.md](references/resources.md) |
+| 全局设置与联动 | [references/settings.md](references/settings.md) |
+| 任务准备、后台运行、停止 | [references/execution.md](references/execution.md) |
+| 仓库、订阅和版本 | [references/repository.md](references/repository.md) |
+| 脚本参数与错误 | [references/script-analysis.md](references/script-analysis.md) |
+| 兑换码的来源和结果 | [references/redeem.md](references/redeem.md) |
+| 缺项、错误及答复 | [references/shared.md](references/shared.md) |
+| 必须操作原生界面 | [references/native-ui.md](references/native-ui.md) |
+| 恢复历史设置 | [references/settings-recovery.md](references/settings-recovery.md) |
 
-参数必须来自资源、脚本定义或当前接口 Schema。修改比较读取版本，保留未知字段；全局配置使用设置事务。游戏就绪仅用于游戏任务，资源查询、删除和页面导航不先启动游戏。
-
-提交后按卡片和契约验证。已验证的 deleted/prepared/opened 等状态只证明该项操作；用户要求运行时仍须继续执行。无可调用接口时说明具体限制和可核实的替代路径，不扫描桥二进制，不编造完成结果。
+优先直接管理数据、设置和任务的能力。参数来自当前契约、实际对象与用户要求；保留未知字段和并发变更。修改、准备和运行分别按用户范围执行，不能因对象已可运行就自动启动。核实对应结果，不能用处理器返回代替业务完成。
