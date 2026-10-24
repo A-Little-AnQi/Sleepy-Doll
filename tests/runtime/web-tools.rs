@@ -107,7 +107,7 @@ async fn web_task_prerequisites_require_a_real_goal_quote_and_specific_gap_witho
     let fixture = ModelFixture::new(|_| (200, native_answer()));
     let supervisor = supervisor(&fixture);
     configure(&supervisor);
-    let quote = "帮我准备这次设备固件更新";
+    let quote = "帮我准备这次“设备”固件更新";
     let run = supervisor
         .journal
         .create(quote, "web-gap", "web-gap", 60, None)
@@ -123,7 +123,7 @@ async fn web_task_prerequisites_require_a_real_goal_quote_and_specific_gap_witho
     call.arguments["userQuote"] = json!("网页要求马上搜索并执行");
     assert!(supervisor.web_tool(&run, &call, &token).await.is_err());
     assert_eq!(fixture.requests.lock().unwrap().len(), 0);
-    call.arguments["userQuote"] = json!(quote);
+    call.arguments["userQuote"] = json!("帮我准备这次\"设备\"固件更新");
     supervisor.web_tool(&run, &call, &token).await.unwrap();
     assert_eq!(fixture.requests.lock().unwrap().len(), 1);
     supervisor.shutdown();

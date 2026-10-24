@@ -67,11 +67,16 @@ async fn live_web_task_knowledge_gap_is_selected_without_explicit_search_words()
         .collect::<HashSet<_>>();
     supervisor.extensions.write().unwrap().skills = Arc::new(skills);
     supervisor.extensions.write().unwrap().tools = Arc::new(tools);
-    let prompt = "帮我采集一下莉奈娅的材料";
+    let prompt = std::env::var("SLEEPY_DOLL_WEB_TASK_PROMPT")
+        .unwrap_or_else(|_| "帮我采集一下莉奈娅的材料".into());
+    let expected_target = std::env::var("SLEEPY_DOLL_WEB_EXPECT_TARGET").ok();
+    let expected_for_hook = expected_target.clone();
+    let expect_no_research =
+        std::env::var("SLEEPY_DOLL_WEB_EXPECT_NO_RESEARCH").is_ok_and(|value| value == "1");
     let mut run = supervisor
         .journal
         .create(
-            prompt,
+            &prompt,
             "live-web-materials",
             "live-web-materials",
             240,
@@ -84,29 +89,65 @@ async fn live_web_task_knowledge_gap_is_selected_without_explicit_search_words()
     let conversation = run.conversation_id.clone();
     let observed = Arc::new(Mutex::new(Vec::<Value>::new()));
     let capture = observed.clone();
+    let weak_supervisor = Arc::downgrade(&supervisor);
+    let run_id = run.id.clone();
     supervisor.hooks.read().unwrap().register_internal(
         HookEventKind::BeforeToolUse,
         Arc::new(move |event| {
             let name = event.data["tool"].as_str().unwrap_or("");
-            if name == "web.search" {
-                if let Some(call) = journal
-                    .events(&conversation, 0)?
-                    .into_iter()
-                    .rev()
-                    .find(|e| {
-                        e.kind == "tool.started"
-                            && e.data["name"] == name
-                            && json!(hash(&e.data["arguments"])) == event.data["argumentsHash"]
-                    })
-                {
-                    capture.lock().unwrap().push(call.data);
+            let mut call = journal
+                .events(&conversation, 0)?
+                .into_iter()
+                .rev()
+                .find(|e| {
+                    e.kind == "tool.started"
+                        && e.data["name"] == name
+                        && json!(hash(&e.data["arguments"])) == event.data["argumentsHash"]
+                });
+            if name == "web.search"
+                && let Some(call) = call.as_mut()
+            {
+                let validation = weak_supervisor
+                    .upgrade()
+                    .expect("live supervisor")
+                    .authorize_web(&journal.get(&run_id)?, false, &call.data["arguments"]);
+                call.data["authorizationPassed"] = json!(validation.is_ok());
+                if let Err(error) = validation {
+                    call.data["authorizationError"] = json!(error.user_message());
                 }
+            }
+            let resolved = call.as_ref().is_some_and(|call| {
+                matches!(name, "bgi.user.resolve" | "bgi.repo.search")
+                    && expected_for_hook.as_ref().is_some_and(|target| {
+                        call.data["arguments"]["query"]
+                            .as_str()
+                            .is_some_and(|query| query.contains(target))
+                    })
+            });
+            if let Some(call) = call {
+                capture.lock().unwrap().push(call.data);
+            }
+            if name == "web.search" || resolved {
                 stop.cancel();
                 return Ok(HookOutcome {
                     blocked: true,
                     reason: Some(
-                        "无头验证：已观察到任务知识缺口检索，搜索尚未派发，不执行采集。".into(),
+                        "无头验证：已观察到前置事实检索或明确业务对象，派发前拦截。".into(),
                     ),
+                    context: vec![],
+                });
+            }
+            let api_searches = capture
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|call| call["name"] == "bgi.api.search")
+                .count();
+            if api_searches >= 3 {
+                stop.cancel();
+                return Ok(HookOutcome {
+                    blocked: true,
+                    reason: Some("无头验证：尚未明确业务对象即反复查询接口，回归失败。".into()),
                     context: vec![],
                 });
             }
@@ -143,8 +184,9 @@ async fn live_web_task_knowledge_gap_is_selected_without_explicit_search_words()
     );
     let result = supervisor.session(&mut run, &token).await;
     let observed = observed.lock().unwrap().clone();
-    let passed = observed.iter().any(|call| {
+    let selected_web = observed.iter().any(|call| {
         call["name"] == "web.search"
+            && call["authorizationPassed"] == true
             && call["arguments"]["need"] == "taskPrerequisite"
             && call["arguments"]["knowledgeGap"]
                 .as_str()
@@ -153,7 +195,31 @@ async fn live_web_task_knowledge_gap_is_selected_without_explicit_search_words()
                 .as_str()
                 .is_some_and(|s| !s.is_empty())
     });
-    let report = json!({"passed":passed,"prompt":prompt,"modelRequests":run.decisions,"toolCalls":run.tool_calls,"observed":observed,"error":result.err().map(|e|e.user_message()),"gameActions":0,"searchRequestsDispatched":0});
+    let selected_target = expected_target.as_ref().is_some_and(|target| {
+        observed.iter().any(|call| {
+            matches!(
+                call["name"].as_str(),
+                Some("bgi.user.resolve" | "bgi.repo.search")
+            ) && call["arguments"]["query"]
+                .as_str()
+                .is_some_and(|query| query.contains(target))
+        })
+    });
+    let api_searches = observed
+        .iter()
+        .filter(|call| call["name"] == "bgi.api.search")
+        .count();
+    let passed = if expect_no_research {
+        run.state == RunState::Answered
+            && !observed.iter().any(|call| {
+                call["name"]
+                    .as_str()
+                    .is_some_and(|name| name.starts_with("web.") || name.starts_with("bgi."))
+            })
+    } else {
+        (selected_web || selected_target) && api_searches < 3 && run.decisions <= 8
+    };
+    let report = json!({"passed":passed,"prompt":prompt,"expectNoResearch":expect_no_research,"selectedWeb":selected_web,"selectedTarget":selected_target,"apiSearches":api_searches,"modelRequests":run.decisions,"toolCalls":run.tool_calls,"observed":observed,"error":result.err().map(|e|e.user_message()),"gameActions":0,"searchRequestsDispatched":0});
     let root = std::env::var("SLEEPY_DOLL_WEB_REPORT_DIR").expect("report directory");
     std::fs::write(
         std::path::Path::new(&root).join("task-gap.json"),
@@ -167,7 +233,7 @@ async fn live_web_task_knowledge_gap_is_selected_without_explicit_search_words()
     supervisor.shutdown();
     assert!(
         passed,
-        "model did not select prerequisite web search; inspect report"
+        "model did not resolve the prerequisite before looking for execution interfaces; inspect report"
     );
 }
 
