@@ -30,25 +30,48 @@ export function MemoryPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [reviewing, setReviewing] = useState(false);
   const [editing, setEditing] = useState<MemoryEntry | null>(null);
   const [draft, setDraft] = useState<MemoryExperience | null>(null);
   const [busy, setBusy] = useState(false);
   const refresh = async () => setRows((await api.memories()).entries);
   useEffect(() => {
     let alive = true;
-    api
-      .memories()
-      .then((result) => {
-        if (alive) setRows(result.entries);
-      })
-      .catch((reason: unknown) => {
+    let reading = false;
+    let revision: string | undefined;
+    const load = async () => {
+      if (reading || !alive) return;
+      reading = true;
+      try {
+        const state = await api.memoryState();
+        if (!alive) return;
+        setReviewing(state.reviewing === true);
+        if (revision == null || state.revision !== revision) {
+          const result = await api.memories();
+          if (alive) {
+            setRows(result.entries);
+            revision = state.revision;
+          }
+        }
+      } catch (reason) {
         if (alive) setError(readError(reason));
-      })
-      .finally(() => {
+      } finally {
+        reading = false;
         if (alive) setLoading(false);
-      });
+      }
+    };
+    const visible = () => {
+      if (!document.hidden) void load();
+    };
+    void load();
+    const timer = window.setInterval(visible, 2000);
+    window.addEventListener("focus", visible);
+    document.addEventListener("visibilitychange", visible);
     return () => {
       alive = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", visible);
+      document.removeEventListener("visibilitychange", visible);
     };
   }, []);
   const change = <K extends keyof MemoryExperience>(
@@ -110,6 +133,7 @@ export function MemoryPage() {
         />
         <span className="memory-hint memory-toolbar-count">
           {t.settings.memoryCount(rows.length)}
+          {reviewing && ` · ${t.settings.memoryReviewing}`}
         </span>
       </div>
       {error && (
@@ -125,11 +149,15 @@ export function MemoryPage() {
         ) : rows.length === 0 && !error ? (
           <EmptyState
             icon={<HistoryIcon />}
-            title={t.settings.memoryNone}
+            title={
+              reviewing ? t.settings.memoryReviewing : t.settings.memoryNone
+            }
             description={
-              memoryState.enabled
-                ? t.settings.memoryEmpty
-                : t.settings.memoryDisabled
+              reviewing
+                ? t.settings.memoryReviewingHint
+                : memoryState.enabled
+                  ? t.settings.memoryEmpty
+                  : t.settings.memoryDisabled
             }
           />
         ) : filteredRows.length === 0 && !error ? (

@@ -77,11 +77,20 @@ impl Supervisor {
         let response = self
             .complete_auxiliary_request(run, purpose, model, messages, Some(tool), cancel)
             .await?;
-        if let Err(error) = structured::validate(&response, tool) {
+        // 记忆返回的是候选集合；模型仍收到完整契约，写入前由学习器逐条验真。
+        // 这里只校验外层，避免一条候选的元数据问题丢弃整批有效事实。
+        let mut validation_tool = tool.clone();
+        if purpose == "memory" && tool.name == "runtime.memory_experiences" {
+            validation_tool.input_schema["properties"]["experiences"]["items"] =
+                json!({"type":"object"});
+        }
+        if let Err(error) = structured::validate(&response, &validation_tool) {
             self.journal.emit(
                 run,
                 "model.structured.rejected",
-                json!({"purpose":purpose,"tool":tool.name}),
+                json!({"purpose":purpose,"tool":tool.name,"finishReason":response.finish_reason,
+                    "calls":response.tool_calls.iter().map(|call|json!({"name":call.name,
+                        "violations":crate::extension::validate(&call.arguments,&tool.input_schema,"$")})).collect::<Vec<_>>()}),
             )?;
             return Err(error);
         }

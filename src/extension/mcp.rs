@@ -264,6 +264,33 @@ impl McpClient {
         )
     }
 
+    /// 内置服务适配器只读取指定工具的当前参数契约，不向主模型暴露远端目录。
+    pub(crate) async fn tool_schema(&self, name: &str, cancel: CancellationToken) -> Result<Value> {
+        let mut cursor = None;
+        let mut seen = HashSet::new();
+        for _ in 0..100 {
+            let result = self
+                .request_async("tools/list", json!({"cursor":cursor}), cancel.clone())
+                .await?;
+            if let Some(tool) = result["tools"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|tool| tool["name"] == name)
+            {
+                return Ok(tool["inputSchema"].clone());
+            }
+            cursor = result["nextCursor"].as_str().map(str::to_owned);
+            if cursor.is_none() {
+                break;
+            }
+            if !seen.insert(cursor.clone()) {
+                return Err(Error::Tool("搜索服务的目录游标重复".into()));
+            }
+        }
+        Err(Error::Tool("搜索服务没有提供当前搜索工具".into()))
+    }
+
     async fn request_async(
         &self,
         method: &str,

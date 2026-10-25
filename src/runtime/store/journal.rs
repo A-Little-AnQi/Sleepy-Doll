@@ -10,6 +10,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+#[path = "summary.rs"]
+mod summary;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationSummary {
@@ -1566,6 +1569,15 @@ impl Journal {
             .collect()
     }
     pub fn finish(&self, run: &mut Run, next: RunState) -> Result<bool> {
+        self.finish_with_reply(run, next, None)
+    }
+
+    fn finish_with_reply(
+        &self,
+        run: &mut Run,
+        next: RunState,
+        reply: Option<&crate::model::Message>,
+    ) -> Result<bool> {
         if run.state.terminal() || !next.terminal() {
             return Err(Error::Conflict("invalid finish transition".into()));
         }
@@ -1596,6 +1608,20 @@ impl Journal {
         {
             return Err(Error::Conflict("stale finish revision".into()));
         }
+        if let Some(reply) = reply {
+            Self::append_message_in(&tx, &candidate, reply)?;
+            Self::insert_event(
+                &tx,
+                &candidate,
+                "assistant.completed",
+                &json!({"text":reply.content,"turn":candidate.decisions,"handoff":true}),
+            )?;
+        }
+        tx.execute("DELETE FROM runtime_summaries WHERE run_id=?1", [&run.id])?;
+        tx.execute(
+            "DELETE FROM runtime_memory_results WHERE run_id=?1",
+            [&run.id],
+        )?;
         Self::insert_event(&tx, &candidate, "run.changed", &public_run(&candidate))?;
         Self::insert_checkpoint(&tx, &candidate)?;
         tx.commit()?;
@@ -2298,6 +2324,16 @@ impl Journal {
     pub fn append_message(&self, run: &Run, message: &crate::model::Message) -> Result<()> {
         let mut db = self.connection.lock().unwrap();
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        Self::append_message_in(&tx, run, message)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn append_message_in(
+        tx: &rusqlite::Transaction<'_>,
+        run: &Run,
+        message: &crate::model::Message,
+    ) -> Result<()> {
         tx.execute("INSERT INTO messages(conversation_id,role,content,tool_call_id,tool_calls_json,reasoning_json,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![run.conversation_id,serde_json::to_value(message.role)?.as_str().unwrap(),message.content,message.tool_call_id,serde_json::to_string(&message.tool_calls)?,serde_json::to_string(&message.reasoning)?,now()])?;
         let message_id = tx.last_insert_rowid();
         if matches!(message.role, crate::model::Role::Assistant) {
@@ -2314,7 +2350,6 @@ impl Journal {
             "UPDATE conversations SET updated_at=?1 WHERE id=?2",
             params![now(), run.conversation_id],
         )?;
-        tx.commit()?;
         Ok(())
     }
     pub fn drain_inputs(&self, run: &str) -> Result<Vec<String>> {

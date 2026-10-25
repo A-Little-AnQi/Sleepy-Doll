@@ -15,6 +15,8 @@ let browser, server, page;
 let enabled = true,
   failToggle = false,
   failList = false;
+let revision = 1,
+  reviewing = false;
 let rows = [
   {
     compatible: true,
@@ -114,7 +116,7 @@ try {
         result = {};
         break;
       case "memory.state":
-        result = { enabled };
+        result = { enabled, revision: String(revision), reviewing };
         if (holdNextState) {
           holdNextState = false;
           await new Promise((resolve) => {
@@ -134,6 +136,7 @@ try {
         else result = { entries: rows };
         break;
       case "memory.update":
+        revision += 1;
         assert.equal(q.params.revision, rows[0].entry.revision);
         rows[0].entry = {
           ...rows[0].entry,
@@ -142,6 +145,7 @@ try {
         };
         break;
       case "memory.delete":
+        revision += 1;
         assert.equal(q.params.revision, rows[0].entry.revision);
         rows = rows.filter((row) => row.entry.id !== q.params.id);
         break;
@@ -166,6 +170,28 @@ try {
     0,
     "Memory must not use the shortcut sidebar",
   );
+  const background = JSON.parse(JSON.stringify(rows[0]));
+  background.entry.id = "background-entry";
+  background.entry.experience.intent = "后台自动整理的配置链路";
+  background.entry.experience.summary =
+    "参数从本轮读取，已有配置合适时直接复用。";
+  reviewing = true;
+  await page.waitForFunction(() =>
+    document
+      .querySelector(".memory-toolbar-count")
+      ?.textContent.includes("正在整理经验"),
+  );
+  rows.push(background);
+  revision += 1;
+  reviewing = false;
+  await memory
+    .getByText(background.entry.experience.summary, { exact: true })
+    .waitFor();
+  rows = rows.filter((row) => row.entry.id !== background.entry.id);
+  revision += 1;
+  await memory
+    .getByText(background.entry.experience.summary, { exact: true })
+    .waitFor({ state: "detached" });
   const toggle = () =>
     page.getByRole("switch", { name: "启用记忆", exact: true });
   await page.waitForFunction(
@@ -309,10 +335,18 @@ try {
   assert.equal(rows.length, 1);
   await page.setViewportSize({ width: 700, height: 780 });
   await page.waitForTimeout(350);
+  const closeSidebar = page
+    .getByRole("button", { name: "关闭侧栏", exact: true })
+    .first();
+  if (await closeSidebar.isVisible()) {
+    await closeSidebar.click();
+    await page.waitForTimeout(250);
+  }
   assert(
     await memory.evaluate((node) => node.scrollWidth <= node.clientWidth + 1),
     "Narrow memory page overflows",
   );
+  await page.screenshot({ path: path.join(captureRoot, "memory-narrow.png") });
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.waitForTimeout(350);
   await page.screenshot({

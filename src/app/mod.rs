@@ -32,8 +32,6 @@ struct ModelView<'a> {
     max_output_tokens: Option<u64>,
     auth: crate::config::ModelAuth,
     prompt_cache: bool,
-    web_provider: crate::config::WebProvider,
-    web_model: &'a Option<String>,
     api_key: &'a Option<String>,
 }
 
@@ -183,7 +181,13 @@ impl AppController {
             None
         };
         match method {
-            "memory.state" => Ok(json!({"enabled":self.supervisor.memory_enabled()})),
+            "memory.state" => {
+                let mut state = self.supervisor.memory.state_snapshot()?;
+                let enabled = self.supervisor.memory_enabled();
+                state["enabled"] = json!(enabled);
+                state["reviewing"] = json!(enabled && state["reviewing"] == true);
+                Ok(state)
+            }
             "memory.setEnabled" => {
                 let enabled = params["enabled"]
                     .as_bool()
@@ -1389,8 +1393,6 @@ impl AppController {
                 max_output_tokens: model.options.max_output_tokens,
                 auth: model.auth,
                 prompt_cache: model.options.prompt_cache,
-                web_provider: model.options.web_provider,
-                web_model: &model.options.web_model,
                 api_key: &model.api_key,
             })
             .collect::<Vec<_>>();

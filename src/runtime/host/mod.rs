@@ -11,3 +11,4 @@ pub mod hooks;
 pub mod installation;
 pub mod process;
 pub(crate) mod web;
+pub(crate) mod web_search;

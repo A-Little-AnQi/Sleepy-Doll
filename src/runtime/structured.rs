@@ -34,7 +34,13 @@ pub(super) fn memory(
     tools: &std::collections::BTreeSet<String>,
     methods: &std::collections::BTreeSet<String>,
 ) -> ToolDefinition {
-    let strings = |max| json!({"type":"array","maxItems":max,"items":{"type":"string"}});
+    let strings =
+        |max| json!({"type":"array","maxItems":max,"items":{"type":"string","minLength":1}});
+    let required_strings = |max| {
+        let mut value = strings(max);
+        value["minItems"] = json!(1);
+        value
+    };
     let method_ids = methods
         .iter()
         .map(|id| json!(id))
@@ -42,10 +48,10 @@ pub(super) fn memory(
         .collect::<Vec<_>>();
     let step = json!({"type":"object","additionalProperties":false,"required":["tool","action"],
         "properties":{"tool":{"type":"string","enum":tools},"methodId":{"type":["string","null"],"enum":method_ids},
-        "action":{"type":"string","minLength":1},"inputRoles":{"type":"object","additionalProperties":{"type":"string"}}}});
-    let experience = json!({"type":"object","additionalProperties":false,"required":["intent","summary","conditions","steps","verification"],
+        "action":{"type":"string","minLength":1},"inputRoles":{"type":"object","additionalProperties":{"type":"string","minLength":1}}}});
+    let experience = json!({"type":"object","additionalProperties":false,"required":["intent","conditions","steps","verification"],
         "properties":{"intent":{"type":"string","minLength":1,"maxLength":160},"summary":{"type":"string","minLength":1,"maxLength":240},
-        "keywords":strings(12),"conditions":strings(8),"verification":strings(8),"pitfalls":strings(8),"anchors":strings(6),
+          "keywords":strings(12),"conditions":required_strings(8),"verification":required_strings(8),"pitfalls":strings(8),"anchors":strings(6),
         "steps":{"type":"array","minItems":1,"maxItems":6,"items":step}}});
     tool(
         "runtime.memory_experiences",

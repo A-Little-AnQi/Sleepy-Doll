@@ -8,6 +8,13 @@ pub(crate) fn summary_value(entry: &MemoryEntry) -> Value {
 }
 
 impl MemoryStore {
+    pub(crate) fn state_snapshot(&self) -> Result<Value> {
+        Ok(self.connection.lock().unwrap().query_row(
+            "SELECT edit_epoch,(SELECT COUNT(*) FROM runtime_experiences),(SELECT COALESCE(SUM(revision),0) FROM runtime_experiences),(SELECT COUNT(*) FROM runtime_experiences WHERE validation_state='verified'),(SELECT COUNT(*) FROM runtime_memory_invalid_methods),(SELECT COUNT(*) FROM runtime_memory_learning WHERE status IN ('pending','inflight')) FROM runtime_memory_meta WHERE id=1",
+            [],|row| Ok(json!({"revision":format!("{}:{}:{}:{}:{}",row.get::<_,i64>(0)?,row.get::<_,i64>(1)?,row.get::<_,i64>(2)?,row.get::<_,i64>(3)?,row.get::<_,i64>(4)?),"reviewing":row.get::<_,i64>(5)?>0})),
+        )?)
+    }
+
     pub(crate) fn invalidate_contexts(&self) -> Result<()> {
         self.connection.lock().unwrap().execute(
             "UPDATE runtime_memory_meta SET edit_epoch=edit_epoch+1 WHERE id=1",
@@ -157,6 +164,12 @@ impl crate::runtime::Supervisor {
         self.config.write().unwrap().runtime.memory_enabled = enabled;
         if !enabled && let Some(control) = self.memory_learning.lock().unwrap().as_ref() {
             control.cancel.cancel();
+        }
+        if enabled {
+            if let Err(error) = self.backfill_latest_experience_learning() {
+                log::warn!("启用记忆后的经验复盘登记失败：{error}");
+            }
+            self.journal.notifier().notify_one();
         }
         Ok(())
     }

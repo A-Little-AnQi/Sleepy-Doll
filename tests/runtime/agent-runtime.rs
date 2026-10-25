@@ -1,4 +1,6 @@
 use super::*;
+#[path = "memory-review.rs"]
+mod memory_review_tests;
 #[path = "web-extraction.rs"]
 mod web_extraction_tests;
 #[path = "web-live.rs"]
@@ -1927,7 +1929,7 @@ fn memory_admission_uses_model_judgment_and_does_not_generate_rust_memories() {
         .journal
         .save(&mut run, RunState::Answered)
         .unwrap();
-    // Routine success, even after a write, must neither save nor enqueue learning.
+    // 没有前台申请也应进入复盘，但 Rust 不生成经验正文。
     supervisor.enqueue_experience_learning(&run).unwrap();
     assert!(!supervisor.memory_learning_requested(&run).unwrap());
     assert!(
@@ -1955,8 +1957,8 @@ fn memory_admission_uses_model_judgment_and_does_not_generate_rust_memories() {
         )
         .unwrap();
     assert_eq!(
-        queued, 0,
-        "Ordinary successful work must not enter the learning queue"
+        queued, 1,
+        "真实观测应进入后台评估，不要求前台显式调用 memory.learn"
     );
     drop(db);
     admit_memory_learning(&supervisor, &run, &["read", "write"]);

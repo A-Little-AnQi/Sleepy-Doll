@@ -12,60 +12,6 @@ use serde_json::{Value, json};
 use std::{collections::BTreeMap, time::Duration};
 use tokio_util::sync::CancellationToken;
 
-/// 原生联网只发送一次：超时或响应丢失可能已计费，不自动重放。
-pub(super) async fn native_web(
-    config: &ModelConfig,
-    endpoint: &str,
-    body: &Value,
-    cancel: &CancellationToken,
-) -> Result<Value> {
-    let model = ProtocolModel::new(config.clone());
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_millis(
-            config.options.timeout_ms.clamp(1000, 180_000),
-        ))
-        .build()?;
-    let mut request = client.post(endpoint).json(body);
-    for (name, value) in model.headers() {
-        request = request.header(name, value);
-    }
-    let response = tokio::select! {
-        _ = cancel.cancelled() => return Err(Error::Cancelled),
-        result = request.send() => result?,
-    };
-    if !response.status().is_success() {
-        return Err(Error::Tool(format!(
-            "当前模型节点未完成原生联网请求（HTTP {}）。请核对该节点、协议及联网权限；没有自动重试或切换收费服务。",
-            response.status().as_u16()
-        )));
-    }
-    let mut bytes = Vec::new();
-    let mut stream = response.bytes_stream();
-    loop {
-        let next = tokio::select! {
-            _ = cancel.cancelled() => return Err(Error::Cancelled),
-            result = stream.next() => result,
-        };
-        let Some(chunk) = next else {
-            break;
-        };
-        let chunk = chunk?;
-        if bytes.len().saturating_add(chunk.len()) > 10 * 1024 * 1024 {
-            return Err(Error::Tool(
-                "联网响应超过10MiB读取上限；未继续读取，已发送请求的用量仍按未知估算保留。".into(),
-            ));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    serde_json::from_slice(&bytes).map_err(|_| {
-        Error::Tool(
-            "模型节点未返回可解析的原生联网JSON响应，未把普通网页或流式文本当作检索结果。".into(),
-        )
-    })
-}
-
 /// 每一次模型调用都从这里过，请求与结果的记录放在这一层。
 pub async fn complete(
     config: ModelConfig,

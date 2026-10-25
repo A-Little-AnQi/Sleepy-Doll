@@ -609,9 +609,20 @@ class Session {
   }
 }
 const sessions = new Map<string, Session>();
+const sessionDeletionListeners = new Set<(id: string) => void>();
+
+export function subscribeSessionDeletions(listener: (id: string) => void) {
+  sessionDeletionListeners.add(listener);
+  return () => {
+    sessionDeletionListeners.delete(listener);
+  };
+}
+
 export function forgetSession(id: string) {
   const entry = sessions.get(id);
   if (entry && !entry.dispose()) sessions.delete(id);
+  localStorage.removeItem(`sleepy-doll-draft:${id}`);
+  sessionDeletionListeners.forEach((listener) => listener(id));
 }
 export function session(id: string) {
   let entry = sessions.get(id);

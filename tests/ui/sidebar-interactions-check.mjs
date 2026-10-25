@@ -1,6 +1,7 @@
 import "./runtime.mjs";
 // Sidebar regression with fake IPC; never deletes real conversations or calls BGI.
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
@@ -12,6 +13,7 @@ const root = path.resolve(
 );
 let server;
 let browser;
+let releaseDeletion;
 try {
   server = await createServer({
     root: path.join(root, "web"),
@@ -24,7 +26,10 @@ try {
   console.log(
     JSON.stringify({ port, cleanup: "finally closes Vite and Chromium" }),
   );
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
+  });
   const page = await browser.newPage({
     viewport: { width: 1100, height: 760 },
   });
@@ -38,6 +43,7 @@ try {
   let mode = "fullAccess";
   let showRunningStatus = true;
   let failPreview = false;
+  let deletionGate;
   const deletionRequests = [];
   const taskDeletionRequests = [];
   let workflows = [
@@ -106,12 +112,16 @@ try {
       launchSilently: true,
     },
   });
-  await page.addInitScript(() => {
-    localStorage.setItem("sleepy-doll-version", "0.1.0");
-    localStorage.setItem("sleepy-doll-locale", "zh");
-    localStorage.setItem("sleepy-doll-theme", "dark");
-    localStorage.setItem("sleepy-doll-sidebar-width", "248");
-  });
+  await page.addInitScript(
+    (version) => {
+      localStorage.setItem("sleepy-doll-version", version);
+      localStorage.setItem("sleepy-doll-locale", "zh");
+      localStorage.setItem("sleepy-doll-theme", "dark");
+      localStorage.setItem("sleepy-doll-sidebar-width", "248");
+    },
+    JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"))
+      .version,
+  );
   await page.route("**/ipc", async (route) => {
     const request = route.request().postDataJSON();
     let result = {};
@@ -123,7 +133,12 @@ try {
       result = { deleted: true };
     }
     if (request.method === "conversation.get")
-      result = { id: request.params.id, messages: [] };
+      result = {
+        id: request.params.id,
+        messages: [
+          { role: "assistant", content: `对话内容 ${request.params.id}` },
+        ],
+      };
     if (request.method === "events.read") result = { events: [] };
     if (request.method === "conversation.delete") {
       deletionRequests.push(request.params);
@@ -140,6 +155,11 @@ try {
         return;
       }
       if (request.params.confirmed) {
+        if (deletionGate) {
+          deletionGate.started();
+          await deletionGate.wait;
+          deletionGate = undefined;
+        }
         conversations = conversations.filter(
           (entry) => entry.id !== request.params.id,
         );
@@ -185,7 +205,9 @@ try {
       };
     });
   const geometryCases = [];
-  for (const width of [248, 200, 480]) {
+  for (const width of process.argv.includes("--deletion-only")
+    ? []
+    : [248, 200, 480]) {
     await page.evaluate(
       (value) =>
         localStorage.setItem("sleepy-doll-sidebar-width", String(value)),
@@ -257,6 +279,8 @@ try {
   showRunningStatus = false;
   await page.reload();
   await row("first").waitFor();
+  await row("first").locator(":scope > button").click();
+  await page.getByText("对话内容 first", { exact: true }).waitFor();
   await row("first").hover();
   await row("first")
     .getByRole("button", { name: "删除对话", exact: true })
@@ -271,6 +295,7 @@ try {
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
   await page.waitForTimeout(300);
   assert.equal(await row("first").count(), 1);
+  assert(await page.getByText("对话内容 first", { exact: true }).isVisible());
   assert.equal(
     deletionRequests.filter((request) => request.confirmed).length,
     0,
@@ -282,6 +307,31 @@ try {
   await dialog.waitFor();
   await dialog.getByRole("button", { name: "删除对话", exact: true }).click();
   await row("first").waitFor({ state: "detached" });
+  await page.getByRole("heading", { name: "开始一项新任务" }).waitFor();
+  assert(await page.locator(".chat-workspace.is-welcome").isVisible());
+  assert.equal(
+    await page.getByText("对话内容 first", { exact: true }).count(),
+    0,
+  );
+  assert.equal(
+    await page.locator(".app-shell").getAttribute("data-details"),
+    "false",
+  );
+  const screenshots = process.argv.includes("--screenshots")
+    ? path.join(root, "target/.tmp/delete-home")
+    : null;
+  if (screenshots) {
+    fs.mkdirSync(screenshots, { recursive: true });
+    for (const [name, width, height] of [
+      ["wide", 1440, 900],
+      ["narrow", 980, 700],
+    ]) {
+      await page.setViewportSize({ width, height });
+      await page.waitForTimeout(350);
+      await page.screenshot({ path: path.join(screenshots, `${name}.png`) });
+    }
+    await page.setViewportSize({ width: 1100, height: 760 });
+  }
   assert.equal(
     deletionRequests.filter((request) => request.confirmed).length,
     1,
@@ -356,16 +406,44 @@ try {
     1,
   );
   assert.equal(await row("second").count(), 1);
+  // 删除请求发出后切到另一对话，迟到的删除响应不得重置新页面或草稿。
+  await row("nested").locator(":scope > button").click();
+  await page.getByText("对话内容 nested", { exact: true }).waitFor();
+  const started = new Promise((resolve) => {
+    deletionGate = {
+      started: resolve,
+      wait: new Promise((release) => {
+        releaseDeletion = release;
+      }),
+    };
+  });
+  await row("nested").hover();
+  await row("nested")
+    .getByRole("button", { name: "删除对话", exact: true })
+    .click();
+  await dialog.waitFor();
+  await dialog.getByRole("button", { name: "删除对话", exact: true }).click();
+  await started;
+  await row("second").locator(":scope > button").click();
+  await page.getByText("对话内容 second", { exact: true }).waitFor();
+  await page.locator("textarea").fill("保留当前对话草稿");
+  releaseDeletion();
+  await row("nested").waitFor({ state: "detached" });
+  assert(await page.getByText("对话内容 second", { exact: true }).isVisible());
+  assert.equal(await page.locator("textarea").inputValue(), "保留当前对话草稿");
   console.log(
     JSON.stringify({
       deletion:
         "all permission modes confirm; cancel and Escape preserve chat; explicit confirmation deletes only the selected chat; preview errors visible",
+      deletedCurrentReturnsHome: true,
+      backgroundDeletionPreservesCurrentDraft: true,
       realDataTouched: false,
       taskDeletion:
         "task page and details panel also require explicit confirmation in fullAccess",
     }),
   );
 } finally {
+  releaseDeletion?.();
   await browser?.close();
   await server?.close();
 }

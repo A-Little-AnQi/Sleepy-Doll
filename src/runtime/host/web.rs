@@ -1,12 +1,93 @@
 //! 通用公开网页读取；不携带模型鉴权、Cookie或本机文件。
-use crate::{
-    error::{Error, Result},
-    model::web::public_url,
-};
+use crate::error::{Error, Result};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::net::IpAddr;
 use std::{collections::BTreeSet, net::SocketAddr, time::Duration};
 use tokio_util::sync::CancellationToken;
+
+pub(crate) fn public_url(text: &str) -> Result<url::Url> {
+    let mut url = url::Url::parse(text)
+        .map_err(|_| Error::Tool("需要完整的公开网页 HTTP(S) 地址。".into()))?;
+    let host = url.host_str().unwrap_or("").trim_matches(['[', ']']);
+    let private = host.is_empty()
+        || !host.contains('.') && host.parse::<IpAddr>().is_err()
+        || host == "localhost"
+        || [".localhost", ".local", ".internal"]
+            .iter()
+            .any(|s| host.ends_with(s))
+        || host.parse::<IpAddr>().is_ok_and(|ip| match ip {
+            IpAddr::V4(ip) => {
+                let o = ip.octets();
+                ip.is_private()
+                    || ip.is_loopback()
+                    || ip.is_link_local()
+                    || ip.is_broadcast()
+                    || ip.is_documentation()
+                    || o[0] == 0
+                    || o[0] >= 224
+                    || o[0] == 100 && (64..=127).contains(&o[1])
+                    || o[0] == 198 && (18..=19).contains(&o[1])
+            }
+            IpAddr::V6(ip) => {
+                // 只接受全球单播地址；映射/兼容地址及保留网段不委托给远端读取。
+                (ip.segments()[0] & 0xe000) != 0x2000
+                    || ip.segments()[0] == 0x2001 && ip.segments()[1] == 0xdb8
+            }
+        });
+    let sensitive = url.query_pairs().any(|(key, _)| {
+        let key = key.to_ascii_lowercase();
+        [
+            "token",
+            "key",
+            "secret",
+            "password",
+            "signature",
+            "credential",
+            "session",
+            "auth",
+        ]
+        .iter()
+        .any(|word| key.contains(word))
+    });
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || private
+        || sensitive
+        || url.port().is_some_and(|p| p != 80 && p != 443)
+    {
+        return Err(Error::Tool(
+            "联网工具只接受无凭据的公开 HTTP(S) 网页；不发送本机、私网、非常用端口或带凭据的地址。"
+                .into(),
+        ));
+    }
+    url.set_fragment(None);
+    Ok(url)
+}
+
+pub(crate) fn domains(args: &Value, key: &str) -> Result<Vec<String>> {
+    args[key]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|domain| {
+            let raw = domain.as_str().unwrap_or("");
+            let url = public_url(&format!("https://{raw}"))?;
+            if url.path() != "/"
+                || url.query().is_some()
+                || url.fragment().is_some()
+                || raw.contains(['/', ':', '#', '?', '@'])
+            {
+                return Err(Error::Tool(
+                    "域名筛选填写纯域名，不包含协议、端口或路径。".into(),
+                ));
+            }
+            Ok(url.host_str().unwrap().to_owned())
+        })
+        .collect()
+}
 
 const MAX_BYTES: usize = 10 * 1024 * 1024;
 
@@ -120,8 +201,7 @@ pub(crate) fn page_from_bytes(
         || content_type.is_empty();
     if !is_text {
         return Err(Error::Tool(
-            "该链接不是可直接读取的文本网页；PDF等内容可显式选择provider后端，未把二进制当作正文。"
-                .into(),
+            "该链接不是可直接读取的文本页面，未把二进制当作正文。".into(),
         ));
     }
     let decoded = String::from_utf8_lossy(bytes);
@@ -176,11 +256,18 @@ async fn response(
     tokio::select! {_ = cancel.cancelled()=>Err(Error::Cancelled),result=request.send()=>result.map_err(Error::from)}
 }
 
-pub(crate) async fn fetch(
+pub(crate) struct Download {
+    pub requested: url::Url,
+    pub final_url: url::Url,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
+pub(crate) async fn download(
     text: &str,
     timeout: Duration,
     cancel: &CancellationToken,
-) -> Result<Page> {
+) -> Result<Download> {
     let requested = public_url(text)?;
     let mut target = requested.clone();
     for _ in 0..10 {
@@ -217,7 +304,7 @@ pub(crate) async fn fetch(
         }
         if !result.status().is_success() {
             return Err(Error::Tool(format!(
-                "网页读取失败（HTTP {}），未自动切换收费后端。",
+                "网页当前无法读取（HTTP {}）。",
                 result.status().as_u16()
             )));
         }
@@ -243,14 +330,32 @@ pub(crate) async fn fetch(
             }
             bytes.extend_from_slice(&chunk);
         }
-        let requested = requested.clone();
-        return tokio::task::spawn_blocking(move || {
-            page_from_bytes(&requested, &target, &content_type, &bytes)
-        })
-        .await
-        .map_err(|_| Error::Tool("网页解析任务中断".into()))?;
+        return Ok(Download {
+            requested,
+            final_url: target,
+            content_type,
+            bytes,
+        });
     }
     Err(Error::Tool("网页重定向次数过多，未继续访问。".into()))
+}
+
+pub(crate) async fn fetch(
+    text: &str,
+    timeout: Duration,
+    cancel: &CancellationToken,
+) -> Result<Page> {
+    let data = download(text, timeout, cancel).await?;
+    tokio::task::spawn_blocking(move || {
+        page_from_bytes(
+            &data.requested,
+            &data.final_url,
+            &data.content_type,
+            &data.bytes,
+        )
+    })
+    .await
+    .map_err(|_| Error::Tool("网页解析任务中断".into()))?
 }
 
 #[cfg(test)]

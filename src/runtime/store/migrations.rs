@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub const LATEST_SCHEMA_VERSION: i64 = 19;
+pub const LATEST_SCHEMA_VERSION: i64 = 20;
 
 pub fn migrate(connection: &mut Connection) -> Result<()> {
     connection.execute_batch(
@@ -370,6 +370,20 @@ const MIGRATIONS: &[(i64, &str)] = &[
             expected_revision INTEGER NOT NULL,source_epoch INTEGER NOT NULL,
             body TEXT NOT NULL,tool_schemas TEXT NOT NULL,evidence_refs TEXT NOT NULL,
             PRIMARY KEY(run_id,entry_id)
+        );
+    "#,
+    ),
+    (
+        20,
+        r#"
+        CREATE TABLE runtime_summaries(
+            run_id TEXT PRIMARY KEY REFERENCES runtime_runs(id) ON DELETE CASCADE,
+            payload TEXT NOT NULL
+        );
+        CREATE TABLE runtime_memory_results(
+            run_id TEXT PRIMARY KEY REFERENCES runtime_runs(id) ON DELETE CASCADE,
+            source_epoch INTEGER NOT NULL,payload TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL,output_tokens INTEGER NOT NULL
         );
     "#,
     ),

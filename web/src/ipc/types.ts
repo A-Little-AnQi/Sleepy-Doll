@@ -12,9 +12,6 @@ export interface ModelInfo {
   maxOutputTokens?: number;
   auth?: "auto" | "apiKey" | "bearer";
   promptCache?: boolean;
-  webModel?: string | null;
-  webProvider?:
-    "auto" | "disabled" | "openai" | "anthropic" | "gemini" | "zhipu";
   apiKey?: string | null;
 }
 

@@ -167,7 +167,6 @@ impl JsonTransport for UreqTransport {
 
 mod catalog;
 mod protocol;
-pub(crate) mod web;
 
 pub use catalog::list_remote_models;
 

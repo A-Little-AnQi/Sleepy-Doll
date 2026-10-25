@@ -196,7 +196,10 @@ function sendWindow(method: string) {
 }
 
 export const api = {
-  memoryState: () => invoke<{ enabled: boolean }>("memory.state"),
+  memoryState: () =>
+    invoke<{ enabled: boolean; revision?: string; reviewing?: boolean }>(
+      "memory.state",
+    ),
   setMemoryEnabled: (enabled: boolean) =>
     invoke<{ enabled: boolean }>("memory.setEnabled", { enabled }),
   memories: () =>
@@ -287,8 +290,6 @@ export const api = {
     maxOutputTokens?: number;
     auth?: string;
     promptCache?: boolean;
-    webModel?: string | null;
-    webProvider?: import("./types").ModelInfo["webProvider"];
   }) => invoke<{ saved: boolean }>("model.save", { model }),
   listModels: (probe: {
     id?: string;

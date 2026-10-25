@@ -94,7 +94,12 @@ try {
   });
   await server.listen();
   const port = server.httpServer.address().port;
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    channel:
+      process.env.SLEEPY_DOLL_BROWSER_CHANNEL ??
+      (process.platform === "win32" ? "msedge" : undefined),
+  });
   const context = await browser.newContext({
     viewport: { width: 1400, height: 900 },
   });
@@ -104,7 +109,10 @@ try {
       (url.protocol === "https:" || url.protocol === "http:") &&
       url.hostname !== "127.0.0.1",
     (route) =>
-      route.fulfill({ contentType: "text/html", body: "<title>blocked</title>" }),
+      route.fulfill({
+        contentType: "text/html",
+        body: "<title>blocked</title>",
+      }),
   );
   const page = await context.newPage();
   page.setDefaultTimeout(8000);
@@ -171,7 +179,10 @@ try {
     await page.locator(".model-form").waitFor();
   };
   const pickPreset = async (id) => {
-    await page.locator(".model-form [data-ui='select-trigger']").first().click();
+    await page
+      .locator(".model-form [data-ui='select-trigger']")
+      .first()
+      .click();
     await page
       .getByRole("option", { name: PRESET_NAMES[id], exact: true })
       .click();
@@ -183,14 +194,15 @@ try {
   const openedUrls = [];
   for (const id of Object.keys(EXPECTED_LINKS)) {
     await pickPreset(id);
-    const links = await page.locator(".model-provider-link").evaluateAll(
-      (els) =>
+    const links = await page
+      .locator(".model-provider-link")
+      .evaluateAll((els) =>
         els.map((a) => ({
           text: a.textContent.trim(),
           href: a.getAttribute("href"),
           target: a.getAttribute("target"),
         })),
-    );
+      );
     const expected = EXPECTED_LINKS[id];
     assert.deepEqual(
       links.map((link) => link.href),
@@ -236,7 +248,9 @@ try {
       const scroll = form.querySelector(".model-form-scroll");
       const footer = form.querySelector(".detail-actions");
       const collapsed = form.querySelector(".model-advanced-body.is-collapsed");
-      const last = [...scroll.querySelectorAll("input, button, [role='switch']")]
+      const last = [
+        ...scroll.querySelectorAll("input, button, [role='switch']"),
+      ]
         .filter(
           (el) =>
             !(collapsed && collapsed.contains(el)) &&
@@ -244,9 +258,7 @@ try {
         )
         .pop();
       const buttons = [...footer.querySelectorAll("button")];
-      const save = buttons.find((b) =>
-        b.className.includes("primary-action"),
-      );
+      const save = buttons.find((b) => b.className.includes("primary-action"));
       const rightmost = buttons.reduce((a, b) =>
         b.getBoundingClientRect().right > a.getBoundingClientRect().right
           ? b
@@ -292,18 +304,12 @@ try {
       "static",
       `${label} 保存行必须是正常文档流（static）`,
     );
-    assert.ok(
-      !layout.footerInsideScroll,
-      `${label} 保存行不能位于滚动区内部`,
-    );
+    assert.ok(!layout.footerInsideScroll, `${label} 保存行不能位于滚动区内部`);
     assert.ok(
       Math.abs(layout.footerRight - layout.formRight) <= 1,
       `${label} 保存行未与表单列右对齐`,
     );
-    assert.ok(
-      layout.saveIsRightmost,
-      `${label} 保存主按钮必须在保存行最右`,
-    );
+    assert.ok(layout.saveIsRightmost, `${label} 保存主按钮必须在保存行最右`);
     assert.ok(
       layout.saveIsLastDom,
       `${label} 保存主按钮必须是保存行最后一个 DOM 按钮`,
@@ -344,7 +350,9 @@ try {
       const collapsed = scroll.querySelector(
         ".model-advanced-body.is-collapsed",
       );
-      const last = [...scroll.querySelectorAll("input, button, [role='switch']")]
+      const last = [
+        ...scroll.querySelectorAll("input, button, [role='switch']"),
+      ]
         .filter(
           (el) =>
             !(collapsed && collapsed.contains(el)) &&
@@ -380,6 +388,14 @@ try {
       .click();
     await page.waitForTimeout(400);
     await checkLayout(`${view.name}/高级表单`);
+    assert.equal(
+      await page.getByText("联网提供方", { exact: true }).count(),
+      0,
+    );
+    assert.equal(
+      await page.getByText("网页内容提取模型", { exact: true }).count(),
+      0,
+    );
     await page.screenshot({
       path: path.join(tempRoot, `advanced-${view.name}.png`),
       fullPage: false,
@@ -479,7 +495,9 @@ try {
       menu.bottom <= menu.footerTop + 1,
       `底部下拉越过保存行：menu.bottom=${menu.bottom} footer.top=${menu.footerTop}`,
     );
-    await page.screenshot({ path: path.join(tempRoot, "select-near-bottom.png") });
+    await page.screenshot({
+      path: path.join(tempRoot, "select-near-bottom.png"),
+    });
     // 菜单开着时卷动正文：boundary Select 应直接收起，而不是跟随重算。
     // 滚动方向必须真实改变 scrollTop（在底部就往上，在顶就往下）。
     const scrolled = await page.evaluate(() => {
@@ -528,6 +546,8 @@ try {
   await page.locator(".detail-actions .primary-action").click();
   await waitForSave(1);
   assert.equal(savedModels.length, 1, "普通表单应发出一次 model.save");
+  assert.equal(savedModels[0].webProvider, undefined);
+  assert.equal(savedModels[0].webModel, undefined);
   assert.deepEqual(
     {
       name: savedModels[0].name,
@@ -548,9 +568,7 @@ try {
   await startNewForm();
   await pickPreset("kimi");
   await page.locator(".key-field input").fill("fixture-key");
-  await page
-    .locator(".model-advanced-toggle", { hasText: "高级选项" })
-    .click();
+  await page.locator(".model-advanced-toggle", { hasText: "高级选项" }).click();
   await page.waitForTimeout(400);
   await page
     .locator(".model-advanced-inner label", { hasText: "响应超时" })

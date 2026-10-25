@@ -14,11 +14,11 @@ fn source(supervisor: &Supervisor, run: &Run, text: &str) -> String {
     supervisor.journal.emit(run,"web.source",json!({"url":"https://docs.example.org/guide","finalUrl":"https://docs.example.org/guide","sourceId":id,"fetchedAt":unix_now(),"title":"Guide","contentType":"text/plain","links":["https://docs.example.org/reference"]})).unwrap();
     id
 }
-fn call(quote: &str) -> ToolCall {
+fn call() -> ToolCall {
     ToolCall {
         id: "web-fetch".into(),
         name: "web.fetch".into(),
-        arguments: json!({"url":"https://docs.example.org/guide","userQuote":quote,"need":"userRequested","focus":"needle contract","mode":"extract"}),
+        arguments: json!({"url":"https://docs.example.org/guide","focus":"needle contract","mode":"extract"}),
     }
 }
 fn extracted(request: &Value) -> Value {
@@ -63,7 +63,7 @@ async fn web_extraction_isolated_model_keeps_verbatim_evidence_and_caches_per_qu
             .collect::<String>()
     );
     let id = source(&supervisor, &run, &text);
-    let mut request = call(quote);
+    let mut request = call();
     request.arguments["maxInputTokens"] = json!(1024);
     let value = supervisor
         .web_tool(&run, &request, &CancellationToken::new())
@@ -135,7 +135,7 @@ async fn web_extraction_rejects_invented_lines_and_does_not_cache_failed_extract
     );
     for _ in 0..2 {
         let value = supervisor
-            .web_tool(&run, &call(quote), &CancellationToken::new())
+            .web_tool(&run, &call(), &CancellationToken::new())
             .await
             .unwrap();
         assert_eq!(value["extractionStatus"], "failed");
@@ -154,16 +154,16 @@ async fn web_extraction_rejects_invented_lines_and_does_not_cache_failed_extract
 }
 
 #[tokio::test]
-async fn web_extraction_uses_selected_helper_and_reuses_page_cache_across_turns() {
-    let primary = ModelFixture::new(|_| panic!("primary model should not extract"));
-    let helper = ModelFixture::new(|request| (200, extracted(request)));
+async fn web_extraction_uses_current_model_and_reuses_page_cache_across_turns() {
+    let primary = ModelFixture::new(|request| (200, extracted(request)));
+    let helper = ModelFixture::new(|_| panic!("legacy helper must not be selected"));
     let supervisor = supervisor(&primary);
     {
         let mut config = supervisor.config.write().unwrap();
         let mut model = config.models[0].clone();
         model.id = "extractor".into();
         model.base_url = helper.url.clone();
-        config.models[0].options.web_model = Some(model.id.clone());
+        config.models[0].options.legacy_web_model = Some(json!(model.id));
         config.models.push(model);
     }
     let quote = "读取这份说明 https://docs.example.org/guide";
@@ -177,7 +177,7 @@ async fn web_extraction_uses_selected_helper_and_reuses_page_cache_across_turns(
         "Needle contract is valid for version 7\n",
     );
     supervisor
-        .web_tool(&first, &call(quote), &CancellationToken::new())
+        .web_tool(&first, &call(), &CancellationToken::new())
         .await
         .unwrap();
     let second = supervisor
@@ -185,7 +185,7 @@ async fn web_extraction_uses_selected_helper_and_reuses_page_cache_across_turns(
         .create(quote, "web-cross-turn", "web-cross-turn-second", 60, None)
         .unwrap();
     let value = supervisor
-        .web_tool(&second, &call(quote), &CancellationToken::new())
+        .web_tool(&second, &call(), &CancellationToken::new())
         .await
         .unwrap();
     assert_eq!(value["pageCacheHit"], true);
@@ -197,8 +197,8 @@ async fn web_extraction_uses_selected_helper_and_reuses_page_cache_across_turns(
             .can_read_artifact(&id, "run", &second.id)
             .unwrap()
     );
-    assert_eq!(helper.requests.lock().unwrap().len(), 1);
-    assert_eq!(primary.requests.lock().unwrap().len(), 0);
+    assert_eq!(helper.requests.lock().unwrap().len(), 0);
+    assert_eq!(primary.requests.lock().unwrap().len(), 1);
     supervisor.shutdown();
 }
 
@@ -220,7 +220,7 @@ async fn web_source_identifier_does_not_read_another_conversations_artifact() {
         .journal
         .create(quote, "web-private-second", "web-private-second", 60, None)
         .unwrap();
-    let mut request = call(quote);
+    let mut request = call();
     request.arguments["sourceId"] = json!(id);
     assert!(
         supervisor
@@ -241,7 +241,7 @@ async fn web_skill_switch_blocks_network_but_raw_read_does_not_need_a_helper_mod
         .create(quote, "web-skill-switch", "web-skill-switch", 60, None)
         .unwrap();
     source(&supervisor, &run, "Original document line\n");
-    let mut automatic = call(quote);
+    let mut automatic = call();
     automatic.arguments.as_object_mut().unwrap().remove("mode");
     let short = supervisor
         .web_tool(&run, &automatic, &CancellationToken::new())
@@ -251,8 +251,8 @@ async fn web_skill_switch_blocks_network_but_raw_read_does_not_need_a_helper_mod
     assert_eq!(fixture.requests.lock().unwrap().len(), 0);
     supervisor.config.write().unwrap().models[0]
         .options
-        .web_model = Some("missing-extractor".into());
-    let mut request = call(quote);
+        .legacy_web_model = Some(json!("missing-extractor"));
+    let mut request = call();
     request.arguments["mode"] = json!("raw");
     let value = supervisor
         .web_tool(&run, &request, &CancellationToken::new())

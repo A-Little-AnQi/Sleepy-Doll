@@ -36,7 +36,11 @@ pub(super) fn search(tools: Vec<ToolDefinition>, query: &str, limit: usize) -> V
                 .as_deref()
                 .unwrap_or_default()
                 .to_lowercase();
-            let exact = if name == query {
+            let named = query.split_whitespace().any(|part| {
+                part.trim_matches(|c: char| !c.is_alphanumeric() && !matches!(c, '.' | '_' | '-'))
+                    == name
+            });
+            let exact = if name == query || named {
                 10_000
             } else if name.contains(&query) || label.contains(&query) {
                 2_000
@@ -53,13 +57,15 @@ pub(super) fn search(tools: Vec<ToolDefinition>, query: &str, limit: usize) -> V
                             + usize::from(description.contains(token)) * 8
                     })
                     .sum::<usize>();
-            // 公开网络是补充来源；明确按工具名查询仍能命中，泛查时让直接来源在前。
-            let priority = if tool.source == "core:web" { -500 } else { 0 };
-            let ranked_score = (score as i64 + priority).max(1);
-            (score > 0).then_some((ranked_score, tool))
+            // 相关性优先；外部参考只在同分时后排，不能压过明确的工具名匹配。
+            (score > 0).then_some((score, tool))
         })
         .collect::<Vec<_>>();
-    ranked.sort_by(|(a, left), (b, right)| b.cmp(a).then_with(|| left.name.cmp(&right.name)));
+    ranked.sort_by(|(a, left), (b, right)| {
+        b.cmp(a)
+            .then_with(|| (left.source == "core:web").cmp(&(right.source == "core:web")))
+            .then_with(|| left.name.cmp(&right.name))
+    });
     ranked
         .into_iter()
         .take(limit)

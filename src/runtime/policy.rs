@@ -73,7 +73,7 @@ pub fn auxiliary_output_reserve(model: &crate::config::ModelConfig) -> u64 {
 
 pub fn auxiliary_timeout(purpose: &str, remaining: i64) -> u64 {
     let maximum = match purpose {
-        "compaction" => 180,
+        "compaction" | "memory" => 180,
         _ => 120,
     };
     if purpose == "memory" {
@@ -210,12 +210,12 @@ mod tests {
         assert_eq!(auxiliary_output_reserve(&model), 8192);
         model.options.max_output_tokens = Some(512);
         assert_eq!(auxiliary_output_reserve(&model), 512);
-        assert_eq!(auxiliary_timeout("memory", 600), 120);
+        assert_eq!(auxiliary_timeout("memory", 600), 180);
         assert_eq!(auxiliary_timeout("compaction", 600), 180);
         assert_eq!(auxiliary_timeout("compaction", -1), 1);
         assert_eq!(
             auxiliary_timeout("memory", -600),
-            120,
+            180,
             "Background learning must not inherit an ended task deadline"
         );
     }

@@ -61,8 +61,6 @@ type ModelForm = {
   maxOutputTokens: number;
   auth: ModelAuthMode;
   promptCache: boolean;
-  webProvider: NonNullable<ModelInfo["webProvider"]>;
-  webModel: string;
 };
 
 function emptyForm(id = `model-${Date.now()}`): ModelForm {
@@ -80,8 +78,6 @@ function emptyForm(id = `model-${Date.now()}`): ModelForm {
     maxOutputTokens: 8192,
     auth: "auto",
     promptCache: true,
-    webProvider: "auto",
-    webModel: "",
   };
 }
 
@@ -106,8 +102,6 @@ function fromPreset(
     maxOutputTokens: preset.maxOutputTokens,
     auth: preset.auth,
     promptCache: true,
-    webProvider: "auto",
-    webModel: "",
   };
 }
 
@@ -127,8 +121,6 @@ function formFor(model?: ModelInfo): ModelForm {
     maxOutputTokens: model.maxOutputTokens ?? 8192,
     auth: model.auth ?? "auto",
     promptCache: model.promptCache !== false,
-    webProvider: model.webProvider ?? "auto",
-    webModel: model.webModel ?? "",
   };
 }
 
@@ -185,9 +177,7 @@ export function ModelsPage({
           (selected.contextWindow ?? DEFAULT_CONTEXT_WINDOW) ||
         form.maxOutputTokens !== (selected.maxOutputTokens ?? 8192) ||
         form.auth !== (selected.auth ?? "auto") ||
-        form.promptCache !== (selected.promptCache !== false) ||
-        form.webProvider !== (selected.webProvider ?? "auto") ||
-        form.webModel !== (selected.webModel ?? "")));
+        form.promptCache !== (selected.promptCache !== false)));
   const resetEditor = (id: string, next: ModelForm) => {
     setSelectedId(id);
     setForm(next);
@@ -604,49 +594,6 @@ export function ModelsPage({
                           }))
                         }
                       />
-                    </FormField>
-                    <FormField label={<>{t.models.webProviderLabel}</>}>
-                      <Select
-                        value={form.webProvider}
-                        label={t.models.webProviderLabel}
-                        options={[
-                          { value: "auto", label: t.models.webProviderAuto },
-                          {
-                            value: "disabled",
-                            label: t.models.webProviderDisabled,
-                          },
-                          { value: "openai", label: "OpenAI" },
-                          { value: "anthropic", label: "Anthropic" },
-                          { value: "gemini", label: "Google Gemini" },
-                          { value: "zhipu", label: t.models.webProviderZhipu },
-                        ]}
-                        onChange={(value) =>
-                          updateForm((draft) => ({
-                            ...draft,
-                            webProvider: value as ModelForm["webProvider"],
-                          }))
-                        }
-                      />
-                      <p className="field-help">{t.models.webProviderHelp}</p>
-                    </FormField>
-                    <FormField label={<>{t.models.webModelLabel}</>}>
-                      <Select
-                        label={t.models.webModelLabel}
-                        value={form.webModel}
-                        options={[
-                          { value: "", label: t.models.webModelCurrent },
-                          ...bootstrap.models
-                            .filter((model) => model.id !== form.id)
-                            .map((model) => ({
-                              value: model.id,
-                              label: `${model.name} · ${model.model}`,
-                            })),
-                        ]}
-                        onChange={(value) =>
-                          updateForm((draft) => ({ ...draft, webModel: value }))
-                        }
-                      />
-                      <p className="field-help">{t.models.webModelHelp}</p>
                     </FormField>
                     <h4>{t.models.window}</h4>
                     <div className="form-grid">

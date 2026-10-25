@@ -245,29 +245,6 @@ impl Supervisor {
         Ok(value)
     }
 
-    fn extraction_model(
-        &self,
-        primary: &crate::config::ModelConfig,
-    ) -> Result<crate::config::ModelConfig> {
-        if let Some(id) = &primary.options.web_model {
-            self.config
-                .read()
-                .unwrap()
-                .models
-                .iter()
-                .find(|model| &model.id == id)
-                .cloned()
-                .ok_or_else(|| {
-                    Error::Tool(
-                        "所选网页提取模型已不可用，请在模型设置中重新选择；未静默切换付费模型。"
-                            .into(),
-                    )
-                })
-        } else {
-            Ok(primary.clone())
-        }
-    }
-
     fn cached_page(
         &self,
         run: &Run,
@@ -340,12 +317,8 @@ impl Supervisor {
         cancel: &CancellationToken,
     ) -> Result<Value> {
         let args = &call.arguments;
-        let helper = if args["mode"] == "raw" {
-            primary.clone()
-        } else {
-            self.extraction_model(primary)?
-        };
-        let url = crate::model::web::public_url(args["url"].as_str().unwrap_or(""))?.to_string();
+        let helper = primary.clone();
+        let url = host::web::public_url(args["url"].as_str().unwrap_or(""))?.to_string();
         let cached = self.cached_page(
             run,
             &url,

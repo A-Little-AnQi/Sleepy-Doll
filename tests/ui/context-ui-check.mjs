@@ -59,6 +59,7 @@ try {
   );
   browser = await chromium.launch({
     headless: true,
+    executablePath: env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
     ...(env.SLEEPY_DOLL_BROWSER_CHANNEL
       ? { channel: env.SLEEPY_DOLL_BROWSER_CHANNEL }
       : {}),

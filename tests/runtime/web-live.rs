@@ -2,6 +2,102 @@
 use super::*;
 use crate::runtime::host::hooks::{HookEventKind, HookOutcome};
 
+#[tokio::test]
+#[ignore = "真实搜索、网页与配置模型辅助提取；只读，不调用任何游戏能力"]
+async fn live_web_foundation_search_fetch_and_extract_with_legacy_relay_options() {
+    let (mut model, _) = installed();
+    model.options.legacy_web_provider = Some(json!("zhipu"));
+    model.options.legacy_web_model = Some(json!("removed-extractor"));
+    let fixture = ModelFixture::new(|_| panic!("configured real model"));
+    let supervisor = supervisor(&fixture);
+    supervisor.config.write().unwrap().models[0] = model;
+    let run = supervisor
+        .journal
+        .create(
+            "核对角色突破所需的采集物",
+            "live-foundation",
+            "live-foundation",
+            240,
+            None,
+        )
+        .unwrap();
+    let token = CancellationToken::new();
+    let search = supervisor
+        .web_tool(
+            &run,
+            &ToolCall {
+                id: "search".into(),
+                name: "web.search".into(),
+                arguments: json!({"query":"千织 突破材料","limit":6,"maxTokens":3000}),
+            },
+            &token,
+        )
+        .await
+        .unwrap();
+    assert_eq!(search["searchVerified"], true);
+    assert_eq!(search["found"], true);
+    assert!(
+        supervisor.journal.model_usage(&run.id).unwrap()["byPurpose"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let rows = search["items"].as_array().unwrap();
+    let selected = rows
+        .iter()
+        .find(|row| {
+            row["url"]
+                .as_str()
+                .is_some_and(|url| url.contains("genshin-center.com"))
+        })
+        .unwrap_or(&rows[0]);
+    let page=supervisor.web_tool(&run,&ToolCall{id:"fetch".into(),name:"web.fetch".into(),arguments:json!({"url":selected["url"],"focus":"只核对千织角色等级突破需要采集的地方特产名称和总数量，不扩展天赋或配队。","mode":"extract","maxTokens":3000})},&token).await.unwrap();
+    assert_eq!(page["fetchVerified"], true);
+    assert_eq!(page["extractionStatus"], "completed");
+    assert_eq!(page["sourceRangesValidated"], true);
+    assert!(page["pageText"].as_str().unwrap().contains("血斛"));
+    let report = json!({"searchVerified":search["searchVerified"],"backend":search["backend"],"sources":rows.len(),
+        "sourceUrl":selected["url"],"fetchVerified":page["fetchVerified"],"ranges":page["ranges"],
+        "sourceRangesValidated":page["sourceRangesValidated"],"summary":page["summary"],"evidence":page["pageText"],
+        "usage":supervisor.journal.model_usage(&run.id).unwrap(),"gameActions":0});
+    let root = std::env::var("SLEEPY_DOLL_WEB_REPORT_DIR").expect("report directory");
+    std::fs::write(
+        std::path::Path::new(&root).join("end-to-end.json"),
+        serde_json::to_vec_pretty(&report).unwrap(),
+    )
+    .unwrap();
+    println!(
+        "real search={}, sources={}, fetch={}, extraction={}",
+        search["backend"],
+        rows.len(),
+        page["fetchVerified"],
+        page["extractionStatus"]
+    );
+    supervisor.shutdown();
+}
+
+fn selects_target(name: &str, args: &Value, target: &str) -> bool {
+    if matches!(name, "bgi.user.resolve" | "bgi.repo.search") {
+        args["query"]
+            .as_str()
+            .is_some_and(|query| query.contains(target))
+    } else if name == "search.batch" {
+        args["requests"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|item| {
+                selects_target(
+                    item["tool"].as_str().unwrap_or(""),
+                    &item["arguments"],
+                    target,
+                )
+            })
+    } else {
+        false
+    }
+}
+
 fn installed() -> (crate::config::ModelConfig, Value) {
     let path = std::env::var("SLEEPY_DOLL_MODEL_CONFIG").expect("model config");
     let id = std::env::var("SLEEPY_DOLL_TEST_MODEL").expect("model id");
@@ -18,7 +114,7 @@ fn installed() -> (crate::config::ModelConfig, Value) {
     )
     .unwrap();
     model.id = "fixture".into();
-    model.options.web_model = None;
+    model.options.legacy_web_model = None;
     (model, raw)
 }
 
@@ -73,13 +169,15 @@ async fn live_web_task_knowledge_gap_is_selected_without_explicit_search_words()
     let expected_for_hook = expected_target.clone();
     let expect_no_research =
         std::env::var("SLEEPY_DOLL_WEB_EXPECT_NO_RESEARCH").is_ok_and(|value| value == "1");
+    let allow_network =
+        std::env::var("SLEEPY_DOLL_WEB_ALLOW_SEARCH").is_ok_and(|value| value == "1");
     let mut run = supervisor
         .journal
         .create(
             &prompt,
             "live-web-materials",
             "live-web-materials",
-            240,
+            if allow_network { 360 } else { 240 },
             None,
         )
         .unwrap();
@@ -117,17 +215,14 @@ async fn live_web_task_knowledge_gap_is_selected_without_explicit_search_words()
                 }
             }
             let resolved = call.as_ref().is_some_and(|call| {
-                matches!(name, "bgi.user.resolve" | "bgi.repo.search")
-                    && expected_for_hook.as_ref().is_some_and(|target| {
-                        call.data["arguments"]["query"]
-                            .as_str()
-                            .is_some_and(|query| query.contains(target))
-                    })
+                expected_for_hook
+                    .as_ref()
+                    .is_some_and(|target| selects_target(name, &call.data["arguments"], target))
             });
             if let Some(call) = call {
                 capture.lock().unwrap().push(call.data);
             }
-            if name == "web.search" || resolved {
+            if (name == "web.search" && !allow_network) || resolved {
                 stop.cancel();
                 return Ok(HookOutcome {
                     blocked: true,
@@ -168,6 +263,8 @@ async fn live_web_task_knowledge_gap_is_selected_without_explicit_search_words()
                         | "bgi.repo.search"
                         | "bgi.repo.read"
                         | "bgi.capability.search"
+                        | "web.search"
+                        | "web.fetch"
                 );
             if allowed {
                 Ok(HookOutcome::default())
@@ -187,29 +284,43 @@ async fn live_web_task_knowledge_gap_is_selected_without_explicit_search_words()
     let selected_web = observed.iter().any(|call| {
         call["name"] == "web.search"
             && call["authorizationPassed"] == true
-            && call["arguments"]["need"] == "taskPrerequisite"
-            && call["arguments"]["knowledgeGap"]
-                .as_str()
-                .is_some_and(|s| !s.is_empty())
-            && call["arguments"]["dependentAction"]
+            && call["arguments"]["query"]
                 .as_str()
                 .is_some_and(|s| !s.is_empty())
     });
     let selected_target = expected_target.as_ref().is_some_and(|target| {
         observed.iter().any(|call| {
-            matches!(
-                call["name"].as_str(),
-                Some("bgi.user.resolve" | "bgi.repo.search")
-            ) && call["arguments"]["query"]
-                .as_str()
-                .is_some_and(|query| query.contains(target))
+            selects_target(
+                call["name"].as_str().unwrap_or(""),
+                &call["arguments"],
+                target,
+            )
         })
     });
     let api_searches = observed
         .iter()
         .filter(|call| call["name"] == "bgi.api.search")
         .count();
-    let passed = if expect_no_research {
+    let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
+    let searches = events
+        .iter()
+        .filter(|e| e.kind == "web.result" && e.data["result"]["searchVerified"] == true)
+        .count();
+    let pages = events.iter().filter(|e| e.kind == "web.source").count();
+    let texts = supervisor
+        .journal
+        .conversation_messages(&run.conversation_id)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.message)
+        .filter(|m| m.role == Role::Assistant && !m.content.trim().is_empty())
+        .map(|m| m.content)
+        .collect::<Vec<_>>();
+    // 检查是否得到真实资料并用于选择业务对象，不强制模型额外打开已经足够的来源。
+    // 网页读取和提取由上面的真实端到端用例单独覆盖。
+    let passed = if allow_network {
+        searches > 0 && selected_target && api_searches < 3
+    } else if expect_no_research {
         run.state == RunState::Answered
             && !observed.iter().any(|call| {
                 call["name"]
@@ -219,7 +330,7 @@ async fn live_web_task_knowledge_gap_is_selected_without_explicit_search_words()
     } else {
         (selected_web || selected_target) && api_searches < 3 && run.decisions <= 8
     };
-    let report = json!({"passed":passed,"prompt":prompt,"expectNoResearch":expect_no_research,"selectedWeb":selected_web,"selectedTarget":selected_target,"apiSearches":api_searches,"modelRequests":run.decisions,"toolCalls":run.tool_calls,"observed":observed,"error":result.err().map(|e|e.user_message()),"gameActions":0,"searchRequestsDispatched":0});
+    let report = json!({"passed":passed,"prompt":prompt,"expectNoResearch":expect_no_research,"selectedWeb":selected_web,"selectedTarget":selected_target,"apiSearches":api_searches,"modelRequests":run.decisions,"toolCalls":run.tool_calls,"observed":observed,"texts":texts,"error":result.err().map(|e|e.user_message()),"gameActions":0,"searchesCompleted":searches,"pagesRead":pages});
     let root = std::env::var("SLEEPY_DOLL_WEB_REPORT_DIR").expect("report directory");
     std::fs::write(
         std::path::Path::new(&root).join("task-gap.json"),
@@ -258,7 +369,7 @@ async fn live_web_page_is_read_and_extracted_by_configured_auxiliary_model() {
     let call = ToolCall {
         id: "live-fetch".into(),
         name: "web.fetch".into(),
-        arguments: json!({"url":"https://www.rust-lang.org/learn","focus":"页面是否提供帮助安装工具链和练习Rust语法的交互式练习？只提取该资料的名称和用途，不列其他学习资源。","mode":"extract","need":"userRequested","userQuote":prompt}),
+        arguments: json!({"url":"https://www.rust-lang.org/learn","focus":"页面是否提供帮助安装工具链和练习Rust语法的交互式练习？只提取该资料的名称和用途，不列其他学习资源。","mode":"extract"}),
     };
     let result = supervisor
         .web_tool(&run, &call, &CancellationToken::new())

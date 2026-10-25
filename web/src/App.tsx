@@ -16,7 +16,13 @@ import { UpdateDialog } from "./app/UpdateDialog";
 import { ReleaseNotifications } from "./app/ReleaseSettings";
 import { restoreTheme } from "./appearance";
 import { restoreLocale } from "./appearance/locale";
-import { isRunning, readError, subscribeRuns, watchTasks } from "./session";
+import {
+  isRunning,
+  readError,
+  subscribeRuns,
+  subscribeSessionDeletions,
+  watchTasks,
+} from "./session";
 import type { Bootstrap, TaskSummary } from "./ipc/types";
 import { hostPluginEnabled } from "./ipc/providers";
 import { useT } from "./i18n";
@@ -41,6 +47,8 @@ export default function App() {
     "skills",
   );
   const [conversation, setConversation] = useState<string | undefined>();
+  const currentConversation = useRef(conversation);
+  currentConversation.current = conversation;
   const [bootstrap, setBootstrap] = useState<Bootstrap>();
   const bootstrapGeneration = useRef(0);
   // 快捷任务侧栏只在用户点开时出现，启动一律收起，也不记忆开关状态。
@@ -55,6 +63,31 @@ export default function App() {
     () => localStorage.getItem("sleepy-doll-version") !== __APP_VERSION__,
   );
   const [composingNewChat, setComposingNewChat] = useState(false);
+
+  useEffect(
+    () =>
+      subscribeSessionDeletions((id) => {
+        bootstrapGeneration.current += 1;
+        setBootstrap((previous) =>
+          previous
+            ? {
+                ...previous,
+                conversations: previous.conversations.filter(
+                  (item) => item.id !== id,
+                ),
+                tasks: previous.tasks.filter(
+                  (item) => item.conversationId !== id,
+                ),
+              }
+            : previous,
+        );
+        if (currentConversation.current !== id) return;
+        setConversation(undefined);
+        setSelectedTask(undefined);
+        setDetailsOpen(false);
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (!releaseNotesOpen) return;

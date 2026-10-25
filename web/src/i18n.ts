@@ -291,11 +291,13 @@ const zh = {
     memoryForgetTitle: "忘记这条记忆？",
     memoryForgetHint: "删除后不再参考这条经验，也不会从原有记录自动恢复。",
     memoryCount: (count: number) => `${count} 条记忆`,
+    memoryReviewing: "正在整理经验",
+    memoryReviewingHint: "完成后会自动显示在这里。",
     memoryAdvanced: "入口与参数（高级）",
 
     memoryHint:
       "自动记住经过观测的实现链路。新任务先核对条件和当前接口，不照搬旧参数。",
-    memoryEmpty: "符合记忆触发条件、且有可复用的新事实时，才会在后台学习。",
+    memoryEmpty: "完成任务后，有用的做法会自动整理到这里。",
     memoryChanged: "入口或契约已变化，暂不自动参考",
     memoryCandidate: "候选经验，使用前仍需核对目标和结果",
     memoryVerified: "该链路已有目标核验记录",
@@ -368,16 +370,6 @@ const zh = {
       "本机模型未报告容量，沿用 32k 起始值；请按实际加载的窗口设置。",
     maxOutputLabel: "最大输出",
     promptCacheLabel: "提示缓存",
-    webProviderLabel: "联网提供方",
-    webModelLabel: "网页内容提取模型",
-    webModelCurrent: "沿用当前模型",
-    webModelHelp:
-      "用独立上下文提取问题相关内容，不接收完整对话或执行工具。可选择已配置的轻量模型；提取用量单独记录，原文仍可继续读取。",
-    webProviderAuto: "自动识别官方服务",
-    webProviderDisabled: "不使用联网工具",
-    webProviderZhipu: "智谱 / Z.ai",
-    webProviderHelp:
-      "沿用此模型的地址和密钥。中转节点需选择其支持的原生联网服务；搜索和网页读取的可用性、费用由服务商决定。不会因此自动联网，普通聊天和一般知识问答不搜索。",
     setDefault: "设为默认",
     deleteNote: (name: string) =>
       `删除「${name}」。已绑定它的对话会改用默认模型。`,
@@ -863,12 +855,14 @@ const en: Dict = {
     memoryForgetHint:
       "This experience will no longer be used or automatically restored from its original record.",
     memoryCount: (count: number) => `${count} memories`,
+    memoryReviewing: "Organizing experience",
+    memoryReviewingHint: "New entries will appear here automatically.",
     memoryAdvanced: "Tools and parameters (advanced)",
 
     memoryHint:
       "Automatically learns observed implementation chains. Checks current conditions and contracts before reusing them.",
     memoryEmpty:
-      "Memory is learned quietly only when a meaningful, reusable discovery meets the memory criteria.",
+      "Useful discoveries are organized here automatically after tasks.",
     memoryChanged: "Entry or contract changed; excluded from automatic recall",
     memoryCandidate:
       "Candidate experience; check the goal and results before reuse",
@@ -942,16 +936,6 @@ const en: Dict = {
       "The local model did not report capacity. Start at 32k and use the window actually loaded.",
     maxOutputLabel: "Max output",
     promptCacheLabel: "Prompt cache",
-    webProviderLabel: "Web provider",
-    webModelLabel: "Web content extraction model",
-    webModelCurrent: "Use the current model",
-    webModelHelp:
-      "Extracts relevant content in an isolated context without the full conversation or action tools. You can select a configured lightweight model. Usage is recorded separately and source text remains readable.",
-    webProviderAuto: "Detect official service",
-    webProviderDisabled: "Disable web tools",
-    webProviderZhipu: "Zhipu / Z.ai",
-    webProviderHelp:
-      "Uses this model's endpoint and key. For relays, select the native web service they support. Availability and charges depend on the provider. This does not enable automatic browsing for ordinary chat or general questions.",
     setDefault: "Set as default",
     deleteNote: (name: string) =>
       `Delete “${name}”? Chats bound to it will fall back to the default model.`,
