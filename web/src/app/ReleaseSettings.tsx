@@ -28,7 +28,7 @@ const zh = {
   revised: "当前版本有修订",
   later: "稍后",
   verified: "下载完成，校验已通过。安装时将关闭并重启软件。",
-  preserve: "安装更新会保留你的配置、对话和快捷任务。",
+  preserve: "更新会保留现有数据。",
   noNotes: "本次更新未提供说明。",
 };
 const en: typeof zh = {
@@ -48,7 +48,7 @@ const en: typeof zh = {
   revised: "A revision is available",
   later: "Later",
   verified: "Download verified. Installing will close and restart the app.",
-  preserve: "Your settings, conversations and shortcuts will be kept.",
+  preserve: "Your data will be kept.",
   noNotes: "No release notes were provided.",
 };
 
@@ -69,6 +69,13 @@ function ReleaseActions({
   const [error, setError] = useState("");
   if (!state.release) return null;
   const release = state.release;
+  const notes = release.notes.trim().replace(
+    /^#\s+([^\r\n]+)\r?\n+/,
+    (heading, title: string) =>
+      [release.version, `v${release.version}`].includes(title.trim())
+        ? ""
+        : heading,
+  );
   const available =
     release.version === state.currentVersion ? text.revised : text.available;
   const size =
@@ -98,7 +105,7 @@ function ReleaseActions({
         aria-label={text.title}
       >
         <Markdown remarkPlugins={[remarkGfm]}>
-          {release.notes.trim() || text.noNotes}
+          {notes || text.noNotes}
         </Markdown>
       </div>
       <p className="release-progress" role="status" aria-live="polite">
