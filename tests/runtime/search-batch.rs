@@ -475,7 +475,7 @@ fn discovery_filters_sources_effects_and_batch_eligibility_before_ranking() {
 #[tokio::test]
 async fn model_discovers_batch_then_receives_merged_results_and_real_read_unlocks() {
     let mut turn = 0;
-    let fixture = ModelFixture::new(move |body| {
+    let fixture = ModelFixture::with_empty_memory_review(move |body| {
         turn += 1;
         (
             200,
@@ -562,5 +562,5 @@ async fn model_discovers_batch_then_receives_merged_results_and_real_read_unlock
         .await
         .unwrap();
     assert_eq!(run.state, RunState::Answered);
-    assert_eq!(fixture.requests.lock().unwrap().len(), 3);
+    assert_eq!(fixture.task_requests().len(), 3);
 }

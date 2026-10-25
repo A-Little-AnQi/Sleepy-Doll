@@ -104,7 +104,7 @@ async fn observation_read_returns_original_result_and_rejects_other_conversation
     let mut turn = 0;
     let id = Arc::new(Mutex::new(String::new()));
     let observed_id = id.clone();
-    let fixture = ModelFixture::new(move |request| {
+    let fixture = ModelFixture::with_empty_memory_review(move |request| {
         turn += 1;
         (
             200,

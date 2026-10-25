@@ -4,7 +4,7 @@ use super::*;
 #[tokio::test]
 async fn matching_catalog_keywords_do_not_preload_skill_bodies() {
     let mut turn = 0;
-    let fixture = ModelFixture::new(move |request| {
+    let fixture = ModelFixture::with_empty_memory_review(move |request| {
         turn += 1;
         let messages = request["messages"].to_string();
         if turn == 1 {
@@ -39,7 +39,7 @@ async fn matching_catalog_keywords_do_not_preload_skill_bodies() {
         .unwrap();
     assert_eq!(run.state, RunState::Answered);
     assert_eq!(run.tool_calls, 1);
-    assert_eq!(fixture.requests.lock().unwrap().len(), 2);
+    assert_eq!(fixture.task_requests().len(), 2);
 }
 
 #[tokio::test]
@@ -47,7 +47,7 @@ async fn context_usage_only_changes_after_a_completed_primary_response() {
     let control = Arc::new(Mutex::new(None::<(Arc<Supervisor>, String)>));
     let inspect = control.clone();
     let mut turn = 0;
-    let fixture = ModelFixture::new(move |_| {
+    let fixture = ModelFixture::with_empty_memory_review(move |_| {
         turn += 1;
         let control = inspect.lock().unwrap();
         let (supervisor, id) = control.as_ref().unwrap();
@@ -115,7 +115,18 @@ async fn context_usage_only_changes_after_a_completed_primary_response() {
         .unwrap();
     assert_eq!(run.context_tokens, 3000);
     assert_eq!(run.cache_read_tokens, 500);
-    assert_eq!(fixture.requests.lock().unwrap().len(), 3);
+    assert_eq!(fixture.task_requests().len(), 3);
+    assert_eq!(fixture.requests.lock().unwrap().len(), 4);
+    let usage = supervisor.journal.model_usage(&run.id).unwrap();
+    assert_eq!(
+        usage["byPurpose"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["purpose"] == "memory")
+            .unwrap()["requests"],
+        1
+    );
     *control.lock().unwrap() = None;
     supervisor.shutdown();
 }
@@ -202,7 +213,7 @@ async fn greeting_only_offers_discovery_and_does_not_load_plugin_manuals() {
 #[tokio::test]
 async fn discovery_loads_real_plugin_contract_and_manual_before_execution() {
     let mut turn = 0;
-    let fixture = ModelFixture::new(move |request| {
+    let fixture = ModelFixture::with_empty_memory_review(move |request| {
         turn += 1;
         (
             200,
@@ -269,7 +280,7 @@ async fn discovery_loads_real_plugin_contract_and_manual_before_execution() {
         .unwrap();
     assert_eq!(count.load(Ordering::SeqCst), 1);
     assert_eq!(run.tool_calls, 2);
-    assert_eq!(fixture.requests.lock().unwrap().len(), 3);
+    assert_eq!(fixture.task_requests().len(), 3);
 }
 
 #[test]

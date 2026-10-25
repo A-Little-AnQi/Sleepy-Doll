@@ -23,6 +23,38 @@ struct ModelFixture {
 }
 
 impl ModelFixture {
+    fn is_memory_review(request: &Value) -> bool {
+        request["tools"][0]["function"]["name"]
+            .as_str()
+            .is_some_and(|name| name.starts_with("runtime_memory_experiences_"))
+    }
+
+    // 非学习场景仍接收并归档总结评估；不让它消耗主任务的脚本响应。
+    fn with_empty_memory_review(
+        mut reply: impl FnMut(&Value) -> (u16, Value) + Send + 'static,
+    ) -> Self {
+        Self::new(move |request| {
+            if Self::is_memory_review(request) {
+                (
+                    200,
+                    answer(&json!({"goalRelevant":true,"experiences":[]}).to_string()),
+                )
+            } else {
+                reply(request)
+            }
+        })
+    }
+
+    fn task_requests(&self) -> Vec<Value> {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| !Self::is_memory_review(request))
+            .cloned()
+            .collect()
+    }
+
     fn new(mut reply: impl FnMut(&Value) -> (u16, Value) + Send + 'static) -> Self {
         Self::with_headers(move |request| {
             let (status, mut body) = reply(request);
@@ -255,7 +287,7 @@ fn supervisor(fixture: &ModelFixture) -> Arc<Supervisor> {
 #[tokio::test]
 async fn followup_skill_and_real_user_inputs_are_disclosed_only_when_requested() {
     let mut turn = 0;
-    let fixture = ModelFixture::new(move |request| {
+    let fixture = ModelFixture::with_empty_memory_review(move |request| {
         turn += 1;
         assert!(!request["tools"].as_array().unwrap().iter().any(|tool| {
             tool["function"]["name"]
@@ -316,7 +348,7 @@ async fn followup_skill_and_real_user_inputs_are_disclosed_only_when_requested()
         .session(&mut run, &CancellationToken::new())
         .await
         .unwrap();
-    assert_eq!(fixture.requests.lock().unwrap().len(), 5);
+    assert_eq!(fixture.task_requests().len(), 5);
     let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
     assert!(events.iter().any(|event| event.kind == "tool.started"
         && event.data["name"] == "skills.read"
@@ -676,7 +708,7 @@ async fn truncated_tool_decisions_are_never_dispatched_or_retried() {
 
 #[tokio::test]
 async fn standalone_shortcut_skill_saves_once_without_scope_model_or_execution() {
-    let fixture = ModelFixture::new(|request| {
+    let fixture = ModelFixture::with_empty_memory_review(|request| {
         let names = request["tools"]
             .as_array()
             .unwrap()
@@ -711,7 +743,7 @@ async fn standalone_shortcut_skill_saves_once_without_scope_model_or_execution()
         .unwrap();
     assert_eq!(run.state, RunState::Succeeded);
     assert_eq!(changes.load(Ordering::SeqCst), 0);
-    assert_eq!(fixture.requests.lock().unwrap().len(), 1);
+    assert_eq!(fixture.task_requests().len(), 1);
     let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
     let saved = events
         .iter()
@@ -739,7 +771,7 @@ async fn standalone_shortcut_skill_saves_once_without_scope_model_or_execution()
             .as_array()
             .unwrap()
             .len(),
-        1
+        2
     );
 }
 
@@ -782,7 +814,7 @@ fn shortcut_schema_lists_registered_tools_without_creating_method_aliases() {
 async fn observed_game_state_does_not_adjudicate_explicit_shortcut_saves_or_repairs() {
     for repair in [false, true] {
         let mut turn = 0;
-        let fixture = ModelFixture::new(move |request| {
+        let fixture = ModelFixture::with_empty_memory_review(move |request| {
             turn += 1;
             if turn == 1 {
                 return (200, tool_calls(vec![("fixture.status", json!({}))]));
@@ -826,10 +858,7 @@ async fn observed_game_state_does_not_adjudicate_explicit_shortcut_saves_or_repa
             run.result
         );
         assert_eq!(changes.load(Ordering::SeqCst), 0);
-        assert_eq!(
-            fixture.requests.lock().unwrap().len(),
-            if repair { 3 } else { 2 }
-        );
+        assert_eq!(fixture.task_requests().len(), if repair { 3 } else { 2 });
         let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
         assert_eq!(
             events
@@ -845,7 +874,7 @@ async fn observed_game_state_does_not_adjudicate_explicit_shortcut_saves_or_repa
                 .as_array()
                 .unwrap()
                 .iter()
-                .all(|item| item["purpose"] == "foreground")
+                .all(|item| item["purpose"] == "foreground" || item["purpose"] == "memory")
         );
     }
 }
@@ -853,7 +882,7 @@ async fn observed_game_state_does_not_adjudicate_explicit_shortcut_saves_or_repa
 #[tokio::test]
 async fn invalid_shortcut_tool_can_be_corrected_without_starting_the_target() {
     let mut turn = 0;
-    let fixture = ModelFixture::new(move |request| {
+    let fixture = ModelFixture::with_empty_memory_review(move |request| {
         turn += 1;
         if turn == 2 {
             let result = request["messages"]
@@ -893,7 +922,7 @@ async fn invalid_shortcut_tool_can_be_corrected_without_starting_the_target() {
         .unwrap();
     assert_eq!(run.state, RunState::Succeeded);
     assert_eq!(changes.load(Ordering::SeqCst), 0);
-    assert_eq!(fixture.requests.lock().unwrap().len(), 2);
+    assert_eq!(fixture.task_requests().len(), 2);
     let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
     assert_eq!(
         events
@@ -914,7 +943,7 @@ fn bgi_mcp_state_then_shortcut_repair_saves_without_review_or_game_calls() {
         )
     });
     let mut turn = 0;
-    let model = ModelFixture::new(move |_request| {
+    let model = ModelFixture::with_empty_memory_review(move |_request| {
         turn += 1;
         if turn == 1 {
             return (200, tool_calls(vec![("bgi.state.get", json!({}))]));
@@ -973,7 +1002,7 @@ fn bgi_mcp_state_then_shortcut_repair_saves_without_review_or_game_calls() {
         .block_on(supervisor.session(&mut run, &CancellationToken::new()))
         .unwrap();
     assert_eq!(run.state, RunState::Succeeded);
-    assert_eq!(model.requests.lock().unwrap().len(), 3);
+    assert_eq!(model.task_requests().len(), 3);
     assert_eq!(
         native.requests.lock().unwrap().len(),
         1,
@@ -1180,7 +1209,7 @@ fn install_status_slice(supervisor: &Supervisor, changes: Arc<std::sync::atomic:
 #[tokio::test]
 async fn repeated_identical_calls_report_to_main_model_without_concluding_task() {
     let mut turn = 0;
-    let fixture = ModelFixture::new(move |request| {
+    let fixture = ModelFixture::with_empty_memory_review(move |request| {
         turn += 1;
         if turn <= 3 {
             return (200, tool_calls(vec![("workspace.environment", json!({}))]));
@@ -1217,7 +1246,7 @@ async fn repeated_identical_calls_report_to_main_model_without_concluding_task()
         run.result.as_deref(),
         Some("已取得当前环境，无需重复读取。")
     );
-    assert_eq!(fixture.requests.lock().unwrap().len(), 4);
+    assert_eq!(fixture.task_requests().len(), 4);
     assert!(
         supervisor
             .journal
@@ -1574,7 +1603,7 @@ fn wide_tool_results_keep_bounded_evidence_and_verification() {
 #[tokio::test]
 async fn malformed_arguments_after_observation_do_not_spend_scope_review_tokens() {
     let mut turn = 0;
-    let fixture = ModelFixture::new(move |_request| {
+    let fixture = ModelFixture::with_empty_memory_review(move |_request| {
         turn += 1;
         (
             200,
@@ -1604,14 +1633,14 @@ async fn malformed_arguments_after_observation_do_not_spend_scope_review_tokens(
         .unwrap();
     assert_eq!(run.state, RunState::Answered);
     assert_eq!(changes.load(Ordering::SeqCst), 0);
-    assert_eq!(fixture.requests.lock().unwrap().len(), 3);
+    assert_eq!(fixture.task_requests().len(), 3);
     let usage = supervisor.journal.model_usage(&run.id).unwrap();
     assert!(
         usage["byPurpose"]
             .as_array()
             .unwrap()
             .iter()
-            .all(|entry| entry["purpose"] == "foreground")
+            .all(|entry| entry["purpose"] == "foreground" || entry["purpose"] == "memory")
     );
 }
 
@@ -1743,25 +1772,15 @@ async fn verified_experience_is_learned_and_recalled_in_a_new_conversation() {
         .unwrap();
     supervisor.session(&mut first, &cancel).await.unwrap();
     assert_eq!(first.state, RunState::Answered);
-    let evidence = supervisor
-        .journal
-        .run_history(&first)
-        .unwrap()
-        .iter()
-        .flat_map(|m| m.tool_calls.clone())
-        .filter(|c| !c.name.starts_with("memory."))
-        .map(|c| c.id)
-        .collect::<Vec<_>>();
-    admit_memory_learning(
-        &supervisor,
-        &first,
-        &evidence.iter().map(String::as_str).collect::<Vec<_>>(),
+    assert_eq!(supervisor.memory.list(10).unwrap().len(), 1);
+    assert_eq!(
+        supervisor
+            .memory
+            .learning_status(&first.id)
+            .unwrap()
+            .as_deref(),
+        Some("complete")
     );
-    let learned = supervisor
-        .learn_experience(&first.id, &cancel, &CancellationToken::new())
-        .await
-        .unwrap();
-    assert_eq!(learned.0, 1);
     let mut second = supervisor
         .journal
         .create("读取另一个脚本配置", "second", "second", 600, None)
@@ -2139,7 +2158,7 @@ fn initial_builtin_tools_are_lightweight_and_expand_with_provider_evidence() {
 #[tokio::test]
 async fn discovered_builtin_shell_becomes_callable_without_loading_a_plugin() {
     let mut turn = 0;
-    let fixture = ModelFixture::new(move |_request| {
+    let fixture = ModelFixture::with_empty_memory_review(move |_request| {
         turn += 1;
         (
             200,
@@ -2161,7 +2180,7 @@ async fn discovered_builtin_shell_becomes_callable_without_loading_a_plugin() {
         .session(&mut run, &CancellationToken::new())
         .await
         .unwrap();
-    let requests = fixture.requests.lock().unwrap();
+    let requests = fixture.task_requests();
     assert!(
         !requests[0]["tools"]
             .to_string()
@@ -2250,7 +2269,7 @@ async fn large_read_keeps_version_evidence_and_artifact_pages_do_not_rewrap() {
 
 #[tokio::test]
 async fn compaction_preserves_current_user_authority_after_summarizing_its_message() {
-    let fixture = ModelFixture::new(|request| {
+    let fixture = ModelFixture::with_empty_memory_review(|request| {
         (
             200,
             if request["messages"][0]["content"] == CONTEXT_COMPACTION_PROMPT {
@@ -2289,7 +2308,7 @@ async fn compaction_preserves_current_user_authority_after_summarizing_its_messa
         .session(&mut run, &CancellationToken::new())
         .await
         .unwrap();
-    let requests = fixture.requests.lock().unwrap();
+    let requests = fixture.task_requests();
     assert!(
         requests.last().unwrap()["messages"]
             .as_array()
