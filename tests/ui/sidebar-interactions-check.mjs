@@ -246,16 +246,16 @@ try {
         "running dot is not vertically centered",
       );
       assert(
-        Math.abs(after.row.right - after.status.right - 10) < 0.5,
-        "running dot is not at the row's right edge",
+        Math.abs(after.status.x - after.row.x - 10) < 0.5,
+        "running dot is not at the row's leading edge",
       );
       assert(
         Math.abs(before.status.x - after.status.x) < 0.5,
         "hover moved the running dot",
       );
       assert(
-        after.actions.right <= after.status.x,
-        "actions overlap the running dot",
+        after.status.right <= after.title.x,
+        "running dot overlaps the title",
       );
       assert(after.title.right <= after.actions.x, "actions cover the title");
       for (const button of after.buttons) {
