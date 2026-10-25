@@ -13,7 +13,7 @@ import { Button } from "@sleepy-doll/ui";
 import { Dialog } from "@sleepy-doll/ui/overlay/Dialog";
 import { useT, type Text } from "../i18n";
 import "./UpdateDialog.css";
-import changelogSource from "./release-notes/changelog-0.1.3.md?raw";
+import changelogSource from "./release-notes/changelog-0.1.4.md?raw";
 import guideSource from "./release-notes/guide.md?raw";
 import faqSource from "./release-notes/faq.md?raw";
 
