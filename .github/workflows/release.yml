@@ -11,6 +11,14 @@ on:
         type: choice
         default: stable
         options: [stable, test]
+      uploaded_run:
+        description: '续接已上传且校验成功的发布运行 ID，通常留空'
+        required: false
+        type: string
+      uploaded_sha256:
+        description: '续接时填写原安装包 SHA-256'
+        required: false
+        type: string
 
 concurrency:
   group: sleepy-doll-release
@@ -21,12 +29,15 @@ permissions:
 
 jobs:
   check:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.uploaded_run == '' }}
     uses: ./.github/workflows/check.yml
   release:
+    if: ${{ always() && (needs.check.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.uploaded_run != '')) }}
     needs: check
     runs-on: windows-2022
     permissions:
       contents: write
+      actions: read
     env:
       TEMP: ${{ github.workspace }}\target\ci\tmp
       TMP: ${{ github.workspace }}\target\ci\tmp
@@ -44,7 +55,9 @@ jobs:
         with:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
+        if: ${{ inputs.uploaded_run == '' }}
       - uses: actions/setup-dotnet@v4
+        if: ${{ inputs.uploaded_run == '' }}
         with:
           dotnet-version: 8.0.x
       - name: Resolve version
@@ -52,15 +65,26 @@ jobs:
           RELEASE_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.channel || '' }}
         run: node scripts/release-version.mjs --github
       - run: npm install
+        if: ${{ inputs.uploaded_run == '' }}
+      - name: Recover verified uploaded package
+        if: ${{ inputs.uploaded_run != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPLOADED_RUN: ${{ inputs.uploaded_run }}
+          UPLOADED_SHA256: ${{ inputs.uploaded_sha256 }}
+        run: node scripts/resume-uploaded-release.mjs
       - name: Build product
+        if: ${{ inputs.uploaded_run == '' }}
         shell: cmd
         run: npm run dist
       - name: Upload and verify R2 files
+        if: ${{ inputs.uploaded_run == '' }}
         env:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: node scripts/publish-r2.mjs
       - name: Deploy distribution service
+        if: ${{ inputs.uploaded_run == '' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
@@ -73,7 +97,7 @@ jobs:
         run: |
           $assets = @("dist/Sleepy-Doll-$env:VERSION-setup.exe", "dist/Sleepy-Doll-$env:VERSION-setup.exe.sha256", "dist/Sleepy-Doll-$env:VERSION-release.json")
           $notes = "web/src/app/release-notes/changelog-$env:VERSION.md"
-          $noteArgs = if (Test-Path -LiteralPath $notes) { @('--notes-file', $notes) } else { @('--notes=') }
+          [string[]]$noteArgs = if (Test-Path -LiteralPath $notes) { @('--notes-file', $notes) } else { @('--notes=') }
           gh release view $env:RELEASE_TAG --json isDraft 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $env:RELEASE_TAG @assets --clobber
