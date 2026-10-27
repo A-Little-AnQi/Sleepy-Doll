@@ -22,6 +22,9 @@ var bridgeDir = Path.Combine(root, $"bridge-{id}");
 var legacyRecords = Path.Combine(bridgeDir, "user", ".sleepy-doll", "config-changes");
 Directory.CreateDirectory(legacyRecords);
 File.WriteAllText(Path.Combine(legacyRecords, "record.json"), "original recovery");
+BgiBridge.InstallPaths.Ensure(bridgeDir);
+Require(Directory.Exists(Path.Combine(bridgeDir, "user", ".sleepy-doll"))
+    && !Directory.Exists(Path.Combine(bridgeDir, "user", "data")), "preflight logging must not migrate business data");
 var migratedRecords = BgiBridge.InstallPaths.ChangeRecordDirectory(bridgeDir);
 Require(migratedRecords == Path.Combine(bridgeDir, "user", "data", "config-changes"), "visible data directory");
 Require(File.ReadAllText(Path.Combine(migratedRecords, "record.json")) == "original recovery", "recovery records survive migration");
@@ -40,6 +43,75 @@ using (var active = new FileStream(Path.Combine(lockedLegacy, "sleepy-doll.runti
     Require(blocked && Directory.Exists(lockedLegacy), "active client blocks migration");
     Require(!Directory.Exists(Path.Combine(lockedBridge, "user", "data")), "blocked migration leaves no second data directory");
     active.Unlock(0, 1);
+}
+
+// 已迁移数据库与旧版重建的界面缓存共存，不能阻止新桥启动。
+var coexistBridge = Path.Combine(root, $"bridge-coexist-{id}");
+var coexistUser = Path.Combine(coexistBridge, "user");
+var canonical = Path.Combine(coexistUser, "data");
+var auxiliary = Path.Combine(coexistUser, ".sleepy-doll");
+Directory.CreateDirectory(Path.Combine(canonical, "config-changes"));
+Directory.CreateDirectory(Path.Combine(auxiliary, "webview2"));
+File.WriteAllText(Path.Combine(canonical, "sleepy-doll.db"), "canonical database");
+File.WriteAllText(Path.Combine(auxiliary, "webview2", "profile"), "legacy profile");
+Require(BgiBridge.InstallPaths.ChangeRecordDirectory(coexistBridge) == Path.Combine(canonical, "config-changes"), "legacy caches must not block the bridge");
+Require(File.ReadAllText(Path.Combine(canonical, "sleepy-doll.db")) == "canonical database", "canonical database remains untouched");
+Require(File.ReadAllText(Path.Combine(auxiliary, "webview2", "profile")) == "legacy profile", "old caches are preserved");
+File.Move(Path.Combine(canonical, "sleepy-doll.db"), Path.Combine(canonical, "custom.sqlite"));
+File.WriteAllText(Path.Combine(coexistUser, "config.json"), "{\"storage\":{\"database\":\"data/custom.sqlite\"}}");
+Require(BgiBridge.InstallPaths.DataDirectory(coexistBridge) == canonical, "canonical custom database follows the app configuration");
+File.WriteAllText(Path.Combine(coexistUser, "config.json"), "{\"storage\":{\"database\":\"outside.sqlite\"}}");
+File.WriteAllText(Path.Combine(coexistUser, "outside.sqlite"), "external database");
+var externalDatabaseBlocked = false;
+try { BgiBridge.InstallPaths.DataDirectory(coexistBridge); } catch (IOException) { externalDatabaseBlocked = true; }
+Require(externalDatabaseBlocked, "an unrelated database cannot authorize choosing the canonical directory");
+File.WriteAllText(Path.Combine(coexistUser, "config.json"), "{\"storage\":{\"database\":\"data/sleepy-doll.db\"}}");
+File.Move(Path.Combine(canonical, "custom.sqlite"), Path.Combine(canonical, "sleepy-doll.db"));
+File.WriteAllText(Path.Combine(auxiliary, "sleepy-doll.db"), "second database");
+var dualDatabaseBlocked = false;
+try { BgiBridge.InstallPaths.DataDirectory(coexistBridge); } catch (IOException) { dualDatabaseBlocked = true; }
+Require(dualDatabaseBlocked && File.ReadAllText(Path.Combine(auxiliary, "sleepy-doll.db")) == "second database", "two real databases remain a conflict");
+
+// 另一个进程在等待期间完成迁移，取得同一把锁后重新读取目录状态。
+var concurrentBridge = Path.Combine(root, $"bridge-concurrent-{id}");
+var concurrentUser = Path.Combine(concurrentBridge, "user");
+var concurrentLegacy = Path.Combine(concurrentUser, ".sleepy-doll");
+Directory.CreateDirectory(Path.Combine(concurrentLegacy, "config-changes"));
+File.WriteAllText(Path.Combine(concurrentLegacy, "config-changes", "record.json"), "preserved recovery");
+using (var migration = new FileStream(Path.Combine(concurrentUser, "data-migration.lock"), FileMode.OpenOrCreate,
+    FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
+{
+    migration.Lock(0, 1);
+    using var started = new ManualResetEventSlim();
+    var waiter = Task.Run(() => { started.Set(); return BgiBridge.InstallPaths.ChangeRecordDirectory(concurrentBridge); });
+    Require(started.Wait(TimeSpan.FromSeconds(5)), "migration waiter started");
+    Thread.Sleep(100);
+    Require(!waiter.IsCompleted, "the bridge waits for the shared migration lock");
+    Directory.Move(concurrentLegacy, Path.Combine(concurrentUser, "data"));
+    migration.Unlock(0, 1);
+    Require(waiter.GetAwaiter().GetResult() == Path.Combine(concurrentUser, "data", "config-changes"), "completed concurrent migration is idempotent");
+}
+Require(File.ReadAllText(Path.Combine(concurrentUser, "data", "config-changes", "record.json")) == "preserved recovery", "concurrent migration preserves recovery records");
+
+var configuredBridge = Path.Combine(root, $"bridge-configured-{id}");
+Directory.CreateDirectory(configuredBridge);
+var bridgeConfig = Path.Combine(configuredBridge, "bridge.config.json");
+var configuredUser = Path.Combine(root, $"用户数据-{id}");
+File.WriteAllText(bridgeConfig, System.Text.Json.JsonSerializer.Serialize(new { userDirectory = configuredUser }), new System.Text.UTF8Encoding(true));
+Require(BgiBridge.InstallPaths.UserRoot(configuredBridge) == configuredUser, "BOM and Unicode absolute roots remain supported");
+File.WriteAllText(bridgeConfig, "{\"userDirectory\":\"C:relative\"}");
+var relativeBlocked = false;
+try { BgiBridge.InstallPaths.UserRoot(configuredBridge); } catch (IOException) { relativeBlocked = true; }
+Require(relativeBlocked && !Directory.Exists(Path.Combine(configuredBridge, "user")), "drive-relative root must not silently create shadow-copy data");
+File.WriteAllText(bridgeConfig, "{");
+var malformedBlocked = false;
+try { BgiBridge.InstallPaths.UserRoot(configuredBridge); } catch (System.Text.Json.JsonException) { malformedBlocked = true; }
+Require(malformedBlocked && !Directory.Exists(Path.Combine(configuredBridge, "user")), "malformed configuration must not silently redirect user data");
+
+if (args.Contains("--data-migration"))
+{
+    Console.WriteLine("Data migration checks passed: legacy records, active locks, cache coexistence, database conflicts, concurrent migration, BOM/Unicode roots and invalid configuration.");
+    return;
 }
 
 // ---- descriptions use BetterGI while actual parameter values stay untouched ----

@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace BgiBridge;
 
-/// <summary>运行期数据的落点。日志、宿主配置回滚记录一律落在安装目录的 user\ 下：那里安装与卸载都不动。</summary>
+/// <summary>运行期数据的落点。日志和配置回滚记录归 user\，更新保留，卸载按产品流程清理。</summary>
 public static class InstallPaths
 {
     /// <summary>
@@ -24,22 +24,83 @@ public static class InstallPaths
         var root = UserRoot(bridgeDir);
         var previous = Path.Combine(root, ".sleepy-doll");
         var destination = Path.Combine(root, "data");
-        if (ExistingAttributes(previous) is { } attributes)
+        if (ExistingAttributes(previous) is not null)
         {
             using var migration = new FileStream(Path.Combine(root, "data-migration.lock"),
                 FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
-            migration.Lock(0, 1);
-            if ((attributes & FileAttributes.ReparsePoint) != 0 || (attributes & FileAttributes.Directory) == 0)
-                throw new IOException("旧数据目录不是普通目录，未迁移。");
-            if (ExistingAttributes(destination) is not null)
-                throw new IOException("发现 .sleepy-doll 与 data 两份数据目录，未覆盖任何内容。");
-            using (var guard = new FileStream(Path.Combine(previous, "sleepy-doll.runtime.lock"),
-                FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
-            { guard.Lock(0, 1); guard.Unlock(0, 1); }
-            Directory.Move(previous, destination);
-            migration.Unlock(0, 1);
+            LockMigration(migration);
+            try
+            {
+                // 主程序可能已在取得锁之前完成迁移；不能沿用锁外读到的目录状态。
+                if (ExistingAttributes(previous) is not { } attributes) return destination;
+                if (!OrdinaryDirectory(attributes))
+                    throw new IOException("旧数据目录不是普通目录，未迁移。");
+                if (ExistingAttributes(destination) is { } current)
+                {
+                    // 与主程序 data_directory::migrate 的兼容规则一致，不合并或覆盖文件。
+                    if (OrdinaryDirectory(current) && CanonicalDatabaseExists(root, destination)
+                        && LegacyHasOnlyAuxiliaryState(previous)) return destination;
+                    throw new IOException("发现 .sleepy-doll 与 data 两份数据目录，未覆盖任何内容。");
+                }
+                using (var guard = new FileStream(Path.Combine(previous, "sleepy-doll.runtime.lock"),
+                    FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
+                { guard.Lock(0, 1); guard.Unlock(0, 1); }
+                Directory.Move(previous, destination);
+            }
+            finally { migration.Unlock(0, 1); }
         }
         return destination;
+    }
+
+    private static bool OrdinaryDirectory(FileAttributes attributes) =>
+        (attributes & FileAttributes.Directory) != 0 && (attributes & FileAttributes.ReparsePoint) == 0;
+
+    private static bool CanonicalDatabaseExists(string root, string destination)
+    {
+        var database = Path.Combine(destination, "sleepy-doll.db");
+        var config = Path.Combine(root, "config.json");
+        if (File.Exists(config))
+        {
+            using var document = ReadConfig(config);
+            if (document.RootElement.TryGetProperty("storage", out var storage)
+                && storage.TryGetProperty("database", out var value))
+            {
+                var configured = value.GetString();
+                if (configured is null) return false;
+                if (configured.StartsWith("${ENV:", StringComparison.Ordinal) && configured.EndsWith('}'))
+                    configured = Environment.GetEnvironmentVariable(configured[6..^1]);
+                if (string.IsNullOrWhiteSpace(configured)) return false;
+                database = Path.GetFullPath(configured, root);
+            }
+        }
+        var relative = Path.GetRelativePath(destination, database);
+        return !Path.IsPathRooted(relative) && relative != ".."
+            && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            && File.Exists(database);
+    }
+
+    private static bool LegacyHasOnlyAuxiliaryState(string directory)
+    {
+        foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+        {
+            var attributes = File.GetAttributes(entry);
+            if ((attributes & FileAttributes.ReparsePoint) != 0) return false;
+            var name = Path.GetFileName(entry);
+            if ((attributes & FileAttributes.Directory) != 0
+                ? name is not ("webview2" or "updates" or "config-changes")
+                : name != "window-placement.json") return false;
+        }
+        return true;
+    }
+
+    private static void LockMigration(FileStream migration)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try { migration.Lock(0, 1); return; }
+            catch (IOException error) when ((error.HResult & 0xffff) == 33 && attempt < 79)
+            { System.Threading.Thread.Sleep(25); }
+        }
     }
 
     private static FileAttributes? ExistingAttributes(string path)
@@ -49,38 +110,44 @@ public static class InstallPaths
         catch (DirectoryNotFoundException) { return null; }
     }
 
-    /// <summary>建好运行期目录。失败只吞掉：日志另有兜底路径，记录写不进去时调用方会自己报错。</summary>
+    private static JsonDocument ReadConfig(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream, System.Text.Encoding.UTF8, true);
+        return JsonDocument.Parse(reader.ReadToEnd());
+    }
+
+    /// <summary>只准备引导日志；数据迁移须在桥配置通过校验后执行。</summary>
     public static void Ensure(string bridgeDir)
     {
         if (string.IsNullOrWhiteSpace(bridgeDir)) return;
         try
         {
             Directory.CreateDirectory(LogDirectory(bridgeDir));
-            Directory.CreateDirectory(ChangeRecordDirectory(bridgeDir));
         }
         catch
         {
         }
     }
 
-    /// <summary>读 bridge.config.json 里的数据根。读不出来或字段不完整时返回 null，由调用方退回缺省。</summary>
+    /// <summary>缺少旧版可选字段时沿用缺省；显式配置损坏时不能悄悄创建另一份用户数据。</summary>
     private static string? ConfiguredRoot(string bridgeDir)
     {
         if (string.IsNullOrWhiteSpace(bridgeDir)) return null;
         try
         {
             var path = Path.Combine(bridgeDir, "bridge.config.json");
-            if (!File.Exists(path)) return null;
-            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            using var document = ReadConfig(path);
             var root = document.RootElement.TryGetProperty("userDirectory", out var value)
                 ? value.GetString()
                 : null;
-            // 相对路径随宿主进程的当前目录变化。
-            return !string.IsNullOrWhiteSpace(root) && Path.IsPathRooted(root) ? root : null;
+            if (string.IsNullOrWhiteSpace(root)) return null;
+            if (!Path.IsPathFullyQualified(root))
+                throw new IOException("连接配置中的数据目录必须是完整绝对路径，请重新连接 BetterGI。");
+            return Path.GetFullPath(root);
         }
-        catch
-        {
-            return null;
-        }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
     }
 }

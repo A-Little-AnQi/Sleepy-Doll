@@ -35,6 +35,8 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo check
       - run: cargo check --no-default-features
+      - name: Validate bridge data migration
+        run: dotnet run --project bgi-bridge/dev/ProductionCoreChecks.csproj --configuration Release -- --data-migration
       - name: Validate workspace PowerShell execution
         run: cargo test --no-default-features --lib runtime::workspace::tests::shell_ -- --nocapture
       - name: Validate BGI progressive disclosure

@@ -67,7 +67,9 @@ public static class Entry
                 Diagnostics.Write($"未处理异常（不会终止宿主，仅记录）：{e.ExceptionObject}");
 
             var registry = new MethodRegistry();
-            SettingsTransactions.Configure(InstallPaths.ChangeRecordDirectory(bridgeDir));
+            var changeRecords = InstallPaths.ChangeRecordDirectory(bridgeDir);
+            Directory.CreateDirectory(changeRecords);
+            SettingsTransactions.Configure(changeRecords);
             StatusTools.Register(registry);
             HostLogTools.Register(registry);
             CatalogTools.Register(registry);
