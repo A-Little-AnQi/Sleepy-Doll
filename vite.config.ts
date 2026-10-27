@@ -96,6 +96,14 @@ function designCssLast(): Plugin {
   };
 }
 
+const appVersion = JSON.parse(
+  fs.readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+).version;
+const releaseNotesPath = new URL(
+  `./web/src/app/release-notes/changelog-${appVersion}.md`,
+  import.meta.url,
+);
+
 export default defineConfig({
   plugins: [react(), designCssLast(), ipcProxy()],
   // 版本号唯一来源是 package.json：更新弹窗拿它和本地记录比对。
@@ -108,13 +116,11 @@ export default defineConfig({
         ),
       ).channel,
     ),
-    __APP_VERSION__: JSON.stringify(
-      JSON.parse(
-        fs.readFileSync(
-          fileURLToPath(new URL("./package.json", import.meta.url)),
-          "utf8",
-        ),
-      ).version,
+    __APP_VERSION__: JSON.stringify(appVersion),
+    __APP_RELEASE_NOTES__: JSON.stringify(
+      fs.existsSync(releaseNotesPath)
+        ? fs.readFileSync(releaseNotesPath, "utf8")
+        : "",
     ),
   },
   root: "web",

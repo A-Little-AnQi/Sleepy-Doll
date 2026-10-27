@@ -29,7 +29,6 @@ const zh = {
   later: "稍后",
   verified: "下载完成，校验已通过。安装时将关闭并重启软件。",
   preserve: "更新会保留现有数据。",
-  noNotes: "本次更新未提供说明。",
 };
 const en: typeof zh = {
   title: "Software updates",
@@ -49,7 +48,6 @@ const en: typeof zh = {
   later: "Later",
   verified: "Download verified. Installing will close and restart the app.",
   preserve: "Your data will be kept.",
-  noNotes: "No release notes were provided.",
 };
 
 function ReleaseActions({
@@ -69,13 +67,13 @@ function ReleaseActions({
   const [error, setError] = useState("");
   if (!state.release) return null;
   const release = state.release;
-  const notes = release.notes.trim().replace(
-    /^#\s+([^\r\n]+)\r?\n+/,
-    (heading, title: string) =>
+  const notes = release.notes
+    .trim()
+    .replace(/^#\s+([^\r\n]+)\r?\n+/, (heading, title: string) =>
       [release.version, `v${release.version}`].includes(title.trim())
         ? ""
         : heading,
-  );
+    );
   const available =
     release.version === state.currentVersion ? text.revised : text.available;
   const size =
@@ -98,16 +96,16 @@ function ReleaseActions({
           {size ? ` · ${size}` : ""}
         </span>
       </div>
-      <div
-        className="release-notes"
-        tabIndex={0}
-        role="region"
-        aria-label={text.title}
-      >
-        <Markdown remarkPlugins={[remarkGfm]}>
-          {notes || text.noNotes}
-        </Markdown>
-      </div>
+      {notes && (
+        <div
+          className="release-notes"
+          tabIndex={0}
+          role="region"
+          aria-label={text.title}
+        >
+          <Markdown remarkPlugins={[remarkGfm]}>{notes}</Markdown>
+        </div>
+      )}
       <p className="release-progress" role="status" aria-live="polite">
         {busy
           ? phase === "installing"

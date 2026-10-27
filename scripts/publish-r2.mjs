@@ -90,7 +90,10 @@ const digest = hash(bytes);
 const notes = await readFile(
   `web/src/app/release-notes/changelog-${version}.md`,
   "utf8",
-);
+).catch((error) => {
+  if (error.code === "ENOENT") return "";
+  throw error;
+});
 const manifest = {
   version,
   channel,

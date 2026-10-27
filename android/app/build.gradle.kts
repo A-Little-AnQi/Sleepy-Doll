@@ -8,8 +8,8 @@ android {
         applicationId = "dev.sleepydoll.android"
         minSdk = 26
         targetSdk = 37
-        versionCode = 4
-        versionName = "0.1.4"
+        versionCode = 5
+        versionName = "0.1.5"
     }
     buildFeatures { compose = true }
     compileOptions {

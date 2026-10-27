@@ -13,16 +13,26 @@ import { Button } from "@sleepy-doll/ui";
 import { Dialog } from "@sleepy-doll/ui/overlay/Dialog";
 import { useT, type Text } from "../i18n";
 import "./UpdateDialog.css";
-import changelogSource from "./release-notes/changelog-0.1.4.md?raw";
 import guideSource from "./release-notes/guide.md?raw";
 import faqSource from "./release-notes/faq.md?raw";
 
-/** 当前版本的更新日志。发新版本时：加一份 md、package.json 升版本号。 */
+const changelogSource = __APP_RELEASE_NOTES__;
+export const hasReleaseNotes = Boolean(changelogSource.trim());
+
+/** 更新说明按当前产品版本加载，允许修复版本不提供日志。 */
 const CHANGELOG_VERSION = __APP_VERSION__;
 
 function tabs(t: Text): Array<{ key: string; title: string; source: string }> {
   return [
-    { key: "changelog", title: t.update.changelog, source: changelogSource },
+    ...(hasReleaseNotes
+      ? [
+          {
+            key: "changelog",
+            title: t.update.changelog,
+            source: changelogSource,
+          },
+        ]
+      : []),
     { key: "guide", title: t.update.guide, source: guideSource },
     { key: "faq", title: t.update.faq, source: faqSource },
   ];

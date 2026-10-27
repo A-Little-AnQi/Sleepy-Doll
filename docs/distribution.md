@@ -22,7 +22,7 @@
 
 1. 同步修改 `Cargo.toml` 和 `package.json` 的产品版本。
    在 `release-channel.json` 选择 `stable` 或 `test`；带 Alpha、Beta、RC 后缀的版本必须选择 `test`。
-2. 添加 `web/src/app/release-notes/changelog-<版本>.md`，并更新 `UpdateDialog.tsx` 引用。
+2. 有更新说明时添加 `web/src/app/release-notes/changelog-<版本>.md`，构建自动读取当前版本；修复版可不提供说明，发布清单和 GitHub Release 保持空正文，客户端不展示空日志。
 3. 提交源码，推送分支，等待检查成功。
 4. 创建并推送对应标签，例如 `v0.1.0`；标签发布读取仓库中的通道配置。手动运行 release 工作流时须明确选择发布通道，该选择同步写入构建中的通道配置，保证客户端、R2 清单与 GitHub 标记一致。
 5. 安装包、SHA-256 和版本清单写入 `dist/`。工作流上传安装包并从公开地址取回校验。

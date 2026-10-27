@@ -1,6 +1,6 @@
 {
   "name": "sleepy-doll-ui",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Desktop agent for game scripting tools, with a BetterGI plugin",
   "private": true,
   "type": "module",

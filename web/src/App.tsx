@@ -12,7 +12,7 @@ import { ExtensionsPage } from "./pages/extensions/ExtensionsPage";
 import { SettingsPage } from "./pages/settings/SettingsPage";
 import { MemoryPage } from "./pages/memory/MemoryPage";
 import { TasksPage } from "./pages/tasks/TasksPage";
-import { UpdateDialog } from "./app/UpdateDialog";
+import { UpdateDialog, hasReleaseNotes } from "./app/UpdateDialog";
 import { ReleaseNotifications } from "./app/ReleaseSettings";
 import { restoreTheme } from "./appearance";
 import { restoreLocale } from "./appearance/locale";
@@ -59,8 +59,9 @@ export default function App() {
   const [trayNotice, setTrayNotice] = useState("");
   const [releaseNotesTab, setReleaseNotesTab] = useState("changelog");
   const [releaseNotesOpen, setReleaseNotesOpen] = useState(
-    // 更新弹窗：本地记录的版本与当前不同（包括第一次使用）就弹。
-    () => localStorage.getItem("sleepy-doll-version") !== __APP_VERSION__,
+    () =>
+      hasReleaseNotes &&
+      localStorage.getItem("sleepy-doll-version") !== __APP_VERSION__,
   );
   const [composingNewChat, setComposingNewChat] = useState(false);
 
