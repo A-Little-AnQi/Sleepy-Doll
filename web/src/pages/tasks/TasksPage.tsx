@@ -104,7 +104,7 @@ export function TasksPage({
         <div>
           <h2>快捷任务</h2>
           <p className="tasks-intro">
-            在对话里输入「创建快捷任务」并描述目标，保存后在这里一键运行。
+            在对话里输入「创建快捷任务」并描述目标，保存后在这里一键运行
           </p>
         </div>
       </div>

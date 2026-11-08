@@ -310,7 +310,12 @@ export function SchedulesPanel({
       }}
     >
       <div className="page-title">
-        <h2>{t.nav.schedules}</h2>
+        <div>
+          <h2>{t.nav.schedules}</h2>
+          <p>
+            在对话里输入「创建定时任务」并描述目标，使用 Windows 计划任务能力，在电脑开启情况下自动运行任务
+          </p>
+        </div>
         <Button variant="primary" onClick={() => openEditor()}>
           <PlusIcon className="button-icon" />
           新建定时任务
