@@ -18,6 +18,7 @@ export function DetailsPanel({
   onSelectTask,
   onOpenConversation,
   onConnectTools,
+  onSchedule,
   reload,
   onClose,
 }: {
@@ -26,21 +27,20 @@ export function DetailsPanel({
   onSelectTask(id: string | undefined): void;
   onOpenConversation(id: string): void;
   onConnectTools?(): void;
+  onSchedule?(task: TaskSummary): void;
   reload(): Promise<void>;
   onClose(): void;
 }) {
   const panel = useRef<HTMLElement>(null);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState("");
+  const [busy, setBusy] = useState<Set<string>>(() => new Set());
+  const pending = useRef(new Set<string>());
   const [removing, setRemoving] = useState<TaskSummary | null>(null);
   const [renaming, setRenaming] = useState<TaskSummary | null>(null);
   const [newName, setNewName] = useState("");
   const tasks = bootstrap.workflows
-    .filter(
-      (task) =>
-        task.shortcut && task.state !== "deleted" && task.state !== "archived",
-    )
+    .filter((task) => task.shortcut && task.state !== "deleted")
     .sort(
       (a, b) =>
         Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name),
@@ -68,7 +68,9 @@ export function DetailsPanel({
     return () => element.removeEventListener("keydown", key);
   }, [onClose]);
   const act = async (id: string, action: () => Promise<unknown>) => {
-    setBusy(id);
+    if (pending.current.has(id)) return;
+    pending.current.add(id);
+    setBusy((current) => new Set(current).add(id));
     setError("");
     try {
       await action();
@@ -76,10 +78,16 @@ export function DetailsPanel({
     } catch (reason) {
       setError(taskError(readError(reason)));
     } finally {
-      setBusy("");
+      pending.current.delete(id);
+      setBusy((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
     }
   };
   const actions: TaskActions = {
+    ...(onSchedule ? { schedule: onSchedule } : {}),
     run: (task) =>
       void act(task.id, () =>
         api.runWorkflow(task.id, task.publishedRevision ?? undefined),
@@ -95,8 +103,6 @@ export function DetailsPanel({
       setRenaming(task);
       setNewName(task.name);
     },
-    archive: (task, archived) =>
-      void act(task.id, () => api.archiveWorkflow(task.id, archived)),
     remove: (task) => setRemoving(task),
     connect: () => onConnectTools?.(),
   };
@@ -108,7 +114,8 @@ export function DetailsPanel({
     ? bootstrap.tasks
         .filter(
           (run) =>
-            run.source?.kind === "savedWorkflow" &&
+            (run.source?.kind === "savedWorkflow" ||
+              run.source?.kind === "boundWorkflow") &&
             run.source.workflowId === selected.id,
         )
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -137,7 +144,7 @@ export function DetailsPanel({
             <TaskCard
               task={selected}
               activeRun={isRunning(currentRun) ? currentRun : undefined}
-              busy={busy === selected.id}
+              busy={busy.has(selected.id)}
               actions={selectedActions}
             />
             <section className="shortcut-purpose">
@@ -197,11 +204,6 @@ export function DetailsPanel({
           </>
         ) : (
           <>
-            {tasks.length > 0 && (
-              <div className="shortcut-shelf-toolbar">
-                <p>已保存的任务，随时点击运行。</p>
-              </div>
-            )}
             {tasks.length > 4 && (
               <SearchField
                 aria-label="搜索快捷任务"
@@ -217,7 +219,7 @@ export function DetailsPanel({
                     key={task.id}
                     task={task}
                     activeRun={taskRun(task, bootstrap.tasks)}
-                    busy={busy === task.id}
+                    busy={busy.has(task.id)}
                     actions={actions}
                   />
                 ))}
@@ -249,8 +251,7 @@ export function DetailsPanel({
           if (task) void act(task.id, () => api.deleteWorkflow(task.id));
         }}
       >
-        <p>删除「{removing?.name}」的快捷入口？</p>
-        <p>已经配置好的任务不会被删除，正在运行的任务也不会被停止。</p>
+        <p>永久删除「{removing?.name}」及其全部修订？</p>
       </ConfirmDialog>
       <ConfirmDialog
         open={renaming != null}

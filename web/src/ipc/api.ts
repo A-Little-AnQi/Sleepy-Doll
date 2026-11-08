@@ -155,7 +155,7 @@ async function invokeHttp<T>(
   return envelope.result as T;
 }
 
-function invoke<T>(
+export function invoke<T>(
   method: string,
   params: Record<string, unknown> = {},
 ): Promise<T> {
@@ -442,8 +442,6 @@ export const api = {
     invoke("workflow.rename", { id, name }),
   pinWorkflow: (id: string, pinned: boolean) =>
     invoke("workflow.pin", { id, pinned }),
-  archiveWorkflow: (id: string, archived: boolean) =>
-    invoke(archived ? "workflow.archive" : "workflow.restore", { id }),
   deleteWorkflow: (id: string) =>
     invoke<{ deleted: boolean; activeRuns: string[]; historyKept: boolean }>(
       "workflow.delete",

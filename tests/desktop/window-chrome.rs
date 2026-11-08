@@ -19,6 +19,96 @@ use tao::{
 use wry::{WebContext, WebViewBuilder, http::Response};
 
 #[test]
+#[ignore = "由 scheduler-ui-check.mjs --webview2 连接隔离的真实 WebView2"]
+fn scheduler_layout_driver() {
+    use std::net::TcpListener;
+    use wry::WebViewBuilderExtWindows;
+    let directory =
+        PathBuf::from(std::env::var_os("SLEEPY_DOLL_WINDOW_VALIDATION").expect("缺少隔离验证目录"));
+    std::fs::create_dir_all(&directory).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let mut events = EventLoopBuilder::<String>::with_user_event()
+        .with_any_thread(true)
+        .build();
+    let proxy = events.create_proxy();
+    let window = WindowBuilder::new()
+        .with_title("Sleepy Doll · 定时任务布局验证")
+        .with_decorations(false)
+        .with_focused(false)
+        .with_visible(false)
+        .with_inner_size(LogicalSize::new(1456.0, 900.0))
+        .build(&events)
+        .unwrap();
+    let mut context = WebContext::new(Some(directory.join("profile")));
+    let webview = WebViewBuilder::new_with_web_context(&mut context)
+        .with_additional_browser_args(format!("--remote-debugging-port={port} --disable-renderer-backgrounding --disable-background-timer-throttling"))
+        .with_initialization_script(
+            "window.__SLEEPY_DOLL_DESKTOP__=true;window.__SLEEPY_DOLL_FRAMELESS__=true;",
+        )
+        .with_ipc_handler(move |request| {
+            let _ = proxy.send_event(request.body().clone());
+        })
+        .with_url("about:blank")
+        .build(&window)
+        .unwrap();
+    std::fs::write(directory.join("cdp.port"), port.to_string()).unwrap();
+    println!(
+        "WebView2 layout driver: pid={} port={port}",
+        std::process::id()
+    );
+    let deadline = Instant::now() + Duration::from_secs(180);
+    let mut completed = false;
+    events.run_return(|event, _, control| {
+        *control = ControlFlow::WaitUntil(deadline);
+        match event {
+            Event::UserEvent(value) => {
+                if serde_json::from_str::<Value>(&value)
+                    .is_ok_and(|message| message["method"] == "probe.done")
+                {
+                    completed = serde_json::from_str::<Value>(&value).unwrap()["success"] == true;
+                    *control = ControlFlow::Exit;
+                } else {
+                    let fixture_port = std::fs::read_to_string(
+                        directory.parent().unwrap().join("native-ipc.port"),
+                    )
+                    .unwrap();
+                    let request: Value = serde_json::from_str(&value).unwrap();
+                    let mut reply: Value =
+                        ureq::post(format!("http://127.0.0.1:{}/ipc", fixture_port.trim()))
+                            .send_json(&request)
+                            .unwrap()
+                            .body_mut()
+                            .read_json()
+                            .unwrap();
+                    reply["kind"] = json!("response");
+                    webview
+                        .evaluate_script(&format!("window.__sleepyDollReceive?.({reply});"))
+                        .unwrap();
+                }
+            }
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                *control = ControlFlow::Exit;
+            }
+            Event::NewEvents(StartCause::ResumeTimeReached { .. })
+                if Instant::now() >= deadline =>
+            {
+                *control = ControlFlow::Exit
+            }
+            _ => {}
+        }
+    });
+    window.set_visible(false);
+    drop(webview);
+    drop(context);
+    assert!(completed, "原生布局验证未收到结束信号");
+}
+
+#[test]
 fn drag_request_returns_before_entering_the_windows_move_loop() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use windows_sys::Win32::{

@@ -382,17 +382,8 @@ function render({ entry, props: p, onPatch }: RenderProps): ReactNode {
         pinned: checked(p, "pinned"),
         state: str(p, "state"),
         stateLabel:
-          p.state === "archived"
-            ? "已归档"
-            : p.state === "unavailable"
-              ? "暂不可用"
-              : "可运行 · 尚未实机验证",
-        actionLabel:
-          p.state === "archived"
-            ? "恢复"
-            : p.state === "unavailable"
-              ? "连接应用"
-              : "运行",
+          p.state === "unavailable" ? "暂不可用" : "可运行 · 尚未实机验证",
+        actionLabel: p.state === "unavailable" ? "连接应用" : "运行",
         runnable: p.state === "readyUnverified",
         zeroToken: true,
         sourceDeleted: false,
@@ -409,8 +400,6 @@ function render({ entry, props: p, onPatch }: RenderProps): ReactNode {
           onPatch("lastAction", "停止");
         },
         pin: (_, value) => onPatch("pinned", value),
-        archive: (_, value) =>
-          onPatch("state", value ? "archived" : "readyUnverified"),
         rename: () => onPatch("lastAction", "重命名"),
         remove: () => onPatch("lastAction", "删除"),
         connect: () => onPatch("lastAction", "连接应用"),

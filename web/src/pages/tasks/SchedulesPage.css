@@ -1,0 +1,3 @@
+.page-sheet.schedules-page {
+  grid-template-rows: minmax(0, 1fr);
+}

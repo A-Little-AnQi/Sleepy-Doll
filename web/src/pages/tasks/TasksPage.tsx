@@ -1,6 +1,6 @@
 import { SearchField, EmptyState } from "@sleepy-doll/ui";
 import { Button, Badge } from "@sleepy-doll/ui";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { api } from "../../ipc/api";
 import { HistoryIcon } from "@sleepy-doll/ui/icons";
 import { TaskCard, type TaskActions } from "../../components/tasks/TaskCard";
@@ -17,17 +17,19 @@ export function TasksPage({
   reload,
   onOpenTask,
   onConnectTools,
+  onSchedule,
 }: {
   bootstrap: Bootstrap;
   reload(): Promise<void>;
   onOpenConversation(id: string): void;
   onOpenTask?: (task: TaskSummary) => void;
   onConnectTools?: () => void;
+  onSchedule(task: TaskSummary): void;
 }) {
   const [tab, setTab] = useState<"tasks" | "runs">("tasks");
   const [query, setQuery] = useState("");
-  const [archived, setArchived] = useState(false);
-  const [busy, setBusy] = useState("");
+  const [busy, setBusy] = useState<Set<string>>(() => new Set());
+  const pending = useRef(new Set<string>());
   const [error, setError] = useState("");
   const [removing, setRemoving] = useState<TaskSummary | null>(null);
   const [renaming, setRenaming] = useState<TaskSummary | null>(null);
@@ -40,9 +42,6 @@ export function TasksPage({
         .filter(
           (task) =>
             task.shortcut &&
-            (archived
-              ? task.state === "archived"
-              : task.state !== "archived") &&
             `${task.name} ${task.description} ${task.shortcut.applicationName} ${task.shortcut.targetName}`
               .toLowerCase()
               .includes(needle),
@@ -51,16 +50,19 @@ export function TasksPage({
           (a, b) =>
             Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name),
         ),
-    [bootstrap.workflows, archived, needle],
+    [bootstrap.workflows, needle],
   );
   const legacy = tasks.filter((task) => !task.shortcut);
   const runs = bootstrap.tasks.filter(
     (run) =>
-      run.source?.kind === "savedWorkflow" &&
+      (run.source?.kind === "savedWorkflow" ||
+        run.source?.kind === "boundWorkflow") &&
       run.prompt.toLowerCase().includes(needle),
   );
   const act = async (id: string, action: () => Promise<unknown>) => {
-    setBusy(id);
+    if (pending.current.has(id)) return;
+    pending.current.add(id);
+    setBusy((current) => new Set(current).add(id));
     setError("");
     try {
       await action();
@@ -68,10 +70,16 @@ export function TasksPage({
     } catch (reason) {
       setError(taskError(readError(reason)));
     } finally {
-      setBusy("");
+      pending.current.delete(id);
+      setBusy((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
     }
   };
   const actions: TaskActions = {
+    schedule: onSchedule,
     run: (task) =>
       void act(task.id, () =>
         api.runWorkflow(task.id, task.publishedRevision ?? undefined),
@@ -86,8 +94,6 @@ export function TasksPage({
     },
     pin: (task, pinned) =>
       void act(task.id, () => api.pinWorkflow(task.id, pinned)),
-    archive: (task, value) =>
-      void act(task.id, () => api.archiveWorkflow(task.id, value)),
     remove: (task) => setRemoving(task),
     connect: () => onConnectTools?.(),
     open: (task) => onOpenTask?.(task),
@@ -102,7 +108,7 @@ export function TasksPage({
           </p>
         </div>
       </div>
-      <div className="list-toolbar tasks-tabs-toolbar">
+      <div className="list-toolbar page-list-toolbar tasks-tabs-toolbar">
         <SlidingTabs
           ariaLabel="快捷任务"
           value={tab}
@@ -112,42 +118,14 @@ export function TasksPage({
             { id: "runs", name: "运行记录" },
           ]}
         />
-        <span className="muted">
-          {
-            bootstrap.tasks.filter(
-              (run) => run.source?.kind === "savedWorkflow" && isRunning(run),
-            ).length
-          }{" "}
-          项正在运行
-        </span>
-      </div>
-      {error && <Toast message={error} onDismiss={() => setError("")} />}
-      <div className="list-toolbar tasks-filter-toolbar">
         <SearchField
           aria-label={tab === "tasks" ? "搜索快捷任务" : "搜索运行记录"}
           placeholder="搜索任务名称或应用"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        {tab === "tasks" && (
-          <div className="filter-row">
-            <Button
-              variant="subtle"
-              aria-pressed={!archived}
-              onClick={() => setArchived(false)}
-            >
-              已保存
-            </Button>
-            <Button
-              variant="subtle"
-              aria-pressed={archived}
-              onClick={() => setArchived(true)}
-            >
-              已归档
-            </Button>
-          </div>
-        )}
       </div>
+      {error && <Toast message={error} onDismiss={() => setError("")} />}
       {tab === "tasks" ? (
         <>
           {visible.length ? (
@@ -157,7 +135,7 @@ export function TasksPage({
                   key={task.id}
                   task={task}
                   activeRun={taskRun(task, bootstrap.tasks)}
-                  busy={busy === task.id}
+                  busy={busy.has(task.id)}
                   actions={actions}
                 />
               ))}
@@ -165,22 +143,12 @@ export function TasksPage({
           ) : (
             <EmptyState
               icon={<HistoryIcon />}
-              title={
-                <>
-                  {needle
-                    ? "没有匹配的任务"
-                    : archived
-                      ? "还没有归档任务"
-                      : "还没有快捷任务"}
-                </>
-              }
+              title={<>{needle ? "没有匹配的任务" : "还没有快捷任务"}</>}
               description={
                 <>
                   {needle
                     ? "换个名称或清除筛选。"
-                    : archived
-                      ? "暂时不用的入口可以归档，随时恢复。"
-                      : "在对话里输入「创建快捷任务」，描述要加入的已有项，也可以点输入框左下角的 + 选择它。"}
+                    : "在对话里输入「创建快捷任务」，描述要加入的已有项，也可以点输入框左下角的 + 选择它。"}
                 </>
               }
             >
@@ -189,7 +157,6 @@ export function TasksPage({
                   variant="secondary"
                   onClick={() => {
                     setQuery("");
-                    setArchived(false);
                   }}
                 >
                   清除筛选
@@ -197,7 +164,7 @@ export function TasksPage({
               )}
             </EmptyState>
           )}
-          {legacy.length > 0 && !needle && !archived && (
+          {legacy.length > 0 && !needle && (
             <details className="tasks-legacy">
               <summary>旧版流程 · {legacy.length} 项</summary>
               <p>
@@ -220,7 +187,8 @@ export function TasksPage({
           {runs.map((run) => {
             const task = tasks.find(
               (task) =>
-                run.source?.kind === "savedWorkflow" &&
+                (run.source?.kind === "savedWorkflow" ||
+                  run.source?.kind === "boundWorkflow") &&
                 task.id === run.source.workflowId,
             );
             return (
@@ -240,7 +208,7 @@ export function TasksPage({
                 {isRunning(run) ? (
                   <Button
                     variant="subtle"
-                    disabled={busy === run.id || run.state === "cancelling"}
+                    disabled={busy.has(run.id) || run.state === "cancelling"}
                     onClick={() =>
                       void act(run.id, () => api.cancelTask(run.id))
                     }
@@ -276,8 +244,7 @@ export function TasksPage({
           if (task) void act(task.id, () => api.deleteWorkflow(task.id));
         }}
       >
-        <p>删除「{removing?.name}」的快捷入口？</p>
-        <p>已经配置好的任务不会被删除，正在运行的任务也不会被停止。</p>
+        <p>永久删除「{removing?.name}」及其全部修订？</p>
       </ConfirmDialog>
       <ConfirmDialog
         open={renaming != null}

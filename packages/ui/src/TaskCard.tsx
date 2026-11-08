@@ -32,13 +32,13 @@ export interface TaskActions<T extends TaskCardData = TaskCardData> {
   run(task: T): void;
   rename?(task: T): void;
   pin?(task: T, pinned: boolean): void;
-  archive?(task: T, archived: boolean): void;
   copy?(task: T): void;
   remove?(task: T): void;
   openSource?(task: T): void;
   askAi?(task: T): void;
   connect?(task: T): void;
   open?(task: T): void;
+  schedule?(task: T): void;
 }
 
 /**
@@ -68,6 +68,8 @@ export function TaskCard<T extends TaskCardData>({
   runErrorText?: string;
 }) {
   const t = useT();
+  const showState =
+    running || activeRun?.state !== "succeeded" || task.state === "unavailable";
   const [menu, setMenu] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -87,11 +89,9 @@ export function TaskCard<T extends TaskCardData>({
   }, [menu]);
   const primary = task.runnable
     ? () => actions.run(task)
-    : task.state === "archived"
-      ? () => actions.archive?.(task, false)
-      : task.state === "unavailable"
-        ? () => actions.connect?.(task)
-        : () => actions.open?.(task);
+    : task.state === "unavailable"
+      ? () => actions.connect?.(task)
+      : () => actions.open?.(task);
   const openable = Boolean(actions.open);
   // 整卡点击打开详情：按钮/菜单等交互元素与正在选择的文本都不误触。
   const openFromCard = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -103,20 +103,24 @@ export function TaskCard<T extends TaskCardData>({
     )
       return;
     if (window.getSelection()?.toString()) return;
+    event.currentTarget
+      .querySelector<HTMLButtonElement>(".task-card-name")
+      ?.focus({ preventScroll: true });
     actions.open?.(task);
   };
   return (
     <article
-      className="task-card"
+      className="task-card list-item"
       data-state={task.state}
       data-running={running}
       data-openable={openable || undefined}
+      data-list-surface={openable || undefined}
       onClick={openable ? openFromCard : undefined}
     >
       <div className="task-card-head">
         {actions.open ? (
           <button
-            className="task-card-name"
+            className="task-card-name list-item-trigger"
             onClick={() => actions.open?.(task)}
           >
             {task.name}
@@ -140,6 +144,17 @@ export function TaskCard<T extends TaskCardData>({
           </IconButton>
           {menu && (
             <div className="task-menu" role="menu">
+              {actions.schedule && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    actions.schedule?.(task);
+                  }}
+                >
+                  安排时间
+                </button>
+              )}
               {actions.rename && (
                 <button
                   role="menuitem"
@@ -197,19 +212,6 @@ export function TaskCard<T extends TaskCardData>({
                     查看来源对话
                   </button>
                 )}
-              {actions.archive && (
-                <button
-                  role="menuitem"
-                  onClick={() => {
-                    setMenu(false);
-                    actions.archive?.(task, task.state !== "archived");
-                  }}
-                >
-                  {task.state === "archived"
-                    ? t.taskCard.restore
-                    : t.taskCard.archive}
-                </button>
-              )}
               {actions.remove && (
                 <button
                   role="menuitem"
@@ -236,16 +238,15 @@ export function TaskCard<T extends TaskCardData>({
         </span>
       )}
       <div className="task-card-foot">
-        <span className="task-card-state" data-state={task.state}>
-          {running ||
-          (activeRun &&
-            task.state !== "unavailable" &&
-            task.state !== "archived")
-            ? (runStateLabel ?? task.stateLabel)
-            : task.shortcut && task.runnable
-              ? "可运行"
-              : task.stateLabel}
-        </span>
+        {showState && (
+          <span className="task-card-state" data-state={task.state}>
+            {running || (activeRun && task.state !== "unavailable")
+              ? (runStateLabel ?? task.stateLabel)
+              : task.shortcut && task.runnable
+                ? "可运行"
+                : task.stateLabel}
+          </span>
+        )}
         {!task.shortcut && task.zeroToken && task.runnable && (
           <span className="task-card-note" title={t.taskCard.offlineNote}>
             {t.taskCard.offlineShort}
@@ -272,10 +273,10 @@ export function TaskCard<T extends TaskCardData>({
               : task.actionLabel || t.taskCard.open}
         </Button>
       </div>
-      {task.issue && task.state !== "archived" && (
+      {task.issue && (
         <p className="task-card-issue">{issueText ?? task.issue}</p>
       )}
-      {!running && activeRun?.error && task.state !== "archived" && (
+      {!running && activeRun?.error && (
         <p className="task-card-issue">{runErrorText ?? activeRun.error}</p>
       )}
     </article>

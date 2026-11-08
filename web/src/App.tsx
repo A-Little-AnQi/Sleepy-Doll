@@ -6,12 +6,14 @@ import { Wordmark } from "@sleepy-doll/ui/icons";
 import { AppShell } from "./components/shell/AppShell";
 import { DetailsPanel } from "./components/shell/DetailsPanel";
 import { Toast } from "@sleepy-doll/ui/overlay/Toast";
+import { MessageHost } from "@sleepy-doll/ui/overlay/Message";
 import { MotionSwitch } from "@sleepy-doll/ui/controls/MotionSwitch";
 import { ChatPage } from "./pages/chat/ChatPage";
 import { ExtensionsPage } from "./pages/extensions/ExtensionsPage";
 import { SettingsPage } from "./pages/settings/SettingsPage";
 import { MemoryPage } from "./pages/memory/MemoryPage";
 import { TasksPage } from "./pages/tasks/TasksPage";
+import { SchedulesPage } from "./pages/tasks/SchedulesPage";
 import { UpdateDialog, hasReleaseNotes } from "./app/UpdateDialog";
 import { ReleaseNotifications } from "./app/ReleaseSettings";
 import { restoreTheme } from "./appearance";
@@ -31,6 +33,7 @@ import { applyBridgeStatus, watchBridgeStatus } from "./session/bridge-status";
 export type Page =
   | "chat"
   | "tasks"
+  | "schedules"
   | "memory"
   | "models"
   | "extensions"
@@ -54,6 +57,7 @@ export default function App() {
   // 快捷任务侧栏只在用户点开时出现，启动一律收起，也不记忆开关状态。
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<string>();
+  const [scheduleTask, setScheduleTask] = useState<TaskSummary>();
   const [error, setError] = useState("");
   const [panicNotice, setPanicNotice] = useState<number | null>(null);
   const [trayNotice, setTrayNotice] = useState("");
@@ -240,6 +244,11 @@ export default function App() {
       setPage("extensions");
     }
   };
+  const openSchedule = (task: TaskSummary) => {
+    setScheduleTask(task);
+    setDetailsOpen(false);
+    setPage("schedules");
+  };
 
   return (
     <AppShell
@@ -254,6 +263,7 @@ export default function App() {
           onSelectTask={setSelectedTask}
           onOpenConversation={openConversation}
           onConnectTools={openConnect}
+          onSchedule={openSchedule}
           reload={reload}
           onClose={() => setDetailsOpen(false)}
         />
@@ -281,11 +291,13 @@ export default function App() {
             ? "chat"
             : visiblePage === "tasks"
               ? "tasks"
-              : visiblePage === "extensions"
-                ? "extensions"
-                : visiblePage === "memory"
-                  ? "memory"
-                  : "settings"
+              : visiblePage === "schedules"
+                ? "schedules"
+                : visiblePage === "extensions"
+                  ? "extensions"
+                  : visiblePage === "memory"
+                    ? "memory"
+                    : "settings"
         }
       >
         {visiblePage === "chat" ? (
@@ -300,6 +312,7 @@ export default function App() {
         ) : visiblePage === "tasks" ? (
           <TasksPage
             bootstrap={bootstrap}
+            onSchedule={openSchedule}
             reload={reload}
             onOpenConversation={openConversation}
             onOpenTask={(task: TaskSummary) => {
@@ -307,6 +320,13 @@ export default function App() {
               setDetailsOpen(true);
             }}
             onConnectTools={openConnect}
+          />
+        ) : visiblePage === "schedules" ? (
+          <SchedulesPage
+            bootstrap={bootstrap}
+            reload={reload}
+            initialTask={scheduleTask}
+            onConsumed={() => setScheduleTask(undefined)}
           />
         ) : visiblePage === "memory" ? (
           <MemoryPage />
@@ -334,6 +354,7 @@ export default function App() {
           />
         )}
       </MotionSwitch>
+      <MessageHost scopeKey={visiblePage} />
       {panicNotice !== null && (
         <Toast
           message={

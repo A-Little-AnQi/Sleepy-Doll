@@ -42,7 +42,7 @@
   flex: 1;
   min-width: 0;
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: 0;
   overflow: hidden;
@@ -75,7 +75,7 @@
   background: var(--subtle);
   border: 1px solid var(--border);
   color: var(--secondary);
-  font-size: 11px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 .details-body {
@@ -112,7 +112,7 @@
   justify-content: space-between;
   margin: 0 2px 2px;
   color: var(--secondary);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 550;
   letter-spacing: 0.04em;
 }
@@ -134,29 +134,29 @@
   box-shadow: 0 2px 8px #00000005;
 }
 .details-panel .task-card-name {
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.5;
   white-space: normal;
   overflow-wrap: anywhere;
 }
 .details-panel .task-card-description {
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
 }
 .details-panel .task-card-foot {
   gap: 6px;
 }
 .details-panel .task-card-state {
-  font-size: 10px;
+  font-size: 14px;
   padding: 3px 6px;
   border-radius: 6px;
 }
 .details-panel .task-card-note {
-  font-size: 10px;
+  font-size: 14px;
 }
 .details-panel .task-card-foot .primary-action {
   min-height: 28px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .details-empty {
   flex: 1;
@@ -186,14 +186,14 @@
 .details-empty h3 {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 550;
 }
 .details-empty p {
   margin: 0;
   max-width: 230px;
   color: var(--secondary);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.8;
 }
 .details-loading {
@@ -214,7 +214,7 @@
 }
 .details-loading > p {
   color: var(--secondary);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
 }
 .detail-block {
@@ -228,13 +228,13 @@
 }
 .detail-block h3 {
   margin: 0;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 550;
   color: var(--secondary);
 }
 .detail-block p {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
   color: var(--secondary);
   overflow-wrap: anywhere;
@@ -242,12 +242,12 @@
 .detail-block ul {
   margin: 0;
   padding-left: 18px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--secondary);
   line-height: 1.7;
 }
 .detail-block summary {
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
   cursor: pointer;
 }
@@ -261,7 +261,7 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
   align-items: baseline;
   gap: 10px;
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.6;
 }
 .detail-facts dt {
@@ -310,7 +310,7 @@
   justify-content: space-between;
   gap: 8px;
   color: var(--secondary);
-  font-size: 11px;
+  font-size: 14px;
 }
 .detail-run-state {
   display: flex;
@@ -333,14 +333,14 @@
 }
 .detail-run-meta time {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .detail-run-prompt,
 .detail-block .detail-run-prompt {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--secondary);
   line-height: 1.65;
   display: -webkit-box;
@@ -371,19 +371,6 @@
 .shortcut-shelf .details-body {
   gap: 16px;
 }
-.shortcut-shelf-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0;
-}
-.shortcut-shelf-toolbar p {
-  flex: 1;
-  margin: 0;
-  color: var(--secondary);
-  font-size: 12px;
-  line-height: 1.7;
-}
 .shortcut-shelf-list {
   display: grid;
   gap: 16px;
@@ -397,12 +384,12 @@
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
 }
 .shortcut-purpose h3 {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 .shortcut-purpose p {
@@ -419,7 +406,7 @@
   padding-left: 18px;
   display: grid;
   gap: 4px;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
   color: var(--secondary);
   overflow-wrap: anywhere;

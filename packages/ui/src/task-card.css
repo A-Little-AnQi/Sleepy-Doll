@@ -17,7 +17,7 @@
 }
 .task-card-application {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-meta);
   line-height: 1.5;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -43,7 +43,7 @@
   border: 0;
   background: transparent;
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--font-item);
   font-weight: 600;
   text-align: left;
   overflow: hidden;
@@ -103,7 +103,7 @@ button.task-card-name:focus-visible {
 .task-card-description {
   margin: 0;
   color: var(--secondary);
-  font-size: 13px;
+  font-size: var(--font-body);
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
@@ -115,6 +115,7 @@ button.task-card-name:focus-visible {
 }
 .task-card-foot .primary-action {
   margin-left: auto;
+  min-inline-size: 7.5em;
 }
 .task-card-state {
   padding: 2px 8px;
@@ -122,7 +123,7 @@ button.task-card-name:focus-visible {
   border: var(--border-width, 1px) solid var(--border);
   background: var(--subtle);
   color: var(--secondary);
-  font-size: 12px;
+  font-size: 14px;
   white-space: nowrap;
 }
 .task-card-state[data-state="readyVerified"] {
@@ -135,12 +136,12 @@ button.task-card-name:focus-visible {
 }
 .task-card-note {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 .task-card-issue {
   margin: 0;
   color: var(--secondary);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }

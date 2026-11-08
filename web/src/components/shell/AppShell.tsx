@@ -25,6 +25,7 @@ import { hostPluginEnabled } from "../../ipc/providers";
 import {
   HistoryIcon,
   BridgeIcon,
+  ClockIcon,
   EditIcon,
   FolderIcon,
   PanelIcon,
@@ -65,9 +66,16 @@ import {
 } from "../../session/conversation-groups";
 import "./app-shell.css";
 import { useT } from "../../i18n";
+import {
+  cancelVisual,
+  springPosition,
+  useCssPresence,
+  useFlipList,
+} from "@sleepy-doll/ui/motion";
 
 const NAV = [
   { page: "tasks", labelKey: "tasks" as const, Icon: ToolIcon },
+  { page: "schedules", labelKey: "schedules" as const, Icon: ClockIcon },
   { page: "memory", labelKey: "memory" as const, Icon: HistoryIcon },
   { page: "extensions", labelKey: "extensions" as const, Icon: PluginIcon },
 ] as const;
@@ -132,10 +140,6 @@ function vtName(id: string) {
   return `sd-${id.replace(/[^a-zA-Z0-9_-]/g, "")}`;
 }
 
-function idsKey(items: Array<{ id: string }>) {
-  return items.map((item) => item.id).join("\0");
-}
-
 interface Props {
   bootstrap: Bootstrap;
   page: Page;
@@ -179,7 +183,14 @@ export function AppShell({
   const sidebarWidth = clampSidebarWidth(preferredWidth, viewport);
   const [peek, setPeek] = useState(false);
   const [resizing, setResizing] = useState(false);
-  const [detailsPresent, setDetailsPresent] = useState(detailsOpen);
+  const shell = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const ghostNode = useRef<HTMLDivElement>(null);
+  const dragCleanup = useRef<(() => void) | null>(null);
+  const dragGeneration = useRef(0);
+  const dragPosition = useRef({ x: 0, y: 0 });
+  const settleMotion = useRef<(() => void) | null>(null);
   const widthRef = useRef(preferredWidth);
   const resizingRef = useRef(false);
   const resizeCleanup = useRef<(() => void) | null>(null);
@@ -235,6 +246,13 @@ export function AppShell({
   }, []);
   useEffect(() => () => window.clearTimeout(peekTimer.current), []);
   useEffect(() => () => resizeCleanup.current?.(), []);
+  useEffect(
+    () => () => {
+      dragCleanup.current?.();
+      cancelVisual(ghostNode.current);
+    },
+    [],
+  );
   useEffect(() => {
     // 断点按 CSS 像素判定，窗口缩放改变的是 CSS 宽度。
     const sidebar = window.matchMedia("(min-width: 960px)");
@@ -321,19 +339,7 @@ export function AppShell({
     if (ids.join("\0") === current.order.join("\0")) return;
     persistLayout({ ...current, order: ids });
   }, [ghost, orderedConversations]);
-  const [shownConversations, setShownConversations] =
-    useState(orderedConversations);
-  useLayoutEffect(() => {
-    if (idsKey(orderedConversations) === idsKey(shownConversations)) {
-      setShownConversations(orderedConversations);
-      return;
-    }
-    if (!shownConversations.length || ghost || draggingRef.current) {
-      setShownConversations(orderedConversations);
-      return;
-    }
-    setShownConversations(orderedConversations);
-  }, [ghost, orderedConversations, shownConversations]);
+  const shownConversations = orderedConversations;
   const conversations = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return shownConversations.filter(
@@ -349,6 +355,17 @@ export function AppShell({
     !conversationId &&
     !query.trim() &&
     (composingNewChat || startedNew);
+  useFlipList(
+    list,
+    JSON.stringify([shownLayout, conversations.map((item) => item.id)]),
+  );
+  useLayoutEffect(() => {
+    settleMotion.current?.();
+  }, [shownLayout, conversations]);
+  useLayoutEffect(() => {
+    if (ghost && ghostNode.current && draggingRef.current)
+      ghostNode.current.style.transform = `translate3d(${dragPosition.current.x}px,${dragPosition.current.y}px,0)`;
+  }, [ghost]);
 
   const armDrag = (event: PointerEvent<HTMLElement>, item: DragItem) => {
     if (event.button !== 0) return;
@@ -360,7 +377,17 @@ export function AppShell({
     ) {
       return;
     }
-    const origin = event.currentTarget.getBoundingClientRect();
+    dragCleanup.current?.();
+    settleMotion.current = null;
+    draftRef.current = null;
+    setDraft(null);
+    cancelVisual(ghostNode.current);
+    setGhost(null);
+    const token = ++dragGeneration.current;
+    const handle = event.currentTarget;
+    const captureTarget = list.current ?? handle;
+    const pointerId = event.pointerId;
+    const origin = handle.getBoundingClientRect();
     const session: DragSession = {
       ...item,
       width: origin.width,
@@ -371,16 +398,35 @@ export function AppShell({
     const startX = event.clientX;
     const startY = event.clientY;
     let active = false;
+    let frame = 0;
+    let point = { x: startX, y: startY };
+    let sample = { x: startX, y: startY, time: performance.now() };
+    const velocity = { x: 0, y: 0 };
+    let draftKey = JSON.stringify(layoutRef.current);
     const preview = (clientX: number, clientY: number) => {
       const slot = slotFromPoint(clientX, clientY, session.kind, session.id);
       const next = slot
         ? layoutAfterDrop(layoutRef.current, session, slot)
         : (draftRef.current ?? layoutRef.current);
-      draftRef.current = next;
-      setDraft(next);
-      setGhost({ ...session, x: clientX, y: clientY });
+      const key = JSON.stringify(next);
+      if (key !== draftKey) {
+        draftKey = key;
+        draftRef.current = next;
+        setDraft(next);
+      }
+      dragPosition.current = {
+        x: clientX - session.grabX,
+        y: clientY - session.grabY,
+      };
+      if (ghostNode.current)
+        ghostNode.current.style.transform = `translate3d(${dragPosition.current.x}px,${dragPosition.current.y}px,0)`;
+    };
+    const paint = () => {
+      frame = 0;
+      preview(point.x, point.y);
     };
     const move = (next: globalThis.PointerEvent) => {
+      if (next.pointerId !== pointerId) return;
       const dx = next.clientX - startX;
       const dy = next.clientY - startY;
       if (!active && dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD)
@@ -390,30 +436,108 @@ export function AppShell({
         draggingRef.current = true;
         document.documentElement.dataset.sdDragging = session.kind;
         try {
-          event.currentTarget.setPointerCapture(event.pointerId);
+          captureTarget.setPointerCapture(pointerId);
         } catch {
           /* 部分嵌入预览没有 capture。 */
         }
+        setGhost({ ...session, x: next.clientX, y: next.clientY });
       }
       next.preventDefault();
-      preview(next.clientX, next.clientY);
+      const now = performance.now();
+      const elapsed = Math.max(1, now - sample.time) / 1000;
+      velocity.x =
+        velocity.x * 0.4 + ((next.clientX - sample.x) / elapsed) * 0.6;
+      velocity.y =
+        velocity.y * 0.4 + ((next.clientY - sample.y) / elapsed) * 0.6;
+      sample = { x: next.clientX, y: next.clientY, time: now };
+      point = { x: next.clientX, y: next.clientY };
+      if (!frame) frame = requestAnimationFrame(paint);
     };
-    const stop = (next: globalThis.PointerEvent) => {
+    const dispose = () => {
+      cancelAnimationFrame(frame);
+      frame = 0;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
       window.removeEventListener("pointercancel", stop);
+      window.removeEventListener("keydown", key);
+      window.removeEventListener("blur", cancel);
+      captureTarget.removeEventListener("lostpointercapture", cancel);
       delete document.documentElement.dataset.sdDragging;
+      try {
+        if (captureTarget.hasPointerCapture(pointerId))
+          captureTarget.releasePointerCapture(pointerId);
+      } catch {
+        /* 嵌入预览可能不支持捕获。 */
+      }
+      dragCleanup.current = null;
+    };
+    const finish = (cancelled: boolean) => {
+      if (!cancelled && frame) {
+        cancelAnimationFrame(frame);
+        paint();
+      }
+      dispose();
       if (!active) {
         draggingRef.current = false;
         return;
       }
-      next.preventDefault();
       const dropped = draftRef.current ?? layoutRef.current;
       draftRef.current = null;
       draggingRef.current = false;
       setDraft(null);
-      setGhost(null);
-      persistLayout(dropped);
+      if (!cancelled) persistLayout(dropped);
+      let lastTarget: { x: number; y: number } | null = null;
+      const retarget = () => {
+        if (dragGeneration.current !== token || draggingRef.current) return;
+        const node = ghostNode.current;
+        const target = list.current?.querySelector<HTMLElement>(
+          `[data-sd-slot="${item.kind}"][data-sd-id="${CSS.escape(item.id)}"]`,
+        );
+        if (!node || !target) {
+          settleMotion.current = null;
+          setGhost(null);
+          return;
+        }
+        const rect = target.getBoundingClientRect();
+        const transform = new DOMMatrixReadOnly(
+          getComputedStyle(target).transform,
+        );
+        const scale = rect.width / (target.offsetWidth || rect.width || 1);
+        const destination = {
+          x: rect.left - transform.m41 * scale,
+          y: rect.top - transform.m42 * scale,
+        };
+        if (
+          lastTarget &&
+          Math.abs(lastTarget.x - destination.x) < 0.5 &&
+          Math.abs(lastTarget.y - destination.y) < 0.5
+        )
+          return;
+        lastTarget = destination;
+        void springPosition(
+          node,
+          dragPosition.current,
+          destination,
+          cancelled ? { x: 0, y: 0 } : velocity,
+        ).then(
+          () => {
+            if (dragGeneration.current === token) {
+              settleMotion.current = null;
+              dragCleanup.current = null;
+              setGhost(null);
+            }
+          },
+          () => {},
+        );
+      };
+      settleMotion.current = retarget;
+      const settle = requestAnimationFrame(retarget);
+      dragCleanup.current = () => {
+        settleMotion.current = null;
+        cancelAnimationFrame(settle);
+        cancelVisual(ghostNode.current);
+        dragGeneration.current++;
+      };
       const block = (click: MouseEvent) => {
         click.preventDefault();
         click.stopPropagation();
@@ -423,27 +547,35 @@ export function AppShell({
         window.removeEventListener("click", block, { capture: true });
       }, 50);
     };
+    const stop = (next: globalThis.PointerEvent) => {
+      if (next.pointerId !== pointerId) return;
+      if (active) next.preventDefault();
+      finish(next.type === "pointercancel");
+    };
+    const cancel = () => finish(true);
+    const key = (next: KeyboardEvent) => {
+      if (next.key === "Escape") {
+        next.preventDefault();
+        finish(true);
+      }
+    };
+    dragCleanup.current = () => {
+      dispose();
+      draggingRef.current = false;
+      dragGeneration.current++;
+    };
     window.addEventListener("pointermove", move, { passive: false });
     window.addEventListener("pointerup", stop);
     window.addEventListener("pointercancel", stop);
+    window.addEventListener("keydown", key);
+    window.addEventListener("blur", cancel);
+    captureTarget.addEventListener("lostpointercapture", cancel);
   };
 
   const detailsToggle = page === "chat";
   const detailsPane = detailsOpen && (page === "chat" || page === "tasks");
-  const detailsVisible =
-    (detailsPane || detailsPresent) && (page === "chat" || page === "tasks");
-  useEffect(() => {
-    if (detailsPane) {
-      setDetailsPresent(true);
-      return;
-    }
-    if (page !== "chat" && page !== "tasks") {
-      setDetailsPresent(false);
-      return;
-    }
-    const timer = window.setTimeout(() => setDetailsPresent(false), 320);
-    return () => window.clearTimeout(timer);
-  }, [detailsPane, page]);
+  const detailsPresent = useCssPresence(detailsPane, body);
+  const detailsVisible = detailsPane || detailsPresent;
   // 宽窗口未折叠时侧栏占布局列，其余情况靠左缘悬停唤出悬浮抽屉。
   const docked = wide && !collapsed;
   const overlayOpen = !docked && (peek || !collapsed);
@@ -511,8 +643,22 @@ export function AppShell({
       /* 部分嵌入预览没有 capture，改听 window。 */
     }
     resizingRef.current = true;
+    widthRef.current = start;
     setResizing(true);
     document.documentElement.dataset.sidebarResizing = "true";
+    let resizeFrame = 0;
+    const paintWidth = () => {
+      resizeFrame = 0;
+      shell.current?.style.setProperty(
+        "--sidebar-user-width",
+        `${widthRef.current}px`,
+      );
+      shell.current?.style.setProperty(
+        "--sidebar-width",
+        `${docked ? widthRef.current : 0}px`,
+      );
+      handle.setAttribute("aria-valuenow", String(widthRef.current));
+    };
     const move = (next: globalThis.PointerEvent) => {
       if (next.pointerId !== pointerId) return;
       const width = clampSidebarWidth(
@@ -520,9 +666,9 @@ export function AppShell({
         window.innerWidth,
       );
       widthRef.current = width;
-      setPreferredWidth(width);
+      if (!resizeFrame) resizeFrame = requestAnimationFrame(paintWidth);
     };
-    const stop = (next?: Event) => {
+    const stop = (next?: Event, update = true) => {
       if (
         next instanceof globalThis.PointerEvent &&
         next.pointerId !== pointerId
@@ -530,9 +676,17 @@ export function AppShell({
         return;
       resizeCleanup.current = null;
       resizingRef.current = false;
-      setResizing(false);
+      cancelAnimationFrame(resizeFrame);
+      const cancelled = next?.type !== "pointerup";
+      if (cancelled) widthRef.current = start;
+      paintWidth();
+      if (update) {
+        setResizing(false);
+        setPreferredWidth(cancelled ? preferredWidth : widthRef.current);
+      }
       delete document.documentElement.dataset.sidebarResizing;
-      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(widthRef.current));
+      if (!cancelled && update)
+        localStorage.setItem(SIDEBAR_WIDTH_KEY, String(widthRef.current));
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
       window.removeEventListener("pointercancel", stop);
@@ -545,7 +699,7 @@ export function AppShell({
         /* 部分嵌入预览没有 capture。 */
       }
     };
-    resizeCleanup.current = stop;
+    resizeCleanup.current = () => stop(undefined, false);
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop);
     window.addEventListener("pointercancel", stop);
@@ -638,7 +792,7 @@ export function AppShell({
           onChange={(event) => setQuery(event.target.value)}
         />
       </div>
-      <div className="app-conversations">
+      <div className="app-conversations" ref={list}>
         <ul
           data-sd-list
           onPointerDown={(event) => {
@@ -737,14 +891,15 @@ export function AppShell({
       {framelessWindow() && <TitleBar />}
       <div
         className="app-shell"
+        ref={shell}
         data-collapsed={!docked}
         data-drawer={overlayOpen}
         data-resizing={resizing}
         data-details={detailsPane}
         style={
           {
-            "--sidebar-user-width": `${sidebarWidth}px`,
-            "--sidebar-width": `${docked ? sidebarWidth : 0}px`,
+            "--sidebar-user-width": `${resizingRef.current ? widthRef.current : sidebarWidth}px`,
+            "--sidebar-width": `${docked ? (resizingRef.current ? widthRef.current : sidebarWidth) : 0}px`,
           } as CSSProperties
         }
       >
@@ -809,7 +964,7 @@ export function AppShell({
             </header>
           ) : null}
           {error && <Toast message={error} onDismiss={() => setError("")} />}
-          <div className="app-body">
+          <div className="app-body" ref={body}>
             <div className="app-view">{children}</div>
             <div
               className="details-slot"
@@ -825,9 +980,11 @@ export function AppShell({
           ? createPortal(
               <div
                 className="app-drag-ghost"
+                ref={ghostNode}
                 style={{
-                  left: ghost.x - ghost.grabX,
-                  top: ghost.y - ghost.grabY,
+                  left: 0,
+                  top: 0,
+                  transform: `translate3d(${ghost.x - ghost.grabX}px,${ghost.y - ghost.grabY}px,0)`,
                   width: ghost.width,
                   height: ghost.height,
                 }}

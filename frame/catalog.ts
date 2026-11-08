@@ -427,7 +427,7 @@ export const catalog: Entry[] = [
       text("name", "名称"),
       text("description", "说明"),
       bool("pinned", "置顶"),
-      select("state", "状态", ["readyUnverified", "unavailable", "archived"]),
+      select("state", "状态", ["readyUnverified", "unavailable"]),
       bool("running", "运行中"),
       bool("busy", "处理中"),
       bool("showDescription", "显示说明"),

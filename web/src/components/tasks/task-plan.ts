@@ -7,12 +7,33 @@ const GROUP_METHOD = "bgi.run_script_groups";
  * 运行配置组的批量动作展开成「运行配置组：名称」列表；
  * 只有严格 true 才追加关闭游戏。识别不了返回空，由调用方退回兜底文案。
  */
-function groupLines(action: { tool: string; arguments: Record<string, unknown> }): string[] {
+function groupLines(action: {
+  tool: string;
+  arguments: Record<string, unknown>;
+}): string[] {
   const args = action.arguments ?? {};
+  if (
+    action.tool === GROUP_TOOL &&
+    ["bgi.run_host_command_plan", "bgi.run_game_command_plan"].includes(
+      String(args.methodId),
+    )
+  ) {
+    const plan = args.arguments as
+      { steps?: Array<{ title?: string; waitSeconds?: number }> } | undefined;
+    return Array.isArray(plan?.steps)
+      ? plan.steps.map((step) =>
+          step.waitSeconds != null
+            ? `等待 ${step.waitSeconds} 秒`
+            : step.title || "原生命令",
+        )
+      : [];
+  }
   if (action.tool !== GROUP_TOOL || args.methodId !== GROUP_METHOD) return [];
   const inner = (args.arguments ?? {}) as Record<string, unknown>;
   const names = Array.isArray(inner.groupNames)
-    ? inner.groupNames.filter((name): name is string => typeof name === "string")
+    ? inner.groupNames.filter(
+        (name): name is string => typeof name === "string",
+      )
     : [];
   const lines = names.map((name) => `运行配置组：${name}`);
   if (inner.closeGameAfter === true) lines.push("完成后关闭原神");
@@ -26,7 +47,8 @@ export function taskPlan(
   if (!binding) return [];
   if (binding.steps?.length) {
     return binding.steps.flatMap((step) => {
-      const expanded = groupLines(step.action);
+      if (step.waitSeconds != null) return [`等待 ${step.waitSeconds} 秒`];
+      const expanded = step.action ? groupLines(step.action) : [];
       return expanded.length ? expanded : [step.title || binding.targetName];
     });
   }

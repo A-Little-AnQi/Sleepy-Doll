@@ -36,6 +36,7 @@ export interface PluginInfo {
   error?: string;
   /** 随产品提供的宿主插件，不能移除。 */
   host?: boolean;
+  bundled?: boolean;
 }
 export interface ConversationInfo {
   id: string;
@@ -150,7 +151,13 @@ export interface TaskInfo {
   source?:
     | { kind: "agent" }
     | { kind: "savedStrategy"; strategyId: string }
-    | { kind: "savedWorkflow"; workflowId: string; workflowRevision: number };
+    | { kind: "savedWorkflow"; workflowId: string; workflowRevision: number }
+    | {
+        kind: "boundWorkflow";
+        workflowId: string;
+        workflowRevision: number;
+        origin: string;
+      };
 }
 
 /** 快捷任务的可见状态。文案与主按钮由后端给出。 */
@@ -160,7 +167,6 @@ export type DefinitionState =
   | "readyUnverified"
   | "readyVerified"
   | "unavailable"
-  | "archived"
   | "deleted";
 
 export interface TaskSummary {
@@ -199,7 +205,8 @@ export interface ShortcutBinding {
   steps?: Array<{
     title: string;
     prepare?: Array<{ tool: string; arguments: Record<string, unknown> }>;
-    action: { tool: string; arguments: Record<string, unknown> };
+    action?: { tool: string; arguments: Record<string, unknown> };
+    waitSeconds?: number;
   }>;
   prepare?: Array<{ tool: string; arguments: Record<string, unknown> }>;
   targetName: string;

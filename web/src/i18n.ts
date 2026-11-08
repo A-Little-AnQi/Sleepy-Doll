@@ -32,6 +32,7 @@ const zh = {
   nav: {
     memory: "记忆",
     tasks: "快捷任务",
+    schedules: "定时任务",
     extensions: "工具与扩展",
     newChat: "新建对话",
     newGroup: "新建分组",
@@ -207,8 +208,6 @@ const zh = {
     pinned: "已置顶",
     unpin: "取消置顶",
     pin: "置顶",
-    restore: "恢复",
-    archive: "归档",
     noDescription: "暂无说明",
     offlineNote: "运行时不会向模型发送请求",
     offlineShort: "运行不调用模型",
@@ -587,6 +586,7 @@ const en: Dict = {
   nav: {
     memory: "Memory",
     tasks: "Quick Tasks",
+    schedules: "Scheduled Tasks",
     extensions: "Tools & Extensions",
     newChat: "New chat",
     newGroup: "New group",
@@ -767,8 +767,6 @@ const en: Dict = {
     pinned: "Pinned",
     unpin: "Unpin",
     pin: "Pin",
-    restore: "Restore",
-    archive: "Archive",
     noDescription: "No description yet",
     offlineNote: "Runs without calling any model",
     offlineShort: "Runs without a model",

@@ -3,7 +3,9 @@ import { isRunning } from "../../session";
 export function taskRun(task: TaskSummary, runs: TaskInfo[]) {
   const related = runs.filter(
     (run) =>
-      run.source?.kind === "savedWorkflow" && run.source.workflowId === task.id,
+      (run.source?.kind === "savedWorkflow" ||
+        run.source?.kind === "boundWorkflow") &&
+      run.source.workflowId === task.id,
   );
   return (
     related.find(isRunning) ??
