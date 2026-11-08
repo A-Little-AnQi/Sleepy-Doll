@@ -35,6 +35,8 @@ npm run dist
 
 `package-lock.json` 与 `Cargo.lock` 为本机文件，Git 忽略它们；CI 使用 `npm install`。构建脚本把 `TEMP`、`TMP` 指向 `target/tmp/`，npm 缓存在 `target/npm-cache/`。
 
+Rust 中间产物继承 Cargo 的全局共享 `build-dir` 配置，构建入口不覆盖为项目目录。全局缓存保留供多个项目复用；`target/debug/`、`target/release/` 继续保存程序等标准输出，隔离测试数据仍归 `target/.tmp/`。
+
 ## 输出与数据
 
 | 路径 | 内容 |
@@ -80,6 +82,24 @@ MCP 协议测试使用 `tests/runtime/mcp-fixture.mjs` 作为独立 Node 测试�
 `tests/ui/` 用 Playwright 验证实际 React 界面，`tests/desktop/` 验证窗口与托盘，`tests/runtime/` 验证运行时行为。`bgi-bridge/dev/` 保留桥专项 C# 检查、元数据生成器及宿主接口盘点工具。需要模型或真实宿主的验证必须单独说明环境与范围，不能算作游戏全流程通过。
 
 ## 浏览器预览
+
+### 定时任务界面验收
+
+`node tests/ui/scheduler-ui-check.mjs --production` 检查最终前端产物，附加 `--dark` 检查深色主题。检查覆盖空、单条、长内容、宽窄窗口、重复拖入和排序、直接输入与循环拨轮、快速连续输入、拖动取消、保存失败保留，以及执行区 FLIP 连续性。
+
+真实 WebView2 验证使用现有 `window-chrome` 测试入口。将 `SLEEPY_DOLL_WINDOW_VALIDATION` 指向本仓库 `target/tmp/scheduler-ui/webview2`，执行 `cargo test --test window-chrome scheduler_layout_driver -- --ignored --nocapture`，看到驱动端口后在另一终端运行上述脚本并附加 `--webview2`。宿主保留 Wry 的原生 IPC 通道，通过独立回环服务获取隔离演示数据；必须同时检查脚本和原生驱动的退出结果。截图和数据只放 `target/.tmp/scheduler-ui`、`target/tmp/scheduler-ui`，结束后清理。此验证覆盖实际渲染和界面交互，不注册 Windows 任务，也不代表真实 BGI 执行或已安装程序的验收。
+
+### 动画与滚动
+
+共享运动入口为 `packages/ui/src/motion/`。视觉插值使用 Web Animations 的 `transform`、`opacity`；手势移动直接写 DOM，每帧合并一次，只有顺序、开关等语义状态进入 React。松手以位置和速度生成临界阻尼弹簧；重新指定目标时采样当前位置和速度，不从旧终点重播。
+
+浮层用 `usePresence`，需要真实布局空间的折叠区用 `useCssPresence`，按实际动画完成卸载。取消或被新目标替代的动画不得执行完成清理。列表以真实 ID 保持节点身份，`useFlipList` 集中读取几何后应用 FLIP，并保留阅读锚点。
+
+聊天滚动统一由 `useConversationScroll` 协调。跟随最新、用户阅读和输入框伸缩共用一个控制器，避免另加原生 `smooth` 滚动争抢位置。支持时由原生 `field-sizing: content` 调整输入框，旧浏览器保留兼容测量；流式文字按真实数据更新，使用 `useDeferredValue` 让后台 Markdown 渲染让出交互优先级，不用计时器逐字追赶。
+
+`node tests/ui/motion-ui-check.mjs` 使用真实 React 页面和演示 IPC，验证连续反向、退场重开、取消拖拽、提交次数预算、内容及图片增高后的阅读位置和宽窄窗口；`--production` 对已构建的 `target/ui/` 运行相同交互检查。使用已安装的 Edge，结果及截图写入 `target/.tmp/web-motion/`，工具临时文件归 `target/tmp/web-motion/`；测试关闭自建浏览器与服务器，任务结束后按删除通道清理数据。`--baseline` 只采集修改前指标，不创建源码副本。
+
+### 组件与页面预览
 
 通用控件、弹层、图标、品牌资源、输入容器、扩展条目和任务卡片位于内部 workspace 包 `packages/ui/`，主程序和托盘通过 `@sleepy-doll/ui` 导入。包不依赖产品 IPC 或会话状态；`ProductUiProvider` 提供产品文案，任务卡片的业务适配留在 `web/src/components/tasks/TaskCard.tsx`。CSS 和资源只有组件包中的一份实现，页面继续负责布局、数据和操作。Slint 安装器独立编译，界面验证通过原生安装器进行。
 
