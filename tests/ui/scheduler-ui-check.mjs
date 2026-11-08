@@ -5,8 +5,12 @@ import http from "node:http";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const scratch = path.join(root, "target/.tmp/scheduler-ui");
-const temporary = path.join(root, "target/tmp/scheduler-ui");
+const taskName =
+  process.argv.find((value) => value.startsWith("--task="))?.slice(7) ??
+  "scheduler-ui";
+assert.match(taskName, /^[a-z][a-z0-9-]*$/);
+const scratch = path.join(root, "target/.tmp", taskName);
+const temporary = path.join(root, "target/tmp", taskName);
 fs.mkdirSync(scratch, { recursive: true });
 fs.mkdirSync(temporary, { recursive: true });
 process.env.TEMP = process.env.TMP = process.env.TMPDIR = temporary;
@@ -25,7 +29,14 @@ const actions = Array.from({ length: 18 }, (_, i) => ({
   publishedRevision: 3,
   available: true,
 }));
-let libraryFixture = actions;
+const unavailableAction = {
+  id: "unavailable-shortcut",
+  title: "不可定时入口",
+  content: "不应出现在定时任务库",
+  available: false,
+  issue: "内部准入失败信息不得替换用户任务描述",
+};
+let libraryFixture = [unavailableAction, ...actions];
 const defaultActions = [
   {
     id: "default:CloseGame",
@@ -117,6 +128,7 @@ let schedules = [];
 let historyFixture = [];
 const calls = [];
 let rejectCreate = false;
+let rejectPreview = false;
 let rejectHistory = false;
 let toggleDelay = 0;
 let passed = false;
@@ -232,6 +244,12 @@ try {
         result = { deleted: true, activeRuns: [], historyKept: true };
         break;
       case "scheduler.preview":
+        if (rejectPreview) {
+          rejectPreview = false;
+          ok = false;
+          error = { message: "未登记的动作不可定时" };
+          break;
+        }
         result = { nextRuns: [new Date(Date.now() + 86400000).toISOString()] };
         break;
       case "scheduler.create":
@@ -551,9 +569,11 @@ try {
     .getByRole("button", { name: "新建定时任务", exact: true })
     .boundingBox();
   assert.ok(
-    Math.abs(createButton.x + createButton.width - toolbar.x - toolbar.width) <
-      2,
-    "新建操作应跟内容区右边缘对齐",
+    Math.min(
+      Math.abs(createButton.x - toolbar.x),
+      Math.abs(createButton.x + createButton.width - toolbar.x - toolbar.width),
+    ) < 2,
+    "新建操作应贴齐所属内容块边缘",
   );
   assert.equal(
     await page
@@ -686,6 +706,15 @@ try {
   await append("每日委托");
   assert.deepEqual(await names(), ["每日委托", "领取奖励", "每日委托"]);
   assert.equal(await dialog.locator(".schedule-library-row").count(), 18);
+  assert.equal(
+    await dialog.getByText(unavailableAction.title, { exact: true }).count(),
+    0,
+  );
+  assert.equal(
+    await dialog.getByText(unavailableAction.issue, { exact: true }).count(),
+    0,
+  );
+  report.ineligibleActionsHidden = true;
   const ids = await queue
     .locator("[data-entry-key]")
     .evaluateAll((nodes) => nodes.map((n) => n.dataset.entryKey));
@@ -1582,6 +1611,30 @@ try {
     name: "快捷任务",
     exact: true,
   });
+  await details
+    .getByRole("button", { name: "每日委托 的更多操作", exact: true })
+    .click();
+  const createsBeforeRejectedShortcut = calls.filter(
+    (call) => call.method === "scheduler.create",
+  ).length;
+  rejectPreview = true;
+  await details
+    .getByRole("menuitem", { name: "安排时间", exact: true })
+    .click();
+  await page
+    .getByText("「每日委托」暂不支持定时执行", { exact: true })
+    .waitFor();
+  assert.equal(await dialog.count(), 0);
+  assert.equal(
+    calls.filter((call) => call.method === "scheduler.create").length,
+    createsBeforeRejectedShortcut,
+  );
+  report.ineligibleShortcutEntryRejected = true;
+  await page
+    .locator(".app-nav")
+    .getByRole("button", { name: "快捷任务", exact: true })
+    .click();
+  await page.getByRole("button", { name: "每日委托", exact: true }).click();
   await details
     .getByRole("button", { name: "每日委托 的更多操作", exact: true })
     .click();

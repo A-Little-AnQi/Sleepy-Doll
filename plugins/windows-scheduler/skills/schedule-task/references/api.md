@@ -7,7 +7,7 @@
 | 接口 | 参数 | 结果与使用方式 |
 | --- | --- | --- |
 | scheduler.clock | `{}` 或 `{localDateTime:"YYYY-MM-DDTHH:mm"}` | now 为 UTC 当前时刻；localNow 为含本机当前偏移的时刻；localDate、weekday（周一 1）、timeZone=system。指定 localDateTime 时增加 resolved.at（含目标日期实际偏移）与 resolved.future；换算失败返回错误。只读，不注册、不运行。 |
-| scheduler.actions.list | 可选 query、category（shortcuts/defaults，默认 shortcuts）、offset=0、limit=20（1–50） | 快捷任务返回 id/title/content/publishedRevision/binding/available/issue；默认项返回 title/binding/available 等，不携带源任务修订。另有 total、nextOffset。available=false 不可绑定。 |
+| scheduler.actions.list | 可选 query、category（shortcuts/defaults，默认 shortcuts）、offset=0、limit=20（1–50） | 只返回通过当前定时准入的快捷任务，含 id/title/content/publishedRevision/binding/available；默认项返回 title/binding/available 等，不携带源任务修订。total、nextOffset 在排除不可绑定项之后计算；搜索不到不代表原快捷任务不存在或用户目标不可实现。 |
 | scheduler.list | `{}` | items 为本插件管理的安排，不列其他软件的系统任务。用名字、时间和任务列表定位，不凭名字编 ID。 |
 | scheduler.get | `{id}` | 最新完整安排，用于修改前取得 revision 与各项 entryId。 |
 
@@ -70,7 +70,7 @@ Occurrence：id、schedule（安排快照）、state、results、createdAt、err
 
 ## 执行时解析的原生命令计划
 
-原始 cmd. 命令快捷入口不可直接定时。先用 bgi.api.describe 读取以下当前契约：
+旧入口若仅含固定 cmd. 命令、固定等待及简单参数，绑定时会按当前契约转换并只读校验，通过才列入可定时任务库。含原生对象、界面上下文、选择或弹窗参数的入口不会自动转换；先用 bgi.api.describe 读取以下当前契约并修复封装：
 
 - bgi.validate_command_plan：通过 bgi.api.read，参数 {mode:"host"或"game",plan:{steps:[…]}}，只读校验，不调用命令、不构造窗口或兑换，返回 valid、executed=false、contractHash、requiresGameReady 和真实命令作用范围。
 - bgi.run_host_command_plan：无游戏动作的固定计划；作为快捷绑定 action 的 bgi.api.invoke methodId，arguments 是 plan。

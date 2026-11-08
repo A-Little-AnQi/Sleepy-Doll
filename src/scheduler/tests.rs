@@ -500,6 +500,51 @@ fn repeated_tasks_really_execute_in_order_after_error() {
 }
 
 #[test]
+fn task_library_excludes_ineligible_bindings_before_search_and_pagination() {
+    let fixture = fixture();
+    let unavailable = save_binding(
+        &fixture.supervisor,
+        "不可定时入口",
+        "只匹配不可用项",
+        ShortcutBinding {
+            action: Some(ShortcutCall {
+                tool: "fixture.close_tool".into(),
+                arguments: json!({}),
+            }),
+            steps: vec![],
+            prepare: vec![],
+            target_name: "未登记的动作".into(),
+            application_name: "Fixture".into(),
+        },
+    );
+    let first = fixture.service.actions("", 0, 1).unwrap();
+    let second = fixture.service.actions("", 1, 1).unwrap();
+    assert_eq!(first["total"], 2);
+    assert_eq!(first["nextOffset"], 1);
+    assert_eq!(second["nextOffset"], Value::Null);
+    for page in [first, second] {
+        assert_eq!(page["items"].as_array().unwrap().len(), 1);
+        assert_eq!(page["items"][0]["available"], true);
+        assert_ne!(page["items"][0]["id"], unavailable);
+    }
+    assert_eq!(
+        fixture.service.actions("只匹配不可用项", 0, 10).unwrap()["total"],
+        0
+    );
+    let mut direct = input(&fixture);
+    direct.entries = vec![EntryInput {
+        entry_id: None,
+        binding: Binding::Shortcut {
+            shortcut_id: unavailable,
+            expected_published_revision: 1,
+        },
+    }];
+    assert!(fixture.service.preview(&direct).is_err());
+    assert!(fixture.service.create(direct).is_err());
+    assert!(fixture.backend.values.lock().unwrap().is_empty());
+}
+
+#[test]
 fn content_search_and_reorder_do_not_consume_originals() {
     let fixture = fixture();
     let found = fixture.service.actions("内容命中", 0, 10).unwrap();

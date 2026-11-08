@@ -359,7 +359,7 @@ export function ScheduleEditor({
           .actions(query, 0, libraryTab)
           .then((result) => {
             if (alive) {
-              setActions(result.items);
+              setActions(result.items.filter((action) => action.available));
               setNextOffset(result.nextOffset);
             }
           })
@@ -403,7 +403,10 @@ export function ScheduleEditor({
         latestLibraryTab.current !== currentTab
       )
         return;
-      setActions((current) => [...current, ...result.items]);
+      setActions((current) => [
+        ...current,
+        ...result.items.filter((action) => action.available),
+      ]);
       setNextOffset(result.nextOffset);
     } catch (reason) {
       if (
@@ -918,9 +921,7 @@ export function ScheduleEditor({
                     </span>
                     <div className="schedule-library-body">
                       <strong>{action.title}</strong>
-                      {(action.content || action.issue) && (
-                        <p>{action.issue || action.content}</p>
-                      )}
+                      {action.content && <p>{action.content}</p>}
                     </div>
                     <IconButton
                       className="schedule-library-add"

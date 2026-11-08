@@ -144,10 +144,40 @@ export function SchedulesPanel({
     };
   }, []);
   useEffect(() => {
-    if (initialTask) {
-      openEditor(null, initialTask);
+    if (!initialTask) return;
+    const revision = initialTask.publishedRevision;
+    if (!revision) {
+      message.error(`「${initialTask.name}」暂不支持定时执行`);
       onConsumed();
+      return;
     }
+    let alive = true;
+    void scheduler
+      .preview({
+        name: initialTask.name,
+        trigger: { kind: "daily", localTimes: ["00:00"] },
+        entries: [
+          {
+            binding: {
+              kind: "shortcut",
+              shortcutId: initialTask.id,
+              expectedPublishedRevision: revision,
+            },
+          },
+        ],
+      })
+      .then(() => {
+        if (alive) openEditor(null, initialTask);
+      })
+      .catch(() => {
+        if (alive) message.error(`「${initialTask.name}」暂不支持定时执行`);
+      })
+      .finally(() => {
+        if (alive) onConsumed();
+      });
+    return () => {
+      alive = false;
+    };
   }, [initialTask]);
   useEffect(() => {
     const visible = () => {

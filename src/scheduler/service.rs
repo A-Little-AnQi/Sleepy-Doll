@@ -80,6 +80,10 @@ impl Scheduler {
         workflow: &mut crate::runtime::operation::task::WorkflowRevision,
         definitions: &[crate::extension::ToolDefinition],
     ) -> Result<()> {
+        crate::bridge::scheduled::normalize_legacy_commands(
+            workflow,
+            self.supervisor()?.bridge_config(),
+        )?;
         for node in &mut workflow.nodes {
             if let TaskNode::Wait(wait) = node {
                 if wait.seconds.is_none() || wait.until.is_some() || wait.probe.is_some() {
@@ -364,12 +368,10 @@ impl Scheduler {
                     },
                 }],
             };
-            let issue = self
-                .bind(&input, None)
-                .err()
-                .map(|error| error.user_message());
-            let repair=(issue.is_some() && revision.nodes.iter().any(|node|matches!(node,TaskNode::Tool(call) if call.tool.as_deref()==Some("bgi.api.invoke") && (call.arguments["methodId"].as_str().is_some_and(|id|id.starts_with("cmd.")) || crate::bridge::scheduled::command_plan_mode(call).is_some())))).then(||json!({"kind":"nativeCommandPlan","capabilityState":"readCurrentContract","readContracts":["bgi.validate_command_plan","bgi.run_host_command_plan","bgi.run_game_command_plan"],"creationDoesNotExecute":true,"next":"读取当前计划接口契约，把固定命令序列和运行期对象选择条件封装成一个快捷入口，再预览定时任务。原始入口不可准入不是目标不可实现；不能把动态数据在创建时写死，也不能擅自改成交付手动入口。"}));
-            items.push(json!({"id":definition.id,"title":definition.name,"content":definition.description,"publishedRevision":revision.revision,"binding":{"kind":"shortcut","shortcutId":definition.id,"expectedPublishedRevision":revision.revision},"available":issue.is_none(),"issue":issue,"repair":repair}));
+            if self.bind(&input, None).is_err() {
+                continue;
+            }
+            items.push(json!({"id":definition.id,"title":definition.name,"content":definition.description,"publishedRevision":revision.revision,"binding":{"kind":"shortcut","shortcutId":definition.id,"expectedPublishedRevision":revision.revision},"available":true}));
         }
         let total = items.len();
         let limit = limit.clamp(1, 50);

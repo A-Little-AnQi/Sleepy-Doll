@@ -188,7 +188,7 @@ fn definitions() -> Vec<Definition> {
         (
             "scheduler.actions.list",
             "查找可绑定任务",
-            "搜索快捷任务标题和已保存内容，取得真实 ID 与发布修订；允许同一目标绑定多次。",
+            "只搜索通过当前定时准入的快捷任务标题和已保存内容，取得真实 ID 与发布修订；允许同一目标绑定多次。未找到不代表原快捷任务不存在，可用 shortcut.list / shortcut.get 核对原绑定。",
             object(
                 json!({"query":{"type":"string","maxLength":200},"category":{"type":"string","enum":["shortcuts","defaults"]},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":50}}),
                 &[],
