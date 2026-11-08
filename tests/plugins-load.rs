@@ -62,7 +62,11 @@ fn independent_bridges_load_tools_and_skills_without_starting_hosts() {
         .load(
             &[root],
             &IDS.map(str::to_owned),
-            &["bgi".into(), "windows-scheduler".into()],
+            &[
+                "bgi".into(),
+                "windows-scheduler".into(),
+                "web-search".into(),
+            ],
             &mut tools,
             &mut skills,
         )
@@ -129,7 +133,11 @@ fn independent_bridges_are_disabled_by_default() {
         .load(
             &[plugin_root()],
             &[],
-            &["bgi".into(), "windows-scheduler".into()],
+            &[
+                "bgi".into(),
+                "windows-scheduler".into(),
+                "web-search".into(),
+            ],
             &mut tools,
             &mut skills,
         )

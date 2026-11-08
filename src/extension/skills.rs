@@ -13,7 +13,6 @@ pub const EMBEDDED_SKILLS: &[&str] = &[
     include_str!("skills/operate-task.md"),
     include_str!("skills/create-shortcut.md"),
     include_str!("skills/continue-task.md"),
-    include_str!("skills/web-search.md"),
 ];
 
 /// 技能的归属，决定谁开关它。
@@ -248,7 +247,13 @@ impl SkillRegistry {
     pub fn read_reference(&self, name: &str, relative: &str) -> Result<String> {
         let skill = self
             .get(name)
-            .ok_or_else(|| Error::Tool("Skill 不存在".into()))?;
+            .ok_or_else(|| Error::Tool("Skill 不存在；请用 skills.search / skills.list 取得实际名称，再用 skills.read 读取正文列出的引用".into()))?;
+        if skill.path.as_os_str().is_empty() {
+            return Err(Error::Tool(
+                "该内置技能没有附带引用目录；完整操作说明已在 skills.read 正文，不需要猜文件路径"
+                    .into(),
+            ));
+        }
         let root = skill
             .path
             .parent()
@@ -555,18 +560,21 @@ mod visibility_tests {
             registry.load_embedded(source).unwrap();
         }
         let visible = registry.standalone();
-        assert_eq!(visible.len(), 2);
-        assert_eq!(visible[0].name, "create-shortcut");
-        assert!(visible.iter().any(|skill| skill.name == "网络搜索"
-            && skill.body.contains("web.search")
-            && skill.body.contains("web.fetch")));
+        assert_eq!(
+            visible
+                .iter()
+                .map(|skill| skill.name.as_str())
+                .collect::<Vec<_>>(),
+            ["create-shortcut"]
+        );
         for name in ["operate-task", "continue-task"] {
             let skill = registry.get(name).unwrap();
             assert!(!skill.body.is_empty());
             assert!(!skill.user_visible);
             assert!(registry.search(name, 8).iter().any(|s| s.name == name));
         }
-        assert_eq!(registry.list().len(), 4);
+        assert!(registry.get("网络搜索").is_none());
+        assert_eq!(registry.list().len(), 3);
     }
 
     #[test]

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "id": "web-search",
+  "name": "网络搜索",
+  "version": "0.1.0",
+  "description": "搜索公开资料、读取网页并核对原文，由软件内置实现，无需配置联网厂商或额外模型。",
+  "skills": ["./skills"]
+}

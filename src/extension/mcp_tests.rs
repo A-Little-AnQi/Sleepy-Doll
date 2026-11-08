@@ -190,10 +190,20 @@ fn bgi_roundtrip_keeps_names_contracts_execution_and_structured_results() {
         );
         assert_eq!(after.source, "plugin:bgi:mcp:bridge");
     }
-    assert!(
-        !tools
-            .iter()
-            .any(|tool| tool.definition().name.starts_with("bgi.host."))
+    assert!(!tools.iter().any(|tool| matches!(
+        tool.definition().name.as_str(),
+        "bgi.host.request" | "bgi.host.events"
+    )));
+    let close = find(&tools, "bgi.host.close").definition();
+    assert_eq!(close.input_schema["additionalProperties"], false);
+    assert_eq!(close.input_schema["properties"], json!({}));
+    assert_eq!(
+        close.execution.effect,
+        crate::extension::ToolEffect::GameWrite
+    );
+    assert_eq!(
+        close.execution.concurrency,
+        crate::extension::ConcurrencyMode::GameExclusive
     );
     let args = json!({"query":"配置组","limit":2});
     let expected = original.call("bgi.feature.search", &args);
@@ -318,6 +328,8 @@ fn shipped_bgi_manifest_loads_and_disables_tools_with_its_plugin() {
         launch_silently: false,
     }));
     for disabled in [vec![], vec!["bgi".to_string()]] {
+        let mut loading_disabled = disabled.clone();
+        loading_disabled.push(crate::extension::providers::WEB_PROVIDER.into());
         let mut plugins = crate::extension::plugins::PluginManager::default();
         plugins.provide_mcp(
             "bgi",
@@ -329,7 +341,7 @@ fn shipped_bgi_manifest_loads_and_disables_tools_with_its_plugin() {
             .load(
                 &[std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins")],
                 &[],
-                &disabled,
+                &loading_disabled,
                 &mut tools,
                 &mut skills,
             )

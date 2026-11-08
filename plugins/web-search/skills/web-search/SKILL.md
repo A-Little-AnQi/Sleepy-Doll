@@ -1,5 +1,7 @@
 ---
-name: 网络搜索
+name: web-search
+userVisible: false
+alwaysLoad: true
 description: 查找任务需要的公开资料，读取网页并核对原文；不需要配置联网厂商或额外模型。
 tags: 联网, 搜索, 网页, 资料, 事实核对
 allowedTools: web.search, web.fetch, artifact.read
