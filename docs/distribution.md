@@ -42,6 +42,12 @@
 
 GitHub Actions Secrets：`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`CLOUDFLARE_API_TOKEN`、`GA_MEASUREMENT_ID`、`GA_API_SECRET`。凭据不进入源码、安装包或发布清单。
 
+## 独立适配插件
+
+独立插件不随默认安装包自动安装。桥构建与隔离检查通过后，执行 `scripts/package-adapters.ps1 -Action Build`，分别组装到 `dist/plugins/march7th/`、`dist/plugins/maaend/`、`dist/plugins/zzz/`；`-Action Check` 检查文件清单、版本和 SHA-256。每个目录可单独导入，包含本插件清单、技能、原生桥、启动入口和说明，排除第三方工具、源码、测试程序、凭据及运行数据。不另生成同内容 ZIP；源码与构建缓存仍在正式模块及 `target/bridge/`。
+
+这些本地插件包的清单明确标记 `published:false`，不写远端下载地址或发布时间，也不改变现有 Windows 安装包的发布状态。具体连接与验收范围见各包 README 和[扩展文档](extensions.md)。
+
 ## Windows 自签名
 
 本机首次执行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 -Action Initialize`，创建 RSA 3072 / SHA-256 代码签名证书。证书固定保存在当前用户 Windows 证书库 `Cert:\CurrentUser\My`，私钥不可导出，不写入仓库、安装载荷或发布清单。重复执行复用原证书；公开证书导出到 `target/release/Sleepy-Doll.cer`，仅含公钥。不要删除或重建证书来处理普通构建失败。

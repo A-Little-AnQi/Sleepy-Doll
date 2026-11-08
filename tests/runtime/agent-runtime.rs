@@ -2662,3 +2662,6 @@ mod search_batch_tests;
 
 #[path = "search-batch-live.rs"]
 mod search_batch_live;
+
+#[path = "local-adapters-live.rs"]
+mod local_adapters_live;

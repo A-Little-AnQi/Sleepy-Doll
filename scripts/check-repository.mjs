@@ -42,6 +42,7 @@ const allowedRoot = new Set([
   "assets",
   "scripts",
   "tests",
+  "test",
   "docs",
   "video",
   "target",
@@ -66,7 +67,7 @@ const files = [...new Set(listed.split("\0").filter(Boolean))].filter((file) =>
   existsSync(resolve(root, file)),
 );
 const sensitive =
-  /(?:^|\/)(?:user|node_modules|dist|target|\.sleepy-doll)\/|\.(?:db(?:-shm|-wal)?|log|pem|key|pfx|p12)$/i;
+  /(?:^|\/)(?:user|node_modules|dist|target|test|\.sleepy-doll)\/|\.(?:db(?:-shm|-wal)?|log|pem|key|pfx|p12)$/i;
 const credentials = [
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
   /\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})\b/,

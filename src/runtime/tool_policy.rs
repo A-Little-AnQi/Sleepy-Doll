@@ -136,10 +136,12 @@ impl TurnTools {
             .iter()
             .filter(|tool| self.allows(tool))
             .filter(|tool| {
-                matches!(
-                    tool.name.as_str(),
-                    "tools.search" | "skills.search" | "skills.read" | "skills.reference"
-                ) || self.discovered.contains(&tool.name)
+                tool.execution.prompt_visible
+                    || matches!(
+                        tool.name.as_str(),
+                        "tools.search" | "skills.search" | "skills.read" | "skills.reference"
+                    )
+                    || self.discovered.contains(&tool.name)
                     || self.used.contains(&tool.name)
                     || matches!(
                         tool.execution.exposure,

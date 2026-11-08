@@ -1,0 +1,364 @@
+{
+  "schemaVersion": 1,
+  "id": "march7th",
+  "name": "三月七小助手原生桥",
+  "version": "0.1.0",
+  "description": "通过本机 C++ 反射桥操作三月七小助手（崩坏：星穹铁道），查询当前状态与内置任务、运行或停止已有任务、查看日志并调整允许的配置。",
+  "skills": [
+    "./skills"
+  ],
+  "httpTools": [
+    {
+      "name": "status",
+      "title": "三月七状态",
+      "description": "读取桥与宿主状态：协议版本、实例与目录版本、宿主版本、当前是否有任务运行及任务名。任何操作前先读它。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23111/status",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MARCH7TH_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 10000,
+      "execution": {
+        "effect": "readOnly",
+        "risk": "observe",
+        "concurrencySafe": true,
+        "concurrency": "readParallel",
+        "modelUsage": "none",
+        "verification": "none",
+        "idempotency": "safeRetry",
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    },
+    {
+      "name": "tasks.search",
+      "title": "三月七任务目录",
+      "description": "搜索三月七小助手当前宿主实际支持的内置任务，返回任务标识、名称与用途；运行前进一步读取命中任务详情。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "可选关键词，按 ID、名称或说明过滤"
+          }
+        },
+        "additionalProperties": false
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23111/tasks/search",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MARCH7TH_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 8000,
+      "execution": {
+        "effect": "readOnly",
+        "risk": "observe",
+        "concurrencySafe": true,
+        "concurrency": "readParallel",
+        "modelUsage": "none",
+        "verification": "none",
+        "idempotency": "safeRetry",
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false,
+        "searchProvider": true
+      }
+    },
+    {
+      "name": "tasks.describe",
+      "title": "三月七任务详情",
+      "description": "查看单个任务 ID 的详情与可启动性；被白名单拒绝的任务返回拒绝原因（更新类、循环挂机类等不允许）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "任务 ID，来自 tasks.search"
+          }
+        },
+        "required": [
+          "taskId"
+        ],
+        "additionalProperties": false
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23111/tasks/describe",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MARCH7TH_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 8000,
+      "execution": {
+        "effect": "readOnly",
+        "risk": "observe",
+        "concurrencySafe": true,
+        "concurrency": "readParallel",
+        "modelUsage": "none",
+        "verification": "none",
+        "idempotency": "safeRetry",
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    },
+    {
+      "name": "config.read",
+      "title": "三月七配置读取",
+      "description": "读取三月七运行配置。敏感字段（令牌、账号、通知凭据等，含嵌套字典与数组内对象）自动脱敏；同时返回配置修订号 revision，写入时必须携带。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "可选的键列表；省略则返回全部非敏感配置"
+          }
+        },
+        "additionalProperties": false
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23111/config/read",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MARCH7TH_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 12000,
+      "execution": {
+        "effect": "readOnly",
+        "risk": "observe",
+        "concurrencySafe": true,
+        "concurrency": "readParallel",
+        "modelUsage": "none",
+        "verification": "none",
+        "idempotency": "safeRetry",
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    },
+    {
+      "name": "config.describe",
+      "title": "三月七可写配置说明",
+      "description": "列出允许经桥修改的配置字段、类型、取值范围与是否在宿主中存在；路径、脚本、计划、自动启动等字段不在其列。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23111/config/describe",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MARCH7TH_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 10000,
+      "execution": {
+        "effect": "readOnly",
+        "risk": "observe",
+        "concurrencySafe": true,
+        "concurrency": "readParallel",
+        "modelUsage": "none",
+        "verification": "none",
+        "idempotency": "safeRetry",
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    },
+    {
+      "name": "config.write",
+      "title": "三月七配置写入",
+      "description": "修改单个白名单内的简单配置字段。必须携带 config.read 返回的 revision；配置被并发修改时返回 409 冲突。写入在宿主主线程闭包内完成校验、set_value 与回读核验。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "字段名，来自 config.describe"
+          },
+          "value": {
+            "description": "新值；类型与取值必须符合 config.describe 声明"
+          },
+          "revision": {
+            "type": "string",
+            "description": "config.read 返回的修订号"
+          },
+          "instanceId": {
+            "type": "string",
+            "description": "本次 status 返回的 instanceId"
+          },
+          "catalogVersion": {
+            "type": "string",
+            "description": "本次 status 返回的 catalogVersion"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "value",
+          "revision",
+          "instanceId",
+          "catalogVersion"
+        ]
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23111/config/write",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MARCH7TH_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 15000,
+      "execution": {
+        "effect": "localWrite",
+        "risk": "standard",
+        "modelUsage": "none",
+        "concurrency": "serial",
+        "verification": "state",
+        "idempotency": "neverRetry",
+        "scope": "fields",
+        "scopeTarget": "key",
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    },
+    {
+      "name": "task.start",
+      "title": "启动三月七任务",
+      "description": "请求宿主启动当前目录中的一个允许任务，随后核对宿主运行状态：只有确认进入运行状态才返回 accepted，否则返回 unconfirmed。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "任务 ID，来自 tasks.search"
+          },
+          "instanceId": {
+            "type": "string",
+            "description": "本次 status 返回的 instanceId"
+          },
+          "catalogVersion": {
+            "type": "string",
+            "description": "本次 status 返回的 catalogVersion"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "taskId",
+          "instanceId",
+          "catalogVersion"
+        ]
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23111/task/start",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MARCH7TH_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 15000,
+      "execution": {
+        "effect": "gameWrite",
+        "risk": "high",
+        "modelUsage": "none",
+        "concurrency": "gameExclusive",
+        "leaseScope": "game:march7th",
+        "verification": "state",
+        "idempotency": "neverRetry",
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    },
+    {
+      "name": "task.stop",
+      "title": "停止三月七任务",
+      "description": "请求宿主停止当前任务，并在观察窗内核对宿主运行状态：已停止 / 未在运行 / 超时未知。超时返回 unknown，不冒充已停止。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "graceMs": {
+            "type": "integer",
+            "description": "停止后的状态观察窗毫秒数，默认 3000，最大 15000"
+          },
+          "instanceId": {
+            "type": "string",
+            "description": "本次 status 返回的 instanceId"
+          },
+          "catalogVersion": {
+            "type": "string",
+            "description": "本次 status 返回的 catalogVersion"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "instanceId",
+          "catalogVersion"
+        ]
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23111/task/stop",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MARCH7TH_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 20000,
+      "execution": {
+        "effect": "gameWrite",
+        "risk": "standard",
+        "modelUsage": "none",
+        "concurrency": "gameExclusive",
+        "leaseScope": "game:march7th",
+        "verification": "state",
+        "idempotency": "neverRetry",
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    },
+    {
+      "name": "logs.read",
+      "title": "三月七任务日志",
+      "description": "读取当前任务日志的末尾若干行，用于核实任务接纳后的真实进展。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tailLines": {
+            "type": "integer",
+            "description": "返回末尾行数，默认 200，最大 2000"
+          }
+        },
+        "additionalProperties": false
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23111/logs/read",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MARCH7TH_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 12000,
+      "execution": {
+        "effect": "readOnly",
+        "risk": "observe",
+        "concurrencySafe": true,
+        "concurrency": "readParallel",
+        "modelUsage": "none",
+        "verification": "none",
+        "idempotency": "safeRetry",
+        "maxResultChars": 20000,
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    }
+  ]
+}

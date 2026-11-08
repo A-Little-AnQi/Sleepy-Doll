@@ -1,0 +1,358 @@
+{
+  "schemaVersion": 1,
+  "id": "maaend",
+  "name": "MaaEnd 桥",
+  "version": "0.1.0",
+  "description": "MaaEnd 独立原生适配：发现任务与实例，按既有选项运行任务，停止并核实，版本化调整任务顺序、启停与声明参数。",
+  "skills": [
+    "./skills"
+  ],
+  "httpTools": [
+    {
+      "name": "status",
+      "title": "MaaEnd 总览",
+      "description": "读取 MaaEnd 后端心跳、MaaFramework 初始化状态、全部实例状态（connected/resource_loaded/tasker_inited/is_running/task_run_state）与当前任务目录指纹（catalogHash）。所有写操作前先用它核对环境与实例就绪情况。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23121/status",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MAAEND_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 25000,
+      "execution": {
+        "effect": "readOnly",
+        "effectIsDynamic": false,
+        "concurrencySafe": true,
+        "risk": "observe",
+        "concurrency": "readParallel",
+        "modelUsage": "none",
+        "maxResultChars": 24000,
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    },
+    {
+      "name": "catalog.search",
+      "title": "MaaEnd 任务目录搜索",
+      "description": "在运行中宿主实时反射的任务目录里按关键词检索任务与选项（名称、条目、翻译标签、说明），返回 catalogHash 供后续写操作作证据。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "additionalProperties": false
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23121/catalog/search",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MAAEND_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 25000,
+      "execution": {
+        "effect": "readOnly",
+        "effectIsDynamic": false,
+        "concurrencySafe": true,
+        "risk": "observe",
+        "concurrency": "readParallel",
+        "modelUsage": "none",
+        "maxResultChars": 24000,
+        "searchHint": "MaaEnd 任务与选项目录",
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false,
+        "searchProvider": true
+      }
+    },
+    {
+      "name": "catalog.describe",
+      "title": "MaaEnd 任务/选项详情",
+      "description": "查看运行中宿主声明的某个任务（条目、分组、控制器/资源要求、选项列表）或某个选项（类型、候选项、输入约束、默认值）的完整定义，附 catalogHash。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "additionalProperties": false
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23121/catalog/describe",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MAAEND_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 25000,
+      "execution": {
+        "effect": "readOnly",
+        "effectIsDynamic": false,
+        "concurrencySafe": true,
+        "risk": "observe",
+        "concurrency": "readParallel",
+        "modelUsage": "none",
+        "maxResultChars": 24000,
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    },
+    {
+      "name": "read",
+      "title": "MaaEnd 实例状态",
+      "description": "读取实例运行状态；不传 instanceId 时返回全部实例与 MaaFramework 版本。任务提交后用它查询 task_run_state 判断真实进度，接纳回执不等于业务成功。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instanceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23121/read",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MAAEND_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 25000,
+      "execution": {
+        "effect": "readOnly",
+        "effectIsDynamic": false,
+        "concurrencySafe": true,
+        "risk": "observe",
+        "concurrency": "readParallel",
+        "modelUsage": "none",
+        "verification": "state",
+        "maxResultChars": 20000,
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    },
+    {
+      "name": "invoke",
+      "title": "MaaEnd 运行已声明任务",
+      "description": "按该实例已保存的配置及声明默认值提交任务，自动生成选项覆盖和必要的 Agent 准备请求；同名任务重复时用 selectedTaskId 精确选择。只使用现存就绪实例，接纳不等于游戏业务完成。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "instanceId",
+          "taskName",
+          "catalogHash"
+        ],
+        "properties": {
+          "instanceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "taskName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "catalogHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "selectedTaskId": {
+            "type": "string",
+            "description": "config.read 返回的既有任务条目 ID；同名重复时必填"
+          }
+        },
+        "additionalProperties": false
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23121/invoke",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MAAEND_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 30000,
+      "execution": {
+        "effect": "gameWrite",
+        "effectIsDynamic": false,
+        "concurrencySafe": false,
+        "risk": "high",
+        "concurrency": "gameExclusive",
+        "leaseScope": "game:maaend",
+        "cancellation": "cooperative",
+        "verification": "state",
+        "modelUsage": "none",
+        "maxResultChars": 12000,
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    },
+    {
+      "name": "task.stop",
+      "title": "MaaEnd 停止任务",
+      "description": "请求停止指定实例当前运行的任务并回读 is_running 与 task_run_state 核实是否真正停下；停止请求超时或响应丢失时返回 unknown，不自动重试。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "instanceId"
+        ],
+        "properties": {
+          "instanceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23121/task/stop",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MAAEND_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 25000,
+      "execution": {
+        "effect": "gameWrite",
+        "effectIsDynamic": false,
+        "concurrencySafe": false,
+        "concurrency": "gameExclusive",
+        "leaseScope": "game:maaend",
+        "verification": "state",
+        "modelUsage": "none",
+        "maxResultChars": 12000,
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    },
+    {
+      "name": "config.read",
+      "title": "MaaEnd 配置读取",
+      "description": "读取当前配置的版本化快照（revision）与脱敏视图：实例、任务顺序、启停与选项值；密码与未知选项脱敏，凭据、路径与预执行程序不外发。写配置前先读，作为 baseRevision 证据。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "instanceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23121/config/read",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MAAEND_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 25000,
+      "execution": {
+        "effect": "readOnly",
+        "effectIsDynamic": false,
+        "concurrencySafe": true,
+        "risk": "observe",
+        "concurrency": "readParallel",
+        "modelUsage": "none",
+        "maxResultChars": 48000,
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    },
+    {
+      "name": "config.update",
+      "title": "MaaEnd 配置有限更新",
+      "description": "带 catalogHash 与 baseRevision，只更新一个实例内既有任务顺序、启停及已声明的安全选项（包括热键）。不修改路径、密码、Agent、预程序或计划；保留未知字段，回读核实，不自动重放未知结果。",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "instanceId",
+          "catalogHash",
+          "baseRevision"
+        ],
+        "properties": {
+          "instanceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "catalogHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "baseRevision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "taskOrder": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "minItems": 1
+          },
+          "taskEnabled": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "optionValues": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:23121/config/update",
+      "headers": {
+        "X-Sleepy-Token": "${ENV:MAAEND_BRIDGE_TOKEN}"
+      },
+      "timeoutMs": 60000,
+      "execution": {
+        "effect": "localWrite",
+        "effectIsDynamic": false,
+        "concurrencySafe": false,
+        "concurrency": "serial",
+        "scope": "fields",
+        "scopeTarget": "instanceId",
+        "scopeReader": "maaend.http.config.read",
+        "verification": "state",
+        "modelUsage": "none",
+        "maxResultChars": 24000,
+        "deferred": true,
+        "alwaysLoad": false,
+        "exposure": "onDemand",
+        "promptVisible": false
+      }
+    }
+  ]
+}

@@ -8,7 +8,9 @@ Sleepy Doll 通过技能（Skill）与插件（Plugin）扩展模型能力：技
 
 - [`plugins/bgi/`](../plugins/bgi/)：随产品分发的 BetterGI 领域插件。
 - [`plugins/example-weather/`](../plugins/example-weather/)：HTTP 工具示例，默认停用。
-- [`plugins/zzz/`](../plugins/zzz/)：绝区零一条龙 MCP 服务接入，当前默认停用并隐藏入口，保留连接配置、工具执行策略与领域操作指引。
+- [`plugins/zzz/`](../plugins/zzz/)：绝区零一条龙独立反射桥与领域技能。
+- [`plugins/march7th/`](../plugins/march7th/)：三月七独立桥与领域技能。
+- [`plugins/maaend/`](../plugins/maaend/)：MaaEnd 独立桥与领域技能。
 
 ## 快速要点
 
@@ -126,6 +128,7 @@ tags: bgi, route
 
 - 可选的 `outputSchema` 在结果进入模型上下文前校验。
 - `maxResultChars` 超出后完整结果保存在运行附件中，模型只接收有界预览。
+- HTTP 工具的非 2xx 响应作为工具错误返回，保留状态码和有界错误正文；不把版本冲突等业务拒绝统一解释为连接中断。错误正文最多读取 16 KiB、展示 4096 个字符，不附加请求 URL 或标头。
 
 ## MCP
 
@@ -138,25 +141,6 @@ tags: bgi, route
 | `inProcess` | `server` | 仅可引用应用注入、与插件 ID 相同的服务；第三方清单不能指定任意实现 |
 
 各传输都可指定 `timeoutMs`（默认 30000）与按远端原始工具名索引的 `toolExecution`。混用传输字段会拒绝加载。HTTP 标头支持 `${ENV:NAME}`，环境值不会写回清单。
-
-绝区零一条龙 MCP 当前默认停用并隐藏入口，等待测试。配置保存在 `plugins/zzz/.sleepy-doll-plugin/plugin.disabled.json`；插件扫描器只识别 `plugin.json`，因此不会加载该插件、连接服务或显示启用入口。
-
-恢复测试时，将上述清单恢复为 `plugin.json`，再导入并启用插件。以下为保留清单中的 `mcpServers` 配置：
-
-```json
-{
-  "id": "onedragon",
-  "transport": "streamableHttp",
-  "url": "http://127.0.0.1:23001/mcp",
-  "timeoutMs": 30000
-}
-```
-
-绝区零一条龙 MCP 提供应用运行、任务状态与停止、配置读写、游戏画面识别和交互操作。Sleepy Doll 通过 MCP 获取工具定义并发起调用；具体可用的应用、操作流程和配置字段由服务端提供。
-
-恢复入口后，在 Sleepy Doll 中导入 `plugins/zzz` 并启用“绝区零一条龙 MCP”。该插件安装在用户插件目录，不随默认安装包分发。先在一条龙“开发工具 → MCP 服务”启动服务，再启用插件或重载扩展。连接成功后，分别查询游戏窗口与任务状态，确认当前运行条件。
-
-源码运行也可使用插件里的 `start-service.ps1 -OneDragonPath <一条龙源码目录>`。启动器复用该目录的 `target/python-env/` 或 `.venv/`，直接运行作者的 MCP 后端；日志归一条龙 `target/dev/mcp/`，临时文件归 `target/tmp/mcp/`。应用配置、识别模型与其他运行机制仍由一条龙管理，启动 MCP 本身不会运行游戏任务。
 
 - 握手、协议版本协商、会话标头、分页、请求 ID 和取消通知由 SDK 管理；服务端未声明的采样、文件访问等客户端能力不启用。
 - 服务的 `instructions` 作为随插件启停的操作说明登记，并在当前任务涉及该插件时装载；它不能改变用户授权。
@@ -181,6 +165,36 @@ tags: bgi, route
 ```
 
 该模式只提供 MCP，不创建窗口、Agent 数据库或模型会话；要求已有配置启用 BGI 插件与连接，不会自动启动 BetterGI。标准输出仅承载 MCP，错误写入标准错误。开发入口 `sleepy-doll-dev` 支持同样参数。此服务使用配置中的宿主连接权限；外部客户端负责自己的用户授权与结果核验。
+
+## 独立宿主桥
+
+三月七、MaaEnd 与绝区零分别维护在 `plugins/march7th/`、`plugins/maaend/`、`plugins/zzz/`。每个目录独立包含插件清单、`bridge/`、领域技能和连接说明，不相互导入桥实现，也不把软件标识交给一个共用桥分流。
+
+这三套桥使用现有 `httpTools` 契约登记工具。主程序继续负责插件启停、工具发现、参数校验、授权与技能装载；通用 MCP 支持仍可接入文档分析等其他插件。绝区零不再连接一条龙的 MCP 服务。
+
+三套插件默认停用，导入和启用不会启动第三方软件。桥统一为 C++ 原生编译产物，各自使用独立端口和令牌，不附带 Python 等脚本桥或要求额外解释器。三月七与绝区零从原生侧调用宿主已加载运行时的反射接口；MaaEnd 使用 MXU 对已有实例公开的原生接口与任务描述，不能把它描述成对 Rust 私有对象进行 CLR 注入。各自的支持范围和手动入口见插件 README。
+
+`test/local-adapters/` 是用户指定并由 Git 忽略的本机分析资料，保存官方源码、发布包、解包内容和来源校验信息。该目录不是生产插件依赖，不进入软件安装载荷，也不用于自动安装第三方工具。
+
+独立交付目录为 `dist/plugins/<插件 ID>/`。原生检查通过后，运行 `scripts/package-adapters.ps1 -Action Build` 按清单组装；`-Action Check` 校验目录、版本及每个文件的 SHA-256。包内包括清单、技能、原生桥与启动说明，排除第三方工具本体、源码、测试程序和运行配置。在插件导入入口选择其中一个插件目录即可，不要求本机有源码或编译器；桥的手动连接步骤见包内 README。组装不会安装或启用插件。
+
+构建输出分别归 `target/bridge/march7th/`、`target/bridge/maaend/`、`target/bridge/zzz/`，工具临时文件归已登记的 `target/.tmp/local-adapters/`。自动验证只运行自写的原生夹具；测试构建不包含真实注入、目标进程启动或游戏输入路径，不向已下载工具附着桥，也不加载其动态库。原生桥编译通过不能代替真实宿主注入或接口验收。
+
+原生验证入口是 `tests/plugins/run-native.ps1`：检查测试产物导入表，拒绝真实注入、进程启动、键鼠输入和网络连接入口，再用清空凭据环境的独立桌面及单进程 Job 运行夹具。只接受三套桥标准输出目录中的测试 EXE，不接受下载的软件；测试辅助程序随检查结束清理。此限制用于可信夹具验证，不是运行任意第三方程序的虚拟机。
+
+`cargo test --no-default-features --test plugins-load` 使用产品实际插件加载器检查三套清单、工具契约、技能、独立端口与默认停用状态；不调用桥、不启动宿主。伪宿主协议测试和插件加载通过均不代表真实宿主、游戏或已安装程序已验收。
+
+三套适配技能沿用 BGI 的披露方式：入口只说明领域、对象边界、结果含义及引用选择，任务、配置、连接资料按需读取。技能摘要、正文与引用不固化具体业务名称、接口名称、参数名或宿主对象标识；具体调用来自当前工具契约，操作对象来自宿主反射目录。HTTP 工具先登记为按需发现，不因启用插件就把全部契约常驻给模型。插件加载检查同时核对这些边界及包内引用可读。
+
+真实模型路由另由忽略测试 `live_glm_currencywars_isolated_plugins` 检查：使用用户原句，同时加载三套正式插件，将全部插件 HTTP 地址和令牌改指隔离假宿主，分别模拟接纳、明确拒绝和断线。假宿主只改变夹具内存，不能启动真实程序；公开资料可通过产品只读联网能力核实，命令、本机文件和真实宿主操作由测试钩子拦截。测试使用正式提交、调度和终态处理链路，核对任务目录、详情、会话依据、实际派发次数和用户可见结果；运行时拒绝拦截与模型答复分别记录，不把后台错误伪装成模型原话。
+
+显式设置模型配置路径、模型 ID、阶段名以及 `SLEEPY_DOLL_TEST_ROOT=E:\BetterGIProject\Sleepy-Doll\target\.tmp\currencywars-agent`，并将工具临时变量指向该根，再运行 `cargo test --no-default-features --lib live_glm_currencywars_isolated_plugins -- --ignored --nocapture`。报告固定为 `target/reports/currencywars-agent.json`，保留不同阶段的原始记录；结束后清理隔离根。同一测试 EXE 仍在运行时不得重建它，避免 Windows 文件占用。单一问法通过不能代表所有问法和真实宿主通过。
+
+HTTP 写工具在调用动作之前明确拒绝时，可返回非成功状态及 `{"submissionStatus":"notSubmitted","error":{"code":"…","message":"…"}}`。运行时记录未提交、释放本次执行占用并将拒绝原因交给模型解释；不能同时返回 `accepted:true` 或 `jobId`。仅有 HTTP 409、`executed:false`、超时或断线均不构成未提交证明，仍保留结果未知与防重放约束。三月七桥仅为已核实在动作之前拒绝的错误码发出该回执。
+
+对声明不可重试的写工具，明确未提交后，同一目标版本、步骤、工具契约和相同参数不会再次派发；执行器直接保留拒绝原因结束，不依赖模型自行记住限制。参数或用户目标变化后重新校验，既定独立步骤使用各自的步骤标识。
+
+启动/提交回执的核验范围与业务结果分开：已确认启动或接纳提交时，桥可返回 `verification.status=succeeded`，并以 `verification.scope=launch/submission` 说明本次工具的完成范围；未确认启动不得带已成功核验。此范围不能证明游戏任务完成。
 
 ## 子进程隔离
 

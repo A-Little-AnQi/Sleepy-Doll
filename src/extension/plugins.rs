@@ -491,6 +491,7 @@ impl Drop for PluginManager {
 fn call_http(definition: &HttpToolManifest, arguments: &Value) -> Result<Value> {
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_millis(definition.timeout_ms)))
+        .http_status_as_error(false)
         .build()
         .new_agent();
     let headers = definition
@@ -498,7 +499,7 @@ fn call_http(definition: &HttpToolManifest, arguments: &Value) -> Result<Value> 
         .iter()
         .map(|(name, value)| (name.as_str(), expand_env(value)))
         .collect::<Vec<_>>();
-    if definition.method.eq_ignore_ascii_case("GET") {
+    let mut response = if definition.method.eq_ignore_ascii_case("GET") {
         let pairs = arguments
             .as_object()
             .into_iter()
@@ -519,18 +520,56 @@ fn call_http(definition: &HttpToolManifest, arguments: &Value) -> Result<Value> 
         for (name, value) in headers {
             request = request.header(name, value);
         }
-        Ok(request.call()?.body_mut().read_json()?)
+        request.call()?
     } else if definition.method.eq_ignore_ascii_case("POST") {
         let mut request = agent.post(&definition.url);
         for (name, value) in headers {
             request = request.header(name, value);
         }
-        Ok(request.send_json(arguments)?.body_mut().read_json()?)
+        request.send_json(arguments)?
     } else {
-        Err(Error::Config(format!(
+        return Err(Error::Config(format!(
             "插件 HTTP 方法不支持：{}",
             definition.method
-        )))
+        )));
+    };
+    let status = response.status();
+    if status.is_success() {
+        Ok(response.body_mut().read_json()?)
+    } else {
+        let detail = response
+            .body_mut()
+            .with_config()
+            .limit(16 * 1024)
+            .read_to_string()
+            .unwrap_or_default();
+        // 不包含请求 URL 或标头；桥的结构化业务错误须保留，避免误判为断线。
+        let message = format!(
+            "插件 HTTP {}：{}",
+            status.as_u16(),
+            detail.chars().take(4096).collect::<String>()
+        );
+        // 只信明确的拒绝提交回执；HTTP 状态、executed:false 或普通错误均不足以
+        // 证明服务没有接纳异步任务。未携带回执的写入错误仍按结果未知处理。
+        let receipt = serde_json::from_str::<Value>(&detail).ok();
+        let rejected = receipt.as_ref().is_some_and(|value| {
+            value["submissionStatus"] == "notSubmitted"
+                && value["error"].is_object()
+                && value["accepted"] != true
+                && value.get("jobId").is_none()
+        });
+        Err(if rejected {
+            Error::NotSubmitted(
+                receipt
+                    .as_ref()
+                    .and_then(|value| value.pointer("/error/message").and_then(Value::as_str))
+                    .filter(|text| !text.trim().is_empty())
+                    .map(|text| text.chars().take(4096).collect())
+                    .unwrap_or(message),
+            )
+        } else {
+            Error::Tool(message)
+        })
     }
 }
 
@@ -558,5 +597,100 @@ fn failed_manifest(directory: &Path) -> PluginManifest {
         http_tools: vec![],
         mcp_servers: vec![],
         adapters: vec![],
+    }
+}
+
+#[cfg(test)]
+mod http_reply_tests {
+    use super::*;
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+    };
+
+    fn reply(status: u16, body: &str) -> Result<Value> {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let body = body.to_owned();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).unwrap();
+                request.extend(byte);
+                assert!(request.len() < 8192);
+            }
+            write!(
+                stream,
+                "HTTP/1.1 {status} Reply\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        let result = call_http(
+            &HttpToolManifest {
+                name: "fixture".into(),
+                title: String::new(),
+                description: String::new(),
+                input_schema: serde_json::json!({"type":"object"}),
+                output_schema: None,
+                method: "GET".into(),
+                url: format!("http://{address}/fixture"),
+                headers: HashMap::new(),
+                timeout_ms: 2000,
+                execution: ToolExecution::read_only(),
+            },
+            &serde_json::json!({}),
+        );
+        server.join().unwrap();
+        result
+    }
+
+    #[test]
+    fn plugin_http_preserves_conflict_body() {
+        let error = reply(
+            409,
+            r#"{"error":{"code":"revision_conflict","message":"配置已变化，请重新读取"}}"#,
+        )
+        .unwrap_err();
+        let Error::Tool(message) = error else {
+            panic!("业务拒绝应保留为工具错误");
+        };
+        assert!(message.contains("409"));
+        assert!(message.contains("revision_conflict"));
+        assert!(message.contains("配置已变化"));
+    }
+
+    #[test]
+    fn plugin_http_requires_explicit_not_submitted_receipt() {
+        assert!(matches!(
+            reply(
+                409,
+                r#"{"submissionStatus":"notSubmitted","error":{"message":"已拒绝"}}"#
+            ),
+            Err(Error::NotSubmitted(_))
+        ));
+        for body in [
+            r#"{"executed":false,"error":{"message":"结果未知"}}"#,
+            r#"{"submissionStatus":"notSubmitted","accepted":true,"error":{}}"#,
+            r#"{"submissionStatus":"notSubmitted","jobId":"pending","error":{}}"#,
+            r#"{"submissionStatus":"notSubmitted"}"#,
+        ] {
+            assert!(matches!(reply(409, body), Err(Error::Tool(_))), "{body}");
+        }
+    }
+
+    #[test]
+    fn plugin_http_keeps_success_shape_and_bounds_error_body() {
+        assert_eq!(
+            reply(200, r#"{"accepted":true}"#).unwrap(),
+            serde_json::json!({"accepted":true})
+        );
+        let error = reply(400, &"x".repeat(8000)).unwrap_err().to_string();
+        assert!(error.len() < 5000);
     }
 }

@@ -16,6 +16,9 @@ pub enum Error {
     ModelProtocol(String),
     #[error("工具错误：{0}")]
     Tool(String),
+    /// 外部工具明确回执拒绝提交；已确认本次动作没有进入执行阶段。
+    #[error("未提交：{0}")]
+    NotSubmitted(String),
     /// 写入前置的乐观版本校验失败（expectedSha256 与当前文件不一致等）。
     /// 与 `Conflict` 不同：它在工具结果边界作为 ok:false 反馈给模型，
     /// 重新读取后可继续，不终止运行。
@@ -58,7 +61,11 @@ impl Error {
             Self::Cancelled => "已停止。".into(),
             Self::Io(_) => "本地文件或插件进程无法访问，请检查路径与权限。".into(),
             Self::Json(_) => "收到的数据格式不完整或不正确。".into(),
-            Self::Config(s) | Self::Tool(s) | Self::Stale(s) | Self::Conflict(s) => {
+            Self::Config(s)
+            | Self::Tool(s)
+            | Self::NotSubmitted(s)
+            | Self::Stale(s)
+            | Self::Conflict(s) => {
                 if s.is_ascii() {
                     "当前操作无法继续，请检查配置或核对执行记录。".into()
                 } else {

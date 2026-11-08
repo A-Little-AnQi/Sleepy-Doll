@@ -88,10 +88,11 @@ function Copy-Product([string]$Destination) {
 
 function Assert-Distribution {
     if (-not (Test-Path -LiteralPath $distribution)) { return }
-    $allowed = @($installerName, "$installerName.sha256", "Sleepy-Doll-$version-release.json", 'android')
+    $allowed = @($installerName, "$installerName.sha256", "Sleepy-Doll-$version-release.json", 'android', 'plugins')
     foreach ($item in Get-ChildItem -LiteralPath $distribution -Force) {
         if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Name -notin $allowed) { throw "Unexpected distribution item: $($item.FullName)" }
-        if ($item.PSIsContainer -ne ($item.Name -eq 'android')) { throw "Wrong distribution item type: $($item.FullName)" }
+        if ($item.PSIsContainer -ne ($item.Name -in @('android', 'plugins'))) { throw "Wrong distribution item type: $($item.FullName)" }
+        if ($item.Name -eq 'plugins') { & (Join-Path $PSScriptRoot 'package-adapters.ps1') -Action Check }
         if ($item.Name -eq 'android') {
             foreach ($android in Get-ChildItem -LiteralPath $item.FullName -Force) {
                 if ($android.PSIsContainer -or ($android.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $android.Name -notmatch '^sleepy-doll-[0-9A-Za-z.+-]+-android-[0-9A-Za-z-]+\.apk(\.sha256)?$') { throw "Unexpected Android distribution item: $($android.FullName)" }

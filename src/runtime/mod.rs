@@ -4253,7 +4253,30 @@ impl Supervisor {
                         })
                     })
                     .map(|step| step.id.clone());
-                let mut request = json!({"methodId":call.name,"arguments":a,"catalogVersion":hash(&json!(definition)),"instanceId":instance,"stepId":step_id});
+                let mut request = json!({"methodId":call.name,"arguments":a,"catalogVersion":hash(&json!(definition)),"instanceId":instance,"stepId":step_id,"goalRevision":run.goal_revision});
+                if definition.execution.idempotency == crate::extension::IdempotencyMode::NeverRetry
+                    && let Some(previous) = attempts.iter().rev().find(|attempt| {
+                        attempt.outcome == "notSubmitted"
+                            && attempt.evidence["submissionStatus"] == "notSubmitted"
+                            && [
+                                "methodId",
+                                "arguments",
+                                "catalogVersion",
+                                "instanceId",
+                                "stepId",
+                                "goalRevision",
+                            ]
+                            .iter()
+                            .all(|key| attempt.request[*key] == request[*key])
+                    })
+                {
+                    let reason = previous.evidence["error"]
+                        .as_str()
+                        .unwrap_or("宿主拒绝了请求");
+                    return Err(Error::Conflict(format!(
+                        "本次操作未执行：{reason} 相同请求未再次提交。"
+                    )));
+                }
                 let scope = self.change_scope(call, definition, cancel).await;
                 let permission = operation::permissions::PermissionEngine::decide(
                     self.execution_permission_mode(run),
@@ -4390,9 +4413,21 @@ impl Supervisor {
                         self.journal.release(&attempt)?;
                         Ok(value)
                     }
+                    Ok(Err(Error::NotSubmitted(message))) => {
+                        attempt.outcome = "notSubmitted".into();
+                        attempt.evidence =
+                            json!({"submissionStatus":"notSubmitted","error":message});
+                        self.journal.attempt(&attempt)?;
+                        self.journal.release(&attempt)?;
+                        Err(Error::NotSubmitted(message))
+                    }
                     Ok(Err(error))
                         if definition.execution.cancellation
-                            == crate::extension::CancellationMode::Reliable =>
+                            == crate::extension::CancellationMode::Reliable
+                            && !matches!(
+                                error,
+                                Error::Conflict(_) | Error::Http(_) | Error::Timeout(_)
+                            ) =>
                     {
                         attempt.outcome = "failed".into();
                         attempt.evidence =
@@ -4444,6 +4479,10 @@ fn tool_outcome(result: Result<Value>, observed: &str, name: &str) -> Result<Val
             Ok(json!({"ok":true,"observedAt":observed,"value":value}))
         }
         Err(error @ (Error::Cancelled | Error::Storage(_) | Error::Conflict(_))) => Err(error),
+        Err(error @ Error::NotSubmitted(_)) => {
+            log::warn!("工具 {name} 未提交：{error}");
+            Ok(json!({"ok":false,"observedAt":observed,"submissionStatus":"notSubmitted","executed":false,"error":error.to_string()}))
+        }
         Err(error @ Error::Stale(_)) => {
             log::warn!("工具 {name} 版本冲突，反馈模型重新读取：{error}");
             Ok(json!({"ok":false,"observedAt":observed,"error":error.to_string()}))

@@ -146,6 +146,9 @@ pub enum ToolExposure {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct ToolExecution {
+    /// 当前权限允许时直接提供契约，避免基础通道能力还要先检索目录。
+    #[serde(default)]
+    pub prompt_visible: bool,
     pub effect: ToolEffect,
     pub effect_is_dynamic: bool,
     pub concurrency_safe: bool,
@@ -189,6 +192,7 @@ pub struct GoalObservationSpec {
 impl Default for ToolExecution {
     fn default() -> Self {
         Self {
+            prompt_visible: false,
             effect: ToolEffect::Unknown,
             effect_is_dynamic: false,
             concurrency_safe: false,

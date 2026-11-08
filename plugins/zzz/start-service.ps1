@@ -1,18 +1,24 @@
 param(
-    [Parameter(Mandatory = $true)][string]$OneDragonPath,
-    [ValidateRange(1, 65535)][int]$Port = 23001
+    [Parameter(Mandatory = $true)][int]$TargetPid,
+    [string]$TokenEnv = 'ZZZ_BRIDGE_TOKEN',
+    [int]$Port = 23101,
+    [switch]$Check
 )
 
 $ErrorActionPreference = 'Stop'
-$root = (Resolve-Path -LiteralPath $OneDragonPath).Path
-if (-not (Test-Path -LiteralPath (Join-Path $root 'src/zzz_od/backend/entry/server.py') -PathType Leaf)) {
-    throw 'ZZZ OneDragon MCP entry point was not found. Set -OneDragonPath to its source directory.'
+
+# Native zzz reflection bridge launcher: attach to an existing OneDragon GUI process.
+# The legacy MCP service (port 23001) is retired; this entry never starts the target
+# and never writes into the target install directory.
+
+$bridgeDir = Join-Path $PSScriptRoot '..\..\..\target\bridge\zzz'
+$injector = Join-Path $bridgeDir 'zzz_injector.exe'
+if (-not (Test-Path -LiteralPath $injector -PathType Leaf)) {
+    throw "Injector not found at $injector. Run plugins/zzz/bridge/build.cmd first."
 }
-$python = @(
-    (Join-Path $root 'target/python-env/Scripts/python.exe'),
-    (Join-Path $root '.venv/Scripts/python.exe')
-) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-if (-not $python) { throw 'ZZZ OneDragon Python environment was not found. Prepare target/python-env or .venv before starting the MCP service.' }
-$env:PYTHONDONTWRITEBYTECODE = '1'
-& $python -B (Join-Path $PSScriptRoot 'start-service.py') --one-dragon-dir $root --port $Port
+
+$injectorArgs = @('--pid', "$TargetPid", '--token-env', $TokenEnv, '--port', "$Port")
+if ($Check) { $injectorArgs += '--check' }
+
+& $injector @injectorArgs
 exit $LASTEXITCODE
