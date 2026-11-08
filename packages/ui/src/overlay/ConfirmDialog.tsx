@@ -26,6 +26,7 @@ export function ConfirmDialog({
   return (
     <Dialog
       compact
+      className="sd-confirm-dialog"
       open={open}
       onClose={() => {
         if (!busy) onClose();

@@ -29,6 +29,7 @@ export function SlidingTabs<T extends string>({
     height: number;
   } | null>(null);
   const last = useRef(value);
+  const motion = useRef<Animation | null>(null);
 
   const place = (animate: boolean) => {
     const list = root.current;
@@ -42,6 +43,19 @@ export function SlidingTabs<T extends string>({
       height: active.offsetHeight,
     };
     const prev = box.current;
+    const currentTransform =
+      marker.dataset.ready === "true"
+        ? new DOMMatrixReadOnly(getComputedStyle(marker).transform)
+        : null;
+    const rendered =
+      prev && currentTransform
+        ? {
+            left: prev.left + currentTransform.m41,
+            top: prev.top + currentTransform.m42,
+            width: prev.width * currentTransform.a,
+            height: prev.height * currentTransform.d,
+          }
+        : prev;
     const same =
       prev !== null &&
       prev.left === next.left &&
@@ -59,6 +73,8 @@ export function SlidingTabs<T extends string>({
       return;
     }
     box.current = next;
+    motion.current?.cancel();
+    motion.current = null;
     marker.style.left = `${next.left}px`;
     marker.style.top = `${next.top}px`;
     marker.style.width = `${next.width}px`;
@@ -75,20 +91,14 @@ export function SlidingTabs<T extends string>({
     if (typeof marker.animate !== "function") return;
     if (typeof marker.getAnimations === "function")
       for (const animation of marker.getAnimations()) animation.cancel();
-    // 简洁 200ms left/width/top/height 插值：无 scale、无过冲弹性。
-    marker.animate(
+    // FLIP 只插值合成层变换；连续切换采样上一拍呈现的位置。
+    motion.current = marker.animate(
       [
         {
-          left: `${prev.left}px`,
-          width: `${prev.width}px`,
-          top: `${prev.top}px`,
-          height: `${prev.height}px`,
+          transform: `translate(${rendered!.left - next.left}px, ${rendered!.top - next.top}px) scale(${rendered!.width / next.width}, ${rendered!.height / next.height})`,
         },
         {
-          left: `${next.left}px`,
-          width: `${next.width}px`,
-          top: `${next.top}px`,
-          height: `${next.height}px`,
+          transform: "none",
         },
       ],
       { duration: 200, easing: "cubic-bezier(0.4, 0, 0.2, 1)" },
@@ -113,6 +123,8 @@ export function SlidingTabs<T extends string>({
     return () => observer?.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, items]);
+
+  useLayoutEffect(() => () => motion.current?.cancel(), []);
 
   return (
     <nav ref={root} className="sd-tabs" aria-label={ariaLabel}>

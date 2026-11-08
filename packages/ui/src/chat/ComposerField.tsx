@@ -16,6 +16,7 @@ export const ComposerField = forwardRef<
   useLayoutEffect(() => {
     const node = inner.current;
     if (!node) return;
+    if (CSS.supports("field-sizing", "content")) return;
     const resize = () => {
       node.style.height = "auto";
       node.style.height = `${Math.min(node.scrollHeight, 180)}px`;

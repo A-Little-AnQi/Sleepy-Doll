@@ -4,13 +4,13 @@ import {
   useLayoutEffect,
   useId,
   useRef,
-  useState,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { CloseIcon } from "../icons";
 import "./Dialog.css";
 import { useT } from "../i18n";
+import { usePresence } from "../motion";
 
 export function Dialog({
   title,
@@ -21,6 +21,7 @@ export function Dialog({
   footer,
   compact = false,
   className = "",
+  initialFocus = "field",
 }: {
   title: string;
   subtitle?: ReactNode;
@@ -30,35 +31,23 @@ export function Dialog({
   footer?: ReactNode;
   compact?: boolean;
   className?: string;
+  initialFocus?: "field" | "dialog";
 }) {
   const t = useT();
   const titleId = useId();
   const layer = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
-  const [present, setPresent] = useState(open);
-
-  useEffect(() => {
-    if (open) setPresent(true);
-  }, [open]);
-
-  useEffect(() => {
-    if (open || !present) return;
-    const id = window.setTimeout(() => setPresent(false), 280);
-    return () => window.clearTimeout(id);
-  }, [open, present]);
-
+  const present = usePresence(open, layer, { content: panel, y: 6, scale: 1 });
+  const snapshot = useRef({ title, subtitle, children, footer });
   useLayoutEffect(() => {
-    const node = layer.current;
-    if (!node) return;
-    if (open) {
-      node.dataset.visible = "false";
-      node.getBoundingClientRect();
-      node.dataset.visible = "true";
-      return;
-    }
-    node.dataset.visible = "false";
-  }, [open, present]);
+    if (open || !present)
+      snapshot.current = { title, subtitle, children, footer };
+  }, [open, present, title, subtitle, children, footer]);
+  const content = open
+    ? { title, subtitle, children, footer }
+    : snapshot.current;
 
   useEffect(() => {
     if (!open) return;
@@ -70,9 +59,13 @@ export function Dialog({
         ) ?? []),
       ].filter((node) => node.getClientRects().length > 0);
     const frame = requestAnimationFrame(() => {
+      if (initialFocus === "dialog") {
+        panel.current?.focus({ preventScroll: true });
+        return;
+      }
       const field =
         layer.current?.querySelector<HTMLElement>("input, textarea");
-      (field ?? focusable()[0])?.focus();
+      (field ?? focusable()[0])?.focus({ preventScroll: true });
     });
     const onKey = (event: KeyboardEvent) => {
       if (
@@ -91,7 +84,11 @@ export function Dialog({
         const items = focusable(),
           first = items[0],
           last = items.at(-1);
-        if (event.shiftKey && document.activeElement === first) {
+        if (
+          event.shiftKey &&
+          (document.activeElement === first ||
+            document.activeElement === panel.current)
+        ) {
           event.preventDefault();
           last?.focus();
         } else if (!event.shiftKey && document.activeElement === last) {
@@ -104,24 +101,34 @@ export function Dialog({
     return () => {
       cancelAnimationFrame(frame);
       document.removeEventListener("keydown", onKey);
-      if (previous?.isConnected) previous.focus();
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
     };
-  }, [open]);
+  }, [open, initialFocus]);
 
   if (!present) return null;
   return createPortal(
-    <div ref={layer} className="sd-dialog-layer">
+    <div
+      ref={layer}
+      className="sd-dialog-layer"
+      data-visible={open}
+      inert={!open}
+      aria-hidden={!open}
+    >
       <div className="sd-dialog-scrim" onClick={onClose} />
       <div
+        ref={panel}
         className={`sd-dialog${compact ? " is-compact" : ""}${className ? ` ${className}` : ""}`}
         role="dialog"
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
       >
         <header className="sd-dialog-head">
           <div>
-            <h2 id={titleId}>{title}</h2>
-            {subtitle ? <p className="sd-dialog-path">{subtitle}</p> : null}
+            <h2 id={titleId}>{content.title}</h2>
+            {content.subtitle ? (
+              <p className="sd-dialog-path">{content.subtitle}</p>
+            ) : null}
           </div>
           <IconButton
             type="button"
@@ -132,8 +139,10 @@ export function Dialog({
             <CloseIcon className="button-icon" />
           </IconButton>
         </header>
-        <div className="sd-dialog-body">{children}</div>
-        {footer ? <footer className="sd-dialog-foot">{footer}</footer> : null}
+        <div className="sd-dialog-body">{content.children}</div>
+        {content.footer ? (
+          <footer className="sd-dialog-foot">{content.footer}</footer>
+        ) : null}
       </div>
     </div>,
     document.body,

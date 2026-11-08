@@ -6,14 +6,23 @@ import {
   type KeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { HistoryIcon, PlusIcon, ToolIcon } from "@sleepy-doll/ui/icons";
+import { ClockIcon, PlusIcon, ToolIcon } from "@sleepy-doll/ui/icons";
 import type { SkillInfo } from "../../ipc/types";
 import "./SkillMenu.css";
 
 /** 内建技能的用户可读名称；其余技能按短描述或名字回退，菜单里不再展示 `$命令号`。 */
 const SKILL_LABELS: Record<string, string> = {
   "create-shortcut": "创建快捷任务",
+  "create-schedule": "创建定时任务",
 };
+
+export function manualSkills(skills: SkillInfo[]): SkillInfo[] {
+  const order = (name: string) =>
+    name === "create-shortcut" ? 0 : name === "create-schedule" ? 1 : 2;
+  return skills
+    .filter((skill) => skill.enabled !== false && skill.available !== false)
+    .sort((left, right) => order(left.name) - order(right.name));
+}
 
 export function skillLabel(skill: SkillInfo): string {
   const known = SKILL_LABELS[skill.name];
@@ -269,8 +278,8 @@ export function SkillMenu({
                   else onPick(skill.name);
                 }}
               >
-                {skill.name === "create-shortcut" ? (
-                  <HistoryIcon className="skill-menu-item-icon" />
+                {skill.name === "create-schedule" ? (
+                  <ClockIcon className="skill-menu-item-icon" />
                 ) : (
                   <ToolIcon className="skill-menu-item-icon" />
                 )}

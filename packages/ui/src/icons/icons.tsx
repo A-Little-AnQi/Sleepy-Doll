@@ -101,6 +101,24 @@ export function HelpIcon(p: IconProps) {
   );
 }
 
+export function ClockIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 6.8v5.4l3.6 2.1" />
+    </Svg>
+  );
+}
+
+export function CalendarIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="4" y="5.5" width="16" height="15" rx="2.5" />
+      <path d="M8 3.5v4M16 3.5v4M4 10h16M8 14h2M14 14h2M8 17h2" />
+    </Svg>
+  );
+}
+
 export function SunIcon(p: IconProps) {
   return (
     <Svg {...p}>

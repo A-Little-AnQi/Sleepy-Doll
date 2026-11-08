@@ -24,6 +24,7 @@ import { useT } from "../../i18n";
 import { usePresentedText } from "./usePresentedText";
 import { isRunning } from "../../session";
 import { prepareCjkStrong, remarkCjkStrong } from "./remarkCjkStrong";
+import { useCssPresence } from "@sleepy-doll/ui/motion";
 
 type Call = NonNullable<MessageInfo["toolCalls"]>[number];
 interface Activity extends Call {
@@ -482,19 +483,14 @@ function ProcessDisclosure({
   autoExpanded?: boolean;
 }) {
   const [choice, setChoice] = useState<boolean | null>(null);
-  const [present, setPresent] = useState(false);
+  const motion = useRef<HTMLDivElement>(null);
   const [version, setVersion] = useState(collapseKey);
   if (version !== collapseKey) {
     setVersion(collapseKey);
     setChoice(null);
-    setPresent(false);
   }
   const expanded = autoExpanded || (version === collapseKey && Boolean(choice));
-  useEffect(() => {
-    if (expanded || !present) return;
-    const timer = window.setTimeout(() => setPresent(false), 220);
-    return () => window.clearTimeout(timer);
-  }, [expanded, present]);
+  const present = useCssPresence(expanded, motion);
   return (
     <section
       className="process-disclosure"
@@ -507,7 +503,6 @@ function ProcessDisclosure({
         hidden={autoExpanded}
         aria-expanded={expanded}
         onClick={() => {
-          if (!expanded) setPresent(true);
           setChoice(!expanded);
         }}
       >
@@ -519,6 +514,7 @@ function ProcessDisclosure({
       </button>
       <div
         className="activity-disclosure-motion"
+        ref={motion}
         aria-hidden={!expanded}
         inert={!expanded}
       >

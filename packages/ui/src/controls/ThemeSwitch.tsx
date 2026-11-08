@@ -1,4 +1,5 @@
 import { MoonIcon, SunIcon } from "../icons";
+import { useLayoutEffect, useRef } from "react";
 import { useT } from "../i18n";
 export type ThemeId = "light" | "dark";
 export type ThemeOrigin = { x: number; y: number };
@@ -12,7 +13,10 @@ export function ThemeSwitch({
 }) {
   const t = useT();
   const dark = theme === "dark";
-  const next: ThemeId = dark ? "light" : "dark";
+  const requested = useRef(theme);
+  useLayoutEffect(() => {
+    requested.current = theme;
+  }, [theme]);
   return (
     <button
       type="button"
@@ -28,6 +32,8 @@ export function ThemeSwitch({
           event.detail === 0 ? bounds.left + bounds.width / 2 : event.clientX;
         const y =
           event.detail === 0 ? bounds.top + bounds.height / 2 : event.clientY;
+        const next: ThemeId = requested.current === "dark" ? "light" : "dark";
+        requested.current = next;
         void onChange(next, { x, y });
       }}
     >

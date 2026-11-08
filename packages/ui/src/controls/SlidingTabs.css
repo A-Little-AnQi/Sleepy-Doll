@@ -17,6 +17,7 @@
   border-radius: 6px;
   background: var(--selected);
   pointer-events: none;
+  transform-origin: 0 0;
   opacity: 0;
   /* left/top/width/height 由组件按当前选中按钮的本地 offset 精确设置（含高度与顶部）。 */
 }
@@ -57,6 +58,7 @@
 
 .sd-tabs button:active:not(:disabled) {
   transform: none;
+  scale: 1;
 }
 
 .sd-tabs-count {

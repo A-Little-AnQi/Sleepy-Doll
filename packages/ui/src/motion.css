@@ -15,11 +15,6 @@
   height: 100%;
 }
 
-[data-motion="page"] {
-  animation: page-enter var(--motion-slow) var(--ease-enter) both;
-}
-
-[data-motion="panel"],
 .bridge-api-detail,
 .run-approval,
 .run-error,
@@ -33,6 +28,7 @@ button,
 [data-ui="select-trigger"],
 [data-ui="select-option"],
 .record,
+.list-item,
 .extension-row,
 .flow-card,
 .bridge-api-row,
@@ -45,12 +41,51 @@ textarea {
     color var(--motion-fast) var(--ease-standard),
     opacity var(--motion-fast) var(--ease-standard),
     box-shadow var(--motion-fast) var(--ease-standard),
-    transform var(--motion-fast) var(--ease-standard);
+    transform var(--motion-fast) var(--ease-standard),
+    scale var(--motion-fast) var(--ease-standard);
 }
 
-button:active:not(:disabled),
-[role="button"]:active:not([aria-disabled="true"]) {
-  transform: scale(0.975);
+:is(
+    .primary-action,
+    .secondary-action,
+    .runtime-action,
+    .subtle-action,
+    .icon-button
+  ):active:not(:disabled) {
+  scale: 0.975;
+  transition-duration: 70ms;
+}
+
+.list-item:has(> .list-item-trigger:hover),
+.list-item[data-list-surface="true"]:not([data-busy]):hover:not(
+    :has(
+      :is(
+        button:not(.list-item-trigger),
+        a,
+        input,
+        select,
+        textarea,
+        [role="menu"]
+      ):hover
+    )
+  ) {
+  background-color: var(--hover);
+}
+
+.list-item:has(> .list-item-trigger:active),
+.list-item[data-list-surface="true"]:not([data-busy]):active:not(
+    :has(
+      :is(
+        button:not(.list-item-trigger),
+        a,
+        input,
+        select,
+        textarea,
+        [role="menu"]
+      ):active
+    )
+  ) {
+  background-color: var(--selected);
   transition-duration: 70ms;
 }
 
@@ -75,7 +110,7 @@ details > :not(summary) {
 }
 
 dialog[open] {
-  animation: dialog-enter var(--motion-slow) var(--ease-enter) both;
+  animation: dialog-enter 180ms var(--ease-enter) both;
 }
 
 dialog[open]::backdrop {
@@ -85,17 +120,6 @@ dialog[open]::backdrop {
 .product-loading p,
 [role="status"] {
   animation: status-enter var(--motion-base) var(--ease-enter) both;
-}
-
-@keyframes page-enter {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
 }
 
 @keyframes panel-enter {
@@ -149,7 +173,7 @@ dialog[open]::backdrop {
 @keyframes dialog-enter {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.985);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -184,5 +208,35 @@ dialog[open]::backdrop {
   50% {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+  }
+  :is(
+      .primary-action,
+      .secondary-action,
+      .runtime-action,
+      .subtle-action,
+      .icon-button
+    ):active:not(:disabled) {
+    scale: 1;
+  }
+  .list-item,
+  .switch,
+  .switch::after {
+    transition: none;
+  }
+  dialog[open],
+  dialog[open]::backdrop {
+    animation: none;
+  }
+  .conversation-status.running,
+  [role="status"] {
+    animation: none;
   }
 }

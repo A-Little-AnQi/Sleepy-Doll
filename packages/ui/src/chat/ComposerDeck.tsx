@@ -22,7 +22,9 @@ export function ComposerDeck({
       return;
     }
     event.preventDefault();
-    event.currentTarget.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+    event.currentTarget
+      .querySelector<HTMLTextAreaElement>("textarea")
+      ?.focus({ preventScroll: true });
   };
 
   return (

@@ -7,7 +7,6 @@
   place-items: center;
   padding: 24px;
   opacity: 0;
-  transition: opacity var(--motion-base) ease-out;
 }
 
 .sd-dialog-layer[data-visible="true"] {
@@ -33,6 +32,10 @@
   border-radius: var(--layout-radius);
   background: var(--surface);
   box-shadow: var(--shadow);
+}
+
+.sd-dialog:focus {
+  outline: none;
 }
 
 .sd-dialog-head {
@@ -96,4 +99,12 @@
 
 .sd-dialog.is-compact .sd-dialog-body {
   overflow: auto;
+}
+
+.sd-dialog.sd-confirm-dialog {
+  width: min(400px, 100%);
+}
+
+.sd-confirm-dialog .sd-dialog-body {
+  overflow-wrap: anywhere;
 }

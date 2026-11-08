@@ -3,15 +3,24 @@
    高度即行高，否则顶部边距叠成 16+11，且空框 caret 会撑满 46px 沉底。 */
 textarea.sd-field.is-bare.sd-composer-field {
   font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 400;
   line-height: 24px;
   min-height: 24px;
   padding: 0;
   overflow-y: auto;
+  field-sizing: content;
+  max-height: 180px;
 }
 
 .sd-composer-field::placeholder {
   font: inherit;
   letter-spacing: inherit;
+}
+
+@supports (field-sizing: content) {
+  textarea.sd-composer-field:placeholder-shown {
+    field-sizing: fixed;
+    height: 24px;
+  }
 }

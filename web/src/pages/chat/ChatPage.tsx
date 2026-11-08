@@ -17,7 +17,11 @@ import {
   SettingsIcon,
   StopIcon,
 } from "@sleepy-doll/ui/icons";
-import { SkillMenu, filterSkills } from "../../components/chat/SkillMenu";
+import {
+  SkillMenu,
+  filterSkills,
+  manualSkills,
+} from "../../components/chat/SkillMenu";
 import { Select } from "@sleepy-doll/ui/controls/Select";
 import {
   isRunning,
@@ -44,6 +48,7 @@ import { PendingRequestLayer } from "../../components/chat/QuestionCard";
 import { useT } from "../../i18n";
 import type { Plan } from "../../session";
 import { DEFAULT_CONTEXT_WINDOW } from "../../models/presets";
+import { useConversationScroll } from "../../components/chat/useConversationScroll";
 
 interface Props {
   bootstrap: Bootstrap;
@@ -190,6 +195,15 @@ export function ChatPage({
   const workspace = useRef<HTMLElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const follow = useRef(true);
+  const returnToLatest = useConversationScroll(
+    draftKey,
+    loading,
+    scroll,
+    flow,
+    dock,
+    follow,
+    setUnread,
+  );
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -217,28 +231,12 @@ export function ChatPage({
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [busy, approval, questionRequests]);
-  useLayoutEffect(() => {
-    if (!flow.current) return;
-    const observer = new ResizeObserver(() => {
-      if (follow.current) {
-        scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
-        setUnread(false);
-      } else {
-        setUnread(true);
-      }
-    });
-    observer.observe(flow.current);
-    return () => observer.disconnect();
-  }, [draftKey, loading]);
   const setDraft = (value: string) => {
     setPrompt(value);
     localStorage.setItem(draftKey, value);
   };
   const invocableSkills = useMemo(
-    () =>
-      bootstrap.skills.filter(
-        (skill) => skill.enabled !== false && skill.available !== false,
-      ),
+    () => manualSkills(bootstrap.skills),
     [bootstrap.skills],
   );
   // `/` 菜单：start 是输入框里 `/` 的下标，query 是 `/` 到光标之间的筛选词。
@@ -437,7 +435,9 @@ export function ChatPage({
     const ws = workspace.current;
     const dk = dock.current;
     if (!ws || !dk || !waitingForUser) return;
+    let frame = 0;
     const update = () => {
+      frame = 0;
       const wsH = ws.getBoundingClientRect().height;
       const dkH = dk.getBoundingClientRect().height;
       const waitH =
@@ -447,22 +447,27 @@ export function ChatPage({
       const requestPad = requestDock
         ? parseFloat(getComputedStyle(requestDock).paddingTop) || 0
         : 0;
+      const available = wsH - dkH - waitH - requestPad;
       const historyReserve = Math.min(
         160,
         Math.max(112, Math.floor(wsH * 0.18)),
+        Math.max(48, available - 260),
       );
-      const max = Math.max(
-        0,
-        Math.floor(wsH - dkH - waitH - requestPad - historyReserve),
-      );
-      ws.style.setProperty("--pending-request-max-height", `${max}px`);
+      const max = Math.max(0, Math.floor(available - historyReserve));
+      if (
+        ws.style.getPropertyValue("--pending-request-max-height") !== `${max}px`
+      )
+        ws.style.setProperty("--pending-request-max-height", `${max}px`);
     };
     update();
-    const observer = new ResizeObserver(update);
+    const observer = new ResizeObserver(() => {
+      if (!frame) frame = requestAnimationFrame(update);
+    });
     observer.observe(ws);
     observer.observe(dk);
     return () => {
       observer.disconnect();
+      cancelAnimationFrame(frame);
       ws.style.removeProperty("--pending-request-max-height");
     };
   }, [waitingForUser]);
@@ -508,17 +513,7 @@ export function ChatPage({
         viewKey={conversationId ?? "new"}
         className="chat-scene-switch"
       >
-        <div
-          ref={scroll}
-          className="chat-scroll"
-          onScroll={(event) => {
-            const target = event.currentTarget;
-            follow.current =
-              target.scrollHeight - target.scrollTop - target.clientHeight <
-              100;
-            if (follow.current) setUnread(false);
-          }}
-        >
+        <div ref={scroll} className="chat-scroll">
           {welcome ? (
             <div className="chat-welcome">
               <img
@@ -617,9 +612,7 @@ export function ChatPage({
           <button
             className="chat-unread"
             onClick={() => {
-              follow.current = true;
-              setUnread(false);
-              scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
+              returnToLatest();
             }}
           >
             有新内容 · 回到最新

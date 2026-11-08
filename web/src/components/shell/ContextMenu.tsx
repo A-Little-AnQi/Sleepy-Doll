@@ -88,6 +88,14 @@ export function ContextMenu() {
 
   useEffect(() => {
     const onContextMenu = (event: MouseEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-context-menu-owner]")
+      ) {
+        event.preventDefault();
+        setTarget(null);
+        return;
+      }
       // 无论最终是否弹菜单，原生菜单都不能出现。
       event.preventDefault();
       const editable = editableElement(event.target);
