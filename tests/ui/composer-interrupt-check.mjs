@@ -11,7 +11,9 @@ const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
-const scratch = path.join(root, "target/.tmp/composer-interrupt");
+const scratch =
+  process.env.SLEEPY_DOLL_UI_CAPTURE_DIR ??
+  path.join(root, "target/.tmp/composer-interrupt");
 fs.mkdirSync(scratch, { recursive: true });
 process.env.TEMP = process.env.TMP = scratch;
 const states = [
@@ -30,7 +32,7 @@ import '${uiStylesheetUrl}';
 import '${uiMotionStylesheetUrl}';
 const bootstrap = {models:[{id:'m',name:'Model',model:'fixture',active:true}],
 conversations:${JSON.stringify([...states, "failure", "switch", "accepted"].map((id) => ({ id, title: id })))},
-tools:[], skills:[{name:'create-shortcut',description:'创建快捷任务',enabled:true,available:true}], tasks:[],permission:PREVIEW_PERMISSION,runtimeToolLabels:{}};
+tools:[], skills:[{name:'create-shortcut',displayName:'创建快捷任务',description:'创建快捷任务',enabled:true,available:true}], tasks:[],permission:PREVIEW_PERMISSION,runtimeToolLabels:{}};
 function Fixture() {
  const [id,setId] = React.useState('deciding');
  window.showConv = setId;
@@ -62,7 +64,10 @@ try {
   const dom = entry.code.match(
     /from "([^"]*\/react-dom_client\.js\?[^"]*)"/,
   )[1];
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
+  });
   const page = await browser.newPage({
     viewport: { width: 1100, height: 850 },
   });
@@ -194,11 +199,11 @@ try {
     assert.ok(await plus.isEnabled(), `${state}: + enabled`);
     await plus.click();
     await pick.click();
-    assert.equal(await field.inputValue(), "$create-shortcut ");
+    assert.equal(await field.inputValue(), "$创建快捷任务 ");
     await field.fill("/");
     await pick.waitFor({ state: "visible" });
     await field.press("Enter");
-    assert.equal(await field.inputValue(), "$create-shortcut ");
+    assert.equal(await field.inputValue(), "$创建快捷任务 ");
     await field.fill(`interrupt ${state}`);
     assert.ok(await send.isEnabled());
     await send.click();

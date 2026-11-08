@@ -50,7 +50,7 @@ pub(super) fn memory(
         "properties":{"tool":{"type":"string","enum":tools},"methodId":{"type":["string","null"],"enum":method_ids},
         "action":{"type":"string","minLength":1},"inputRoles":{"type":"object","additionalProperties":{"type":"string","minLength":1}}}});
     let experience = json!({"type":"object","additionalProperties":false,"required":["intent","conditions","steps","verification"],
-        "properties":{"intent":{"type":"string","minLength":1,"maxLength":160},"summary":{"type":"string","minLength":1,"maxLength":240},
+        "properties":{"title":{"type":"string","minLength":1,"maxLength":24,"description":"简短的通用软件操作名称，不写单次任务或流程判断，例如兑换码输入、定时任务创建"},"intent":{"type":"string","minLength":1,"maxLength":160},"summary":{"type":"string","minLength":1,"maxLength":240},
           "keywords":strings(12),"conditions":required_strings(8),"verification":required_strings(8),"pitfalls":strings(8),"anchors":strings(6),
         "steps":{"type":"array","minItems":1,"maxItems":6,"items":step}}});
     tool(

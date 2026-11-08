@@ -51,6 +51,8 @@ impl Serialize for SkillSource {
 #[serde(rename_all = "camelCase")]
 pub struct Skill {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     pub description: String,
     pub source: SkillSource,
     pub tags: Vec<String>,
@@ -114,6 +116,10 @@ impl SkillRegistry {
                     name.clone(),
                     Skill {
                         name,
+                        display_name: fields
+                            .get("displayName")
+                            .map(|name| name.trim().to_owned())
+                            .filter(|name| !name.is_empty()),
                         description,
                         source: source.clone(),
                         tags,
@@ -156,6 +162,10 @@ impl SkillRegistry {
             name.clone(),
             Skill {
                 name,
+                display_name: fields
+                    .get("displayName")
+                    .map(|name| name.trim().to_owned())
+                    .filter(|name| !name.is_empty()),
                 description,
                 source: SkillSource::Product,
                 tags: list_field(&fields, "tags"),
@@ -194,6 +204,7 @@ impl SkillRegistry {
             name.clone(),
             Skill {
                 name,
+                display_name: None,
                 description: format!("{plugin} MCP 服务的操作说明"),
                 source: SkillSource::Plugin(plugin.into()),
                 tags: vec![plugin.into()],
@@ -272,14 +283,26 @@ impl SkillRegistry {
     }
 
     pub fn explicit(&self, text: &str) -> Vec<Skill> {
-        let names = text
-            .split_whitespace()
-            .filter_map(|word| word.strip_prefix('$'))
-            .collect::<HashSet<_>>();
+        let mentions = |name: &str| {
+            let marker = format!("${name}");
+            text.match_indices(&marker).any(|(start, _)| {
+                (start == 0
+                    || text[..start]
+                        .chars()
+                        .next_back()
+                        .is_some_and(char::is_whitespace))
+                    && text[start + marker.len()..]
+                        .chars()
+                        .next()
+                        .is_none_or(char::is_whitespace)
+            })
+        };
         let mut found = self
             .skills
             .values()
-            .filter(|skill| names.contains(skill.name.as_str()))
+            .filter(|skill| {
+                mentions(&skill.name) || skill.display_name.as_deref().is_some_and(mentions)
+            })
             .cloned()
             .collect::<Vec<_>>();
         found.sort_by(|left, right| left.name.cmp(&right.name));
@@ -298,8 +321,9 @@ impl SkillRegistry {
             .values()
             .filter_map(|skill| {
                 let haystack = tokens(&format!(
-                    "{} {} {}",
+                    "{} {} {} {}",
                     skill.name,
+                    skill.display_name.as_deref().unwrap_or_default(),
                     skill.description,
                     skill.tags.join(" ")
                 ));
@@ -576,6 +600,36 @@ mod visibility_tests {
         }
         assert!(registry.get("网络搜索").is_none());
         assert_eq!(registry.list().len(), 4);
+    }
+
+    #[test]
+    fn chinese_display_commands_keep_canonical_skill_ids() {
+        let mut registry = SkillRegistry::default();
+        for source in EMBEDDED_SKILLS {
+            registry.load_embedded(source).unwrap();
+        }
+        for (label, id) in [
+            ("创建快捷任务", "create-shortcut"),
+            ("创建定时任务", "create-schedule"),
+        ] {
+            assert_eq!(
+                registry.get(id).unwrap().display_name.as_deref(),
+                Some(label)
+            );
+            assert_eq!(
+                registry.explicit(&format!("前文 ${label} 后文"))[0].name,
+                id
+            );
+            assert_eq!(registry.explicit(&format!("${id}"))[0].name, id);
+            assert!(registry.explicit(&format!("${label}扩展")).is_empty());
+        }
+        registry
+            .load_embedded(
+                "---\nname: sample\ndisplayName: 查询 天气\ndescription: sample\n---\n正文",
+            )
+            .unwrap();
+        assert_eq!(registry.explicit("$查询 天气 ")[0].name, "sample");
+        assert_eq!(registry.search("查询 天气", 1)[0].name, "sample");
     }
 
     #[test]

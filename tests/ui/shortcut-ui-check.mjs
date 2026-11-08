@@ -93,6 +93,7 @@ try {
     skills: [
       {
         name: "create-shortcut",
+        displayName: "创建快捷任务",
         description: "创建快捷任务：把已有的任务、配置或资源封装成一键入口。",
         source: "product",
         tags: [],
@@ -277,7 +278,7 @@ try {
   await page.locator(".skill-menu-popover").waitFor({ state: "detached" });
   assert.equal(
     await composer.inputValue(),
-    "把血斛采集加入快捷任务$create-shortcut ",
+    "把血斛采集加入快捷任务 $创建快捷任务 ",
     "Skill menu inserts the marker at the caret",
   );
   assert.equal(

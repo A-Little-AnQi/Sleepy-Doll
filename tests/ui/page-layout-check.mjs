@@ -6,8 +6,12 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const scratch = path.join(root, "target/.tmp/ui-readability");
-const temporary = path.join(root, "target/tmp/ui-readability");
+const scratch =
+  process.env.SLEEPY_DOLL_UI_CAPTURE_DIR ??
+  path.join(root, "target/.tmp/ui-readability");
+const temporary =
+  process.env.SLEEPY_DOLL_UI_TEMP_DIR ??
+  path.join(root, "target/tmp/ui-readability");
 fs.mkdirSync(scratch, { recursive: true });
 fs.mkdirSync(temporary, { recursive: true });
 process.env.TEMP = process.env.TMP = process.env.TMPDIR = temporary;
@@ -296,7 +300,8 @@ try {
           if (await close.isVisible()) await close.click();
         }
         const panel = page.locator(selector);
-        await panel.locator(".page-list-toolbar .search-field").waitFor();
+        if (name !== "记忆")
+          await panel.locator(".page-list-toolbar .search-field").waitFor();
         if (name === "记忆")
           await panel
             .getByRole("heading", { name: "记忆", exact: true })
@@ -305,9 +310,10 @@ try {
         const geometry = await panel.evaluate((root) => {
           const title = root.querySelector(".page-title"),
             toolbar = root.querySelector(".page-list-toolbar"),
-            input = toolbar.querySelector(".search-field"),
-            tabs = toolbar.querySelector(".sd-tabs");
+            input = toolbar?.querySelector(".search-field"),
+            tabs = toolbar?.querySelector(".sd-tabs");
           const rect = (n) => {
+            if (!n) return null;
             const r = n.getBoundingClientRect();
             return {
               x: r.x,
@@ -378,36 +384,41 @@ try {
             JSON.stringify({ name, empty }),
           );
         }
-        assert.ok(
-          Math.abs(geometry.toolbar.y - geometry.title.bottom - 24) < 1,
-          JSON.stringify({ name, geometry }),
-        );
-        assert.ok(
-          Math.abs(geometry.search.right - geometry.toolbar.right) < 1,
-          JSON.stringify({ name, geometry }),
-        );
-        if (width >= 1000) {
+        if (!geometry.toolbar) {
+          assert.equal(name, "记忆");
+          assert.equal(geometry.search, null);
+        } else {
           assert.ok(
-            Math.abs(geometry.search.width - 300) < 1,
+            Math.abs(geometry.toolbar.y - geometry.title.bottom - 24) < 1,
             JSON.stringify({ name, geometry }),
           );
-          if (geometry.tabs)
+          assert.ok(
+            Math.abs(geometry.search.right - geometry.toolbar.right) < 1,
+            JSON.stringify({ name, geometry }),
+          );
+          if (width >= 1000) {
             assert.ok(
-              Math.abs(
-                geometry.tabs.y +
-                  geometry.tabs.height / 2 -
-                  geometry.search.y -
-                  geometry.search.height / 2,
-              ) < 1,
+              Math.abs(geometry.search.width - 300) < 1,
+              JSON.stringify({ name, geometry }),
+            );
+            if (geometry.tabs)
+              assert.ok(
+                Math.abs(
+                  geometry.tabs.y +
+                    geometry.tabs.height / 2 -
+                    geometry.search.y -
+                    geometry.search.height / 2,
+                ) < 1,
+                JSON.stringify({ name, geometry }),
+              );
+          }
+          if (width <= 700)
+            assert.ok(
+              Math.abs(geometry.search.x - geometry.toolbar.x) < 1 &&
+                Math.abs(geometry.search.width - geometry.toolbar.width) < 1,
               JSON.stringify({ name, geometry }),
             );
         }
-        if (width <= 700)
-          assert.ok(
-            Math.abs(geometry.search.x - geometry.toolbar.x) < 1 &&
-              Math.abs(geometry.search.width - geometry.toolbar.width) < 1,
-            JSON.stringify({ name, geometry }),
-          );
         if (name === "快捷任务") {
           const before = await panel
             .locator(".page-list-toolbar")
@@ -501,7 +512,7 @@ try {
         pages: geometries.map(({ name, title, search }) => ({
           name,
           left: title.x,
-          searchWidth: search.width,
+          searchWidth: search?.width ?? null,
         })),
       });
     }

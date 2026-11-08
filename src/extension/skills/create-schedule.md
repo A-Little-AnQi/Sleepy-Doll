@@ -1,5 +1,6 @@
 ---
 name: create-schedule
+displayName: 创建定时任务
 description: 为已有快捷任务创建定时执行安排，设置执行时间和顺序。
 tags: 创建, 定时任务, 时间安排, 按天, 间隔, 每天, 每周, 每月
 ---

@@ -25,11 +25,16 @@ export function manualSkills(skills: SkillInfo[]): SkillInfo[] {
 }
 
 export function skillLabel(skill: SkillInfo): string {
+  if (skill.displayName?.trim()) return skill.displayName.trim();
   const known = SKILL_LABELS[skill.name];
   if (known) return known;
   // 长机器描述截断会变成假标题：只有本身就很短的首句才当名称，否则回退技能名。
   const line = (skill.description.split(/[。；;：:\n（(]/, 1)[0] ?? "").trim();
   return line.length > 0 && line.length <= 24 ? line : skill.name;
+}
+
+export function skillCommandName(skill: SkillInfo): string {
+  return skill.displayName?.trim() || skill.name;
 }
 
 /** `/` 菜单的筛选：显示名与内部名都可匹配。 */

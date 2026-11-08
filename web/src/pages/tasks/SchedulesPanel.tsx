@@ -316,12 +316,12 @@ export function SchedulesPanel({
             在对话里输入「创建定时任务」并描述目标，使用 Windows 计划任务能力，在电脑开启情况下自动运行任务
           </p>
         </div>
+      </div>
+      <div className="list-toolbar page-list-toolbar schedule-toolbar">
         <Button variant="primary" onClick={() => openEditor()}>
           <PlusIcon className="button-icon" />
           新建定时任务
         </Button>
-      </div>
-      <div className="list-toolbar page-list-toolbar schedule-toolbar">
         <SearchField
           aria-label="搜索定时任务"
           placeholder="搜索定时任务"

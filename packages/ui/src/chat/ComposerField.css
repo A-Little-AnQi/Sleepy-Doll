@@ -18,6 +18,50 @@ textarea.sd-field.is-bare.sd-composer-field {
   letter-spacing: inherit;
 }
 
+.sd-composer-editor {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+.sd-composer-editor > textarea.sd-composer-field {
+  position: relative;
+  display: block;
+}
+.sd-composer-highlights {
+  box-sizing: border-box;
+  position: absolute;
+  inset: 0 auto auto 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  color: var(--text);
+  pointer-events: none;
+  user-select: none;
+}
+.sd-composer-highlights mark {
+  padding: 0;
+  border-radius: 3px;
+  color: color-mix(in srgb, var(--gold) 60%, var(--text));
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.sd-composer-editor[data-highlighted="true"] textarea.sd-composer-field {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--text);
+}
+.sd-composer-editor[data-highlighted="true"]
+  textarea.sd-composer-field::selection {
+  color: transparent;
+  background: color-mix(in srgb, var(--gold) 25%, transparent);
+}
+
 @supports (field-sizing: content) {
   textarea.sd-composer-field:placeholder-shown {
     field-sizing: fixed;

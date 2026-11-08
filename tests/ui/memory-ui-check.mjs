@@ -178,7 +178,7 @@ try {
   reviewing = true;
   await page.waitForFunction(() =>
     document
-      .querySelector(".memory-toolbar-count")
+      .querySelector(".memory-reviewing")
       ?.textContent.includes("正在整理经验"),
   );
   rows.push(background);
@@ -305,12 +305,15 @@ try {
         .querySelector('[role="switch"]')
         ?.getAttribute("aria-checked") === "true",
   );
-  await memory.getByRole("textbox", { name: "搜索记忆" }).fill("不存在");
-  await memory.getByText("没有找到相关记忆", { exact: true }).waitFor();
-  await memory.getByRole("textbox", { name: "搜索记忆" }).fill("");
-  await memory.locator(".memory-entry > summary").click();
-  await memory.getByRole("button", { name: "编辑记忆", exact: true }).click();
+  assert.equal(
+    await memory.getByRole("textbox", { name: "搜索记忆" }).count(),
+    0,
+  );
+  await memory.locator(".memory-entry-trigger").click();
+  const detail = page.locator(".memory-detail-dialog");
+  await detail.getByRole("button", { name: "编辑记忆", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "编辑记忆", exact: true });
+  await editor.getByLabel("操作名称", { exact: true }).fill("采集路线配置");
   await editor
     .getByRole("textbox", { name: "简介（最多 240 字）", exact: true })
     .fill("");
@@ -325,7 +328,7 @@ try {
     .fill("根据新事实更新过的简介");
   await editor.getByRole("button", { name: "保存", exact: true }).click();
   await memory.getByText("根据新事实更新过的简介", { exact: true }).waitFor();
-  await memory.getByRole("button", { name: "忘记这条", exact: true }).click();
+  await detail.getByRole("button", { name: "忘记这条", exact: true }).click();
   assert.equal(requests.filter((q) => q.method === "memory.delete").length, 0);
   const confirm = page.getByRole("dialog", {
     name: "忘记这条记忆？",
@@ -333,6 +336,8 @@ try {
   });
   await confirm.getByRole("button", { name: "取消", exact: true }).click();
   assert.equal(rows.length, 1);
+  await detail.getByRole("button", { name: "关闭", exact: true }).click();
+  await detail.waitFor({ state: "hidden" });
   await page.setViewportSize({ width: 700, height: 780 });
   await page.waitForTimeout(350);
   const closeSidebar = page
@@ -347,12 +352,14 @@ try {
     "Narrow memory page overflows",
   );
   await page.screenshot({ path: path.join(captureRoot, "memory-narrow.png") });
+  await memory.locator(".memory-entry-trigger").click();
+  await detail.waitFor();
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.waitForTimeout(350);
   await page.screenshot({
     path: path.join(captureRoot, "memory.png"),
   });
-  await memory.getByRole("button", { name: "忘记这条", exact: true }).click();
+  await detail.getByRole("button", { name: "忘记这条", exact: true }).click();
   await confirm.getByRole("button", { name: "忘记这条", exact: true }).click();
   await memory
     .getByRole("heading", { name: "还没有记忆", exact: true })
@@ -374,7 +381,9 @@ try {
       lateStateReadCannotRevertToggle: true,
       toggleFailureRollback: true,
       introductionList: true,
-      search: true,
+      noMemorySearch: true,
+      lightweightTitle: true,
+      detailsInDialog: true,
       edit: true,
       confirmedForget: true,
       emptyAndErrorStates: true,

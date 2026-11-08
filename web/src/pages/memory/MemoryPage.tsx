@@ -3,16 +3,17 @@ import {
   ConfirmDialog,
   Dialog,
   EmptyState,
-  SearchField,
   SettingsScope,
 } from "@sleepy-doll/ui";
 import { useEffect, useState } from "react";
 import { api } from "../../ipc/api";
-import type { MemoryEntry, MemoryExperience } from "../../ipc/types";
+import type { Bootstrap, MemoryEntry, MemoryExperience } from "../../ipc/types";
 import { useT } from "../../i18n";
 import { readError } from "../../session";
-import { HistoryIcon } from "@sleepy-doll/ui/icons";
+import { ChevronIcon, HistoryIcon } from "@sleepy-doll/ui/icons";
 import { MemoryToggle, useMemoryState } from "./MemoryControls";
+import { MarkdownText } from "../../components/chat/Transcript";
+import { providerOfTool } from "../../ipc/providers";
 import "./MemoryPage.css";
 
 type Row = { entry: MemoryEntry; compatible: boolean };
@@ -22,10 +23,62 @@ const lines = (value: string) =>
     .map((line) => line.trim())
     .filter(Boolean);
 
-export function MemoryPage() {
+const normalized = (value: string) =>
+  value.replace(/\s+/g, "").replace(/[。.!！?？]+$/u, "");
+
+function memoryTitle(
+  entry: MemoryEntry,
+  bootstrap?: Pick<Bootstrap, "plugins" | "tools">,
+) {
+  const experience = entry.experience;
+  const title = experience.title?.trim();
+  if (title && Array.from(title).length <= 24) return title;
+  const intent = experience.intent.trim();
+  const shortIntent =
+    Array.from(intent).length <= 20 && !/[\n，,；;。]/u.test(intent);
+  if (entry.userEdited && shortIntent) return intent;
+  const namespaces = new Set(
+    experience.steps.map((step) => step.tool.split(".")[0]?.toLowerCase()),
+  );
+  const software = experience.steps
+    .map((step) => {
+      const tool = bootstrap?.tools.find((tool) => tool.name === step.tool);
+      const provider = tool
+        ? providerOfTool(tool.name, tool.source)
+        : undefined;
+      return bootstrap?.plugins.find(
+        (plugin) => plugin.manifest.id === provider,
+      )?.manifest.name;
+    })
+    .find((name) => name && Array.from(name).length <= 12);
+  const words = [
+    ...new Set(experience.keywords.map((word) => word.trim())),
+  ].filter(
+    (word) =>
+      Array.from(word).length >= 2 &&
+      Array.from(word).length <= 10 &&
+      !/[.:/\\{}\[\]，；;。]/u.test(word) &&
+      !namespaces.has(word.toLowerCase()) &&
+      word !== software,
+  );
+  if (words.length) {
+    if (!software) return words.slice(0, 2).join(" · ");
+    const word = words.find(
+      (word) => Array.from(`${software} · ${word}`).length <= 24,
+    );
+    return word ? `${software} · ${word}` : `${software}操作`;
+  }
+  if (shortIntent) return intent;
+  return software ? `${software}操作` : "软件操作经验";
+}
+
+export function MemoryPage({
+  bootstrap,
+}: {
+  bootstrap?: Pick<Bootstrap, "plugins" | "tools">;
+}) {
   const t = useT();
   const memoryState = useMemoryState();
-  const [query, setQuery] = useState("");
   const [forgetting, setForgetting] = useState<MemoryEntry | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [error, setError] = useState("");
@@ -35,6 +88,8 @@ export function MemoryPage() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [draft, setDraft] = useState<MemoryExperience | null>(null);
   const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<Row | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const refresh = async () => setRows((await api.memories()).entries);
   useEffect(() => {
     let alive = true;
@@ -104,17 +159,29 @@ export function MemoryPage() {
       await api.memoryDelete(entry.id, entry.revision);
       await refresh();
       setForgetting(null);
+      setDetailOpen(false);
     } catch (reason) {
       setError(readError(reason));
     } finally {
       setBusy(false);
     }
   };
-  const filteredRows = rows.filter(({ entry }) =>
-    `${entry.experience.intent} ${entry.experience.summary} ${entry.experience.keywords.join(" ")}`
-      .toLocaleLowerCase()
-      .includes(query.toLocaleLowerCase().trim()),
-  );
+  const current =
+    rows.find(({ entry }) => entry.id === selected?.entry.id) ?? selected;
+  const overview = current
+    ? [
+        current.entry.experience.summary,
+        current.entry.experience.intent,
+      ].filter(
+        (value, index, values) =>
+          value.trim() &&
+          normalized(value) !==
+            normalized(memoryTitle(current.entry, bootstrap)) &&
+          values.findIndex(
+            (other) => normalized(other) === normalized(value),
+          ) === index,
+      )
+    : [];
   return (
     <SettingsScope className="memory-page">
       <header className="page-title memory-page-header">
@@ -123,19 +190,6 @@ export function MemoryPage() {
         </div>
         <MemoryToggle compact />
       </header>
-      <div className="list-toolbar page-list-toolbar memory-toolbar">
-        {reviewing && (
-          <span className="memory-hint memory-toolbar-count" role="status">
-            {t.settings.memoryReviewing}
-          </span>
-        )}
-        <SearchField
-          aria-label={t.settings.memorySearch}
-          placeholder={t.settings.memorySearch}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </div>
       {error && (
         <p className="memory-error" role="alert">
           {error}
@@ -160,83 +214,182 @@ export function MemoryPage() {
                   : t.settings.memoryDisabled
             }
           />
-        ) : filteredRows.length === 0 && !error ? (
-          <EmptyState icon={<HistoryIcon />} title={t.settings.memoryNoMatch} />
         ) : null}
+        {reviewing && rows.length > 0 && (
+          <p className="memory-hint memory-reviewing" role="status">
+            {t.settings.memoryReviewing}
+          </p>
+        )}
         <div className="memory-list">
-          {filteredRows.map(({ entry, compatible }) => (
-            <details key={entry.id} className="memory-entry list-item">
-              <summary className="list-item-trigger">
-                <span className="memory-entry-title">
-                  {entry.experience.intent}
-                </span>
-                <span className="memory-entry-intro">
-                  {entry.experience.summary}
-                </span>
-              </summary>
-              <div className="memory-entry-body">
-                <p className="memory-hint">
-                  {entry.validationState === "verified"
-                    ? t.settings.memoryVerified
-                    : t.settings.memoryCandidate}
-                </p>
-                {!compatible && (
-                  <p className="memory-hint">{t.settings.memoryChanged}</p>
-                )}
-                <p className="memory-hint">
-                  {entry.experience.conditions.join("；")}
-                </p>
-                <ol>
-                  {entry.experience.steps.map((step, index) => (
+          {rows.map(({ entry, compatible }) => {
+            const title = memoryTitle(entry, bootstrap);
+            const intro = entry.experience.summary.trim();
+            return (
+              <div key={entry.id} className="memory-entry list-item">
+                <button
+                  type="button"
+                  className="memory-entry-trigger list-item-trigger"
+                  aria-label={title}
+                  aria-haspopup="dialog"
+                  onClick={() => {
+                    setError("");
+                    setSelected({ entry, compatible });
+                    setDetailOpen(true);
+                  }}
+                >
+                  <span className="memory-entry-copy">
+                    <span className="memory-entry-title">{title}</span>
+                    {intro && normalized(intro) !== normalized(title) && (
+                      <span className="memory-entry-intro">{intro}</span>
+                    )}
+                  </span>
+                  <ChevronIcon className="memory-entry-chevron" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <Dialog
+        open={detailOpen && current !== null}
+        compact
+        className="memory-detail-dialog"
+        title={current ? memoryTitle(current.entry, bootstrap) : ""}
+        initialFocus="dialog"
+        onClose={() => setDetailOpen(false)}
+        footer={
+          current && (
+            <>
+              <Button
+                variant="subtle"
+                className="memory-detail-forget"
+                disabled={busy}
+                onClick={() => {
+                  setError("");
+                  setForgetting(current.entry);
+                }}
+              >
+                {t.settings.memoryDelete}
+              </Button>
+              <Button
+                variant="primary"
+                disabled={busy}
+                onClick={() => {
+                  setError("");
+                  setEditing(current.entry);
+                  setDraft({
+                    ...structuredClone(current.entry.experience),
+                    title: memoryTitle(current.entry, bootstrap),
+                  });
+                  setEditorOpen(true);
+                }}
+              >
+                {t.settings.memoryEdit}
+              </Button>
+            </>
+          )
+        }
+      >
+        {current && (
+          <SettingsScope className="memory-detail-content">
+            <p className="memory-detail-status">
+              {[
+                current.entry.validationState === "verified"
+                  ? t.settings.memoryVerified
+                  : t.settings.memoryCandidate,
+                !current.compatible ? t.settings.memoryChanged : "",
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+            {overview.length > 0 && (
+              <section className="memory-detail-section">
+                <h3>{t.settings.memoryOverview}</h3>
+                {overview.map((value, index) => (
+                  <MarkdownText key={index} text={value} />
+                ))}
+              </section>
+            )}
+            {current.entry.experience.conditions.length > 0 && (
+              <section className="memory-detail-section">
+                <h3>{t.settings.memoryConditionsHeading}</h3>
+                <ul>
+                  {current.entry.experience.conditions.map((value, index) => (
                     <li key={index}>
-                      <span>{step.action}</span>
+                      <MarkdownText text={value} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {current.entry.experience.steps.length > 0 && (
+              <section className="memory-detail-section">
+                <h3>{t.settings.memorySteps}</h3>
+                <ol>
+                  {current.entry.experience.steps.map((step, index) => (
+                    <li key={index}>
+                      <MarkdownText text={step.action} />
                     </li>
                   ))}
                 </ol>
-                <details className="memory-advanced">
-                  <summary>{t.settings.memoryAdvanced}</summary>
-                  {entry.experience.steps.map((step, index) => (
-                    <code key={index}>
-                      {step.tool}
-                      {step.methodId ? ` → ${step.methodId}` : ""}
-                    </code>
+              </section>
+            )}
+            {current.entry.experience.verification.length > 0 && (
+              <section className="memory-detail-section">
+                <h3>{t.settings.memoryVerificationHeading}</h3>
+                <ul>
+                  {current.entry.experience.verification.map((value, index) => (
+                    <li key={index}>
+                      <MarkdownText text={value} />
+                    </li>
                   ))}
-                </details>
-                <p>{entry.experience.verification.join("；")}</p>
-                {entry.experience.pitfalls.length > 0 && (
-                  <p className="memory-hint">
-                    {entry.experience.pitfalls.join("；")}
-                  </p>
-                )}
-                <div className="memory-actions">
-                  <Button
-                    variant="subtle"
-                    disabled={busy}
-                    onClick={() => {
-                      setError("");
-                      setEditing(entry);
-                      setDraft(structuredClone(entry.experience));
-                      setEditorOpen(true);
-                    }}
-                  >
-                    {t.settings.memoryEdit}
-                  </Button>
-                  <Button
-                    variant="subtle"
-                    disabled={busy}
-                    onClick={() => {
-                      setError("");
-                      setForgetting(entry);
-                    }}
-                  >
-                    {t.settings.memoryDelete}
-                  </Button>
-                </div>
-              </div>
-            </details>
-          ))}
-        </div>
-      </div>
+                </ul>
+              </section>
+            )}
+            {current.entry.experience.pitfalls.length > 0 && (
+              <section className="memory-detail-section">
+                <h3>{t.settings.memoryPitfallsHeading}</h3>
+                <ul>
+                  {current.entry.experience.pitfalls.map((value, index) => (
+                    <li key={index}>
+                      <MarkdownText text={value} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {current.entry.experience.steps.length > 0 && (
+              <details className="memory-advanced memory-detail-advanced">
+                <summary>{t.settings.memoryAdvanced}</summary>
+                <ol>
+                  {current.entry.experience.steps.map((step, index) => (
+                    <li key={index}>
+                      <code>
+                        {step.tool}
+                        {step.methodId ? ` → ${step.methodId}` : ""}
+                      </code>
+                      {Object.entries(step.inputRoles).length > 0 && (
+                        <dl className="memory-role-list">
+                          {Object.entries(step.inputRoles).map(
+                            ([name, role]) => (
+                              <div key={name}>
+                                <dt>
+                                  <code>{name}</code>
+                                </dt>
+                                <dd>{role}</dd>
+                              </div>
+                            ),
+                          )}
+                        </dl>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            )}
+          </SettingsScope>
+        )}
+      </Dialog>
       {editing && draft && (
         <Dialog
           open={editorOpen}
@@ -257,6 +410,7 @@ export function MemoryPage() {
                 variant="primary"
                 disabled={
                   busy ||
+                  !draft.title?.trim() ||
                   !draft.summary.trim() ||
                   Array.from(draft.summary).length > 240 ||
                   !draft.intent.trim()
@@ -280,6 +434,14 @@ export function MemoryPage() {
                 {error}
               </p>
             )}
+            <label>
+              {t.settings.memoryTitle}
+              <input
+                maxLength={24}
+                value={draft.title ?? ""}
+                onChange={(event) => change("title", event.target.value)}
+              />
+            </label>
             <label>
               {t.settings.memoryIntent}
               <input

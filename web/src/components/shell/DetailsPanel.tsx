@@ -143,6 +143,7 @@ export function DetailsPanel({
           <>
             <TaskCard
               task={selected}
+              catalog={bootstrap}
               activeRun={isRunning(currentRun) ? currentRun : undefined}
               busy={busy.has(selected.id)}
               actions={selectedActions}
@@ -218,6 +219,7 @@ export function DetailsPanel({
                   <TaskCard
                     key={task.id}
                     task={task}
+                    catalog={bootstrap}
                     activeRun={taskRun(task, bootstrap.tasks)}
                     busy={busy.has(task.id)}
                     actions={actions}

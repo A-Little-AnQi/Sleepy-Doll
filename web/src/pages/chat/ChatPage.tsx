@@ -21,6 +21,7 @@ import {
   SkillMenu,
   filterSkills,
   manualSkills,
+  skillCommandName,
 } from "../../components/chat/SkillMenu";
 import { Select } from "@sleepy-doll/ui/controls/Select";
 import {
@@ -267,8 +268,12 @@ export function ChatPage({
     );
   };
   // 技能菜单把 `$技能名` 插到光标处；运行时按这个前缀显式装载该技能。
+  const commandName = (name: string) => {
+    const skill = invocableSkills.find((skill) => skill.name === name);
+    return skill ? skillCommandName(skill) : name;
+  };
   const insertSkill = (name: string) => {
-    const marker = `$${name} `;
+    const marker = `$${commandName(name)} `;
     const node = textarea.current;
     if (!node) {
       setDraft(marker + prompt);
@@ -293,10 +298,12 @@ export function ChatPage({
         return;
       }
     }
-    setDraft(prompt.slice(0, at) + marker + prompt.slice(at));
+    const insertion =
+      at > 0 && !/\s/u.test(prompt[at - 1]!) ? ` ${marker}` : marker;
+    setDraft(prompt.slice(0, at) + insertion + prompt.slice(at));
     requestAnimationFrame(() => {
       node.focus();
-      const caret = at + marker.length;
+      const caret = at + insertion.length;
       node.setSelectionRange(caret, caret);
     });
   };
@@ -305,7 +312,7 @@ export function ChatPage({
     if (!slash) return;
     const node = textarea.current;
     const caret = node?.selectionStart ?? prompt.length;
-    const marker = `$${name} `;
+    const marker = `$${commandName(name)} `;
     const at = slash.start;
     setSlash(null);
     setDraft(prompt.slice(0, at) + marker + prompt.slice(caret));
@@ -655,6 +662,10 @@ export function ChatPage({
             // 任意运行/等待态都保持可编辑：草稿随时可写，发送会打断上一轮。
             placeholder={t.chat.composerPlaceholderNew}
             value={prompt}
+            highlightTerms={invocableSkills.flatMap((skill) => [
+              `$${skill.name}`,
+              `$${skillCommandName(skill)}`,
+            ])}
             onChange={(event) => {
               setDraft(event.target.value);
               const node = event.target;

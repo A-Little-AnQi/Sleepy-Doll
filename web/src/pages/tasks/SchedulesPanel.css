@@ -871,7 +871,7 @@
     gap: 10px;
   }
   .schedule-panel > .schedule-toolbar > .primary-action {
-    margin-left: auto;
+    margin-left: 0;
   }
 }
 @media (max-width: 380px) {

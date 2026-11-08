@@ -134,6 +134,7 @@ export function TasksPage({
                 <TaskCard
                   key={task.id}
                   task={task}
+                  catalog={bootstrap}
                   activeRun={taskRun(task, bootstrap.tasks)}
                   busy={busy.has(task.id)}
                   actions={actions}

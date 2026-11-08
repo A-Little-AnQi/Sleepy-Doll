@@ -3,7 +3,7 @@ use crate::runtime::types::Run;
 
 pub(crate) fn summary_value(entry: &MemoryEntry) -> Value {
     // Old records can predate introduction limits. Keep retrieval bounded too.
-    json!({"id":entry.id,"revision":entry.revision,"intent":entry.experience.intent.chars().take(160).collect::<String>(),
+    json!({"id":entry.id,"revision":entry.revision,"title":entry.experience.title.chars().take(24).collect::<String>(),"intent":entry.experience.intent.chars().take(160).collect::<String>(),
         "summary":entry.experience.summary.chars().take(240).collect::<String>(),"validationState":entry.validation_state})
 }
 

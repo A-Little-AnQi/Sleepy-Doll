@@ -52,6 +52,13 @@ fn network_plugin_bootstrap_toggle_and_legacy_skill_setting() {
             .map(|s| s["name"].as_str().unwrap())
             .collect::<Vec<_>>();
         assert_eq!(names, ["create-schedule", "create-shortcut"]);
+        let labels = bootstrap["skills"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|skill| skill["displayName"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(labels, ["创建定时任务", "创建快捷任务"]);
         let tools = bootstrap["tools"]
             .as_array()
             .unwrap()

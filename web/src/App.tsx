@@ -329,7 +329,7 @@ export default function App() {
             onConsumed={() => setScheduleTask(undefined)}
           />
         ) : visiblePage === "memory" ? (
-          <MemoryPage />
+          <MemoryPage bootstrap={bootstrap} />
         ) : visiblePage === "extensions" ? (
           <ExtensionsPage
             bootstrap={bootstrap}

@@ -1425,6 +1425,7 @@ impl AppController {
             .map(|skill| {
                 json!({
                     "name":skill.name,
+                    "displayName":skill.display_name,
                     "description":skill.description,
                     "source":skill.source,
                     "tags":skill.tags,

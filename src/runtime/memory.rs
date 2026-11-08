@@ -32,6 +32,8 @@ pub struct ExperienceStep {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Experience {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
     pub intent: String,
     #[serde(default)]
     pub summary: String,
@@ -127,6 +129,9 @@ pub fn tool_schemas(
 impl Experience {
     pub fn validate(&self) -> Result<()> {
         let mut text = vec![self.intent.as_str(), self.summary.as_str()];
+        if !self.title.is_empty() {
+            text.push(&self.title);
+        }
         text.extend(
             self.conditions
                 .iter()
@@ -145,7 +150,8 @@ impl Experience {
         {
             return Err(Error::Config("经验说明不能为空，也不能保存凭据".into()));
         }
-        if self.intent.trim().is_empty()
+        if self.title.chars().count() > 24
+            || self.intent.trim().is_empty()
             || self.intent.chars().count() > 160
             || self.summary.trim().is_empty()
             || self.summary.chars().count() > 240
@@ -805,6 +811,7 @@ const LEARNING_PROMPT: &str = r#"你负责提炼可复用的操作经验，不�
 各接口即使已有文档，实际验证过的组合顺序、参数来源、跨层关系和必要步骤仍有复用价值；保存这些联系及下次如何判断适用，不照抄工具说明或上次参数。
 输入是真实工具轨迹和契约。只记实现链路，不记任务进度、已做/待办清单、一次性的成功宣告或猜测。
 经验包含：目标语义、适用条件、经过观测的入口顺序、参数从哪里取得、核验标准、必要的失败分支。
+title 是简短的通用操作名称，通常 4–12 字，最多 24 字；必要时加软件名，例如“表格软件 数据导入”“定时任务创建”。只写软件与操作，不写某次用户请求、具体对象、时间或“先判断是否可调度”等前置判断和流程句。title 不替代 intent、summary 和正文：通用适用目标写入 intent，方法概述写入 summary，条件、步骤和核验细节完整保留。
 用“换一批对象和参数后是否仍能减少探路”检查通用性。保留真实方法名、字段名和有条件的分支关系；本次业务对象的名称、数量、队名、选择的作者或目标路径要抽象为参数来源，不写进 intent、summary、keywords 和步骤正文。不要把本次任务实例当成下次的默认目标。已有对象可用时直接复用，不把创建、订阅、同步固化为每次必做。
 必须按任务条件选择链路，不固化成唯一方案。每次复用都要核对当前接口契约、能力可用性和现场条件。
 inputRoles 描述本次参数的来源，不保存上次可直接执行的参数对象、组名、校验值、catalogVersion、Job ID、授权或凭据。
@@ -1516,6 +1523,7 @@ mod tests {
     }
     fn experience() -> Experience {
         Experience {
+            title: String::new(),
             intent: "配置地图追踪脚本".into(),
             summary: "先读取当前目录和契约，再创建配置组并回读有效配置".into(),
             keywords: vec!["地图追踪".into(), "脚本".into()],
@@ -1557,6 +1565,35 @@ mod tests {
             .execute_batch("CREATE TABLE runtime_runs(id TEXT PRIMARY KEY)")
             .unwrap();
         store
+    }
+
+    #[test]
+    fn lightweight_titles_preserve_legacy_content_and_identity() {
+        let store = store();
+        let run = run();
+        let legacy = experience();
+        let value = serde_json::to_value(&legacy).unwrap();
+        assert!(value.get("title").is_none());
+        let mut named: Experience = serde_json::from_value(value).unwrap();
+        assert!(named.title.is_empty());
+        named.validate().unwrap();
+        let id = named.id();
+        let schemas = tool_schemas(&named, &definitions()).unwrap();
+        store
+            .remember(vec![(named.clone(), schemas.clone())], &run, 0)
+            .unwrap();
+        let saved = store.get(&id).unwrap();
+        named.title = "地图追踪配置".into();
+        named.validate().unwrap();
+        assert_eq!(id, named.id());
+        store.edit(&id, saved.revision, &named, &schemas).unwrap();
+        let updated = store.get(&id).unwrap();
+        assert_eq!(updated.experience.title, "地图追踪配置");
+        assert_eq!(updated.experience.intent, legacy.intent);
+        assert_eq!(updated.experience.summary, legacy.summary);
+        assert_eq!(updated.experience.steps.len(), legacy.steps.len());
+        named.title = "长".repeat(25);
+        assert!(named.validate().is_err());
     }
 
     #[test]

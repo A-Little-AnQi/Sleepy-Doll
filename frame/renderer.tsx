@@ -416,7 +416,6 @@ function render({ entry, props: p, onPatch }: RenderProps): ReactNode {
             activeRun={
               checked(p, "running") ? { state: "executing" } : undefined
             }
-            runStateLabel="正在执行"
           />,
         ),
       );

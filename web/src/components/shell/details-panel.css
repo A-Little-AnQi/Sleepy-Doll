@@ -134,7 +134,7 @@
   box-shadow: 0 2px 8px #00000005;
 }
 .details-panel .task-card-name {
-  font-size: 15px;
+  font-size: var(--font-item);
   line-height: 1.5;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -145,11 +145,6 @@
 }
 .details-panel .task-card-foot {
   gap: 6px;
-}
-.details-panel .task-card-state {
-  font-size: 14px;
-  padding: 3px 6px;
-  border-radius: 6px;
 }
 .details-panel .task-card-note {
   font-size: 14px;
@@ -394,11 +389,6 @@
 }
 .shortcut-purpose p {
   margin: 0;
-  overflow-wrap: anywhere;
-}
-/* 详情内应用/绑定信息完整展示，不做单行截断。 */
-.details-panel .task-card-application {
-  white-space: normal;
   overflow-wrap: anywhere;
 }
 .shortcut-plan {

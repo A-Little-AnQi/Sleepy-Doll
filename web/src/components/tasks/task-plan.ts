@@ -3,6 +3,37 @@ import type { ShortcutBinding } from "../../ipc/types";
 const GROUP_TOOL = "bgi.api.invoke";
 const GROUP_METHOD = "bgi.run_script_groups";
 
+function groupNames(action: {
+  tool: string;
+  arguments: Record<string, unknown>;
+}): string[] {
+  const args = action.arguments ?? {};
+  if (action.tool !== GROUP_TOOL || args.methodId !== GROUP_METHOD) return [];
+  const inner = (args.arguments ?? {}) as Record<string, unknown>;
+  return Array.isArray(inner.groupNames)
+    ? inner.groupNames.filter(
+        (name): name is string =>
+          typeof name === "string" && Boolean(name.trim()),
+      )
+    : [];
+}
+
+/** 卡片展示绑定的组项名称，不附加软件名或执行说明。 */
+export function taskTargets(
+  binding: ShortcutBinding | null | undefined,
+): string[] {
+  if (!binding) return [];
+  const groups = binding.steps?.length
+    ? binding.steps.flatMap((step) =>
+        step.action ? groupNames(step.action) : [],
+      )
+    : binding.action
+      ? groupNames(binding.action)
+      : [];
+  const names = groups.length ? groups : binding.targetName.split(/[、，,]/u);
+  return [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+}
+
 /**
  * 运行配置组的批量动作展开成「运行配置组：名称」列表；
  * 只有严格 true 才追加关闭游戏。识别不了返回空，由调用方退回兜底文案。
@@ -30,11 +61,7 @@ function groupLines(action: {
   }
   if (action.tool !== GROUP_TOOL || args.methodId !== GROUP_METHOD) return [];
   const inner = (args.arguments ?? {}) as Record<string, unknown>;
-  const names = Array.isArray(inner.groupNames)
-    ? inner.groupNames.filter(
-        (name): name is string => typeof name === "string",
-      )
-    : [];
+  const names = groupNames(action);
   const lines = names.map((name) => `运行配置组：${name}`);
   if (inner.closeGameAfter === true) lines.push("完成后关闭原神");
   return lines;

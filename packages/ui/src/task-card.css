@@ -15,13 +15,18 @@
 .task-card[data-openable="true"] {
   cursor: pointer;
 }
-.task-card-application {
+.task-card-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
   color: var(--muted);
   font-size: var(--font-meta);
   line-height: 1.5;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+.task-card-targets > span {
+  min-width: 0;
+  max-width: 100%;
 }
 .task-card[data-running="true"] {
   border-color: var(--border-strong);
@@ -37,7 +42,8 @@
   min-width: 0;
 }
 .task-card-name {
-  flex: 1;
+  flex: 0 1 auto;
+  max-width: 100%;
   min-width: 0;
   padding: 0;
   border: 0;
@@ -49,6 +55,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.task-card-heading {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
 }
 button.task-card-name:focus-visible {
   outline: 2px solid var(--secondary);
@@ -97,6 +111,15 @@ button.task-card-name:focus-visible {
   font-size: var(--font-body);
   text-align: left;
 }
+.task-card-action-menu {
+  position: fixed;
+  top: 0;
+  right: auto;
+  left: 0;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+}
 .task-menu button:hover {
   background: var(--hover);
 }
@@ -117,22 +140,15 @@ button.task-card-name:focus-visible {
   margin-left: auto;
   min-inline-size: 7.5em;
 }
-.task-card-state {
+.task-card-tag {
   padding: 2px 8px;
   border-radius: 999px;
   border: var(--border-width, 1px) solid var(--border);
   background: var(--subtle);
   color: var(--secondary);
   font-size: 14px;
-  white-space: nowrap;
-}
-.task-card-state[data-state="readyVerified"] {
-  border-color: var(--border-strong);
-  color: var(--text);
-}
-.task-card-state[data-state="unavailable"],
-.task-card-state[data-state="invalid"] {
-  border-style: dashed;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .task-card-note {
   color: var(--muted);

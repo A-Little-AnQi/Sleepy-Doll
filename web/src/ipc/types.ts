@@ -17,6 +17,7 @@ export interface ModelInfo {
 
 export interface SkillInfo {
   name: string;
+  displayName?: string | null;
   description: string;
   source: string;
   tags: string[];
@@ -57,6 +58,7 @@ export interface ToolInfo {
   source: string;
 }
 export interface MemoryExperience {
+  title?: string;
   intent: string;
   summary: string;
   keywords: string[];

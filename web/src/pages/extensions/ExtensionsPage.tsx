@@ -13,6 +13,7 @@ import { MotionSwitch } from "@sleepy-doll/ui/controls/MotionSwitch";
 import { SlidingTabs } from "@sleepy-doll/ui/controls/SlidingTabs";
 import { providerOfTool } from "../../ipc/providers";
 import { useT } from "../../i18n";
+import { skillLabel } from "../../components/chat/SkillMenu";
 export function ExtensionsPage({
   bootstrap,
   reload,
@@ -63,7 +64,7 @@ export function ExtensionsPage({
     currentTab === "skills"
       ? bootstrap.skills.map((skill) => ({
           id: skill.name,
-          name: skill.name,
+          name: skillLabel(skill),
           description: skill.description,
           enabled: skill.enabled !== false,
           available: skill.available !== false,
@@ -102,7 +103,9 @@ export function ExtensionsPage({
           bundled: plugin.bundled === true || plugin.host === true,
         }));
   const filtered = items.filter((item) =>
-    (item.name + item.description).toLowerCase().includes(query.toLowerCase()),
+    (item.name + item.id + item.description)
+      .toLowerCase()
+      .includes(query.toLowerCase()),
   );
   const current = items.find((item) => item.id === selected);
   const toggle = async (id: string, enabled: boolean) => {

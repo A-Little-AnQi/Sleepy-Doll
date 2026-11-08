@@ -1,5 +1,6 @@
 ---
 name: create-shortcut
+displayName: 创建快捷任务
 description: 创建和修改快捷任务：组合应用动作、本机操作与等待，保存为可重复运行的入口。
 tags: 快捷任务, 创建, 封装, 入口
 ---

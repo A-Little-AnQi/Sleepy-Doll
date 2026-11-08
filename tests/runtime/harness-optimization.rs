@@ -163,6 +163,7 @@ async fn supplement_refreshes_memory_and_skills_without_rewriting_system() {
         .find(|d| d.name == "workspace.environment")
         .unwrap();
     let experience = memory::Experience {
+        title: String::new(),
         intent: "special_route_experience".into(),
         summary: "special_route 的专用环境读取链路".into(),
         keywords: vec!["special_route".into()],
@@ -468,6 +469,7 @@ fn memory_filters_incompatible_candidates_before_top_k() {
         .unwrap();
     for index in 0..12 {
         let experience = memory::Experience {
+            title: String::new(),
             intent: format!("route family {index:02}"),
             summary: "route family".into(),
             keywords: vec!["route".into()],
