@@ -1,6 +1,7 @@
 """从宿主源码索引与只读桥目录生成 BGI 功能覆盖清单。"""
 import argparse
 import collections
+import hashlib
 import json
 import re
 import subprocess
@@ -10,6 +11,37 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def source_fingerprint(source):
+    pending = [source / "BetterGenshinImpact/BetterGenshinImpact.csproj"]
+    visited, files = set(), set()
+    while pending:
+        project = pending.pop().resolve()
+        if not project.is_relative_to(source): raise SystemExit("项目引用超出源码范围")
+        if project in visited: continue
+        visited.add(project)
+        for node in ET.parse(project).getroot().iter():
+            if node.tag.rsplit("}", 1)[-1] not in {"Compile", "ProjectReference"} or "Include" not in node.attrib: continue
+            include = node.attrib["Include"]
+            if "$(" in include or "*" in include: raise SystemExit("审计尚未解析项目输入：" + include)
+            path = (project.parent / include.replace("\\", "/")).resolve()
+            if node.tag.rsplit("}", 1)[-1] == "ProjectReference": pending.append(path)
+            else: files.add(path)
+        files.update(p for p in project.parent.rglob("*") if p.is_file()
+                     and p.suffix in {".cs", ".xaml", ".csproj"}
+                     and not set(p.relative_to(source).parts) & {"bin", "obj", ".git", "User"})
+    digest = hashlib.sha256()
+    for path in sorted(files, key=lambda p: p.relative_to(source).as_posix().encode("utf-16-be")):
+        digest.update((path.relative_to(source).as_posix() + "\0").encode())
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
+    return digest.hexdigest()
+
+
+def verify_source(source, metadata):
+    revision = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+    if metadata.get("sourceRevision") != revision or metadata.get("sourceTreeHash") != source_fingerprint(source):
+        raise SystemExit("宿主声明与当前源码不一致；先重新运行 MetadataBuilder，不能给旧声明标上当前版本。")
 
 
 def snake(value):
@@ -49,12 +81,17 @@ def live_catalog(config_path, cache):
             break
         offset = result["nextOffset"]
     contracts = []
-    keep = {"methodId", "group", "summary", "displayName", "callable", "unavailableReason",
+    keep = {"methodId", "group", "summary", "displayName", "callable", "unavailableReason", "guide", "catalogVersion",
             "effect", "inputSchema", "outputSchema", "requiresGameReady", "whenToUse",
             "preconditions", "sideEffects", "resultMeaning", "verification", "rollback", "source"}
     for item in items:
         detail = read("catalog/" + item["methodId"])
+        if detail.get("catalogVersion") != info.get("catalogVersion"):
+            raise RuntimeError("接口目录在审计期间变化，拒绝混用快照")
         contracts.append({key: value for key, value in detail.items() if key in keep})
+    final_info = read("info")
+    if any(final_info.get(key) != info.get(key) for key in ("instanceId", "catalogVersion", "bridgeCode")):
+        raise RuntimeError("宿主实例在审计期间变化，拒绝混用快照")
     safe = {"info": {key: info.get(key) for key in
                      ["protocolVersion", "bridge", "bridgeCode", "catalogVersion", "methods"]},
             "items": items, "contracts": contracts}
@@ -101,7 +138,8 @@ def make_inventory(source, metadata, live):
             name = member.get("jsonName") or camel(member["name"])
             path = prefix + name
             kind = (member.get("valueType") or "").removesuffix("?")
-            target = by_type.get(kind, [])
+            resolved = member.get("resolvedType")
+            target = [resolved] if resolved in properties else by_type.get(kind, [])
             if len(target) == 1 and "<" not in kind and not kind.endswith("[]"):
                 walk(target[0], path + ".", ancestors | {owner})
             else:
@@ -165,12 +203,9 @@ def make_inventory(source, metadata, live):
         else:
             item["bridgeState"] = "源码设置，当前桥未匹配"
             item["reason"] = "需核对版本、父对象初始化与安全读写契约。"
-    stable = []
-    for file in sorted((ROOT / "bgi-bridge/managed/Tools").glob("*.cs")):
-        for method in sorted(set(re.findall(r'"(bgi\.[a-z_]+(?:\.[a-z_]+)*)"', file.read_text(encoding="utf-8")))):
-            if method.startswith("bgi."):
-                stable.append({"methodId": method, "source": file.relative_to(ROOT).as_posix(),
-                               "live": method in runtime})
+    registrations = json.loads((ROOT / "bgi-bridge/dev/bgi-method-metadata.json").read_text(encoding="utf-8-sig"))
+    stable = [{"methodId": method, "source": entry["source"]["path"], "live": method in runtime}
+              for method, entry in sorted(registrations.items())]
     assessments = dict(collections.Counter(item["chainAssessment"] for item in commands))
     skill_refs = {}
     known = set(re.findall(r'"(bgi\.[a-zA-Z_][a-zA-Z0-9_.]*)"', "\n".join(file.read_text(encoding="utf-8-sig") for file in
@@ -180,7 +215,7 @@ def make_inventory(source, metadata, live):
             if method in known:
                 skill_refs.setdefault(method, []).append(file.relative_to(ROOT).as_posix())
     return {"source": str(source), "sourceRevision": subprocess.check_output(
-        ["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip(),
+        ["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip(), "sourceTreeHash": metadata["sourceTreeHash"],
         "commands": sorted(commands, key=lambda item: item["symbol"]),
         "settings": sorted(settings, key=lambda item: item["path"]),
         "views": pages, "stableEntries": stable, "liveInfo": live.get("info", {}),
@@ -251,6 +286,7 @@ def main():
     elif cache.exists():
         live = json.loads(cache.read_text(encoding="utf-8"))
     metadata = json.loads((ROOT / "bgi-bridge/managed/generated/host-documentation.json").read_text(encoding="utf-8"))
+    verify_source(source=args.source.resolve(), metadata=metadata)
     data = make_inventory(args.source.resolve(), metadata, live)
     output = ROOT / "target/reports/bgi"
     output.mkdir(parents=True, exist_ok=True)

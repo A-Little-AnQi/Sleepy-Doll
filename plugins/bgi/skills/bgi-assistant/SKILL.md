@@ -13,6 +13,7 @@ alwaysLoad: true
 根据用户要完成的事，从当前可用工具和能力说明中选择入口。技能不指定业务接口、类名、参数路径或页面标识；这些都可能随版本变化。已知符号也先核对当前声明，不凭记忆调用。工具说明和现有证据已经足够时直接处理，不为例行装载手册增加调用；需要额外知识时只读相关资料。
 
 - 操作资源、设置和任务：读取 bgi-operator，按需要选择一份资料。
+- 没有找到入口或链路不完整：按 bgi-operator 的 capabilities.md 核对源码声明、实际登记与上下文；不把索引未命中当作软件不支持。
 - 阅读或开发 JavaScript：读取 bgi-javascript；已有配置能完成的事不默认写脚本。
 - 排查配置与效果：读 [guide-workflow.md](references/guide-workflow.md)。
 - 封装已有任务：读 [quick-tasks.md](references/quick-tasks.md)，保存与运行分开。

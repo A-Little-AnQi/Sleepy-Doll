@@ -11,6 +11,7 @@ tags: BGI操作
 
 | 所需知识 | 资料 |
 |---|---|
+| 能力缺失、数据入口与调用链完整性 | [references/capabilities.md](references/capabilities.md) |
 | 用户资源、配置组与删除边界 | [references/resources.md](references/resources.md) |
 | 全局设置与联动 | [references/settings.md](references/settings.md) |
 | 任务准备、后台运行、停止 | [references/execution.md](references/execution.md) |

@@ -504,7 +504,7 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
             let features=features.clone();
             Arc::new(move |a: &Value| features.inspect_symbols(&a["symbols"].as_array().unwrap().iter().filter_map(Value::as_str).map(str::to_owned).collect::<Vec<_>>())) as BridgeToolFn
         }),
-        ("bgi.feature.search", "检索离线源码声明", "离线检索软件源码、接口登记、配置设置、JavaScript 引擎注入、类型和成员声明；无需连接或启动 BetterGI。按真实名称、符号或说明查询，摘要带来源；空 query 分页浏览。静态资料不证明现场可调用，需要执行时再读取当前契约。", json!({"type":"object","properties":{"query":{"type":"string","maxLength":200,"default":""},"kind":{"type":"string","enum":["command","setting","page","scriptApi","resourceModel","stable"]},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":12,"default":5}},"required":[],"additionalProperties":false}), {
+        ("bgi.feature.search", "检索离线源码声明", "离线检索软件源码、接口登记、配置设置、JavaScript 引擎注入、类型和成员声明；无需连接或启动 BetterGI。按真实名称、符号或说明查询，摘要带来源；空 query 分页浏览。静态资料不证明现场可调用，需要执行时再读取当前契约。", json!({"type":"object","properties":{"query":{"type":"string","maxLength":512,"description":"关键词最多200字符；已返回的完整标识可直接查询","default":""},"kind":{"type":"string","enum":["command","setting","page","scriptApi","resourceModel","stable","hostApi"]},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":12,"default":5}},"required":[],"additionalProperties":false}), {
             let features = features.clone();
             Arc::new(move |a: &Value| features.search(a["query"].as_str().unwrap_or(""),a["kind"].as_str(),a["offset"].as_u64().unwrap_or(0) as usize,a["limit"].as_u64().unwrap_or(5) as usize)) as BridgeToolFn
         }),

@@ -1,7 +1,10 @@
 """Generate factual BGI declarations; procedures are read from plugin skills."""
 import hashlib
+import errno
 import json
+import os
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -9,13 +12,23 @@ AUDIT = ROOT / "bgi-bridge/dev/fixtures/host-features.json"
 METHODS = ROOT / "bgi-bridge/dev/bgi-method-metadata.json"
 HOST_DOCUMENTATION = ROOT / "bgi-bridge/managed/generated/host-documentation.json"
 OUTPUT = ROOT / "plugins/bgi/resources/feature-index.json"
+HOST_SURFACE = ROOT / "bgi-bridge/dev/fixtures/host-surface.json"
+
+
+def content_bytes(path):
+    # Git checkout 的换行和 UTF-8 BOM 不应让同一份 JSON 元数据失配。
+    return path.read_text(encoding="utf-8-sig").encode("utf-8")
 
 
 def ref(path, skill="bgi-operator"):
     return {"skill": skill, "path": "references/" + path}
 
 
-def build(data, methods, documentation):
+def build(data, methods, documentation, surface):
+    assert data.get("sourceRevision") == documentation.get("sourceRevision"), "Source audit and declarations use different revisions"
+    assert data.get("sourceTreeHash") == documentation.get("sourceTreeHash"), "Source audit and declarations use different trees"
+    assert surface.get("sourceRevision") == documentation.get("sourceRevision"), "Host methods and declarations use different revisions"
+    assert surface.get("sourceTreeHash") == documentation.get("sourceTreeHash"), "Host methods and declarations use different trees"
     result = []
     revision = data["sourceRevision"]
     published_names = {item["name"] for item in data["commands"] if item.get("publicExposure", True)}
@@ -107,17 +120,58 @@ def build(data, methods, documentation):
     assert {item["methodId"] for item in data["stableEntries"]} <= methods.keys(), "Registration snapshot missing audited methods"
     for item in result:
         assert item["source"]["path"]
-    return {"format": 2, "sourceRevision": revision, "sourceSnapshotHash": hashlib.sha256(HOST_DOCUMENTATION.read_bytes()).hexdigest(), "scriptTypes": documentation["scriptTypes"], "items": result}
+    host_types = {}
+    existing = {item["id"] for item in result}
+    for name, definition in surface.get("types", {}).items():
+        profile = {key:definition[key] for key in ["name","source","line","summary","isAbstract","isStatic"] if key in definition}
+        profile.update(kind="enum" if definition["kind"] == "enum" else "type", members=[], bases=definition.get("bases", []), baseResolution="sourceSyntaxOnly")
+        if definition["kind"] == "enum":
+            profile["enumValues"] = definition["values"]
+        for constructor in definition.get("constructors", []):
+            profile["members"].append(dict(constructor, name=".ctor", kind="constructor", returnType=name))
+        host_types[name] = profile
+        if "T:" + name not in existing:
+            result.append({"id":"T:"+name,"kind":"hostApi","title":name.split(".")[-1],
+                "summary":definition.get("summary") or "宿主源码类型声明；不代表可直接调用", "keywords":[name], "availability":"sourceDeclaration",
+                "inputSources":[],"declaration":dict(profile, members=[]),"references":[ref("capabilities.md")],
+                "source":{"path":definition["source"],"line":definition["line"]}})
+    for method in surface.get("methods", {}).values():
+        member = {key:method[key] for key in ["name","returnType","parameters","source","line","summary","isStatic","hasImplementation","asyncVoid"]}
+        member.update(kind="method", declarationRole=method["kind"])
+        host_types[method["owner"]]["members"].append(member)
+        result.append({"id":"H:"+method["id"][2:], "kind":"hostApi","title":method["name"],
+            "summary":method.get("summary") or method["returnType"]+" "+method["name"], "keywords":[method["owner"],method["name"]],
+            "availability":"sourceDeclaration", "inputSources":method["parameters"], "declaration":dict(member,owner=method["owner"]), "references":[ref("capabilities.md")],
+            "source":{"path":method["source"],"line":method["line"]}})
+    for symbol, entry in documentation["entries"].items():
+        if not symbol.startswith("P:"): continue
+        owner, name = symbol[2:].rsplit(".",1)
+        if owner in host_types:
+            host_types[owner]["members"].append({"name":name,"kind":"property","returnType":entry.get("valueType"),
+                "readable":True,"writable":entry.get("writable",False),"isStatic":entry.get("isStatic",False),
+                "source":entry["source"],"line":entry["line"]})
+    assert len(result) == len({item["id"] for item in result}), "Duplicate source capability ID"
+    source_hash = hashlib.sha256(content_bytes(HOST_DOCUMENTATION) + b"\0" + content_bytes(HOST_SURFACE)).hexdigest()
+    inputs_hash = hashlib.sha256(b"".join(hashlib.sha256(content_bytes(path)).digest() for path in [AUDIT, METHODS, HOST_DOCUMENTATION, HOST_SURFACE])).hexdigest()
+    return {"format": 2, "sourceRevision": revision, "sourceTreeHash":documentation["sourceTreeHash"], "sourceSnapshotHash":source_hash, "indexInputsHash":inputs_hash, "scriptTypes": documentation["scriptTypes"], "hostTypes":host_types, "items": result}
 
 
 def main():
-    index = build(json.loads(AUDIT.read_text(encoding="utf-8-sig")), json.loads(METHODS.read_text(encoding="utf-8-sig")), json.loads(HOST_DOCUMENTATION.read_text(encoding="utf-8-sig")))
+    index = build(json.loads(AUDIT.read_text(encoding="utf-8-sig")), json.loads(METHODS.read_text(encoding="utf-8-sig")), json.loads(HOST_DOCUMENTATION.read_text(encoding="utf-8-sig")), json.loads(HOST_SURFACE.read_text(encoding="utf-8-sig")))
     encoded = json.dumps(index, ensure_ascii=False, separators=(",", ":"))
     if "--check" in sys.argv:
         if not OUTPUT.exists() or OUTPUT.read_text(encoding="utf-8") != encoded:
             raise SystemExit("功能索引已过期；运行 feature-guide-builder.py 后再验证")
     else:
-        OUTPUT.write_text(encoded, encoding="utf-8")
+        for attempt in range(8):
+            try:
+                OUTPUT.write_text(encoded, encoding="utf-8")
+                break
+            except OSError as error:
+                # Windows 编译器短暂映射 include_str 输入时不能截断；只重试同一生成文件。
+                if os.name != "nt" or error.errno not in {errno.EACCES, errno.EINVAL} or attempt == 7:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
     print(json.dumps({"items": len(index["items"]), "bytes": OUTPUT.stat().st_size}))
 
 

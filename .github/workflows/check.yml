@@ -41,5 +41,6 @@ jobs:
         run: cargo test --no-default-features --lib runtime::workspace::tests::shell_ -- --nocapture
       - name: Validate BGI progressive disclosure
         run: |
+          dotnet run --project bgi-bridge/dev/ProductionCoreChecks.csproj --configuration Release -- --check-interfaces bgi-bridge/dev/bgi-method-metadata.json
           python bgi-bridge/dev/feature-guide-builder.py --check
           cargo test --no-default-features --lib

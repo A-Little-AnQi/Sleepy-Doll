@@ -2,6 +2,6 @@
   <PropertyGroup><BaseIntermediateOutputPath>../../target/dotnet/production-core-checks-obj/</BaseIntermediateOutputPath><MSBuildProjectExtensionsPath>../../target/dotnet/production-core-checks-obj/</MSBuildProjectExtensionsPath></PropertyGroup>
   <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF><UseAppHost>false</UseAppHost><EnableDefaultCompileItems>false</EnableDefaultCompileItems><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><OutputPath>../../target/dotnet/production-core-checks/</OutputPath></PropertyGroup>
-  <ItemGroup><Compile Include="ProductionCoreChecks.cs" /><ProjectReference Include="../managed/BgiBridge.csproj" /></ItemGroup>
+  <ItemGroup><Compile Include="ProductionCoreChecks.cs" /><Compile Include="RegistrySnapshot.cs" /><ProjectReference Include="../managed/BgiBridge.csproj" /></ItemGroup>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
 </Project>

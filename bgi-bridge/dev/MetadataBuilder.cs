@@ -5,8 +5,15 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-if (args.Length != 2) throw new ArgumentException("MetadataBuilder <BetterGI source root> <output JSON>");
+if (args.Length == 3 && args[2] == "--surface")
+{
+    HostSurfaceAudit.Write(args[0], args[1]);
+    return;
+}
+if (args.Length != 2 && !(args.Length == 4 && args[2] == "--surface-output")) throw new ArgumentException("MetadataBuilder <BetterGI source root> <output JSON> [--surface-output <surface JSON>]");
 var root = Path.GetFullPath(args[0]);
+var hostSurface = HostSurfaceAudit.Collect(root);
+var productFiles = HostSurfaceAudit.Files(root);
 var entries = new SortedDictionary<string, object>(StringComparer.Ordinal);
 var enumValues = new SortedDictionary<string, string[]>(StringComparer.Ordinal);
 var labels = new Dictionary<string, string?>(StringComparer.Ordinal);
@@ -19,7 +26,7 @@ void AddPropertyGuide(string key, string caption)
     if (propertyGuides.TryGetValue(key, out var prior) && prior != caption) propertyGuides[key] = null;
     else propertyGuides.TryAdd(key, caption);
 }
-foreach (var path in Directory.EnumerateFiles(root, "*.xaml", SearchOption.AllDirectories).Where(Usable))
+foreach (var path in productFiles.Where(path => Path.GetExtension(path) == ".xaml"))
 {
     try
     {
@@ -95,8 +102,12 @@ foreach (var path in Directory.EnumerateFiles(root, "*.xaml", SearchOption.AllDi
     }
     catch { }
 }
-var trees = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories).Where(Usable)
+var trees = productFiles.Where(path => Path.GetExtension(path) == ".cs")
     .Select(path => (Path: path, Tree: CSharpSyntaxTree.ParseText(File.ReadAllText(path)))).ToArray();
+var typeMap = trees.SelectMany(pair => pair.Tree.GetRoot().DescendantNodes().OfType<BaseTypeDeclarationSyntax>().Select(type =>
+    (Type: type, pair.Path, pair.Tree, Name: TypeName(type))))
+    .GroupBy(item => item.Name).ToDictionary(group => group.Key, group =>
+        (group.First().Type, group.First().Path, group.First().Tree, Parts: group.ToArray()));
 var callerText = trees.ToDictionary(pair => Path.GetRelativePath(root, pair.Path).Replace('\\', '/'), pair => pair.Tree.GetRoot().ToString());
 var callers = trees.SelectMany(pair => pair.Tree.GetRoot().DescendantNodes().OfType<IdentifierNameSyntax>()
     .Select(node => (Name: node.Identifier.ValueText, Path: Path.GetRelativePath(root, pair.Path).Replace('\\', '/'))))
@@ -225,6 +236,7 @@ foreach (var (path, tree) in trees)
                 label,
                 kind,
                 valueType,
+                resolvedType = valueType is null ? null : ResolveType(valueType, member),
                 initial,
                 range,
                 source = Path.GetRelativePath(root, path).Replace('\\','/'),
@@ -257,20 +269,30 @@ foreach (var (path, tree) in trees)
     }
 }
 var scriptTypes = new SortedDictionary<string, object>(StringComparer.Ordinal);
-var typeMap = trees.SelectMany(pair => pair.Tree.GetRoot().DescendantNodes().OfType<BaseTypeDeclarationSyntax>().Select(type =>
-    (Type: type, pair.Path, pair.Tree, Name: string.Join('.', type.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().Reverse().Select(n => n.Name.ToString())) + "." + type.Identifier.ValueText)))
-    .GroupBy(item => item.Name).ToDictionary(group => group.Key, group => group.First());
+static string TypeName(BaseTypeDeclarationSyntax type) => string.Join('.', type.Ancestors().OfType<BaseNamespaceDeclarationSyntax>()
+    .Reverse().Select(value => value.Name.ToString())) + "." + string.Join('+', type.Ancestors().OfType<TypeDeclarationSyntax>()
+    .Reverse().Select(value => value.Identifier.ValueText).Append(type.Identifier.ValueText));
 string ResolveType(string raw, SyntaxNode context)
 {
-    raw = raw.TrimEnd('?');
-    var external = new Dictionary<string, string> { ["Mat"]="OpenCvSharp.Mat",["Point2f"]="OpenCvSharp.Point2f",["Pen"]="System.Drawing.Pen",["Color"]="System.Drawing.Color",["CancellationToken"]="System.Threading.CancellationToken",["CancellationTokenSource"]="System.Threading.CancellationTokenSource",["Task"]="System.Threading.Tasks.Task" };
+    raw = raw.TrimEnd('?').Replace("global::", "", StringComparison.Ordinal);
+    string? Match(string value)
+    {
+        if (typeMap.ContainsKey(value)) return value;
+        var matches = typeMap.Keys.Where(name => name.Replace('+', '.') == value).ToArray();
+        return matches.Length == 1 ? matches[0] : null;
+    }
     foreach (var directive in context.SyntaxTree.GetRoot().DescendantNodes().OfType<UsingDirectiveSyntax>())
-        if (directive.Alias?.Name.Identifier.ValueText == raw) return directive.Name!.ToString();
+        if (directive.Alias?.Name.Identifier.ValueText == raw) return Match(directive.Name!.ToString()) ?? directive.Name!.ToString();
+    var external = new Dictionary<string, string> { ["Mat"]="OpenCvSharp.Mat",["Point2f"]="OpenCvSharp.Point2f",["Pen"]="System.Drawing.Pen",["Color"]="System.Drawing.Color",["CancellationToken"]="System.Threading.CancellationToken",["CancellationTokenSource"]="System.Threading.CancellationTokenSource",["Task"]="System.Threading.Tasks.Task" };
     if (external.TryGetValue(raw, out var known)) return known;
-    if (typeMap.ContainsKey(raw)) return raw;
-    foreach (var directive in context.SyntaxTree.GetRoot().DescendantNodes().OfType<UsingDirectiveSyntax>().Where(d => d.Alias is null))
-        if (typeMap.ContainsKey(directive.Name + "." + raw)) return directive.Name + "." + raw;
-    var names = typeMap.Keys.Where(name => name.EndsWith("." + raw, StringComparison.Ordinal)).ToArray();
+    if (Match(raw) is { } direct) return direct;
+    foreach (var owner in context.Ancestors().OfType<TypeDeclarationSyntax>())
+        if (Match(TypeName(owner) + "+" + raw.Replace('.', '+')) is { } nested) return nested;
+    var ns = string.Join('.', context.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().Reverse().Select(value => value.Name.ToString()));
+    if (Match(ns + "." + raw) is { } local) return local;
+    foreach (var directive in context.SyntaxTree.GetRoot().DescendantNodes().OfType<UsingDirectiveSyntax>().Where(value => value.Alias is null))
+        if (Match(directive.Name + "." + raw) is { } imported) return imported;
+    var names = typeMap.Keys.Where(name => name.Replace('+', '.').EndsWith("." + raw, StringComparison.Ordinal)).ToArray();
     return names.Length == 1 ? names[0] : raw;
 }
 object Parameters(ParameterListSyntax list) => list.Parameters.Select(parameter => new
@@ -302,7 +324,8 @@ while (jsRoots.TryDequeue(out var name))
     if (scriptTypes.ContainsKey(name) || !typeMap.TryGetValue(name, out var definition)) continue;
     var declaration = definition.Type;
     var members = new List<object>();
-    if (declaration is TypeDeclarationSyntax type)
+    foreach (var part in definition.Parts)
+    if (part.Type is TypeDeclarationSyntax type)
     {
         foreach (var member in type.Members.Where(m => m.Modifiers.Any(SyntaxKind.PublicKeyword)))
         {
@@ -319,7 +342,7 @@ while (jsRoots.TryDequeue(out var name))
                 implementation=implementation is null ? null : implementation[..Math.Min(implementation.Length,4096)],
                 implementationTruncated=implementation?.Length>4096,resolvedReturnType=ResolveType(returns,member),parameters,isStatic=member.Modifiers.Any(SyntaxKind.StaticKeyword),summary=Summary(member),
                 deprecated=member.AttributeLists.SelectMany(list=>list.Attributes).Any(a=>a.Name.ToString().EndsWith("Obsolete")),
-                source=Path.GetRelativePath(root,definition.Path).Replace('\\','/'),line=definition.Tree.GetLineSpan(member.Span).StartLinePosition.Line+1 });
+                source=Path.GetRelativePath(root,part.Path).Replace('\\','/'),line=part.Tree.GetLineSpan(member.Span).StartLinePosition.Line+1 });
             foreach (var token in Regex.Matches(returns + " " + member.ToString().Split('{')[0], @"\b[A-Z]\w+\b").Cast<Match>().Select(m=>m.Value))
                 jsRoots.Enqueue(ResolveType(token,member));
         }
@@ -333,13 +356,17 @@ while (jsRoots.TryDequeue(out var name))
     scriptTypes[name] = new { name,kind=declaration is EnumDeclarationSyntax ? "enum":"type",
         summary=Summary(declaration),source=Path.GetRelativePath(root,definition.Path).Replace('\\','/'),line=definition.Tree.GetLineSpan(declaration.Span).StartLinePosition.Line+1,members,
         enumValues=declaration is EnumDeclarationSyntax e ? e.Members.Select(m=>m.Identifier.ValueText).ToArray():null,
-        bases=declaration is TypeDeclarationSyntax t ? t.BaseList?.Types.Select(b=>ResolveType(b.Type.ToString(),t)).ToArray():null };
+        bases=definition.Parts.SelectMany(part => (part.Type as TypeDeclarationSyntax)?.BaseList?.Types.Select(baseType => ResolveType(baseType.Type.ToString(), part.Type)) ?? []).Distinct().ToArray() };
 }
-var output = JsonSerializer.Serialize(new { format = 1, entries, enums = enumValues, scriptBindings, scriptTypes, uiDeclarations }, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+if (hostSurface.GetProperty("sourceTreeHash").GetString() != HostSurfaceAudit.Fingerprint(root))
+    throw new IOException("宿主源码在生成期间变化，请重新生成");
+var output = JsonSerializer.Serialize(new { format = 1, sourceRevision = hostSurface.GetProperty("sourceRevision").GetString(),
+    sourceTreeHash = hostSurface.GetProperty("sourceTreeHash").GetString(),
+    entries, enums = enumValues, scriptBindings, scriptTypes, uiDeclarations }, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
 File.WriteAllText(args[1], output);
+if (args.Length == 4) File.WriteAllText(args[3], hostSurface.GetRawText());
 Console.WriteLine($"Indexed {entries.Count} members and {enumValues.Count} enums.");
 
-static bool Usable(string path) => !path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Any(part => part is "obj" or "bin" or ".git");
 static string? Caption(string? value)
 {
     if (value is null) return null;

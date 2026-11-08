@@ -101,6 +101,10 @@ if errorlevel 1 exit /b 1
 copy /y "%MBIN%\BgiBridge.deps.json" "%DIST%\" >nul
 if errorlevel 1 exit /b 1
 
+echo Verifying interface snapshot and feature index...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\dev\export-method-metadata.ps1" -Check -AssemblyPath "%DIST%\BgiBridge.dll"
+if errorlevel 1 exit /b 1
+
 echo Building offline recovery helper...
 dotnet build "%ROOT%\recovery\Recovery.csproj" -c Release -v quiet --nologo -p:UseSharedCompilation=false -o "%DIST%"
 if errorlevel 1 exit /b 1

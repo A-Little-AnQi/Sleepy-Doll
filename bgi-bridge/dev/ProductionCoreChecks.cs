@@ -11,6 +11,13 @@ using System.Text.Json;
 
 static void Require(bool value, string message) { if (!value) throw new Exception(message); }
 
+if (args.Length >= 2 && args[0] is "--check-interfaces" or "--export-interfaces")
+{
+    try { RegistrySnapshot.Run(args); }
+    catch (Exception error) { Console.Error.WriteLine(error.Message); Environment.ExitCode = 1; }
+    return;
+}
+
 var cache = Environment.ExpandEnvironmentVariables("%TEMP%");
 var root = Path.Combine(cache, "production-core-fixtures");
 Directory.CreateDirectory(root);

@@ -12,7 +12,7 @@ pub struct FeatureIndex {
     revision: String,
     search_documents: Vec<SearchDocument>,
     inverse_frequency: HashMap<String, f64>,
-    script_types: serde_json::Map<String, Value>,
+    declared_types: serde_json::Map<String, Value>,
     source_snapshot_hash: String,
 }
 
@@ -93,13 +93,15 @@ impl FeatureIndex {
                 )
             })
             .collect();
+        let mut declared_types = data["hostTypes"].as_object().cloned().unwrap_or_default();
+        declared_types.extend(data["scriptTypes"].as_object().cloned().unwrap_or_default());
         Ok(Self {
             items,
             ids,
             revision: data["sourceRevision"].as_str().unwrap_or("").into(),
             search_documents,
             inverse_frequency,
-            script_types: data["scriptTypes"].as_object().cloned().unwrap_or_default(),
+            declared_types,
             source_snapshot_hash: data["sourceSnapshotHash"]
                 .as_str()
                 .unwrap_or_default()
@@ -133,13 +135,13 @@ impl FeatureIndex {
         let mut value = json!({"source":"bgiPluginFeatureIndex", "sourceRevision":self.revision,
             "sourceSnapshotHash":self.source_snapshot_hash,"capabilityState":"referenceOnly","declarationVerified":true,"executionVerified":false,"item":item,
             "next":"本结果是源码事实，非现场执行证明。类型成员按 nextMemberOffset 分页；需要执行时取得当前契约。"});
-        if item["kind"] == "scriptApi" {
+        if item["kind"] == "scriptApi" || item["kind"] == "hostApi" {
             let mut symbol = json!({"runtimeVerified":false,"kind":declaration["kind"]});
             if let Some(owner) = declaration["clrType"].as_str() {
                 symbol["binding"] = declaration.clone();
                 if let Some(member) = declaration["member"].as_str() {
                     let overloads = self
-                        .script_types
+                        .declared_types
                         .get(owner)
                         .and_then(|definition| definition["members"].as_array())
                         .into_iter()
@@ -260,7 +262,7 @@ impl FeatureIndex {
             .as_str()
             .or_else(|| member["returnType"].as_str())
         {
-            let definition = self.script_types.get(return_type);
+            let definition = self.declared_types.get(return_type);
             value["returns"] = json!({"declaredType":member["returnType"],"resolvedType":return_type,
                 "definitionId":definition.map(|_|format!("T:{return_type}")),
                 "declaredBases":definition.map(|value|&value["bases"]),"runtimeVerified":false});
@@ -273,7 +275,7 @@ impl FeatureIndex {
     }
 
     fn type_view(&self, name: &str, offset: usize, limit: usize) -> Value {
-        let Some(definition) = self.script_types.get(name) else {
+        let Some(definition) = self.declared_types.get(name) else {
             return Value::Null;
         };
         let members = definition["members"]
@@ -312,11 +314,6 @@ impl FeatureIndex {
         offset: usize,
         limit: usize,
     ) -> Result<Value> {
-        if query.chars().count() > 200 {
-            return Err(Error::Tool(
-                "query 最多 200 字符；留空按页浏览真实能力目录".into(),
-            ));
-        }
         if let Some(index) = self.ids.get(query.trim()) {
             let item = &self.items[*index];
             if kind.is_none_or(|kind| item["kind"] == kind) {
@@ -331,6 +328,11 @@ impl FeatureIndex {
                     json!({"source":"bgiPluginFeatureIndex","query":query,"total":1,"offset":offset,"nextOffset":null,"items":items}),
                 );
             }
+        }
+        if query.chars().count() > 200 {
+            return Err(Error::Tool(
+                "query 最多 200 字符；留空按页浏览真实能力目录".into(),
+            ));
         }
         let needle = normalize(query);
         let tokens = terms(query);

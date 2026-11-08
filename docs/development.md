@@ -73,6 +73,7 @@ cargo test --no-default-features --lib
 cargo test --no-default-features --lib extension::mcp::tests
 cargo clippy --all-targets --no-default-features -- -D warnings
 python bgi-bridge/dev/feature-guide-builder.py --check
+dotnet run --project bgi-bridge/dev/ProductionCoreChecks.csproj -- --check-interfaces bgi-bridge/dev/bgi-method-metadata.json
 ```
 
 CI 执行前端、发布脚本、Rust 格式／编译／库测试及功能索引一致性检查；clippy 在本地执行。
@@ -122,11 +123,17 @@ MCP 协议测试使用 `tests/runtime/mcp-fixture.mjs` 作为独立 Node 测试�
 桥内嵌源码文档是构建输入，更新宿主版本时重新生成：
 
 ```powershell
-dotnet run --project bgi-bridge/dev/MetadataBuilder.csproj -- <BGI源码根目录> bgi-bridge/managed/generated/host-documentation.json
-python bgi-bridge/dev/coverage-audit.py <BGI源码根目录>
+dotnet run --project bgi-bridge/dev/MetadataBuilder.csproj -- <BGI源码根目录> bgi-bridge/managed/generated/host-documentation.json --surface-output bgi-bridge/dev/fixtures/host-surface.json
+powershell -NoProfile -File bgi-bridge/dev/export-method-metadata.ps1
+python bgi-bridge/dev/coverage-audit.py <BGI源码根目录> --update-fixture
+python bgi-bridge/dev/feature-guide-builder.py
 ```
 
 覆盖报告与现场契约快照生成到 `target/reports/bgi/`。确认需要更新功能索引的基准时，对盘点命令加 `--update-fixture`，再执行 `python bgi-bridge/dev/feature-guide-builder.py`。基准位于 `bgi-bridge/dev/fixtures/host-features.json`，口语目标测试数据位于同目录的 `user-scenarios.json`；前者供索引生成，后者仅保存测试请求和行为约束，不参与生产检索，不能当作现场运行证据。
+
+`host-surface.json` 额外盘点主程序与其项目引用中的宿主类型、公共方法、命令及构造器。源文件指纹、源码版本和索引必须一致；嵌套类型按词法作用域解析，partial 成员合并后保留各自源文件。未引用的测试工程不进入产品声明。`hostApi` 只是源码引用，不新增可调用方法；桥的注册快照由当前编译结果导出，CI 会拒绝新增接口而快照未更新的情况。
+
+`interface-surface-audit.py --live-snapshot <只读目录JSON> --before-index <更新前索引摘要JSON>` 将运行目录、索引与源码成员逐项对照，输出 `target/reports/bgi/interface-audit.json` 和 `.md`。JSON 保留脱敏目录快照与基准摘要，后续可把同一报告 JSON 传给两个输入参数重新生成，无需保留临时文件。当前连接若已离线可加 `--runtime-offline`；不自动启动或重连宿主。报告分别列出发现缺口、业务适配缺口、定时组合与结果核验，不能把声明数量、callable 或编译通过算作全部业务完成。
 
 `interface-review.py <类型契约JSON>` 将接口审阅报告写到相同报告目录。源码索引、隔离验证、宿主任务记录与实际游戏结果分别判定；Job 完成、接口返回或编译成功均不能单独证明业务成功。
 
