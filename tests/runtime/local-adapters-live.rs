@@ -196,6 +196,87 @@ fn recorded_live_disclosure_cases_match_receipts() {
 }
 
 #[tokio::test]
+async fn rejected_write_draft_is_reviewed_without_resubmission() {
+    let mut turn = 0;
+    let fixture = ModelFixture::new(move |_| {
+        turn += 1;
+        (
+            200,
+            match turn {
+                1 => tool_calls(vec![("demo.http.start", json!({}))]),
+                2 => answer("请在宿主界面关闭只读开关后重试。"),
+                _ => answer("未能启动，宿主拒绝了请求，本次没有执行。"),
+            },
+        )
+    });
+    let supervisor = supervisor(&fixture);
+    {
+        let mut config = supervisor.config.write().unwrap();
+        config.plugins.enabled = vec!["demo".into()];
+        config.runtime.memory_enabled = false;
+    }
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let invoked = calls.clone();
+    let mut tools = ToolRegistry::default();
+    tools
+        .register(
+            crate::extension::FunctionTool::new(
+                "demo.http.start",
+                "提交已有任务",
+                json!({"type":"object"}),
+                "plugin:demo:http",
+                move |_| {
+                    invoked.fetch_add(1, Ordering::SeqCst);
+                    Err(Error::NotSubmitted("宿主为只读模式，未提交".into()))
+                },
+            )
+            .with_execution(crate::extension::ToolExecution {
+                effect: ToolEffect::ExternalWrite,
+                prompt_visible: true,
+                deferred: false,
+                always_load: true,
+                ..Default::default()
+            })
+            .with_provider_version(Some("fixture".into())),
+        )
+        .unwrap();
+    supervisor.update_extensions(Arc::new(SkillRegistry::default()), Arc::new(tools), vec![]);
+    let mut run = supervisor
+        .journal
+        .create(
+            "运行已有任务",
+            "rejection-review",
+            "rejection-review",
+            60,
+            None,
+        )
+        .unwrap();
+    supervisor
+        .session(&mut run, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "复核不应重复提交");
+    assert_eq!(
+        fixture.task_requests().len(),
+        3,
+        "拒绝后的草稿经过现有交付复核"
+    );
+    assert_eq!(
+        run.result.as_deref(),
+        Some("未能启动，宿主拒绝了请求，本次没有执行。")
+    );
+    assert!(
+        supervisor
+            .journal
+            .events(&run.conversation_id, 0)
+            .unwrap()
+            .iter()
+            .any(|event| event.kind == "delivery.review.started")
+    );
+    supervisor.shutdown();
+}
+
+#[tokio::test]
 async fn plugin_rejected_submission_is_distinct_from_unknown_write() {
     let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest: Value = serde_json::from_slice(

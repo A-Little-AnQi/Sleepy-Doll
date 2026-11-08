@@ -361,6 +361,21 @@ impl Supervisor {
                     Ok(value) => ("completed", outcome(&value), value),
                     Err(error) => ("failed", "error", json!({"error":error.user_message()})),
                 };
+                // 子查询不经过 record_result；仍须按它自身的契约登记分页。
+                // 在收取结果处串行合并，避免并发任务覆盖同一个检索账本。
+                if state == "completed" {
+                    let mut coverage_run = run.clone();
+                    coverage_run.discovered.extend(exposed.iter().cloned());
+                    self.record_retrieval_page(
+                        &coverage_run,
+                        &ToolCall {
+                            id: format!("{}:{}", call.id, request.id),
+                            name: request.tool.clone(),
+                            arguments: request.arguments.clone(),
+                        },
+                        &json!({"ok":true,"value":value}),
+                    )?;
+                }
                 if classification == "hit" && request.tool != "tools.search" {
                     evidence.push(request.tool.clone());
                 }

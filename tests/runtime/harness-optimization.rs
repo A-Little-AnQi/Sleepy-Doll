@@ -2,6 +2,118 @@
 use super::*;
 use std::collections::BTreeMap;
 
+#[test]
+fn observation_restore_matches_exact_artifact_when_call_ids_are_reused() {
+    let s = super::super::record_result_tests::interrupt_supervisor("observation-identity");
+    let run = s
+        .journal
+        .create("核对原始资料", "identity", "identity", 60, None)
+        .unwrap();
+    let mut history = Vec::new();
+    let call = ToolCall {
+        id: "reused".into(),
+        name: "source.read".into(),
+        arguments: json!({}),
+    };
+    let mut artifacts = Vec::new();
+    for text in ["old".repeat(500), "new".repeat(500)] {
+        let mut assistant = message(Role::Assistant, "");
+        assistant.tool_calls.push(call.clone());
+        s.journal.append_message(&run, &assistant).unwrap();
+        history.push(assistant);
+        s.record_result(&run, &call, Ok(json!({"text":text})), 256, &mut history)
+            .unwrap();
+        let stored: Value = serde_json::from_str(&history.last().unwrap().content).unwrap();
+        artifacts.push(stored["artifactId"].as_str().unwrap().to_owned());
+    }
+    let old = s
+        .journal
+        .read_observation_artifact(&run, "reused", &artifacts[0])
+        .unwrap()
+        .unwrap();
+    let new = s
+        .journal
+        .read_observation_artifact(&run, "reused", &artifacts[1])
+        .unwrap()
+        .unwrap();
+    assert!(old.contains("oldold"));
+    assert!(!old.contains("newnew"));
+    assert!(new.contains("newnew"));
+    let other = s
+        .journal
+        .create("另一会话", "other", "other", 60, None)
+        .unwrap();
+    assert!(
+        s.journal
+            .read_observation_artifact(&other, "reused", &artifacts[0])
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn wide_window_receives_full_stored_observation_without_artifact_reread() {
+    let root = crate::test_root("observation-window");
+    std::fs::create_dir_all(&root).unwrap();
+    let file = root.join("source.txt");
+    let proof = "TAIL_CONDITION_MUST_SURVIVE";
+    std::fs::write(&file, format!("{}{proof}", "x".repeat(60000))).unwrap();
+    let path = file.to_string_lossy().into_owned();
+    let prompt = format!("读取 {path} 并核对原文末尾条件");
+    let mut turn = 0;
+    let fixture = ModelFixture::with_empty_memory_review(move |request| {
+        turn += 1;
+        (
+            200,
+            if turn == 1 {
+                tool_calls(vec![(
+                    "workspace.read",
+                    json!({"path":path,"maxChars":61000}),
+                )])
+            } else {
+                let result = request["messages"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .rev()
+                    .find(|m| m["role"] == "tool")
+                    .unwrap_or_else(|| panic!("Expected completed tool observation: {request}"));
+                let observed: Value =
+                    serde_json::from_str(result["content"].as_str().unwrap()).unwrap();
+                assert!(observed.to_string().contains(proof));
+                assert_ne!(observed["truncated"], true);
+                answer("原文末尾条件已保留")
+            },
+        )
+    });
+    let supervisor = supervisor(&fixture);
+    supervisor.config.write().unwrap().models[0]
+        .options
+        .context_window = 1048576;
+    let mut run = supervisor
+        .submit(&prompt, None, "full-observation", Some(30), None)
+        .unwrap();
+    supervisor
+        .session(&mut run, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(run.decisions, 2);
+    let history = supervisor.journal.history(&run).unwrap();
+    let stored = history.iter().find(|m| m.role == Role::Tool).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&stored.content).unwrap()["truncated"],
+        true,
+        "持久化仍是可恢复引用，装载全文只改变本轮请求视图"
+    );
+    assert!(
+        supervisor
+            .journal
+            .read_observation(&run, stored.tool_call_id.as_deref().unwrap())
+            .unwrap()
+            .contains(proof)
+    );
+}
+
 #[tokio::test]
 async fn supplement_refreshes_memory_and_skills_without_rewriting_system() {
     let control = Arc::new(Mutex::new(None::<(Arc<Supervisor>, String)>));

@@ -232,7 +232,7 @@ async fn web_source_identifier_does_not_read_another_conversations_artifact() {
 }
 
 #[tokio::test]
-async fn web_skill_switch_blocks_network_but_raw_read_does_not_need_a_helper_model() {
+async fn web_plugin_switch_blocks_network_but_raw_read_does_not_need_a_helper_model() {
     let fixture = ModelFixture::new(|_| panic!("must not call model"));
     let supervisor = supervisor(&fixture);
     let quote = "读取这份说明 https://docs.example.org/guide";
@@ -268,9 +268,9 @@ async fn web_skill_switch_blocks_network_but_raw_read_does_not_need_a_helper_mod
         .config
         .write()
         .unwrap()
-        .agent
-        .disabled_skills
-        .push("网络搜索".into());
+        .plugins
+        .disabled
+        .push(crate::extension::providers::WEB_PROVIDER.into());
     assert!(
         supervisor
             .web_tool(&run, &request, &CancellationToken::new())

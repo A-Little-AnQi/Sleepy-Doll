@@ -78,7 +78,7 @@ impl Workflow {
                     tool: Some(step.tool),
                     capability_id: None,
                     arguments: step.arguments,
-                    execution: Some(step.execution),
+                    execution: Some(Box::new(step.execution)),
                     provider_version: step.provider_version,
                     resource_versions: step.resource_versions,
                     on_failure: FailurePolicy::Stop,

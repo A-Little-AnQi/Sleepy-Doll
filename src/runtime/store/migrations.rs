@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub const LATEST_SCHEMA_VERSION: i64 = 20;
+pub const LATEST_SCHEMA_VERSION: i64 = 22;
 
 pub fn migrate(connection: &mut Connection) -> Result<()> {
     connection.execute_batch(
@@ -385,6 +385,27 @@ const MIGRATIONS: &[(i64, &str)] = &[
             source_epoch INTEGER NOT NULL,payload TEXT NOT NULL,
             input_tokens INTEGER NOT NULL,output_tokens INTEGER NOT NULL
         );
+    "#,
+    ),
+    (
+        21,
+        r#"
+        CREATE TABLE scheduled_tasks(id TEXT PRIMARY KEY, revision INTEGER NOT NULL, payload TEXT NOT NULL);
+        CREATE TABLE scheduled_occurrences(id TEXT PRIMARY KEY, schedule_id TEXT NOT NULL, request_key TEXT NOT NULL UNIQUE, state TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL, cancel_requested INTEGER NOT NULL DEFAULT 0);
+        CREATE INDEX scheduled_occurrences_queue ON scheduled_occurrences(state,created_at);
+        CREATE TABLE scheduled_dispatcher(id INTEGER PRIMARY KEY CHECK(id=1), heartbeat INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO scheduled_dispatcher(id) VALUES(1);
+        "#,
+    ),
+    (
+        22,
+        r#"
+        DELETE FROM runtime_workflow_runs WHERE workflow_id IN (SELECT id FROM task_definitions WHERE deleted=1);
+        DELETE FROM runtime_workflows WHERE id IN (SELECT id FROM task_definitions WHERE deleted=1);
+        DELETE FROM task_runs WHERE task_id IN (SELECT id FROM task_definitions WHERE deleted=1);
+        DELETE FROM task_revisions WHERE task_id IN (SELECT id FROM task_definitions WHERE deleted=1);
+        DELETE FROM task_definitions WHERE deleted=1;
+        UPDATE task_definitions SET archived=0,deleted=0,payload=json_remove(payload,'$.archivedAt','$.deletedAt');
     "#,
     ),
 ];

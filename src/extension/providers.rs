@@ -6,9 +6,23 @@ use std::collections::HashSet;
 
 /// 随产品提供的宿主提供方：工具名 `bgi.*` 与 source `core:bgi` 都归它。
 pub const HOST_PROVIDER: &str = "bgi";
+pub const WEB_PROVIDER: &str = "web-search";
+pub const WEB_TOOL_SOURCE: &str = "plugin:web-search:native";
+
+pub fn is_web_source(source: &str) -> bool {
+    source == WEB_TOOL_SOURCE || source == "core:web"
+}
+
+pub fn is_default_enabled_plugin(id: &str) -> bool {
+    is_host_provider(id) || id == WEB_PROVIDER
+}
 
 pub fn is_host_provider(id: &str) -> bool {
     id == HOST_PROVIDER
+}
+
+pub fn is_bundled_plugin(id: &str) -> bool {
+    matches!(id, "bgi" | "windows-scheduler" | WEB_PROVIDER)
 }
 
 /// 宿主插件默认开启，写进 `plugins.disabled` 才算关掉。
@@ -16,16 +30,19 @@ pub fn host_plugin_enabled(disabled: &[String]) -> bool {
     !disabled.iter().any(|id| is_host_provider(id))
 }
 
-/// 插件是否被配置为启用：宿主插件默认开启，其余插件要写进 `plugins.enabled` 才装载。
+/// 宿主和联网插件默认开启；其余插件须显式启用。
 pub fn plugin_enabled(id: &str, enabled: &[String], disabled: &[String]) -> bool {
-    if is_host_provider(id) {
-        return host_plugin_enabled(disabled);
+    if is_default_enabled_plugin(id) {
+        return !disabled.iter().any(|entry| entry == id);
     }
     enabled.iter().any(|entry| entry == id)
 }
 
 /// 从工具名或注册来源推断提供方，Core 工具没有提供方。
 pub fn provider_of_tool(name: &str, source: &str) -> Option<String> {
+    if is_web_source(source) || name.starts_with("web.") {
+        return Some(WEB_PROVIDER.into());
+    }
     if source == "core:bgi" || name.starts_with("bgi.") {
         return Some(HOST_PROVIDER.into());
     }

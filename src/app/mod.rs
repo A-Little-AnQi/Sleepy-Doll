@@ -298,7 +298,7 @@ impl AppController {
             }
             "plugin.remove" => {
                 let id = required(&params, "id")?;
-                if crate::extension::providers::is_host_provider(id) {
+                if crate::extension::providers::is_bundled_plugin(id) {
                     return Err(Error::Config("随产品提供的插件不能移除。".into()));
                 }
                 let config = self.config.lock().unwrap().clone();
@@ -646,16 +646,10 @@ impl AppController {
                     )?,
                 ))
             }
-            "workflow.rename" | "workflow.pin" | "workflow.archive" | "workflow.restore" => {
-                self.patch_task(&params, method)
-            }
+            "workflow.rename" | "workflow.pin" => self.patch_task(&params, method),
             "workflow.delete" => {
                 let id = required(&params, "id")?;
-                let mut definition = self.supervisor.tasks.definition(id)?;
-                // 逻辑删除，运行中的实例继续用已固定快照。
-                definition.deleted_at = Some(crate::runtime::types::now());
-                definition.updated_at = crate::runtime::types::now();
-                self.supervisor.tasks.save_definition(&definition)?;
+                self.supervisor.delete_workflow(id)?;
                 Ok(json!({
                     "deleted":true,
                     "activeRuns":self.supervisor.task_run_ids(id)?,
@@ -672,8 +666,6 @@ impl AppController {
                 definition.draft_revision = None;
                 definition.last_run_id = None;
                 definition.pinned = false;
-                definition.archived_at = None;
-                definition.deleted_at = None;
                 definition.created_at = crate::runtime::types::now();
                 definition.updated_at = definition.created_at.clone();
                 // 生成新 ID，保留来源说明，不复用原活动运行与外部 Job。
@@ -991,17 +983,12 @@ impl AppController {
                 source_title_snapshot: params["sourceTitleSnapshot"].as_str().unwrap_or("").into(),
                 published_revision: None,
                 draft_revision: None,
-                archived_at: None,
-                deleted_at: None,
                 pinned: false,
                 last_run_id: None,
                 created_at: crate::runtime::types::now(),
                 updated_at: crate::runtime::types::now(),
             },
         };
-        if definition.deleted_at.is_some() {
-            return Err(Error::Conflict("已删除的任务不能继续编辑".into()));
-        }
         let revision_number = self.supervisor.tasks.next_revision_number(&task_id)?;
         let revision = compile(
             &task_id,
@@ -1072,7 +1059,7 @@ impl AppController {
         }))
     }
 
-    /// 改名、置顶、归档、恢复，都不触碰执行语义与稳定 ID。
+    /// 改名和置顶不触碰执行语义与稳定 ID。
     fn patch_task(&self, params: &Value, method: &str) -> Result<Value> {
         use crate::runtime::operation::task_store::DefinitionPatch;
         let id = required(params, "id")?;
@@ -1091,18 +1078,7 @@ impl AppController {
                 ),
                 ..DefinitionPatch::default()
             },
-            "workflow.archive" => {
-                definition.archived_at = Some(crate::runtime::types::now());
-                definition.updated_at = crate::runtime::types::now();
-                self.supervisor.tasks.save_definition(&definition)?;
-                return Ok(json!({"archived":true}));
-            }
-            _ => {
-                definition.archived_at = None;
-                definition.updated_at = crate::runtime::types::now();
-                self.supervisor.tasks.save_definition(&definition)?;
-                return Ok(json!({"archived":false}));
-            }
+            _ => return Err(Error::Config("未知快捷任务操作".into())),
         };
         definition.apply(patch)?;
         self.supervisor.tasks.save_definition(&definition)?;
@@ -1148,7 +1124,7 @@ impl AppController {
                 capability_id: step.capability_id,
                 // 旧 Job ID 是历史证据，不是新运行的输入参数。
                 arguments: step.arguments,
-                execution: step.execution,
+                execution: step.execution.map(Box::new),
                 provider_version: step.provider_version,
                 resource_versions: step.resource_versions,
                 on_failure: FailurePolicy::Stop,
@@ -1181,8 +1157,6 @@ impl AppController {
             // 这一份修订还没有执行过，状态仍是「尚未实机验证」。
             published_revision: Some(1),
             draft_revision: None,
-            archived_at: None,
-            deleted_at: None,
             pinned: false,
             last_run_id: None,
             created_at: crate::runtime::types::now(),
@@ -1457,12 +1431,13 @@ impl AppController {
                     "error":plugin.error.as_ref().map(|_|"插件加载失败，请检查配置"),
                     "configuredEnabled":config.plugin_enabled(&plugin.manifest.id),
                     // 随产品提供的插件不能移除。
-                    "host":crate::extension::providers::is_host_provider(&plugin.manifest.id)
+                    "host":crate::extension::providers::is_host_provider(&plugin.manifest.id),
+                    "bundled":crate::extension::providers::is_bundled_plugin(&plugin.manifest.id)
                 })
             })
             .collect::<Vec<_>>();
         Ok(
-            json!({"permission":permission,"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions(),"runtimeToolLabels":self.supervisor.runtime_tool_labels(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.supervisor.task_summaries(None)?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"conversationGroups":self.supervisor.journal.conversation_groups()?,"bridge":bridge_status}),
+            json!({"permission":permission,"configPath":self.config_path.display().to_string(),"models":models,"skills":skills,"plugins":plugins,"tools":extensions.tools.definitions().into_iter().chain(self.supervisor.native_plugin_tool_definitions()).collect::<Vec<_>>(),"runtimeToolLabels":self.supervisor.runtime_tool_labels(),"conversations":self.supervisor.journal.conversations()?,"tasks":self.supervisor.journal.list()?.iter().map(crate::runtime::types::public_run).collect::<Vec<_>>(),"strategies":self.supervisor.journal.strategies()?,"workflows":self.supervisor.task_summaries(None)?,"operations":self.operations.store.list()?,"resources":self.operations.store.resources()?,"diagnostics":self.operations.store.diagnostics()?,"notifications":self.operations.store.notifications(true)?,"conversationGroups":self.supervisor.journal.conversation_groups()?,"bridge":bridge_status}),
         )
     }
 

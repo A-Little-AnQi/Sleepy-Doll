@@ -84,3 +84,28 @@ pub(super) fn validate(
     }
     Ok(())
 }
+
+/// Only ask the model to fill omitted fields; never coerce an enum, reinterpret
+/// text as a decision, retry truncated output, or accept another tool name.
+pub(super) fn missing_fields_only(
+    response: &crate::model::ModelResponse,
+    definition: &ToolDefinition,
+) -> bool {
+    if gateway::output_truncated(response.finish_reason.as_deref())
+        || response.tool_calls.len() != 1
+        || response.tool_calls[0].name != definition.name
+    {
+        return false;
+    }
+    let Ok(validator) = jsonschema::validator_for(&definition.input_schema) else {
+        return false;
+    };
+    let mut missing = false;
+    for error in validator.iter_errors(&response.tool_calls[0].arguments) {
+        if error.schema_path.to_string().rsplit('/').next() != Some("required") {
+            return false;
+        }
+        missing = true;
+    }
+    missing
+}

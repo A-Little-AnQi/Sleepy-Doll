@@ -177,6 +177,19 @@ pub struct ToolExecution {
     #[serde(default)]
     pub scope_reader: Option<String>,
     pub goal_observation: Option<Box<GoalObservationSpec>>,
+    /// 适配器声明分页与查询身份，运行时不从工具名或业务文本猜测。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<Box<PaginationSpec>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PaginationSpec {
+    pub has_more: String,
+    pub next_cursor: String,
+    pub cursor_argument: String,
+    pub initial_cursor: Value,
+    pub identity: Vec<String>,
 }
 
 /// Typed native evidence for an information goal, declared by the adapter.
@@ -216,6 +229,7 @@ impl Default for ToolExecution {
             scope_target: None,
             scope_reader: None,
             goal_observation: None,
+            pagination: None,
         }
     }
 }
@@ -248,6 +262,19 @@ impl ToolExecution {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if let Some(spec) = &self.pagination
+            && (self.effect != ToolEffect::ReadOnly
+                || self.effect_is_dynamic
+                || spec.identity.is_empty()
+                || [&spec.has_more, &spec.next_cursor, &spec.cursor_argument]
+                    .into_iter()
+                    .chain(spec.identity.iter())
+                    .any(|p| !p.starts_with('/')))
+        {
+            return Err(Error::Config(
+                "分页契约必须绑定明确的只读工具、JSON指针与查询身份".into(),
+            ));
+        }
         if self.search_provider && (self.effect != ToolEffect::ReadOnly || self.effect_is_dynamic) {
             return Err(Error::Config("批量检索入口必须是效果明确的只读工具".into()));
         }
@@ -306,6 +333,29 @@ pub struct ToolDefinition {
 pub trait Tool: Send + Sync {
     fn definition(&self) -> ToolDefinition;
     fn call(&self, arguments: &Value) -> Result<Value>;
+    /// 宿主声明本批交付动作的先后；缺省保持模型给出的调用顺序。
+    fn response_priority(&self) -> i32 {
+        0
+    }
+    /// 通道声明需要在实际交付前检查的展示内容；只提供草稿，不执行动作。
+    fn presentation(&self, _arguments: &Value) -> Option<Value> {
+        None
+    }
+    /// 交付对象和路由参数，不含待组织的正文；不按相同字符串猜参数位置。
+    fn presentation_context(&self, _arguments: &Value) -> Option<Value> {
+        None
+    }
+    fn presents_content(&self) -> bool {
+        false
+    }
+    /// 已经向用户交付结果的宿主工具可以结束本轮，避免继续生成重复发言。
+    fn turn_completion(&self, _result: &Value) -> Option<String> {
+        None
+    }
+    /// 宿主已有内容提交回执；只用于避免重复交付，不证明整项目标已完成或接收端已看到。
+    fn has_delivery_receipt(&self, _result: &Value) -> bool {
+        false
+    }
     fn call_async(
         self: Arc<Self>,
         arguments: Value,
@@ -330,6 +380,21 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    pub fn tool(&self, name: &str) -> Option<Arc<dyn Tool>> {
+        self.tools.get(name).cloned()
+    }
+
+    pub fn response_priority(&self, name: &str) -> i32 {
+        self.tools
+            .get(name)
+            .map_or(0, |tool| tool.response_priority())
+    }
+
+    pub fn turn_completion(&self, name: &str, result: &Value) -> Option<String> {
+        self.tools
+            .get(name)
+            .and_then(|tool| tool.turn_completion(result))
+    }
     pub(crate) fn register_mcp(
         &mut self,
         provider: &str,

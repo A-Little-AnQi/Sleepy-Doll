@@ -9,6 +9,7 @@ pub(super) fn search_properties() -> Value {
         "refresh":{"type":"boolean","default":false,"description":"明确需要更新时重新搜索，否则复用15分钟内的相同检索"},
         "limit":{"type":"integer","minimum":1,"maximum":30,"default":8}})
 }
+
 pub(super) fn fetch_properties() -> Value {
     json!({"url":{"type":"string","minLength":10,"maxLength":2048,"description":"公开HTTP(S)网页地址"},
         "focus":{"type":"string","minLength":1,"maxLength":600,"description":"本次需要从网页核对的内容；省略时读取主要信息"},
@@ -27,16 +28,13 @@ impl Supervisor {
         if self.journal.goal(&run.id)?.is_none() {
             return Err(Error::Tool("缺少当前用户任务".into()));
         }
-        if self
+        if !self
             .config
             .read()
             .unwrap()
-            .agent
-            .disabled_skills
-            .iter()
-            .any(|name| name == "网络搜索")
+            .plugin_enabled(crate::extension::providers::WEB_PROVIDER)
         {
-            return Err(Error::Tool("网络搜索技能已停用".into()));
+            return Err(Error::Tool("网络搜索插件已停用".into()));
         }
         Ok(())
     }
@@ -117,5 +115,59 @@ impl Supervisor {
         self.journal
             .emit(run, "web.result", json!({"requestKey":key,"result":value}))?;
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod plugin_tests {
+    use super::*;
+
+    #[test]
+    fn network_plugin_controls_discovery_and_execution_not_legacy_skill_switch() {
+        let supervisor = super::super::record_result_tests::interrupt_supervisor("network-plugin");
+        let run = supervisor
+            .journal
+            .create("核对公开资料", "network-plugin", "fixture", 300, None)
+            .unwrap();
+        supervisor
+            .config
+            .write()
+            .unwrap()
+            .agent
+            .disabled_skills
+            .push("网络搜索".into());
+        assert_eq!(supervisor.native_plugin_tool_definitions().len(), 2);
+        assert!(
+            supervisor
+                .introduced_providers()
+                .contains(crate::extension::providers::WEB_PROVIDER)
+        );
+        assert!(
+            supervisor
+                .authorize_web(&run, false, &json!({"query":"fixture"}))
+                .is_ok()
+        );
+        supervisor
+            .config
+            .write()
+            .unwrap()
+            .plugins
+            .disabled
+            .push(crate::extension::providers::WEB_PROVIDER.into());
+        assert!(supervisor.native_plugin_tool_definitions().is_empty());
+        assert!(
+            !supervisor
+                .introduced_providers()
+                .contains(crate::extension::providers::WEB_PROVIDER)
+        );
+        for fetch in [false, true] {
+            let error = supervisor
+                .authorize_web(&run, fetch, &json!({}))
+                .unwrap_err();
+            assert!(error.to_string().contains("网络搜索插件已停用"));
+        }
+        supervisor.config.write().unwrap().plugins.disabled.clear();
+        assert_eq!(supervisor.native_plugin_tool_definitions().len(), 2);
+        supervisor.shutdown();
     }
 }

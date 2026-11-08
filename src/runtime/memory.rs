@@ -550,7 +550,11 @@ impl MemoryStore {
     }
 
     pub fn enqueue(&self, run: &super::types::Run, implementation: &str) -> Result<()> {
-        if matches!(run.source, super::types::RunSource::SavedWorkflow { .. }) {
+        if matches!(
+            run.source,
+            super::types::RunSource::SavedWorkflow { .. }
+                | super::types::RunSource::BoundWorkflow { .. }
+        ) {
             return Ok(());
         }
         self.connection.lock().unwrap().execute(

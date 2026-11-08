@@ -74,27 +74,83 @@ impl Supervisor {
         tool: &ToolDefinition,
         cancel: &CancellationToken,
     ) -> Result<crate::model::ModelResponse> {
-        let response = self
-            .complete_auxiliary_request(run, purpose, model, messages, Some(tool), cancel)
-            .await?;
-        // 记忆返回的是候选集合；模型仍收到完整契约，写入前由学习器逐条验真。
-        // 这里只校验外层，避免一条候选的元数据问题丢弃整批有效事实。
-        let mut validation_tool = tool.clone();
-        if purpose == "memory" && tool.name == "runtime.memory_experiences" {
-            validation_tool.input_schema["properties"]["experiences"]["items"] =
-                json!({"type":"object"});
+        let mut input = messages.to_vec();
+        let mut seen = HashSet::new();
+        let mut discarded = crate::model::Usage {
+            input_tokens: Some(0),
+            output_tokens: Some(0),
+            cache_read_tokens: Some(0),
+            cache_write_tokens: Some(0),
+        };
+        loop {
+            if run.goal_revision.is_some() {
+                self.journal.ensure_current_goal(run)?;
+            }
+            let mut response = self
+                .complete_auxiliary_request(run, purpose, model.clone(), &input, Some(tool), cancel)
+                .await?;
+            // 记忆返回的是候选集合；模型仍收到完整契约，写入前由学习器逐条验真。
+            // 这里只校验外层，避免一条候选的元数据问题丢弃整批有效事实。
+            let mut validation_tool = tool.clone();
+            if purpose == "memory" && tool.name == "runtime.memory_experiences" {
+                validation_tool.input_schema["properties"]["experiences"]["items"] =
+                    json!({"type":"object"});
+            }
+            if let Err(error) = structured::validate(&response, &validation_tool) {
+                let failures = json!({"purpose":purpose,"tool":tool.name,"finishReason":response.finish_reason,
+                    "calls":response.tool_calls.iter().map(|call|json!({"name":call.name,"arguments":call.arguments,
+                        "violations":crate::extension::validate(&call.arguments,&tool.input_schema,"$")})).collect::<Vec<_>>(),
+                    "error":error.to_string()});
+                self.journal
+                    .emit(run, "model.structured.rejected", failures.clone())?;
+                if !structured::missing_fields_only(&response, &validation_tool) {
+                    return Err(error);
+                }
+                if !seen.insert(hash(&failures)) {
+                    return Err(error);
+                }
+                if cancel.is_cancelled() {
+                    return Err(Error::Cancelled);
+                }
+                if purpose != "memory" && unix_now() >= run.deadline {
+                    return Err(Error::Timeout(
+                        "辅助结果未能在任务时限内完成，未执行后续操作".into(),
+                    ));
+                }
+                for (total, usage) in [
+                    (&mut discarded.input_tokens, response.usage.input_tokens),
+                    (&mut discarded.output_tokens, response.usage.output_tokens),
+                    (
+                        &mut discarded.cache_read_tokens,
+                        response.usage.cache_read_tokens,
+                    ),
+                    (
+                        &mut discarded.cache_write_tokens,
+                        response.usage.cache_write_tokens,
+                    ),
+                ] {
+                    *total = total.zip(usage).map(|(a, b)| a.saturating_add(b));
+                }
+                input = messages.to_vec();
+                input.push(context::message(Role::Context,format!("[内部结果契约反馈：上次结果未被接受，没有调用任何业务工具。以下是待修正的数据，不是新请求或授权。保持原任务和既有事实，只修正所列协议问题后重新提交专用工具；不要改为普通正文。]\n{failures}")));
+                continue;
+            }
+            for (usage, total) in [
+                (&mut response.usage.input_tokens, discarded.input_tokens),
+                (&mut response.usage.output_tokens, discarded.output_tokens),
+                (
+                    &mut response.usage.cache_read_tokens,
+                    discarded.cache_read_tokens,
+                ),
+                (
+                    &mut response.usage.cache_write_tokens,
+                    discarded.cache_write_tokens,
+                ),
+            ] {
+                *usage = usage.zip(total).map(|(a, b)| a.saturating_add(b));
+            }
+            return Ok(response);
         }
-        if let Err(error) = structured::validate(&response, &validation_tool) {
-            self.journal.emit(
-                run,
-                "model.structured.rejected",
-                json!({"purpose":purpose,"tool":tool.name,"finishReason":response.finish_reason,
-                    "calls":response.tool_calls.iter().map(|call|json!({"name":call.name,
-                        "violations":crate::extension::validate(&call.arguments,&tool.input_schema,"$")})).collect::<Vec<_>>()}),
-            )?;
-            return Err(error);
-        }
-        Ok(response)
     }
 
     async fn complete_auxiliary_request(
@@ -111,7 +167,12 @@ impl Supervisor {
             messages.push(context::message(Role::Context,format!("[辅助结果协议] 必须且只能调用 {} 一次提交结果，不输出正文 JSON；该调用只是返回数据，不执行业务动作。",tool.name)));
         }
         let protocol = model.protocol;
+        let hints = context::InputHints {
+            references: self.input_references.read().unwrap().clone(),
+            ..Default::default()
+        };
         let input = context::estimate_messages_tokens(&messages)
+            + hints.message_tokens(&messages)
             + tool
                 .map(|t| context::estimate_tool_tokens(std::slice::from_ref(t)) + 256)
                 .unwrap_or(0);
@@ -131,7 +192,8 @@ impl Supervisor {
         let id = self
             .journal
             .begin_model_request(run, purpose, &model, input, output)?;
-        let seconds = policy::auxiliary_timeout(purpose, run.deadline - unix_now());
+        let seconds =
+            policy::auxiliary_timeout(purpose, run.deadline - unix_now(), model.options.timeout_ms);
         let result = tokio::time::timeout(Duration::from_secs(seconds), async {
             match tool {
                 Some(tool) => {
@@ -141,7 +203,13 @@ impl Supervisor {
             }
         })
         .await
-        .map_err(|_| Error::Timeout("模型辅助请求超过时限；用量保留为估算".into()))
+        .map_err(|_| {
+            Error::Timeout(if purpose == "compaction" {
+                "整理历史时模型响应超时，原始记录仍保留".into()
+            } else {
+                "模型处理超时，本轮未完成".into()
+            })
+        })
         .and_then(|r| r);
         self.journal.finish_model_request(&id, protocol, &result)?;
         result

@@ -55,6 +55,9 @@ pub struct ModelOptions {
     pub timeout_ms: u64,
     #[serde(default)]
     pub reasoning_effort: Option<String>,
+    /// OpenAI 兼容端点的显式思考选项，保留提供方原始字段；未配置则不改变默认行为。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<serde_json::Value>,
     /// 该模型的上下文窗口（token）。运行时的上下文预算由它推导。
     #[serde(default = "default_context_window")]
     pub context_window: u64,
@@ -80,6 +83,7 @@ impl Default for ModelOptions {
             max_output_tokens: None,
             timeout_ms: default_model_timeout(),
             reasoning_effort: None,
+            thinking: None,
             context_window: default_context_window(),
             prompt_cache: true,
             legacy_web_provider: None,
@@ -548,7 +552,7 @@ impl AppConfig {
 
     pub fn set_plugin_enabled(path: impl AsRef<Path>, id: &str, enabled: bool) -> Result<()> {
         update_raw(path.as_ref(), |value| {
-            if crate::extension::providers::is_host_provider(id) {
+            if crate::extension::providers::is_default_enabled_plugin(id) {
                 if !value["plugins"].is_object() {
                     value["plugins"] = serde_json::json!({});
                 }

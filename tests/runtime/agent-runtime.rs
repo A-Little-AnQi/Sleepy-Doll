@@ -576,6 +576,68 @@ async fn stored_shortcuts_have_read_only_lookup_without_database_or_model_access
     assert!(fixture.requests.lock().unwrap().is_empty());
 }
 
+#[tokio::test]
+async fn shortcut_save_preserves_wait_steps_without_executing_the_target() {
+    let fixture = ModelFixture::new(|_| panic!("Saving a shortcut must not request a model"));
+    let supervisor = supervisor(&fixture);
+    let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    install_status_slice(&supervisor, changes.clone());
+    let saved=supervisor.save_shortcut(&json!({"name":"有等待的入口","binding":{"applicationName":"Fixture","targetName":"顺序动作","steps":[{"title":"前项","action":{"tool":"fixture.change","arguments":{}}},{"title":"等待","waitSeconds":10},{"title":"后项","action":{"tool":"fixture.change","arguments":{}}}]}}),None).unwrap();
+    let revision = supervisor
+        .tasks
+        .published_revision(saved["taskId"].as_str().unwrap())
+        .unwrap()
+        .unwrap();
+    assert!(revision.validation.publishable());
+    assert!(
+        matches!(&revision.nodes[1],operation::task::TaskNode::Wait(wait) if wait.seconds == Some(10))
+    );
+    assert_eq!(revision.shortcut.unwrap().steps[1].wait_seconds, Some(10));
+    assert_eq!(changes.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn shortcut_shell_failure_does_not_execute_the_next_command() {
+    let fixture = ModelFixture::new(|_| panic!("A saved command task must not request a model"));
+    let supervisor = supervisor(&fixture);
+    let saved = supervisor.save_shortcut(&json!({"name":"命令失败停链","binding":{"applicationName":"本机操作","targetName":"命令顺序","steps":[{"title":"失败命令","action":{"tool":"workspace.shell","arguments":{"command":"exit 3","timeoutMs":20000}}},{"title":"不应执行","action":{"tool":"workspace.shell","arguments":{"command":"Write-Output 'must-not-run'","timeoutMs":20000}}}]}}),None).unwrap();
+    let id = saved["taskId"].as_str().unwrap();
+    let revision = supervisor.tasks.published_revision(id).unwrap().unwrap();
+    let mut run = supervisor
+        .submit_workflow(id, None, "shell-failure-chain", Some(60))
+        .unwrap();
+    let config = supervisor.config.read().unwrap().clone();
+    let bridge = host::bridge::Bridge::new(config.bridge.clone()).unwrap();
+    let cancel = CancellationToken::new();
+    let state = operation::executor::TaskExecutor::new(
+        &supervisor,
+        &bridge,
+        &config.runtime,
+        &cancel,
+        &revision,
+        &mut run,
+    )
+    .run()
+    .await
+    .unwrap();
+    assert_eq!(state, RunState::Failed);
+    let events = supervisor.journal.events(&run.conversation_id, 0).unwrap();
+    let steps: Vec<_> = events
+        .iter()
+        .filter(|event| event.run_id == run.id && event.kind == "step.finished")
+        .collect();
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0].data["outcome"], "verifiedFailed");
+    assert_eq!(steps[1].data["outcome"], "skipped");
+    assert!(
+        run.error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("退出码 3")
+    );
+}
+
 #[test]
 fn necessary_rereads_after_other_observations_are_not_a_stagnant_loop() {
     let fixture = ModelFixture::new(|_| panic!("Recording observations must not call a model"));
@@ -2091,7 +2153,7 @@ fn initial_builtin_tools_are_lightweight_and_expand_with_provider_evidence() {
     }
     supervisor.extensions.write().unwrap().tools = Arc::new(registry);
     let definitions = supervisor.definitions(&HashSet::new());
-    assert_eq!(definitions.len(), 55);
+    assert_eq!(definitions.len(), 56);
     let policy = tool_policy::TurnTools::new(
         &definitions,
         &[],
@@ -2638,8 +2700,65 @@ async fn truncated_summary_is_retried_and_never_committed_as_complete() {
         .into_iter()
         .find(|event| event.kind == "context.compacted" && event.data["mode"] == "summary")
         .unwrap();
-    assert_eq!(event.data["outputTokens"], 60);
+    assert!(event.data["outputTokens"].as_u64().unwrap() >= 60);
+    let summary_requests = fixture
+        .task_requests()
+        .into_iter()
+        .filter(|request| request["messages"][0]["content"] == CONTEXT_COMPACTION_PROMPT)
+        .collect::<Vec<_>>();
+    assert!(
+        summary_requests[1]["messages"][2]["content"]
+            .as_str()
+            .unwrap()
+            .len()
+            < summary_requests[0]["messages"][2]["content"]
+                .as_str()
+                .unwrap()
+                .len(),
+        "truncated input must be refined, not replayed unchanged"
+    );
     assert_eq!(run.result.as_deref(), Some("continued"));
+}
+
+#[tokio::test]
+async fn exhausted_reasoning_adapts_only_unconfigured_output_and_keeps_model() {
+    let fixture = ModelFixture::new(|request| {
+        let limit = request["max_tokens"].as_u64().unwrap();
+        if limit <= 8192 {
+            (
+                200,
+                json!({"choices":[{"message":{"role":"assistant","content":"","reasoning_content":"private reasoning"},"finish_reason":"length"}],"usage":{"prompt_tokens":100,"completion_tokens":limit}}),
+            )
+        } else {
+            (200, answer("完整结果"))
+        }
+    });
+    let supervisor = supervisor(&fixture);
+    {
+        let mut config = supervisor.config.write().unwrap();
+        config.models[0].options.max_output_tokens = None;
+        config.models[0].options.context_window = 1048576;
+    }
+    let mut run = supervisor
+        .submit("核对后回答", None, "adaptive-output", Some(30), None)
+        .unwrap();
+    supervisor
+        .session(&mut run, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(run.result.as_deref(), Some("完整结果"));
+    let requests = fixture.task_requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["model"], requests[1]["model"]);
+    assert!(
+        requests[1]["max_tokens"].as_u64().unwrap() > requests[0]["max_tokens"].as_u64().unwrap()
+    );
+    assert!(
+        supervisor.config.read().unwrap().models[0]
+            .options
+            .max_output_tokens
+            .is_none()
+    );
 }
 
 #[path = "harness-optimization.rs"]

@@ -61,7 +61,9 @@ impl TurnTools {
             if result["ok"] != true || result["value"].is_null() {
                 continue;
             }
-            if result["value"]["untrusted"] == true || tool.source == "core:web" {
+            if result["value"]["untrusted"] == true
+                || crate::extension::providers::is_web_source(&tool.source)
+            {
                 continue;
             }
             if tool.name == "search.batch" {
@@ -75,7 +77,7 @@ impl TurnTools {
                         && provider.execution.search_provider
                         && provider.execution.effect == ToolEffect::ReadOnly
                         && name != "tools.search"
-                        && provider.source != "core:web"
+                        && !crate::extension::providers::is_web_source(&provider.source)
                     {
                         policy.read.insert(provider.source.clone());
                     }
@@ -139,7 +141,13 @@ impl TurnTools {
                 tool.execution.prompt_visible
                     || matches!(
                         tool.name.as_str(),
-                        "tools.search" | "skills.search" | "skills.read" | "skills.reference"
+                        "tools.search"
+                            | "skills.search"
+                            | "skills.read"
+                            | "skills.reference"
+                            | "reasoning.set"
+                            | "retrieval.resolve"
+                            | "retrieval.continue"
                     )
                     || self.discovered.contains(&tool.name)
                     || self.used.contains(&tool.name)
@@ -185,6 +193,47 @@ mod tests {
             ..ToolExecution::default()
         })
         .definition()
+    }
+
+    #[test]
+    fn prompt_visible_only_pins_tools_already_allowed_by_exposure_and_permissions() {
+        let mut ready = tool(
+            "channel.answer",
+            "channel",
+            ToolExposure::Always,
+            ToolEffect::ExternalWrite,
+        );
+        ready.execution.prompt_visible = true;
+        let mut deferred = tool(
+            "channel.mutate",
+            "channel",
+            ToolExposure::AfterRead,
+            ToolEffect::ExternalWrite,
+        );
+        deferred.execution.prompt_visible = true;
+        let definitions = vec![ready, deferred];
+        let full = TurnTools::new(
+            &definitions,
+            &[],
+            &HashSet::new(),
+            PermissionMode::FullAccess,
+            false,
+        );
+        assert_eq!(
+            full.select(&definitions)
+                .iter()
+                .map(|d| d.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["channel.answer"]
+        );
+        let plan = TurnTools::new(
+            &definitions,
+            &[],
+            &HashSet::new(),
+            PermissionMode::PlanOnly,
+            false,
+        );
+        assert!(plan.select(&definitions).is_empty());
     }
 
     fn observation(name: &str, value: Value) -> Vec<Message> {

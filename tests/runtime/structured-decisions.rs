@@ -117,6 +117,66 @@ async fn invalid_decisions_are_not_repaired_from_text_or_retried() {
 }
 
 #[tokio::test]
+async fn omitted_fields_receive_bounded_context_feedback_without_dispatching_a_tool() {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = calls.clone();
+    let fixture = ModelFixture::with_headers(move |request| {
+        let index = observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if index > 0 {
+            assert!(request["messages"].to_string().contains("内部结果契约反馈"));
+        }
+        let args = match index {
+            0 => json!({"decision":"continue"}),
+            1 => json!({"basis":"已读事实"}),
+            _ => json!({"decision":"continue","basis":"原任务与已读事实"}),
+        };
+        (
+            200,
+            tool_calls(vec![("fixture.decision", args)]),
+            String::new(),
+        )
+    });
+    let supervisor = supervisor(&fixture);
+    let run = supervisor
+        .journal
+        .create("核对", "typed-missing", "typed-missing", 60, None)
+        .unwrap();
+    let mut definition = decision_fixture_tool();
+    definition.input_schema["properties"]["basis"] = json!({"type":"string"});
+    definition.input_schema["required"] = json!(["decision", "basis"]);
+    let response = supervisor
+        .complete_auxiliary_tool(
+            &run,
+            "scope",
+            supervisor.model_for(&run).unwrap(),
+            &[message(Role::User, "核对")],
+            &definition,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.tool_calls[0].arguments["decision"], "continue");
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+    let requests = fixture.requests.lock().unwrap();
+    assert_eq!(
+        requests[1]["messages"].as_array().unwrap().len(),
+        requests[2]["messages"].as_array().unwrap().len()
+    );
+    assert_eq!(
+        supervisor.journal.model_usage(&run.id).unwrap()["byPurpose"][0]["requests"],
+        3
+    );
+    assert!(
+        !supervisor
+            .journal
+            .events(&run.conversation_id, 0)
+            .unwrap()
+            .iter()
+            .any(|event| event.kind == "tool.started")
+    );
+}
+
+#[tokio::test]
 async fn tool_schema_is_included_in_auxiliary_window_budget() {
     let fixture = ModelFixture::with_headers(|_| panic!("超窗请求不应发出"));
     let supervisor = supervisor(&fixture);

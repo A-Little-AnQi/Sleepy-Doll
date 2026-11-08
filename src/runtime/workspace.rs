@@ -302,6 +302,11 @@ impl Workspace {
         Ok(json!({
             "cwd": cwd.to_string_lossy(),
             "exitCode": status.code().unwrap_or(-1),
+            "verification": {
+                "status": if status.success() { "succeeded" } else { "failed" },
+                "scope": "process",
+                "reason": if status.success() { "PowerShell 正常退出".to_owned() } else { format!("PowerShell 退出码 {}",status.code().unwrap_or(-1)) }
+            },
             "stdout": stdout,
             "stdoutTruncated": stdout_overflow || stdout_cut,
             "stderr": stderr,
@@ -371,10 +376,12 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
     registry.register(
         FunctionTool::new(
             "workspace.read",
-            "读取一个文本文件。默认按 16384 字符预算返回（maxChars 可调最大 8388608），支持 startLine/maxLines/tailLines 分页；返回总行数、nextLine、截断标记与全文件 sha256。跟随 nextLine 继续读取；全文件统计优先 workspace.search。",
+            "读取文本文件，支持 startLine/startColumn、maxLines、tailLines。maxChars控制本页字符量；截断后把nextCursor完整传给cursor继续，无需加大预算，超长单行也可读完。游标绑定文件sha256，文件变化时须重新读。旧nextLine仅是行定位，半行续读须用cursor。全文件统计优先workspace.search。",
             json!({"type":"object","properties":{
                 "path":{"type":"string"},
                 "startLine":{"type":"integer","minimum":1,"description":"从第几行开始，1 起算"},
+                "startColumn":{"type":"integer","minimum":1,"description":"首行从第几个Unicode字符开始，1起算；不是字节或UTF-16偏移"},
+                "cursor":{"type":"object","description":"上次nextCursor原样传入，优先于startLine/startColumn/tailLines；文件版本变化会拒绝续读","properties":{"startLine":{"type":"integer","minimum":1},"startColumn":{"type":"integer","minimum":1},"sha256":{"type":"string","minLength":1}},"required":["startLine","startColumn","sha256"],"additionalProperties":false},
                 "maxLines":{"type":"integer","minimum":1},
                 "tailLines":{"type":"integer","minimum":1,"description":"只读末尾 N 行，优先于 startLine"},
                 "maxChars":{"type":"integer","minimum":1,"maximum":8388608,"description":"文本字符上限，默认 16384，最大 8388608"}
@@ -416,7 +423,7 @@ pub fn register_tools(registry: &mut ToolRegistry, workspace: Arc<Workspace>) ->
     registry.register(
         FunctionTool::new(
             "workspace.search",
-            "在文件或目录中做正则搜索与统计：pattern 或 patterns（最多 64 个）至少其一；可选 include 通配、recursive（默认 true）、caseSensitive（默认 false）、capture 命名捕获分组计数、sumCapture 命名捕获数字求和、sampleLimit（默认 20，最大 2000）。全文件扫描计数，样本才受 sampleLimit 限制。",
+            "在文件或目录中做正则搜索与统计：pattern或patterns至少其一。支持include、recursive、caseSensitive、capture、sumCapture、sampleLimit。全文件扫描计数，样本才受sampleLimit限制；样本column是匹配起点的Unicode字符列，可传给workspace.read的startColumn，textTruncated仅说明样本文字是节选。",
             json!({"type":"object","properties":{
                 "path":{"type":"string","description":"单个文件或目录，与 paths 至少提供其一"},
                 "paths":{"type":"array","items":{"type":"string"},"minItems":1,"description":"文件或目录列表，与 path 至少提供其一"},
@@ -947,6 +954,8 @@ mod tests {
         assert!(ok["ok"].as_bool().unwrap(), "{ok}");
         let value = &ok["value"];
         assert_eq!(value["exitCode"].as_i64(), Some(0));
+        assert_eq!(value["verification"]["status"], "succeeded");
+        assert_eq!(value["verification"]["scope"], "process");
         let stdout = value["stdout"].as_str().unwrap_or_default();
         assert!(stdout.contains("hello"), "{stdout}");
         assert!(stdout.contains("work"), "{stdout}");
@@ -959,6 +968,7 @@ mod tests {
         );
         assert!(failure["ok"].as_bool().unwrap(), "{failure}");
         assert_eq!(failure["value"]["exitCode"].as_i64(), Some(3));
+        assert_eq!(failure["value"]["verification"]["status"], "failed");
 
         let native_failure = call(
             &registry,
@@ -967,6 +977,7 @@ mod tests {
         );
         assert!(native_failure["ok"].as_bool().unwrap(), "{native_failure}");
         assert_eq!(native_failure["value"]["exitCode"].as_i64(), Some(7));
+        assert_eq!(native_failure["value"]["verification"]["status"], "failed");
     }
 
     #[cfg(windows)]

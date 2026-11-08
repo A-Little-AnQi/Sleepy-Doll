@@ -14,6 +14,13 @@ pub enum Error {
     Timeout(String),
     #[error("模型协议错误：{0}")]
     ModelProtocol(String),
+    #[error(
+        "模型输出预算耗尽：输入 {input_tokens} token，输出 {output_tokens} token，未产生可执行结果"
+    )]
+    OutputBudget {
+        input_tokens: u64,
+        output_tokens: u64,
+    },
     #[error("工具错误：{0}")]
     Tool(String),
     /// 外部工具明确回执拒绝提交；已确认本次动作没有进入执行阶段。
@@ -53,7 +60,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 impl Error {
     pub fn user_message(&self) -> String {
         match self {
-            Self::ModelProtocol(_) => "模型响应没有完整结束，未执行这轮工具调用。".into(),
+            Self::ModelProtocol(_) => "模型返回的数据未通过协议校验，本轮工具调用未执行。".into(),
+            Self::OutputBudget { .. } => {
+                "模型本轮输出达到上限，未得到完整答复，也未执行本轮工具调用。".into()
+            }
             Self::Http(message) if message.starts_with("模型") => message.clone(),
             Self::Http(_) => "连接中断或服务未响应，请稍后核对运行结果。".into(),
             Self::Timeout(message) => message.clone(),

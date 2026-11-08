@@ -60,7 +60,7 @@ impl TaskStore {
 
     /// 把旧版 `runtime_workflows` 的行读成新模型。
     fn adopt_legacy_workflows(&self) -> Result<()> {
-        let db = self.connection.lock().unwrap();
+        let mut db = self.connection.lock().unwrap();
         let exists: bool = db.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_workflows')",
             [],
@@ -84,12 +84,18 @@ impl TaskStore {
             else {
                 continue;
             };
-            let known: bool = db.query_row(
+            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let still_present: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM runtime_workflows WHERE id=?1 AND revision=?2)",
+                params![legacy.id, legacy.revision],
+                |row| row.get(0),
+            )?;
+            let known: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM task_definitions WHERE id=?1)",
                 [&legacy.id],
                 |row| row.get(0),
             )?;
-            if known {
+            if known || !still_present {
                 continue;
             }
             let Some(revision) = legacy.to_revision() else {
@@ -104,14 +110,11 @@ impl TaskStore {
                 source_title_snapshot: format!("由运行 {} 提取", legacy.verified_from_run),
                 published_revision: Some(revision.revision),
                 draft_revision: None,
-                archived_at: None,
-                deleted_at: None,
                 pinned: false,
                 last_run_id: None,
                 created_at: legacy.created_at.clone(),
                 updated_at: legacy.created_at.clone(),
             };
-            let tx = db.unchecked_transaction()?;
             tx.execute(
                 "INSERT OR IGNORE INTO task_definitions VALUES(?1,?2,?3,NULL,?4,NULL,0,0,?5,?6)",
                 params![
@@ -159,8 +162,8 @@ impl TaskStore {
                 definition.source_conversation_id,
                 definition.published_revision,
                 definition.draft_revision,
-                definition.archived_at.is_some() as i32,
-                definition.deleted_at.is_some() as i32,
+                0,
+                0,
                 serde_json::to_string(definition)?,
                 definition.updated_at
             ],
@@ -172,9 +175,21 @@ impl TaskStore {
         &self,
         definition: &WorkflowDefinition,
         revision: &WorkflowRevision,
+        require_existing: bool,
     ) -> Result<()> {
         let mut db = self.connection.lock().unwrap();
         let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM task_definitions WHERE id=?1)",
+            [&definition.id],
+            |row| row.get(0),
+        )?;
+        if require_existing && !exists {
+            return Err(Error::Conflict("快捷任务已删除，无法保存旧版本".into()));
+        }
+        if !require_existing && exists {
+            return Err(Error::Conflict("快捷任务已存在".into()));
+        }
         tx.execute(
             "INSERT INTO task_revisions(task_id,revision,payload,created_at) VALUES(?1,?2,?3,?4)",
             params![
@@ -185,13 +200,13 @@ impl TaskStore {
             ],
         )?;
         tx.execute("INSERT INTO task_definitions VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
-            ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,source_conversation_id=excluded.source_conversation_id,published_revision=excluded.published_revision,draft_revision=excluded.draft_revision,archived=excluded.archived,deleted=excluded.deleted,payload=excluded.payload,updated_at=excluded.updated_at",params![definition.id,definition.name,definition.description,definition.source_conversation_id,definition.published_revision,definition.draft_revision,definition.archived_at.is_some() as i32,definition.deleted_at.is_some() as i32,serde_json::to_string(definition)?,definition.updated_at])?;
+            ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,source_conversation_id=excluded.source_conversation_id,published_revision=excluded.published_revision,draft_revision=excluded.draft_revision,archived=0,deleted=0,payload=excluded.payload,updated_at=excluded.updated_at",params![definition.id,definition.name,definition.description,definition.source_conversation_id,definition.published_revision,definition.draft_revision,0,0,serde_json::to_string(definition)?,definition.updated_at])?;
         tx.commit()?;
         Ok(())
     }
 
     pub fn save_definition(&self, definition: &WorkflowDefinition) -> Result<()> {
-        self.connection.lock().unwrap().execute(
+        let changed=self.connection.lock().unwrap().execute(
             "UPDATE task_definitions SET name=?1,description=?2,source_conversation_id=?3,published_revision=?4,draft_revision=?5,archived=?6,deleted=?7,payload=?8,updated_at=?9 WHERE id=?10",
             params![
                 definition.name,
@@ -199,20 +214,49 @@ impl TaskStore {
                 definition.source_conversation_id,
                 definition.published_revision,
                 definition.draft_revision,
-                definition.archived_at.is_some() as i32,
-                definition.deleted_at.is_some() as i32,
+                0,
+                0,
                 serde_json::to_string(definition)?,
                 definition.updated_at,
                 definition.id
             ],
         )?;
+        if changed == 0 {
+            return Err(Error::Config("快捷任务不存在".into()));
+        }
+        Ok(())
+    }
+
+    /// 永久删除定义、全部修订和运行关联，旧版导入源也一并移除。
+    pub fn delete(&self, id: &str) -> Result<()> {
+        let mut db = self.connection.lock().unwrap();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        for sql in [
+            "DELETE FROM task_runs WHERE task_id=?1",
+            "DELETE FROM task_revisions WHERE task_id=?1",
+            "DELETE FROM runtime_workflow_runs WHERE workflow_id=?1",
+            "DELETE FROM runtime_workflows WHERE id=?1",
+            "DELETE FROM task_definitions WHERE id=?1",
+        ] {
+            tx.execute(sql, [id])?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
     /// 同一修订号只接受内容相同的重写。
     pub fn save_revision(&self, revision: &WorkflowRevision) -> Result<()> {
-        let db = self.connection.lock().unwrap();
-        let existing: Option<String> = db
+        let mut db = self.connection.lock().unwrap();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM task_definitions WHERE id=?1)",
+            [&revision.task_id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Err(Error::Config("快捷任务不存在".into()));
+        }
+        let existing: Option<String> = tx
             .query_row(
                 "SELECT payload FROM task_revisions WHERE task_id=?1 AND revision=?2",
                 params![revision.task_id, revision.revision],
@@ -227,7 +271,7 @@ impl TaskStore {
                 Err(Error::Conflict("已发布的修订不可改写".into()))
             };
         }
-        db.execute(
+        tx.execute(
             "INSERT INTO task_revisions VALUES(?1,?2,?3,?4)",
             params![
                 revision.task_id,
@@ -236,6 +280,7 @@ impl TaskStore {
                 revision.created_at
             ],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -303,9 +348,8 @@ impl TaskStore {
 
     pub fn definitions(&self) -> Result<Vec<WorkflowDefinition>> {
         let db = self.connection.lock().unwrap();
-        let mut query = db.prepare(
-            "SELECT payload FROM task_definitions WHERE deleted=0 ORDER BY updated_at DESC",
-        )?;
+        let mut query =
+            db.prepare("SELECT payload FROM task_definitions ORDER BY updated_at DESC")?;
         let rows = query
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -315,14 +359,32 @@ impl TaskStore {
     }
 
     pub fn record_run(&self, task_id: &str, revision: u64, run_id: &str) -> Result<()> {
-        self.connection.lock().unwrap().execute(
+        let mut db = self.connection.lock().unwrap();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let payload: String = tx
+            .query_row(
+                "SELECT payload FROM task_definitions WHERE id=?1",
+                [task_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| Error::Config("快捷任务不存在".into()))?;
+        let mut definition: WorkflowDefinition = serde_json::from_str(&payload)?;
+        tx.execute(
             "INSERT INTO task_runs VALUES(?1,?2,?3,?4)",
             params![task_id, revision, run_id, crate::runtime::types::now()],
         )?;
-        let mut definition = self.definition(task_id)?;
         definition.last_run_id = Some(run_id.into());
         definition.updated_at = crate::runtime::types::now();
-        self.save_definition(&definition)?;
+        tx.execute(
+            "UPDATE task_definitions SET payload=?1,updated_at=?2 WHERE id=?3",
+            params![
+                serde_json::to_string(&definition)?,
+                definition.updated_at,
+                task_id
+            ],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -338,22 +400,13 @@ impl TaskStore {
             .collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// 定义当前可见状态。优先级：删除 > 归档 > 草稿 > 依赖不可用 > 验证结论。
+    /// 定义当前可见状态：草稿、依赖可用性和验证结论。
     pub fn state_of(
         &self,
         definition: &WorkflowDefinition,
         available: Availability<'_>,
         introduced: &HashSet<String>,
     ) -> (DefinitionState, Option<WorkflowRevision>, Option<String>) {
-        if definition.deleted_at.is_some() {
-            return (DefinitionState::Deleted, None, None);
-        }
-        if definition.archived_at.is_some() {
-            let revision = definition
-                .published_revision
-                .and_then(|revision| self.revision(&definition.id, revision).ok());
-            return (DefinitionState::Archived, revision, None);
-        }
         if definition.published_revision.is_none() {
             let revision = definition
                 .draft_revision
@@ -525,4 +578,227 @@ impl WorkflowDefinition {
 
 pub fn empty_arguments() -> Value {
     Value::Object(serde_json::Map::new())
+}
+
+#[cfg(test)]
+mod deletion_tests {
+    use super::*;
+    use crate::runtime::operation::workflow::{Workflow, WorkflowStep};
+    use serde_json::json;
+
+    fn definition(id: &str) -> WorkflowDefinition {
+        WorkflowDefinition {
+            id: id.into(),
+            name: id.into(),
+            description: "用户保存的任务".into(),
+            source_conversation_id: None,
+            source_message_id: None,
+            source_title_snapshot: String::new(),
+            published_revision: Some(1),
+            draft_revision: None,
+            pinned: false,
+            last_run_id: None,
+            created_at: "2026-11-07T00:00:00Z".into(),
+            updated_at: "2026-11-07T00:00:00Z".into(),
+        }
+    }
+
+    fn revision(id: &str, number: u64) -> WorkflowRevision {
+        WorkflowRevision {
+            shortcut: None,
+            task_id: id.into(),
+            revision: number,
+            schema_version: 1,
+            name: id.into(),
+            description: String::new(),
+            nodes: vec![],
+            limits: Default::default(),
+            model_usage: ModelUsage::None,
+            validation: Default::default(),
+            created_at: "2026-11-07T00:00:00Z".into(),
+        }
+    }
+
+    fn legacy(id: &str) -> Workflow {
+        Workflow {
+            id: id.into(),
+            revision: 1,
+            name: id.into(),
+            description: String::new(),
+            input_schema: json!({}),
+            steps: vec![WorkflowStep {
+                id: "read".into(),
+                title: "读取".into(),
+                tool: "fixture.read".into(),
+                arguments: json!({}),
+                depends_on: vec![],
+                execution: crate::extension::ToolExecution::read_only(),
+                provider_version: None,
+                resource_versions: vec![],
+            }],
+            verified_from_run: "old-run".into(),
+            verified_at: "2026-11-07T00:00:00Z".into(),
+            unattended: Default::default(),
+            created_at: "2026-11-07T00:00:00Z".into(),
+        }
+    }
+
+    fn database(name: &str) -> std::path::PathBuf {
+        let root = crate::test_root(name);
+        std::fs::create_dir_all(&root).unwrap();
+        root.join("tasks.db")
+    }
+
+    fn seed_legacy(store: &TaskStore, id: &str) {
+        let workflow = legacy(id);
+        let db = store.connection.lock().unwrap();
+        db.execute(
+            "INSERT INTO runtime_workflows VALUES(?1,1,?2,?3)",
+            params![
+                id,
+                serde_json::to_string(&workflow).unwrap(),
+                workflow.created_at
+            ],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO runtime_workflow_runs VALUES(?1,1,?2,'now')",
+            params![id, format!("legacy-{id}")],
+        )
+        .unwrap();
+    }
+
+    fn counts(store: &TaskStore, id: &str) -> Vec<i64> {
+        let db = store.connection.lock().unwrap();
+        [
+            ("task_definitions", "id"),
+            ("task_revisions", "task_id"),
+            ("task_runs", "task_id"),
+            ("runtime_workflows", "id"),
+            ("runtime_workflow_runs", "workflow_id"),
+        ]
+        .into_iter()
+        .map(|(table, key)| {
+            db.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE {key}=?1"),
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        })
+        .collect()
+    }
+
+    #[test]
+    fn hard_delete_purges_legacy_and_all_revisions_without_resurrection() {
+        let path = database("task-hard-delete");
+        let store = TaskStore::open(&path).unwrap();
+        seed_legacy(&store, "target");
+        drop(store);
+        let store = TaskStore::open(&path).unwrap();
+        assert!(
+            store.definition("target").is_ok(),
+            "先确认真实旧版记录已被导入"
+        );
+        store.save_revision(&revision("target", 2)).unwrap();
+        store.record_run("target", 1, "run-1").unwrap();
+        store.create_definition(&definition("other")).unwrap();
+        store.save_revision(&revision("other", 1)).unwrap();
+        store.delete("target").unwrap();
+        assert_eq!(counts(&store, "target"), vec![0; 5]);
+        assert!(store.definition("other").is_ok());
+        assert!(store.revision("other", 1).is_ok());
+        drop(store);
+        let reopened = TaskStore::open(&path).unwrap();
+        assert!(reopened.definition("target").is_err());
+        assert!(reopened.revision("target", 1).is_err());
+        assert_eq!(counts(&reopened, "target"), vec![0; 5]);
+        assert_eq!(reopened.definitions().unwrap().len(), 1);
+        reopened.delete("target").unwrap();
+        assert!(reopened.definition("other").is_ok());
+    }
+
+    #[test]
+    fn hard_delete_rolls_back_every_table_on_failure() {
+        let path = database("task-delete-rollback");
+        let store = TaskStore::open(&path).unwrap();
+        store.create_definition(&definition("target")).unwrap();
+        store.save_revision(&revision("target", 1)).unwrap();
+        store.record_run("target", 1, "run-1").unwrap();
+        seed_legacy(&store, "target");
+        let before = counts(&store, "target");
+        store.connection.lock().unwrap().execute_batch("CREATE TRIGGER reject_delete BEFORE DELETE ON task_definitions BEGIN SELECT RAISE(ABORT,'fixture failure'); END;").unwrap();
+        assert!(store.delete("target").is_err());
+        assert_eq!(counts(&store, "target"), before);
+        drop(store);
+        let reopened = TaskStore::open(&path).unwrap();
+        assert_eq!(counts(&reopened, "target"), before);
+    }
+
+    #[test]
+    fn hard_delete_rejects_late_updates_and_run_links() {
+        let path = database("task-delete-late-write");
+        let store = TaskStore::open(&path).unwrap();
+        let stale = definition("target");
+        store.create_definition(&stale).unwrap();
+        store.save_revision(&revision("target", 1)).unwrap();
+        store.delete("target").unwrap();
+        assert!(store.save_definition(&stale).is_err());
+        assert!(store.save_revision(&revision("target", 2)).is_err());
+        assert!(
+            store
+                .save_shortcut_atomically(&stale, &revision("target", 2), true)
+                .is_err()
+        );
+        assert!(store.record_run("target", 1, "late-run").is_err());
+        assert_eq!(counts(&store, "target"), vec![0; 5]);
+    }
+
+    #[test]
+    fn migration_purges_old_deletions_and_returns_archived_tasks_to_normal_list() {
+        let path = database("task-delete-migration");
+        let store = TaskStore::open(&path).unwrap();
+        for id in ["deleted", "archived"] {
+            store.create_definition(&definition(id)).unwrap();
+            store.save_revision(&revision(id, 1)).unwrap();
+            store.record_run(id, 1, &format!("run-{id}")).unwrap();
+            let mut payload = serde_json::to_value(definition(id)).unwrap();
+            payload["archivedAt"] = json!("old");
+            payload["deletedAt"] = if id == "deleted" {
+                json!("old")
+            } else {
+                Value::Null
+            };
+            store
+                .connection
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE task_definitions SET archived=1,deleted=?1,payload=?2 WHERE id=?3",
+                    params![id == "deleted", payload.to_string(), id],
+                )
+                .unwrap();
+        }
+        seed_legacy(&store, "deleted");
+        store
+            .connection
+            .lock()
+            .unwrap()
+            .execute_batch("DELETE FROM schema_migrations WHERE version=22;PRAGMA user_version=21;")
+            .unwrap();
+        drop(store);
+        let migrated = TaskStore::open(&path).unwrap();
+        assert_eq!(counts(&migrated, "deleted"), vec![0; 5]);
+        let tasks = migrated.definitions().unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, "archived");
+        let payload:String=migrated.connection.lock().unwrap().query_row("SELECT payload FROM task_definitions WHERE id='archived' AND archived=0 AND deleted=0",[],|row|row.get(0)).unwrap();
+        let payload: Value = serde_json::from_str(&payload).unwrap();
+        assert!(payload.get("archivedAt").is_none());
+        assert!(payload.get("deletedAt").is_none());
+        drop(migrated);
+        let reopened = TaskStore::open(&path).unwrap();
+        assert_eq!(reopened.definitions().unwrap().len(), 1);
+        assert_eq!(counts(&reopened, "deleted"), vec![0; 5]);
+    }
 }

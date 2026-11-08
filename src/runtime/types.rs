@@ -194,7 +194,7 @@ pub struct PromptCacheSnapshot {
     pub tokens: u64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -213,6 +213,13 @@ pub enum RunSource {
         #[serde(alias = "workflow_revision")]
         workflow_revision: u64,
     },
+    BoundWorkflow {
+        workflow_id: String,
+        workflow_revision: u64,
+        origin: String,
+        scope_hash: String,
+        snapshot: Box<crate::runtime::operation::task::WorkflowRevision>,
+    },
 }
 
 impl RunSource {
@@ -221,10 +228,22 @@ impl RunSource {
         &self,
         dialogue_mode: crate::runtime::operation::permissions::PermissionMode,
     ) -> crate::runtime::operation::permissions::PermissionMode {
-        if matches!(self, Self::SavedWorkflow { .. }) {
+        if matches!(
+            self,
+            Self::SavedWorkflow { .. } | Self::BoundWorkflow { .. }
+        ) {
             crate::runtime::operation::permissions::PermissionMode::FullAccess
         } else {
             dialogue_mode
+        }
+    }
+
+    pub fn workflow_id(&self) -> Option<&str> {
+        match self {
+            Self::SavedWorkflow { workflow_id, .. } | Self::BoundWorkflow { workflow_id, .. } => {
+                Some(workflow_id)
+            }
+            _ => None,
         }
     }
 }
@@ -340,6 +359,10 @@ pub fn public_run(run: &Run) -> Value {
     // 前缀哈希只用于恢复与审计，界面既不需要它，也不应把内部缓存键当产品状态。
     if let Some(object) = value.as_object_mut() {
         object.remove("promptCacheSnapshot");
+        if let Some(source) = object.get_mut("source").and_then(Value::as_object_mut) {
+            source.remove("snapshot");
+            source.remove("scopeHash");
+        }
     }
     value
 }

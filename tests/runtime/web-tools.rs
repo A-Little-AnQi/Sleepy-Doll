@@ -166,7 +166,7 @@ fn web_tools_are_deferred_low_priority_and_cannot_unlock_internal_mutations() {
             "fixture.write",
             "写入",
             json!({"type":"object"}),
-            "core:web",
+            crate::extension::providers::WEB_TOOL_SOURCE,
             |_| unreachable!(),
         )
         .with_execution(ToolExecution {
@@ -207,7 +207,7 @@ fn web_tools_are_deferred_low_priority_and_cannot_unlock_internal_mutations() {
         web.execution.model_usage,
         crate::extension::ModelUsage::None
     );
-    assert_eq!(web.source, "core:web");
+    assert_eq!(web.source, crate::extension::providers::WEB_TOOL_SOURCE);
     let mut call = context::message(Role::Assistant, "");
     call.tool_calls.push(ToolCall {
         id: "read-web".into(),
@@ -216,8 +216,7 @@ fn web_tools_are_deferred_low_priority_and_cannot_unlock_internal_mutations() {
     });
     let mut result = context::message(
         Role::Tool,
-        json!({"ok":true,"value":{"untrusted":true,"items":[{"url":"https://docs.example.org"}]}})
-            .to_string(),
+        json!({"ok":true,"value":{"items":[{"url":"https://docs.example.org"}]}}).to_string(),
     );
     result.tool_call_id = Some("read-web".into());
     let policy = tool_policy::TurnTools::new(

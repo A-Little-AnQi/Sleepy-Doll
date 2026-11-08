@@ -209,14 +209,32 @@ async fn complete_inner(
             result = request.send() => result,
         };
         let retry = match &result {
-            Ok(response) => matches!(
-                response.status().as_u16(),
-                429 | 500 | 502 | 503 | 504 | 529
-            ),
-            Err(error) => error.is_connect() || error.is_timeout(),
+            Ok(response) => {
+                let declined = response
+                    .headers()
+                    .get("x-should-retry")
+                    .is_some_and(|value| value.as_bytes().eq_ignore_ascii_case(b"false"));
+                !declined
+                    && matches!(
+                        response.status().as_u16(),
+                        429 | 500 | 502 | 503 | 504 | 529
+                    )
+            }
+            // 等响应头超时不代表服务没有处理请求，不能再盲目重发整轮生成。
+            Err(error) => error.is_connect(),
         };
         if !retry || attempt >= 2 {
-            break result?;
+            break result.map_err(|error| {
+                if error.is_timeout() {
+                    Error::Timeout(if error.is_connect() {
+                        "连接模型服务超时，本轮未完成".into()
+                    } else {
+                        "模型服务未在等待期限内返回响应，本轮未完成，未自动重发".into()
+                    })
+                } else {
+                    error.into()
+                }
+            })?;
         }
         let response = result.as_ref().ok();
         let Some(delay) = retry_delay(
@@ -234,6 +252,11 @@ async fn complete_inner(
     };
     if !response.status().is_success() {
         let status = response.status().as_u16();
+        if status == 408 {
+            return Err(Error::Timeout(
+                "模型服务等待数据超时，本轮未完成，未自动重发".into(),
+            ));
+        }
         let cooldown = retry_after_duration(
             response
                 .headers()
@@ -287,7 +310,13 @@ async fn complete_inner(
     loop {
         let chunk = tokio::select! {_ = cancel.cancelled()=>return Err(Error::Cancelled),r=stream.next()=>r};
         let Some(chunk) = chunk else { break };
-        pending.extend_from_slice(&chunk?);
+        pending.extend_from_slice(&chunk.map_err(|error| {
+            if error.is_timeout() {
+                Error::Timeout("模型响应流长时间未继续返回数据，本轮未完成".into())
+            } else {
+                error.into()
+            }
+        })?);
         if pending.len() > 4 * 1024 * 1024 {
             return Err(Error::ModelProtocol("stream frame exceeds limit".into()));
         }
@@ -456,6 +485,12 @@ pub fn output_truncated(reason: Option<&str>) -> bool {
 
 pub fn validate(r: &ModelResponse) -> Result<()> {
     let truncated = output_truncated(r.finish_reason.as_deref());
+    if truncated && r.text.trim().is_empty() && r.tool_calls.is_empty() {
+        return Err(Error::OutputBudget {
+            input_tokens: r.usage.input_tokens.unwrap_or(0),
+            output_tokens: r.usage.output_tokens.unwrap_or(0),
+        });
+    }
     if truncated && !r.tool_calls.is_empty() {
         return Err(Error::ModelProtocol(
             "工具调用所在的模型回复被截断，未执行任何调用".into(),
@@ -484,10 +519,19 @@ pub fn validate(r: &ModelResponse) -> Result<()> {
     }
     let mut ids = std::collections::HashSet::new();
     for c in &r.tool_calls {
-        if c.id.is_empty() || c.name.is_empty() || !c.arguments.is_object() || !ids.insert(&c.id) {
-            return Err(Error::ModelProtocol(
-                "invalid or duplicate tool call".into(),
-            ));
+        let reason = if c.id.is_empty() {
+            Some("tool call has no id")
+        } else if c.name.is_empty() {
+            Some("tool call has no name")
+        } else if !c.arguments.is_object() {
+            Some("tool call arguments are not an object")
+        } else if !ids.insert(&c.id) {
+            Some("duplicate tool call id")
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            return Err(Error::ModelProtocol(reason.into()));
         }
     }
     Ok(())
@@ -665,6 +709,11 @@ impl Decoder {
     }
 
     pub fn push(&mut self, v: Value) -> Result<Option<String>> {
+        if v["error"]["code"] == "upstream_idle_timeout" {
+            return Err(Error::Timeout(
+                "模型响应流长时间未继续返回数据，本轮未完成，未自动重发".into(),
+            ));
+        }
         if !v["error"].is_null() || v["type"] == "error" {
             return Err(Error::ModelProtocol("provider stream error".into()));
         }

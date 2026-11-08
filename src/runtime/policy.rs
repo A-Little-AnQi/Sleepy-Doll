@@ -18,6 +18,23 @@ pub struct RuntimeConfig {
     /// 单次请求的总窗口上限（输入与输出）。留空则用模型窗口。
     #[serde(default)]
     pub max_tokens: Option<u64>,
+    /// 可选的通道交付检查；在同一运行内复核草稿，不创建第二个 Agent。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_review: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_review_contextual: Option<bool>,
+    /// 嵌入通道的默认最终交付入口；纯文本草稿进入复核后仍可提交到此入口。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_tool: Option<String>,
+    /// 用户设定的回复要求，随真实任务焦点保留；不增加任务或权限。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_preference: Option<String>,
+    /// 嵌入方提供完整通道指令；默认仍沿用桌面 Agent 的基础指令。
+    #[serde(default)]
+    pub standalone_instructions: bool,
+    /// 通道明确允许的逐轮推理档位；空列表保持模型配置，不开放切换工具。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reasoning_efforts: Vec<String>,
     pub grants: Vec<Grant>,
     pub permission_mode: crate::runtime::operation::permissions::PermissionMode,
     pub trust_grants: Vec<crate::runtime::operation::permissions::TrustGrant>,
@@ -36,6 +53,12 @@ impl Default for RuntimeConfig {
             // 留空：按当前模型的窗口推导，见 `budget`。
             context_chars: None,
             max_tokens: None,
+            delivery_review: None,
+            delivery_review_contextual: None,
+            delivery_tool: None,
+            response_preference: None,
+            standalone_instructions: false,
+            reasoning_efforts: Vec::new(),
             grants: vec![],
             // 默认每次写入都问一次。
             permission_mode: crate::runtime::operation::permissions::PermissionMode::AskEach,
@@ -68,18 +91,15 @@ pub fn output_reserve(model: &crate::config::ModelConfig) -> u64 {
 
 /// Auxiliary reasoning shares the user's output cap, not the whole main window.
 pub fn auxiliary_output_reserve(model: &crate::config::ModelConfig) -> u64 {
-    output_reserve(model).min(8192)
+    output_reserve(model)
 }
 
-pub fn auxiliary_timeout(purpose: &str, remaining: i64) -> u64 {
-    let maximum = match purpose {
-        "compaction" | "memory" => 180,
-        _ => 120,
-    };
+pub fn auxiliary_timeout(purpose: &str, remaining: i64, model_timeout_ms: u64) -> u64 {
+    let maximum = model_timeout_ms.div_ceil(1000).max(1);
     if purpose == "memory" {
-        maximum as u64
+        maximum
     } else {
-        remaining.clamp(1, maximum) as u64
+        (remaining.max(1) as u64).min(maximum)
     }
 }
 
@@ -207,15 +227,16 @@ mod tests {
         assert_eq!(calibrated_scale(45, 1000, 900), 45);
         let mut model = model(256000);
         model.options.max_output_tokens = Some(15000);
-        assert_eq!(auxiliary_output_reserve(&model), 8192);
+        assert_eq!(auxiliary_output_reserve(&model), 15000);
         model.options.max_output_tokens = Some(512);
         assert_eq!(auxiliary_output_reserve(&model), 512);
-        assert_eq!(auxiliary_timeout("memory", 600), 180);
-        assert_eq!(auxiliary_timeout("compaction", 600), 180);
-        assert_eq!(auxiliary_timeout("compaction", -1), 1);
+        assert_eq!(auxiliary_timeout("memory", 600, 240_000), 240);
+        assert_eq!(auxiliary_timeout("compaction", 600, 240_000), 240);
+        assert_eq!(auxiliary_timeout("compaction", 30, 240_000), 30);
+        assert_eq!(auxiliary_timeout("compaction", -1, 240_000), 1);
         assert_eq!(
-            auxiliary_timeout("memory", -600),
-            180,
+            auxiliary_timeout("memory", -600, 240_000),
+            240,
             "Background learning must not inherit an ended task deadline"
         );
     }

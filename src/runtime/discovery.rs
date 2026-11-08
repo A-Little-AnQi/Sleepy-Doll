@@ -63,7 +63,10 @@ pub(super) fn search(tools: Vec<ToolDefinition>, query: &str, limit: usize) -> V
         .collect::<Vec<_>>();
     ranked.sort_by(|(a, left), (b, right)| {
         b.cmp(a)
-            .then_with(|| (left.source == "core:web").cmp(&(right.source == "core:web")))
+            .then_with(|| {
+                crate::extension::providers::is_web_source(&left.source)
+                    .cmp(&crate::extension::providers::is_web_source(&right.source))
+            })
             .then_with(|| left.name.cmp(&right.name))
     });
     ranked

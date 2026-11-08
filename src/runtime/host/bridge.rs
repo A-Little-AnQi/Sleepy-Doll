@@ -512,6 +512,11 @@ impl Bridge {
                 )?;
                 let mut prep = journal.prepare(run, &prep_call_id, prep_request, instance)?;
                 while !journal.acquire(&prep)? {
+                    if matches!(run.source, RunSource::BoundWorkflow { .. }) {
+                        prep.outcome = "notSubmitted".into();
+                        journal.attempt(&prep)?;
+                        return Err(Error::Tool("本项需要的游戏执行权仍被占用".into()));
+                    }
                     if cancel.is_cancelled() {
                         prep.outcome = "cancelled".into();
                         journal.attempt(&prep)?;
@@ -645,6 +650,11 @@ impl Bridge {
         request["preconditionSnapshot"] = snapshot["snapshotId"].clone();
         let mut a = journal.prepare(run, call_id, request, instance)?;
         while !journal.acquire(&a)? {
+            if matches!(run.source, RunSource::BoundWorkflow { .. }) {
+                a.outcome = "notSubmitted".into();
+                journal.attempt(&a)?;
+                return Err(Error::Tool("本项需要的游戏执行权仍被占用".into()));
+            }
             if cancel.is_cancelled() {
                 a.outcome = "cancelled".into();
                 journal.attempt(&a)?;

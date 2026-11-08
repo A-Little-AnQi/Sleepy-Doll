@@ -7,7 +7,40 @@ use crate::{
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+
+/// 通道提供的外部输入预算提示，不含媒体本体，也不参与授权。
+#[derive(Default, Clone)]
+pub struct InputHints {
+    pub references: BTreeMap<String, u64>,
+    pub reobtainable_tools: HashSet<String>,
+}
+impl InputHints {
+    pub fn reference_tokens(&self, text: &str) -> u64 {
+        self.references
+            .iter()
+            .filter(|(key, _)| !key.is_empty())
+            .fold(0u64, |sum, (key, tokens)| {
+                sum.saturating_add(tokens.saturating_mul(text.matches(key.as_str()).count() as u64))
+            })
+    }
+    pub fn message_tokens(&self, messages: &[Message]) -> u64 {
+        messages
+            .iter()
+            .filter(|m| matches!(m.role, Role::User | Role::Context | Role::Tool))
+            .fold(0u64, |sum, m| {
+                sum.saturating_add(self.reference_tokens(&m.content))
+            })
+    }
+    pub fn without_references(&self, text: &str) -> String {
+        self.references
+            .keys()
+            .filter(|key| !key.is_empty())
+            .fold(text.to_owned(), |value, key| {
+                value.replace(key, "[外部媒体未展开；可通过原始观测或来源工具重新读取]")
+            })
+    }
+}
 
 pub fn message(role: Role, content: impl Into<String>) -> Message {
     Message {
@@ -41,6 +74,70 @@ pub fn missing_goal_message(
         return Ok(None);
     }
     Ok(Some(message(Role::Context, content)))
+}
+
+/// 请求视图里的任务焦点；只重复已记录的真实输入，不写回历史，不把资料变成目标。
+pub fn focus_message(goal: &super::contracts::Goal, hints: &InputHints) -> Result<Message> {
+    let latest = goal
+        .inputs
+        .last()
+        .ok_or_else(|| Error::Conflict("当前任务没有真实用户输入".into()))?;
+    Ok(message(Role::User, hints.without_references(&latest.text)))
+}
+
+/// 交付阶段只组织已查明的信息。原始历史留在 Journal；观测索引保留可读回的
+/// callId，遇到真正缺口可回工作阶段，不再把整段调查材料当成待发送内容。
+pub fn delivery_view(history: &[Message], goal: &super::contracts::Goal) -> Result<Vec<Message>> {
+    let calls = history
+        .iter()
+        .flat_map(|m| &m.tool_calls)
+        .map(|c| (&c.id, &c.name))
+        .collect::<BTreeMap<_, _>>();
+    let mut view = goal
+        .inputs
+        .iter()
+        .map(|i| message(Role::User, i.text.clone()))
+        .collect::<Vec<_>>();
+    for material in history.iter().filter(|m| {
+        m.role == Role::Context
+            && !m.content.starts_with("[内部交付草稿")
+            && !m.content.starts_with("[交付对象与通道")
+            && !m.content.starts_with("[准备交付时发现检索覆盖仍待处理")
+    }) {
+        view.push(material.clone());
+    }
+    let observations = history.iter().filter(|m| m.role == Role::Tool).map(|m| {
+        let value = serde_json::from_str(&m.content).unwrap_or_else(|_| json!({"text":m.content}));
+        let observed = value.get("value").unwrap_or(&value);
+        json!({"callId":m.tool_call_id,"tool":m.tool_call_id.as_ref().and_then(|id|calls.get(id)),
+            "coverage":{"scope":observed.get("scope"),"hasMore":observed.get("hasMore"),
+                "truncated":observed.get("truncated"),"source":observed.get("source")}})
+    }).collect::<Vec<_>>();
+    view.push(message(Role::Context, format!(
+        "[本轮已读观测索引；下方保留实际原文，observation.read可按callId重读；索引不是事实替代]\n{}",
+        serde_json::to_string(&observations)?
+    )));
+    // 保留真实工具轮及提供方原始思考字段，让统一窗口预算可以按调用边界压缩、回读。
+    // 把全部结果变成不可分页的 Context 会绕开原有预算机制。
+    for entry in history
+        .iter()
+        .filter(|m| m.role == Role::Tool || m.role == Role::Assistant && !m.tool_calls.is_empty())
+    {
+        view.push(entry.clone());
+    }
+    if let Some(handoff) = history
+        .iter()
+        .rev()
+        .find(|m| m.role == Role::Context && m.content.starts_with("[交付对象与通道"))
+    {
+        view.push(handoff.clone());
+    }
+    if let Some(checkpoint) = history.iter().rev().find(|m| {
+        m.role == Role::Context && m.content.starts_with("[准备交付时发现检索覆盖仍待处理")
+    }) {
+        view.push(checkpoint.clone());
+    }
+    Ok(view)
 }
 
 /// 粗略 token 估算，单位与 `policy.max_tokens` 一致。
@@ -97,6 +194,7 @@ pub fn tool_evidence(value: &serde_json::Value) -> serde_json::Value {
                     "path",
                     "observedAt",
                     "truncated",
+                    "nextCursor",
                     "nextLine",
                     "nextOffset",
                     "total",
@@ -249,6 +347,7 @@ fn cache_model_key(model: &ModelConfig) -> Result<String> {
         "temperature": model.options.temperature,
         "maxOutputTokens": model.options.max_output_tokens,
         "reasoningEffort": model.options.reasoning_effort,
+        "thinking": model.options.thinking,
         "promptCache": model.options.prompt_cache,
     });
     Ok(digest(&serde_json::to_vec(&value)?))
@@ -386,9 +485,74 @@ pub fn split_compaction_text(text: &str, token_limit: u64) -> Vec<String> {
     chunks
 }
 
+/// 失败后减少实际输入，而不是原样重试同一份超长摘要请求。
+/// 逐次细分有严格进展，所有片段都保留在队列中，成功前不提交检查点。
+pub fn refine_compaction_chunk(text: &str) -> Option<(String, String)> {
+    let middle = text.chars().count() / 2;
+    let boundary = text.char_indices().nth(middle)?.0;
+    if boundary == 0 {
+        return None;
+    }
+    let (left, right) = text.split_at(boundary);
+    Some((left.to_owned(), right.to_owned()))
+}
+
 impl PackedContext {
     pub fn compacted(&self) -> bool {
         self.cleared_results > 0
+    }
+
+    /// 大观测的持久化预览不是模型输入上限。只恢复已选入本轮的原始观测，
+    /// 按真实剩余窗口装载；装不下的仍保留可读回引用，不重跑工具。
+    pub fn restore_observations(
+        &mut self,
+        budget: ContextBudget<'_>,
+        mut original: impl FnMut(&str, &str) -> Result<Option<String>>,
+    ) -> Result<Vec<String>> {
+        if self.needs_model_compaction {
+            return Ok(Vec::new());
+        }
+        let mut used = budget.message_cost(&self.messages);
+        let mut restored = Vec::new();
+        for index in (0..self.messages.len()).rev() {
+            let message = &self.messages[index];
+            if message.role != Role::Tool {
+                continue;
+            }
+            let Some(call_id) = message.tool_call_id.as_deref() else {
+                continue;
+            };
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&message.content) else {
+                continue;
+            };
+            // 只恢复运行时生成的 artifact 包装，不能把来源工具自己的截断声明抹掉。
+            if value["truncated"] != true
+                || !value["originalChars"].is_u64()
+                || !value["artifactId"].is_string()
+            {
+                continue;
+            }
+            let Some(content) = original(call_id, value["artifactId"].as_str().unwrap())? else {
+                continue;
+            };
+            let mut full = message.clone();
+            full.content = content;
+            let next = used
+                .saturating_sub(budget.message_cost(std::slice::from_ref(message)))
+                .saturating_add(budget.message_cost(std::slice::from_ref(&full)));
+            if next.saturating_add(budget.margin()) > budget.limit() {
+                continue;
+            }
+            restored.push(call_id.to_owned());
+            self.messages[index] = full;
+            used = next;
+        }
+        self.tokens = estimate_messages_tokens(&self.messages)
+            + match budget {
+                ContextBudget::TokensWithHints(_, hints) => hints.message_tokens(&self.messages),
+                _ => 0,
+            };
+        Ok(restored)
     }
 }
 
@@ -415,6 +579,7 @@ fn reobtainable(name: &str) -> bool {
             | "bgi.api.describe"
             | "bgi.api.read"
             | "artifact.read"
+            | "retrieval.continue"
             | "skills.search"
             | "skills.read"
             | "skills.reference"
@@ -453,22 +618,23 @@ fn group_cost(group: &[Message]) -> usize {
 
 /// 默认按 token 计量；显式设置 contextChars 时沿用字符上限。
 #[derive(Clone, Copy)]
-pub enum ContextBudget {
+pub enum ContextBudget<'a> {
     Chars(usize),
     Tokens(usize),
+    TokensWithHints(usize, &'a InputHints),
 }
 
-impl ContextBudget {
+impl ContextBudget<'_> {
     fn limit(self) -> usize {
         match self {
-            Self::Chars(limit) | Self::Tokens(limit) => limit,
+            Self::Chars(limit) | Self::Tokens(limit) | Self::TokensWithHints(limit, _) => limit,
         }
     }
 
     fn margin(self) -> usize {
         match self {
             Self::Chars(_) => 2048,
-            Self::Tokens(_) => 512,
+            Self::Tokens(_) | Self::TokensWithHints(_, _) => 512,
         }
     }
 
@@ -476,6 +642,9 @@ impl ContextBudget {
         match self {
             Self::Chars(_) => text.chars().count(),
             Self::Tokens(_) => estimate_tokens(text) as usize,
+            Self::TokensWithHints(_, hints) => {
+                estimate_tokens(text).saturating_add(hints.reference_tokens(text)) as usize
+            }
         }
     }
 
@@ -483,7 +652,14 @@ impl ContextBudget {
         match self {
             Self::Chars(_) => group_cost(messages),
             Self::Tokens(_) => estimate_messages_tokens(messages) as usize,
+            Self::TokensWithHints(_, hints) => estimate_messages_tokens(messages)
+                .saturating_add(hints.message_tokens(messages))
+                as usize,
         }
+    }
+    fn reobtainable(self, name: &str) -> bool {
+        reobtainable(name)
+            || matches!(self,Self::TokensWithHints(_,hints) if hints.reobtainable_tools.contains(name))
     }
 }
 
@@ -641,7 +817,7 @@ pub fn build(
                 .find(|c| Some(&c.id) == m.tool_call_id.as_ref())
                 .map(|c| c.name.as_str())
                 .unwrap_or_default();
-            if reobtainable(produced_by)
+            if budget.reobtainable(produced_by)
                 && let Some(cleared) = cleared_tool_result(m)
                 && budget.text_cost(&m.content) > budget.text_cost(&cleared)
             {
@@ -649,9 +825,24 @@ pub fn build(
             }
         }
     }
-    // 最旧的先清，最近的 KEEP_RECENT_RESULTS 条留全文。
-    let stale = clearable.len().saturating_sub(KEEP_RECENT_RESULTS);
-    for (gi, mi, cleared) in clearable.drain(..stale) {
+    // 按所有工具结果确定最近边界，不能把“唯一可回收的旧大结果”误当成最新结果。
+    let recent: HashSet<_> = groups
+        .iter()
+        .enumerate()
+        .flat_map(|(gi, group)| {
+            group
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| m.role == Role::Tool)
+                .map(move |(mi, _)| (gi, mi))
+        })
+        .rev()
+        .take(KEEP_RECENT_RESULTS)
+        .collect();
+    for (gi, mi, cleared) in clearable
+        .into_iter()
+        .filter(|(gi, mi, _)| !recent.contains(&(*gi, *mi)))
+    {
         if total + budget.margin() <= budget.limit() {
             break;
         }
@@ -669,13 +860,18 @@ pub fn build(
             budget.limit(),
             match budget {
                 ContextBudget::Chars(_) => "字符",
-                ContextBudget::Tokens(_) => "token",
+                ContextBudget::Tokens(_) | ContextBudget::TokensWithHints(_, _) => "token",
             }
         )));
     }
     let mut result = vec![message(Role::System, system)];
     result.extend(groups.into_iter().flatten());
-    let tokens = estimate_messages_tokens(&result);
+    let tokens = match budget {
+        ContextBudget::TokensWithHints(_, hints) => {
+            estimate_messages_tokens(&result).saturating_add(hints.message_tokens(&result))
+        }
+        _ => estimate_messages_tokens(&result),
+    };
     Ok(PackedContext {
         messages: result,
         tokens,
@@ -688,6 +884,159 @@ pub fn build(
 mod tests {
     use super::*;
     use crate::model::ToolCall;
+
+    #[test]
+    fn original_observation_uses_available_window_without_changing_its_source_limits() {
+        let mut tool = message(
+            Role::Tool,
+            json!({"truncated":true,"originalChars":80000,"artifactId":"stored"}).to_string(),
+        );
+        tool.tool_call_id = Some("source".into());
+        let mut call = message(Role::Assistant, "");
+        call.tool_calls.push(ToolCall {
+            id: "source".into(),
+            name: "source.read".into(),
+            arguments: json!({}),
+        });
+        let original=json!({"ok":true,"value":{"text":"原文".repeat(40000),"truncated":true,"nextOffset":40000}}).to_string();
+        let mut packed = build(
+            "规则".into(),
+            vec![message(Role::User, "核对资料"), call, tool],
+            ContextBudget::Tokens(100000),
+        )
+        .unwrap();
+        assert_eq!(
+            packed
+                .restore_observations(ContextBudget::Tokens(100000), |_, _| Ok(Some(
+                    original.clone()
+                )))
+                .unwrap(),
+            vec!["source"]
+        );
+        let restored: serde_json::Value =
+            serde_json::from_str(&packed.messages.last().unwrap().content).unwrap();
+        assert_eq!(restored["value"]["truncated"], true);
+        assert_eq!(restored["value"]["nextOffset"], 40000);
+        assert!(packed.tokens < 100000);
+    }
+
+    #[test]
+    fn oversized_or_media_heavy_observation_keeps_its_recoverable_reference() {
+        let reference = "[external-media]";
+        let hints = InputHints {
+            references: BTreeMap::from([(reference.into(), 6000)]),
+            ..Default::default()
+        };
+        let mut tool = message(
+            Role::Tool,
+            json!({"truncated":true,"originalChars":8000,"artifactId":"stored"}).to_string(),
+        );
+        tool.tool_call_id = Some("source".into());
+        let mut packed = PackedContext {
+            messages: vec![tool.clone()],
+            tokens: 0,
+            cleared_results: 0,
+            needs_model_compaction: false,
+        };
+        assert!(
+            packed
+                .restore_observations(ContextBudget::TokensWithHints(4000, &hints), |_, _| Ok(
+                    Some(json!({"ok":true,"value":{"image":reference}}).to_string())
+                ))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(packed.messages[0].content, tool.content);
+        assert!(
+            packed
+                .restore_observations(ContextBudget::Chars(5000), |_, _| Ok(Some(
+                    "x".repeat(8000)
+                )))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(packed.messages[0].tool_call_id, tool.tool_call_id);
+    }
+
+    #[test]
+    fn external_inputs_are_budgeted_and_readonly_results_can_be_recovered() {
+        let reference = "[opaque-input-reference]";
+        let hints = InputHints {
+            references: BTreeMap::from([(reference.into(), 6000)]),
+            reobtainable_tools: HashSet::from(["channel.read".into()]),
+        };
+        let mut history = vec![message(Role::User, "读取资料")];
+        for (id, content) in [("old", reference), ("latest", "最新原文")] {
+            let mut call = message(Role::Assistant, "");
+            call.tool_calls.push(ToolCall {
+                id: id.into(),
+                name: "channel.read".into(),
+                arguments: json!({}),
+            });
+            history.push(call);
+            let mut result = message(
+                Role::Tool,
+                json!({"ok":true,"value":{"content":content}}).to_string(),
+            );
+            result.tool_call_id = Some(id.into());
+            history.push(result);
+        }
+        assert_eq!(hints.message_tokens(&history), 6000);
+        let packed = build(
+            "规则".into(),
+            history,
+            ContextBudget::TokensWithHints(4000, &hints),
+        )
+        .unwrap();
+        assert_eq!(packed.cleared_results, 1);
+        assert!(!packed.needs_model_compaction);
+        assert_eq!(hints.message_tokens(&packed.messages), 0);
+        assert!(
+            packed
+                .messages
+                .iter()
+                .any(|m| m.content.contains("observation.read"))
+        );
+        assert!(
+            packed
+                .messages
+                .iter()
+                .any(|m| m.content.contains("最新原文"))
+        );
+        assert!(!hints.without_references(reference).contains(reference));
+        assert!(
+            build(
+                "规则".into(),
+                vec![message(Role::User, reference)],
+                ContextBudget::TokensWithHints(4000, &hints)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn delivery_keeps_all_source_materials_without_exposing_uncommitted_drafts() {
+        let goal = crate::runtime::contracts::Goal::new("重新回答");
+        let sources = vec![
+            message(Role::Context, "本轮背景"),
+            message(
+                Role::Context,
+                r#"{"kind":"source-reference","replyTo":{"messageId":"quoted-message","text":"此前要求重答的内容"}}"#,
+            ),
+            message(Role::Context, "[内部交付草稿，尚未发送]不应泄露的旧稿"),
+            message(Role::Context, "[交付对象与通道]当前目的地"),
+        ];
+        let view = delivery_view(&sources, &goal).unwrap();
+        assert!(view.iter().any(|m| m.content == "本轮背景"));
+        assert!(view.iter().any(|m| m.content.contains("quoted-message")));
+        assert!(!view.iter().any(|m| m.content.contains("不应泄露的旧稿")));
+        assert_eq!(
+            view.iter()
+                .filter(|m| m.content.starts_with("[交付对象与通道]"))
+                .count(),
+            1
+        );
+    }
 
     #[test]
     fn compaction_cannot_remove_current_human_prohibitions_or_create_new_authority() {

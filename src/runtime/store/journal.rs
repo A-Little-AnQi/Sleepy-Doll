@@ -60,6 +60,181 @@ mod context_activity_tests {
     use super::*;
 
     #[test]
+    fn delivery_observations_use_source_coverage_not_storage_preview() {
+        use crate::model::Role;
+        use crate::runtime::context::message;
+        use sha2::{Digest, Sha256};
+        let journal = deletion_journal();
+        let run = journal
+            .create("核对已读资料", "chat", "coverage-original", 300, None)
+            .unwrap();
+        let call = ToolCall {
+            id: "source-call".into(),
+            name: "read".into(),
+            arguments: json!({}),
+        };
+        let original = json!({"ok":true,"value":{"hasMore":false,"truncated":false,"scope":{"completeQuery":true},"content":"完整来源".repeat(5000)}});
+        journal
+            .record_tool(&run.conversation_id, &call, &original)
+            .unwrap();
+        let mut assistant = message(Role::Assistant, "");
+        assistant.tool_calls.push(call.clone());
+        journal.append_message(&run, &assistant).unwrap();
+        let mut result=message(Role::Tool,json!({"ok":true,"artifactId":format!("{:x}",Sha256::digest(original.to_string().as_bytes())),"truncated":true,"originalChars":original.to_string().len(),"preview":"存储预览","value":{}}).to_string());
+        result.tool_call_id = Some(call.id);
+        journal.append_message(&run, &result).unwrap();
+        let stored = journal.run_history(&run).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&stored.last().unwrap().content).unwrap()["truncated"],
+            true
+        );
+        let observed = journal.run_observations(&run).unwrap();
+        let source: Value = serde_json::from_str(&observed.last().unwrap().content).unwrap();
+        assert_eq!(source, original);
+        assert_eq!(source["value"]["hasMore"], false);
+        assert_eq!(source["value"]["truncated"], false);
+    }
+
+    #[test]
+    fn model_history_defers_old_material_preserves_writes_and_reads_back_with_scope() {
+        use crate::model::Role;
+        use crate::runtime::context::message;
+        let journal = deletion_journal();
+        assert!(matches!(
+            journal.read_artifact("run", "call-not-an-artifact"),
+            Err(Error::Tool(_))
+        ));
+        let mut old = journal
+            .create("先前的真实请求", "chat", "old-material", 300, None)
+            .unwrap();
+        let background = "旧任务背景".repeat(1000);
+        journal.append_message(&old, &message(Role::Context,
+            r#"{"kind":"source-reference","replyTo":{"messageId":"quoted-source","text":"引用原文"}}"#)).unwrap();
+        journal
+            .append_message(&old, &message(Role::Context, &background))
+            .unwrap();
+        let mut calls = message(Role::Assistant, "");
+        calls.tool_calls = vec![
+            ToolCall {
+                id: "old-read".into(),
+                name: "read".into(),
+                arguments: json!({}),
+            },
+            ToolCall {
+                id: "old-write".into(),
+                name: "write".into(),
+                arguments: json!({}),
+            },
+        ];
+        journal.append_message(&old, &calls).unwrap();
+        let original = "完整原始资料".repeat(2000);
+        for (id, text) in [
+            ("old-read", original.as_str()),
+            ("old-write", "不可重复执行的写入回执"),
+        ] {
+            let mut result = message(Role::Tool, text);
+            result.tool_call_id = Some(id.into());
+            journal.append_message(&old, &result).unwrap();
+        }
+        journal.save(&mut old, RunState::Answered).unwrap();
+        let current = journal
+            .create("当前请求", "chat", "current-material", 300, None)
+            .unwrap();
+        journal
+            .append_message(&current, &message(Role::Context, "当前完整背景"))
+            .unwrap();
+        let mut current_call = message(Role::Assistant, "");
+        current_call.tool_calls.push(ToolCall {
+            id: "current-read".into(),
+            name: "read".into(),
+            arguments: json!({}),
+        });
+        journal.append_message(&current, &current_call).unwrap();
+        let mut current_result = message(Role::Tool, "当前完整资料");
+        current_result.tool_call_id = Some("current-read".into());
+        journal.append_message(&current, &current_result).unwrap();
+        let view = journal
+            .model_history(&current, &["read".into()].into_iter().collect())
+            .unwrap();
+        let deferred: Value = serde_json::from_str(
+            &view
+                .iter()
+                .find(|m| m.tool_call_id.as_deref() == Some("old-read"))
+                .unwrap()
+                .content,
+        )
+        .unwrap();
+        assert_eq!(deferred["historicalMaterial"], true);
+        let id = deferred["messageId"].as_i64().unwrap();
+        assert_eq!(
+            journal.read_history_message(&current, id).unwrap()["content"],
+            original
+        );
+        assert!(view.iter().any(|m| m.content == "当前完整资料"));
+        assert!(view.iter().any(|m| m.content == "当前完整背景"));
+        let delivery = journal.delivery_observations(&current).unwrap();
+        let previous: Value =
+            serde_json::from_str(delivery[0].content.split_once('\n').unwrap().1).unwrap();
+        let user = previous
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["text"] == "先前的真实请求")
+            .unwrap();
+        assert_eq!(user["sources"][0]["replyTo"]["messageId"], "quoted-source");
+        assert_eq!(user["sources"][0]["replyTo"]["text"], "引用原文");
+        let locator = delivery
+            .iter()
+            .find(|m| m.content.starts_with("[用户此前最近一次明确引用的对象"))
+            .unwrap();
+        let locator: Value =
+            serde_json::from_str(locator.content.split_once('\n').unwrap().1).unwrap();
+        assert_eq!(locator["userText"], "先前的真实请求");
+        assert_eq!(locator["replyTo"]["messageId"], "quoted-source");
+        assert!(
+            delivery
+                .iter()
+                .any(|m| m.content.contains("先前的真实请求"))
+        );
+        assert!(delivery.iter().any(|m| m.content == "当前完整背景"));
+        assert!(delivery.iter().any(|m| m.content == "当前完整资料"));
+        assert!(!delivery.iter().any(|m| m.content == background));
+        assert!(view.iter().any(|m| m.content == "不可重复执行的写入回执"));
+        assert!(
+            view.iter()
+                .any(|m| m.role == Role::User && m.content == "先前的真实请求")
+        );
+        assert!(
+            !view
+                .iter()
+                .any(|m| m.content == background || m.content == original)
+        );
+        assert!(
+            journal
+                .history(&current)
+                .unwrap()
+                .iter()
+                .any(|m| m.content == original)
+        );
+        let other = journal
+            .create("其他会话", "other-chat", "other-material", 300, None)
+            .unwrap();
+        assert!(journal.read_history_message(&other, id).is_err());
+        assert!(journal.read_history_message(&old, id + 1000).is_err());
+        let current_id = journal
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT MAX(id) FROM messages WHERE content='当前完整资料'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert!(journal.read_history_message(&old, current_id).is_err());
+    }
+
+    #[test]
     fn interrupt_submission_rolls_back_when_model_binding_fails() {
         let journal = deletion_journal();
         journal
@@ -577,6 +752,31 @@ impl Journal {
             shortcut_reference,
             RunSource::Agent,
             None,
+            None,
+        )
+    }
+
+    pub fn create_with_context(
+        &self,
+        prompt: &str,
+        context: &str,
+        conversation: &str,
+        key: &str,
+        duration: i64,
+        model_id: Option<&str>,
+    ) -> Result<Run> {
+        self.create_sourced(
+            prompt,
+            conversation,
+            key,
+            duration,
+            model_id,
+            false,
+            None,
+            None,
+            RunSource::Agent,
+            None,
+            Some(context),
         )
     }
 
@@ -593,6 +793,7 @@ impl Journal {
         shortcut_reference: Option<&str>,
         source: RunSource,
         initial_plan: Option<&PlanRevision>,
+        context: Option<&str>,
     ) -> Result<Run> {
         let mut db = self.connection.lock().unwrap();
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -679,6 +880,13 @@ impl Journal {
                 serde_json::to_string(&run)?
             ],
         )?;
+        if let Some(context) = context.filter(|value| !value.trim().is_empty()) {
+            Self::append_message_in(
+                &tx,
+                &run,
+                &crate::runtime::context::message(crate::model::Role::Context, context),
+            )?;
+        }
         tx.execute(
             "INSERT INTO messages(conversation_id,role,content,created_at) VALUES(?1,'user',?2,?3)",
             params![conversation, prompt, stamp],
@@ -707,6 +915,11 @@ impl Journal {
             RunSource::SavedWorkflow {
                 workflow_id,
                 workflow_revision,
+            }
+            | RunSource::BoundWorkflow {
+                workflow_id,
+                workflow_revision,
+                ..
             } => {
                 goal.inputs[0].origin = InputOrigin::ShortcutClick {
                     task_id: workflow_id.clone(),
@@ -864,6 +1077,16 @@ impl Journal {
                 "received",
             ),
             Err(Error::Cancelled) => (None, None, 0, true, "cancelledUsageUnknown"),
+            Err(Error::OutputBudget {
+                input_tokens,
+                output_tokens,
+            }) => (
+                (*input_tokens > 0).then_some(*input_tokens),
+                (*output_tokens > 0).then_some(*output_tokens),
+                0,
+                *input_tokens == 0 || *output_tokens == 0,
+                "outputBudgetExhausted",
+            ),
             Err(_) => (None, None, 0, true, "failedUsageUnknown"),
         };
         self.connection.lock().unwrap().execute("UPDATE runtime_model_requests SET input_tokens=COALESCE(?2,input_tokens),output_tokens=COALESCE(?3,output_tokens),cache_read_tokens=?4,estimated=?5,outcome=?6,finished_at=?7 WHERE id=?1",params![id,input,output,cache,estimated,outcome,now()])?;
@@ -1652,6 +1875,7 @@ impl Journal {
              WHERE (?1=1 OR c.archived_at IS NULL)
                AND c.id NOT LIKE 'task-%'
                AND c.id NOT LIKE 'shortcut-config-%'
+               AND c.id NOT LIKE 'scheduled-%'
                AND (?2 IS NULL OR instr(lower(c.title),?2)>0)
              ORDER BY c.updated_at DESC
              LIMIT ?3 OFFSET ?4",
@@ -1906,6 +2130,43 @@ impl Journal {
         Ok(())
     }
 
+    pub fn latest_run_event_data(&self, run: &Run, kind: &str) -> Result<Option<Value>> {
+        let text: Option<String> = self.connection.lock().unwrap().query_row(
+            "SELECT data FROM runtime_events WHERE run_id=?1 AND kind=?2 ORDER BY sequence DESC LIMIT 1",
+            params![run.id,kind], |row|row.get(0),
+        ).optional()?;
+        text.map(|value| serde_json::from_str(&value).map_err(Error::from))
+            .transpose()
+    }
+
+    /// 只读取当前会话且位于本次运行边界内的原始观测，不重新执行工具。
+    pub fn read_observation_artifact(
+        &self,
+        run: &Run,
+        call_id: &str,
+        artifact_id: &str,
+    ) -> Result<Option<String>> {
+        use sha2::{Digest, Sha256};
+        let connection = self.connection.lock().unwrap();
+        let mut statement=connection.prepare("SELECT DISTINCT t.result_json FROM tool_calls t JOIN messages m ON m.conversation_id=t.conversation_id AND m.tool_call_id=t.call_id AND m.role='tool' LEFT JOIN runtime_message_owners o ON o.message_id=m.id LEFT JOIN runtime_runs r ON r.id=o.run_id WHERE t.conversation_id=?1 AND t.call_id=?2 AND CASE WHEN json_valid(m.content) THEN json_extract(m.content,'$.artifactId') END=?3 AND COALESCE(json_extract(r.payload,'$.messageBoundary'),m.id)<=?4")?;
+        let rows = statement.query_map(
+            params![
+                run.conversation_id,
+                call_id,
+                artifact_id,
+                run.message_boundary
+            ],
+            |row| row.get::<_, String>(0),
+        )?;
+        for row in rows {
+            let text = row?;
+            if format!("{:x}", Sha256::digest(text.as_bytes())) == artifact_id {
+                return Ok(Some(text));
+            }
+        }
+        Ok(None)
+    }
+
     /// 只读取当前会话且位于本次运行边界内的原始观测，不重新执行工具。
     pub fn read_observation(&self, run: &Run, call_id: &str) -> Result<String> {
         self.connection.lock().unwrap().query_row(
@@ -1915,6 +2176,23 @@ impl Journal {
     }
 
     pub fn history(&self, run: &Run) -> Result<Vec<crate::model::Message>> {
+        self.projected_history(run, None)
+    }
+
+    /// 旧轮次的资料保留定位，原文仍可回读；本轮读取和写入回执不缩减。
+    pub fn model_history(
+        &self,
+        run: &Run,
+        read_only: &std::collections::HashSet<String>,
+    ) -> Result<Vec<crate::model::Message>> {
+        self.projected_history(run, Some(read_only))
+    }
+
+    fn projected_history(
+        &self,
+        run: &Run,
+        read_only: Option<&std::collections::HashSet<String>>,
+    ) -> Result<Vec<crate::model::Message>> {
         let (summary, entries) = self.history_window(run)?;
         let mut messages = summary
             .as_ref()
@@ -1953,8 +2231,57 @@ impl Journal {
                 ));
             }
         }
-        messages.extend(entries.into_iter().map(|entry| entry.message));
+        let calls = entries
+            .iter()
+            .flat_map(|entry| &entry.message.tool_calls)
+            .map(|call| (call.id.clone(), call.name.clone()))
+            .collect::<std::collections::HashMap<_, _>>();
+        messages.extend(entries.into_iter().map(|entry| {
+            let mut message=entry.message;
+            if entry.sort_key < run.message_boundary && let Some(read_only)=read_only {
+                let old_read=message.role==crate::model::Role::Tool
+                    && message.tool_call_id.as_ref().and_then(|id|calls.get(id)).is_some_and(|name|read_only.contains(name));
+                // 来源定位不是大段旧资料。保留宿主提供的消息/引用关系，
+                // 追问才能找到原对象；正文和工具观测仍按需回读。
+                let source_reference = message.role==crate::model::Role::Context
+                    && serde_json::from_str::<Value>(&message.content)
+                        .is_ok_and(|value| value["kind"] == "source-reference");
+                if old_read || message.role==crate::model::Role::Context && !source_reference {
+                    let evidence=if old_read {
+                        serde_json::from_str::<Value>(&message.content).ok().map(|value|
+                            crate::runtime::context::tool_evidence(&value["value"]))
+                    }else{None};
+                    message.content=json!({"historicalMaterial":true,"messageId":entry.id,
+                        "callId":message.tool_call_id,"recoverWith":"history.read",
+                        "value":evidence,
+                        "note":"这是较早任务的资料定位，不是当前观测或新增请求；需要其中的事实时按messageId回读原文。"}).to_string();
+                }
+            }
+            message
+        }));
         Ok(messages)
+    }
+
+    pub fn read_history_message(&self, run: &Run, id: i64) -> Result<Value> {
+        let mut result=self.connection.lock().unwrap().query_row(
+            "SELECT m.role,m.content,m.tool_call_id FROM messages m
+             LEFT JOIN runtime_message_owners o ON o.message_id=m.id
+             LEFT JOIN runtime_runs r ON r.id=o.run_id
+             WHERE m.id=?1 AND m.conversation_id=?2
+               AND COALESCE(json_extract(r.payload,'$.messageBoundary'),m.id)<=?3",
+            params![id,run.conversation_id,run.message_boundary],
+            |row|Ok(json!({"messageId":id,"role":row.get::<_,String>(0)?,"content":row.get::<_,String>(1)?,"callId":row.get::<_,Option<String>>(2)?,"historical":true})),
+        ).optional()?.ok_or_else(||Error::Tool("历史资料不存在或超出当前会话边界".into()))?;
+        if result["role"] == "tool"
+            && let (Some(call_id), Some(content)) =
+                (result["callId"].as_str(), result["content"].as_str())
+            && let Ok(value) = serde_json::from_str::<Value>(content)
+            && let Some(artifact_id) = value["artifactId"].as_str()
+            && let Some(original) = self.read_observation_artifact(run, call_id, artifact_id)?
+        {
+            result["content"] = json!(original);
+        }
+        Ok(result)
     }
 
     /// 本次运行的原始观测，不受模型上下文压缩影响。
@@ -1986,6 +2313,79 @@ impl Journal {
                 })
             })
             .collect()
+    }
+
+    /// 交付索引基于来源结果，不能把持久化预览的截断误当成来源未读完。
+    /// 交付复核保留此前交流的来源，不能只看当前一句省略了对象的追问。
+    /// 旧交流始终是背景，当前任务仍由 Goal 的真实用户输入决定。
+    pub fn delivery_observations(&self, run: &Run) -> Result<Vec<crate::model::Message>> {
+        let (_, entries) = self.history_window(run)?;
+        let mut previous: Vec<Value> = Vec::new();
+        for entry in entries
+            .iter()
+            .filter(|entry| entry.sort_key < run.message_boundary)
+        {
+            let m = &entry.message;
+            if m.role == crate::model::Role::Context
+                && let Ok(reference) = serde_json::from_str::<Value>(&m.content)
+                && reference["kind"] == "source-reference"
+            {
+                // 来源关系与其紧邻的真实用户输入一起呈现，避免 JSON 字符串
+                // 再次转义，以及把引用误当成和上一句无关的独立材料。
+                if let Some(user) = previous.last_mut().filter(|v| v["role"] == "user") {
+                    let sources = user
+                        .as_object_mut()
+                        .unwrap()
+                        .entry("sources")
+                        .or_insert_with(|| json!([]));
+                    sources.as_array_mut().unwrap().push(reference);
+                } else {
+                    previous.push(json!({"role":"context","sourceReference":reference}));
+                }
+            } else if m.role == crate::model::Role::User
+                || m.role == crate::model::Role::Assistant
+                    && m.tool_calls.is_empty()
+                    && !m.content.trim().is_empty()
+            {
+                previous.push(json!({"role":m.role,"text":m.content,"journalMessageId":entry.id}));
+            }
+        }
+        let mut result = Vec::new();
+        if !previous.is_empty() {
+            result.push(crate::runtime::context::message(crate::model::Role::Context,
+                format!("[此前真实交流，仅用于理解指代和更正；旧请求不新增本轮任务，旧机器人答复不是事实依据]\n{}", serde_json::to_string(&previous)?)));
+        }
+        if let Some((user, reference)) = previous.iter().rev().find_map(|user| {
+            let source = user
+                .get("sources")?
+                .as_array()?
+                .iter()
+                .rev()
+                .find(|source| source.get("replyTo").is_some())?;
+            Some((user, source))
+        }) {
+            result.push(crate::runtime::context::message(crate::model::Role::Context,
+                format!("[用户此前最近一次明确引用的对象；仅作来源定位，当前任务仍由本轮最新原话决定，机器人自己的旧话题不能替代用户引用]\n{}",
+                    json!({"userText":user["text"],"source":reference["source"],"replyTo":reference["replyTo"]}))));
+        }
+        result.extend(self.run_observations(run)?);
+        Ok(result)
+    }
+
+    pub fn run_observations(&self, run: &Run) -> Result<Vec<crate::model::Message>> {
+        let mut history = self.run_history(run)?;
+        for message in &mut history {
+            if message.role == crate::model::Role::Tool
+                && let Some(call_id) = message.tool_call_id.as_deref()
+                && let Ok(value) = serde_json::from_str::<Value>(&message.content)
+                && value["truncated"] == true
+                && let Some(artifact_id) = value["artifactId"].as_str()
+                && let Some(original) = self.read_observation_artifact(run, call_id, artifact_id)?
+            {
+                message.content = original;
+            }
+        }
+        Ok(history)
     }
 
     pub fn history_window(
@@ -2419,11 +2819,11 @@ impl Journal {
         Ok(id)
     }
     pub fn read_artifact(&self, run: &str, id: &str) -> Result<String> {
-        Ok(self.connection.lock().unwrap().query_row(
+        self.connection.lock().unwrap().query_row(
             "SELECT content FROM runtime_artifacts WHERE id=?1 AND run_id=?2",
             params![id, run],
             |r| r.get(0),
-        )?)
+        ).optional()?.ok_or_else(||Error::Tool("资料不存在或不属于当前运行；callId应使用observation.read，artifact.read只接受artifactId。".into()))
     }
     pub fn plan(&self, run: &str) -> Result<Option<PlanRevision>> {
         let s: Option<String> = self
@@ -2660,6 +3060,7 @@ impl Journal {
                 strategy_id: strategy.id.clone(),
             },
             Some(&strategy.plan),
+            None,
         )
     }
     pub fn create_workflow_run(
@@ -2683,6 +3084,35 @@ impl Journal {
                 workflow_id: task_id.into(),
                 workflow_revision: revision,
             },
+            None,
+            None,
+        )
+    }
+
+    pub(crate) fn create_bound_workflow_run(
+        &self,
+        snapshot: crate::runtime::operation::task::WorkflowRevision,
+        origin: &str,
+        scope_hash: &str,
+        duration: i64,
+    ) -> Result<Run> {
+        self.create_sourced(
+            &format!("定时执行：{}", snapshot.name),
+            &format!("scheduled-{origin}"),
+            &format!("scheduled-{origin}"),
+            duration,
+            None,
+            false,
+            None,
+            None,
+            RunSource::BoundWorkflow {
+                workflow_id: snapshot.task_id.clone(),
+                workflow_revision: snapshot.revision,
+                origin: origin.into(),
+                scope_hash: scope_hash.into(),
+                snapshot: Box::new(snapshot),
+            },
+            None,
             None,
         )
     }

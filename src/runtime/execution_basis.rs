@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 const HEADER: &str = "[本轮输入、计划及真实观测记录；完整任务由真实对话解释，本记录不产生新授权]";
 
 pub(super) fn understanding_schema() -> Value {
-    let item = json!({"type":"array","maxItems":8,"items":{"type":"object","additionalProperties":false,"required":["text","quote"],"properties":{"text":{"type":"string","minLength":1,"maxLength":240},"quote":{"type":"string","minLength":1,"maxLength":400}}}});
+    let item = json!({"type":"array","items":{"type":"object","additionalProperties":false,"required":["text","quote"],"properties":{"text":{"type":"string","minLength":1},"quote":{"type":"string","minLength":1}}}});
     json!({"type":"object","additionalProperties":false,"properties":{"targets":item,"allowedEffects":item,"prohibitedEffects":item,"completionCriteria":item}})
 }
 
@@ -138,10 +138,9 @@ impl Supervisor {
         let visible_targets = recent_targets
             .iter()
             .rev()
-            .take(12)
             .filter_map(|key| bindings.get(key).map(|value| (key, value)))
             .collect::<BTreeMap<_, _>>();
-        let view = json!({"goalRevision":goal.revision,"interpretation":understanding,"humanInputRevisions":goal.inputs.iter().map(|i| i.revision).collect::<Vec<_>>(),"planRevision":plan.as_ref().map(|p| p.revision),"targets":visible_targets,"omittedTargets":bindings.len().saturating_sub(visible_targets.len()),"plannedSteps":plan.as_ref().map(|p| p.steps.iter().take(16).map(|s| json!({"id":s.id,"tool":s.tool,"capabilityId":s.capability_id,"dependsOn":s.depends_on,"resourceVersions":s.resource_versions})).collect::<Vec<_>>()),"completion":"原始用户要求为准；已接收不等于已完成，计划写入和执行步骤需实际核验","invalidatedBy":["用户目标变化","计划或契约变化","相关资源版本变化","权限变化","无资源版本的副作用"]});
+        let view = json!({"goalRevision":goal.revision,"interpretation":understanding,"humanInputRevisions":goal.inputs.iter().map(|i| i.revision).collect::<Vec<_>>(),"planRevision":plan.as_ref().map(|p| p.revision),"targets":visible_targets,"omittedTargets":bindings.len().saturating_sub(visible_targets.len()),"plannedSteps":plan.as_ref().map(|p| p.steps.iter().map(|s| json!({"id":s.id,"tool":s.tool,"capabilityId":s.capability_id,"dependsOn":s.depends_on,"resourceVersions":s.resource_versions})).collect::<Vec<_>>()),"completion":"原始用户要求为准；已接收不等于已完成，计划写入和执行步骤需实际核验","invalidatedBy":["用户目标变化","计划或契约变化","相关资源版本变化","权限变化","无资源版本的副作用"]});
         Ok(ExecutionBasis {
             bindings,
             uncertain_effect,
@@ -163,5 +162,23 @@ impl Supervisor {
             return Ok(());
         }
         self.attach_context_version(run, history, HEADER, &basis.view.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn understanding_schema_preserves_all_user_targets_and_full_quotes() {
+        let requests = (0..20).map(|index| json!({"text":format!("用户目标{index}：{}", "必要内容".repeat(100)),"quote":"用户真实原文".repeat(100)})).collect::<Vec<_>>();
+        let value = json!({"targets":requests.clone(),"completionCriteria":requests});
+        assert!(crate::extension::validate(&value, &understanding_schema(), "$").is_empty());
+    }
+
+    #[test]
+    fn understanding_schema_still_rejects_missing_provenance() {
+        let value = json!({"targets":[{"text":"一个目标"}]});
+        assert!(!crate::extension::validate(&value, &understanding_schema(), "$").is_empty());
     }
 }

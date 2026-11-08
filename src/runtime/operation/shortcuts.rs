@@ -1,5 +1,5 @@
 //! A shortcut stores concrete calls in execution order, without a model at run time.
-use super::task::{FailurePolicy, TaskNode, ToolCatalog, ToolNode};
+use super::task::{FailurePolicy, MAX_WAIT_SECONDS, TaskNode, ToolCatalog, ToolNode, WaitNode};
 use crate::{
     error::{Error, Result},
     extension::ToolEffect,
@@ -34,14 +34,17 @@ pub struct ShortcutStep {
     pub title: String,
     #[serde(default)]
     pub prepare: Vec<ShortcutCall>,
-    pub action: ShortcutCall,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<ShortcutCall>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_seconds: Option<u64>,
 }
 
 pub fn schema() -> Value {
     let call = json!({"type":"object","properties":{"tool":{"type":"string","minLength":1,"description":"当前 Agent 工具目录中的 canonical 名称；不是应用接口标识、SDK 别名或显示名称。"},"arguments":{"type":"object","description":"该工具的完整参数对象，保留外层封装与应用接口参数的层级。"}},"required":["tool","arguments"],"additionalProperties":false});
     json!({"type":"object","properties":{
         "id":{"type":"string"},"name":{"type":"string","minLength":1},"description":{"type":"string"},
-        "binding":{"type":"object","properties":{"action":call,"steps":{"type":"array","minItems":1,"items":{"type":"object","properties":{"title":{"type":"string","minLength":1},"prepare":{"type":"array","items":call,"maxItems":4},"action":call},"required":["title","action"],"additionalProperties":false}},"prepare":{"type":"array","items":call,"maxItems":4},"targetName":{"type":"string"},"applicationName":{"type":"string"}},"required":["targetName","applicationName"],"oneOf":[{"required":["action"],"not":{"required":["steps"]}},{"required":["steps"],"not":{"required":["action"]}}],"additionalProperties":false}
+        "binding":{"type":"object","properties":{"action":call,"steps":{"type":"array","minItems":1,"items":{"type":"object","properties":{"title":{"type":"string","minLength":1},"prepare":{"type":"array","items":call,"maxItems":4},"action":call,"waitSeconds":{"type":"integer","minimum":1,"maximum":MAX_WAIT_SECONDS,"description":"固定等待秒数；与 action 二选一，等待结束再执行后续步骤，可取消。"}},"required":["title"],"oneOf":[{"required":["action"],"not":{"required":["waitSeconds"]}},{"required":["waitSeconds"],"not":{"required":["action"]},"properties":{"prepare":{"maxItems":0}}}],"additionalProperties":false}},"prepare":{"type":"array","items":call,"maxItems":4},"targetName":{"type":"string"},"applicationName":{"type":"string"}},"required":["targetName","applicationName"],"oneOf":[{"required":["action"],"not":{"required":["steps"]}},{"required":["steps"],"not":{"required":["action"]}}],"additionalProperties":false}
     },"required":["name","binding"],"additionalProperties":false})
 }
 pub fn schema_for_tools(names: impl IntoIterator<Item = String>) -> Value {
@@ -107,6 +110,30 @@ pub fn nodes(binding: &ShortcutBinding, catalog: &ToolCatalog) -> Result<Vec<Tas
         if step.title.trim().is_empty() {
             return Err(Error::Config("请指定每个步骤的名称".into()));
         }
+        if let Some(seconds) = step.wait_seconds {
+            if step.action.is_some()
+                || !step.prepare.is_empty()
+                || !(1..=MAX_WAIT_SECONDS).contains(&seconds)
+            {
+                return Err(Error::Config(format!(
+                    "等待步骤只接受 1–{MAX_WAIT_SECONDS} 秒，不能同时包含工具调用"
+                )));
+            }
+            nodes.push(TaskNode::Wait(WaitNode {
+                id: format!("step-{at}"),
+                title: step.title.clone(),
+                seconds: Some(seconds),
+                until: None,
+                probe: None,
+                check_seconds: seconds.min(5),
+                timeout_seconds: None,
+            }));
+            continue;
+        }
+        let action = step
+            .action
+            .as_ref()
+            .ok_or_else(|| Error::Config("步骤需要工具调用或等待时长".into()))?;
         preparation(
             &mut nodes,
             &format!("step-{at}-prepare"),
@@ -117,7 +144,7 @@ pub fn nodes(binding: &ShortcutBinding, catalog: &ToolCatalog) -> Result<Vec<Tas
             &mut nodes,
             format!("step-{at}"),
             &step.title,
-            &step.action,
+            action,
             catalog,
         )?;
     }
@@ -211,6 +238,33 @@ mod tests {
     use super::*;
     use crate::extension::ToolExecution;
     use crate::runtime::operation::task::ToolContract;
+    #[test]
+    fn fixed_wait_steps_are_composable_and_reject_ambiguous_or_invalid_steps() {
+        let mut catalog = ToolCatalog::new();
+        read_only_catalog(&mut catalog, &["plugin.run"]);
+        let step = json!({"title":"等待十秒","waitSeconds":10});
+        let input = |step: Value| json!({"name":"顺序任务","binding":{"applicationName":"App","targetName":"有序任务","steps":[{"title":"前一项","action":{"tool":"plugin.run","arguments":{}}},step,{"title":"后一项","action":{"tool":"plugin.run","arguments":{}}}]}});
+        let value = input(step.clone());
+        assert!(crate::extension::validate(&value, &schema(), "$").is_empty());
+        let binding: ShortcutBinding = serde_json::from_value(value["binding"].clone()).unwrap();
+        let compiled = nodes(&binding, &catalog).unwrap();
+        assert!(matches!(&compiled[0], TaskNode::Tool(_)));
+        assert!(matches!(&compiled[1],TaskNode::Wait(wait) if wait.seconds == Some(10)));
+        assert!(matches!(&compiled[2], TaskNode::Tool(_)));
+        for step in [
+            json!({"title":"缺少动作"}),
+            json!({"title":"零秒","waitSeconds":0}),
+            json!({"title":"过长","waitSeconds":86401}),
+            json!({"title":"混用","waitSeconds":10,"action":{"tool":"plugin.run","arguments":{}}}),
+            json!({"title":"准备混用","waitSeconds":10,"prepare":[{"tool":"plugin.run","arguments":{}}]}),
+        ] {
+            let value = input(step);
+            assert!(!crate::extension::validate(&value, &schema(), "$").is_empty());
+            let binding: ShortcutBinding =
+                serde_json::from_value(value["binding"].clone()).unwrap();
+            assert!(nodes(&binding, &catalog).is_err());
+        }
+    }
     #[test]
     fn binding_rejects_write_preparation_and_old_job_identity() {
         let mut catalog = ToolCatalog::new();
@@ -392,7 +446,8 @@ mod tests {
             vec![ShortcutStep {
                 title: "第二段".into(),
                 prepare: vec![],
-                action: call("plugin.run"),
+                action: Some(call("plugin.run")),
+                wait_seconds: None,
             }],
         );
         // 动作与步骤混用拒绝。
@@ -403,17 +458,20 @@ mod tests {
             ShortcutStep {
                 title: "第一段".into(),
                 prepare: vec![call("plugin.read")],
-                action: call("plugin.run"),
+                action: Some(call("plugin.run")),
+                wait_seconds: None,
             },
             ShortcutStep {
                 title: "第二段".into(),
                 prepare: vec![call("plugin.read")],
-                action: call("plugin.run"),
+                action: Some(call("plugin.run")),
+                wait_seconds: None,
             },
             ShortcutStep {
                 title: "第三段".into(),
                 prepare: vec![],
-                action: call("plugin.run"),
+                action: Some(call("plugin.run")),
+                wait_seconds: None,
             },
         ];
         let compiled = nodes(&binding, &catalog).unwrap();

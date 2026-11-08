@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    error::Result,
+    error::{Error, Result},
     extension::{ToolEffect, ToolExecution},
 };
 
@@ -309,7 +309,7 @@ pub struct ToolNode {
     pub capability_id: Option<String>,
     pub arguments: Value,
     #[serde(default)]
-    pub execution: Option<ToolExecution>,
+    pub execution: Option<Box<ToolExecution>>,
     #[serde(default)]
     pub provider_version: Option<String>,
     #[serde(default)]
@@ -535,6 +535,26 @@ pub struct WorkflowRevision {
     pub created_at: String,
 }
 
+/// 绑定实际调用及可信本地工具契约；运行时重读后逐项核对，不以模型的权限声明放行。
+pub fn bound_fingerprint(
+    revision: &WorkflowRevision,
+    definitions: &[crate::extension::ToolDefinition],
+) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut contracts = Vec::new();
+    for name in super::task_store::tool_names(&revision.nodes) {
+        let definition = definitions
+            .iter()
+            .find(|tool| tool.name == name)
+            .ok_or_else(|| Error::Conflict(format!("绑定工具不可用：{name}")))?;
+        contracts.push(definition);
+    }
+    Ok(format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&(revision, contracts))?)
+    ))
+}
+
 /// 定义状态机的可见形态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -544,8 +564,6 @@ pub enum DefinitionState {
     ReadyUnverified,
     ReadyVerified,
     Unavailable,
-    Archived,
-    Deleted,
 }
 
 impl DefinitionState {
@@ -556,8 +574,6 @@ impl DefinitionState {
             Self::ReadyUnverified => "可运行 · 尚未实机验证",
             Self::ReadyVerified => "可运行",
             Self::Unavailable => "需要连接工具",
-            Self::Archived => "已归档",
-            Self::Deleted => "已删除",
         }
     }
     pub fn action(self) -> &'static str {
@@ -566,8 +582,6 @@ impl DefinitionState {
             Self::Invalid => "查看原因",
             Self::ReadyUnverified | Self::ReadyVerified => "运行",
             Self::Unavailable => "连接工具",
-            Self::Archived => "恢复",
-            Self::Deleted => "",
         }
     }
     pub fn runnable(self) -> bool {
@@ -592,10 +606,6 @@ pub struct WorkflowDefinition {
     pub published_revision: Option<u64>,
     #[serde(default)]
     pub draft_revision: Option<u64>,
-    #[serde(default)]
-    pub archived_at: Option<String>,
-    #[serde(default)]
-    pub deleted_at: Option<String>,
     #[serde(default)]
     pub pinned: bool,
     #[serde(default)]
@@ -735,7 +745,7 @@ fn bind_contracts(nodes: &mut [TaskNode], catalog: &ToolCatalog) {
             TaskNode::Tool(tool) => {
                 if let Some(contract) = tool.tool.as_deref().and_then(|name| catalog.get(name)) {
                     if tool.execution.is_none() {
-                        tool.execution = Some(contract.execution.clone());
+                        tool.execution = Some(Box::new(contract.execution.clone()));
                     }
                     // 已绑定的版本是修订的一部分，重新编译不覆盖。
                     if tool.provider_version.is_none() {
@@ -756,7 +766,7 @@ fn bind_contracts(nodes: &mut [TaskNode], catalog: &ToolCatalog) {
                     && let Some(contract) = probe.tool.as_deref().and_then(|name| catalog.get(name))
                 {
                     if probe.execution.is_none() {
-                        probe.execution = Some(contract.execution.clone());
+                        probe.execution = Some(Box::new(contract.execution.clone()));
                     }
                     if probe.provider_version.is_none() {
                         probe.provider_version = contract.provider_version.clone();

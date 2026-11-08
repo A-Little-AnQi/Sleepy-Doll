@@ -90,10 +90,20 @@ pub(super) fn openai_chat_body(
     if let Some(value) = &config.options.reasoning_effort {
         body["reasoning_effort"] = json!(value);
     }
+    if let Some(value) = &config.options.thinking {
+        body["thinking"] = value.clone();
+    }
     body
 }
 
 pub(super) fn apply_reasoning_options(config: &ModelConfig, body: &mut Value) -> Result<()> {
+    if let Some(thinking) = &config.options.thinking
+        && (config.protocol != ModelProtocol::OpenaiChat || !thinking.is_object())
+    {
+        return Err(Error::Config(
+            "thinking选项需要OpenAI兼容Chat协议和对象参数".into(),
+        ));
+    }
     let Some(effort) = &config.options.reasoning_effort else {
         return Ok(());
     };
@@ -915,6 +925,27 @@ mod tests {
             .body(&[wrong_protocol], &[])
             .unwrap();
         assert!(glm["messages"][0].get("reasoning_content").is_none());
+    }
+
+    #[test]
+    fn explicit_thinking_options_are_preserved_without_changing_effort_or_defaults() {
+        let mut model = config("same-model", ModelProtocol::OpenaiChat);
+        let initial = ProtocolModel::new(model.clone()).body(&[], &[]).unwrap();
+        assert!(initial.get("thinking").is_none());
+        let thinking = json!({"type":"enabled","clear_thinking":false});
+        model.options.thinking = Some(thinking.clone());
+        for effort in ["low", "max"] {
+            model.options.reasoning_effort = Some(effort.into());
+            let body = ProtocolModel::new(model.clone()).body(&[], &[]).unwrap();
+            assert_eq!(body["thinking"], thinking);
+            assert_eq!(body["reasoning_effort"], effort);
+            assert_eq!(body["model"], "same-model");
+        }
+        model.protocol = ModelProtocol::OpenaiResponses;
+        assert!(matches!(
+            ProtocolModel::new(model).body(&[], &[]),
+            Err(Error::Config(_))
+        ));
     }
 
     #[test]

@@ -9,7 +9,8 @@
 //! - 目录遍历用 canonical 集合防 junction/symlink 循环；symlink 本身一律
 //!   跳过并记录在 `skipped` 中，不会被当作文件打开。
 //! - read 的 `text` 是原文的行切片：CRLF、末尾换行原样保留；预算截断可能
-//!   切在半行，此时 `nextLine` 指向该半行所在行号（重读有重叠，不跳不漏）。
+//!   切在半行；`nextCursor` 保留行内字符位置及文件校验值，可无重叠续读。
+//!   `nextLine` 保留旧接口语义，仍指向半行所在行号。
 
 use crate::error::{Error, Result};
 use regex::{Regex, RegexBuilder};
@@ -124,18 +125,33 @@ fn sha256_hex(bytes: &[u8]) -> String {
     h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// 读单个已解析文件并组装 JSON 结果；预算与分页参数由调用方给出。
-/// `max_chars` 允许为 0（batch 预算耗尽时）：返回空 text 且 truncated。
-fn read_file_value(
-    path_label: &str,
-    abs: &Path,
+struct ReadPage<'a> {
     start_line: usize,
+    start_column: usize,
     max_lines: Option<usize>,
     tail_lines: Option<usize>,
     max_chars: usize,
-) -> Result<Value> {
+    expected_sha: Option<&'a str>,
+}
+
+/// 读单个已解析文件并组装 JSON 结果；预算与分页参数由调用方给出。
+/// `max_chars` 允许为 0（batch 预算耗尽时）：返回空 text 且 truncated。
+fn read_file_value(path_label: &str, abs: &Path, page: ReadPage<'_>) -> Result<Value> {
+    let ReadPage {
+        start_line,
+        start_column,
+        max_lines,
+        tail_lines,
+        max_chars,
+        expected_sha,
+    } = page;
     let bytes = fs::read(abs).map_err(|e| tool_err(format!("读取 {} 失败：{e}", abs.display())))?;
     let sha256 = sha256_hex(&bytes);
+    if expected_sha.is_some_and(|expected| !expected.eq_ignore_ascii_case(&sha256)) {
+        return Err(tool_err(
+            "文件已变化，旧续读游标失效；请重新读取，不要拼接不同版本的正文",
+        ));
+    }
     let text_full = decode_bytes(&bytes);
     let chars = text_full.chars().count();
     let lines = raw_lines(&text_full);
@@ -154,6 +170,7 @@ fn read_file_value(
     let mut used = 0usize;
     let mut last_returned = 0usize;
     let mut char_resume_line = 0usize;
+    let mut char_resume_column = 1usize;
     let mut chars_truncated = false;
     let mut lines_truncated = false;
     for (idx, line) in lines.iter().enumerate() {
@@ -165,20 +182,32 @@ fn read_file_value(
             lines_truncated = true;
             break;
         }
-        let need = line.chars().count();
+        let skip = if no == start {
+            start_column.saturating_sub(1)
+        } else {
+            0
+        };
+        let line_chars = line.chars().count();
+        if skip > line_chars {
+            return Err(tool_err(
+                "读取列超出该行；startColumn 按 Unicode 字符从 1 起算",
+            ));
+        }
+        let need = line_chars - skip;
         if used + need > max_chars {
             let room = max_chars.saturating_sub(used);
             if room > 0 {
-                out_text.push_str(&line.chars().take(room).collect::<String>());
+                out_text.extend(line.chars().skip(skip).take(room));
+                used += room;
                 last_returned = no;
             }
-            // 无论截半还是整行装不下，续读都从当前行 no 开始：
-            // 截半时重叠重读该行，预算恰好耗尽时从这条未读整行继续。
+            // 记录确切的下一个 Unicode 字符；即使一行大于单页预算也能推进。
             char_resume_line = no;
+            char_resume_column = skip + room + 1;
             chars_truncated = true;
             break;
         }
-        out_text.push_str(line);
+        out_text.extend(line.chars().skip(skip));
         used += need;
         last_returned = no;
     }
@@ -200,6 +229,16 @@ fn read_file_value(
     } else {
         json!(last_returned + 1)
     };
+    let next_column = if chars_truncated {
+        char_resume_column
+    } else {
+        1
+    };
+    let next_cursor = next_line.as_u64().map(|line| {
+        json!({
+            "startLine":line,"startColumn":next_column,"sha256":sha256,
+        })
+    });
 
     Ok(json!({
         "ok": true,
@@ -210,8 +249,11 @@ fn read_file_value(
         "chars": chars,
         "totalLines": total_lines,
         "returnedStartLine": start,
+        "returnedStartColumn": start_column,
         "returnedLines": returned_lines,
+        "returnedChars": used,
         "nextLine": next_line,
+        "nextCursor": next_cursor,
         "truncated": chars_truncated || lines_truncated,
         "text": out_text,
     }))
@@ -231,13 +273,40 @@ pub fn read(root: &Path, args: &Value) -> Result<Value> {
         )));
     }
     let abs = resolve(root, path_arg)?;
+    let cursor = args.get("cursor");
+    if let Some(cursor) = cursor
+        && (!cursor.is_object()
+            || cursor["startLine"].as_u64().is_none_or(|n| n == 0)
+            || cursor["startColumn"].as_u64().is_none_or(|n| n == 0)
+            || cursor["sha256"].as_str().is_none_or(str::is_empty))
+    {
+        return Err(tool_err(
+            "cursor 必须保留上次返回的 startLine、startColumn 和 sha256",
+        ));
+    }
     read_file_value(
         path_arg,
         &abs,
-        arg_usize(args, "startLine").unwrap_or(1).max(1),
-        arg_usize(args, "maxLines"),
-        arg_usize(args, "tailLines"),
-        max_chars,
+        ReadPage {
+            start_line: cursor
+                .and_then(|c| arg_usize(c, "startLine"))
+                .or_else(|| arg_usize(args, "startLine"))
+                .unwrap_or(1)
+                .max(1),
+            start_column: cursor
+                .and_then(|c| arg_usize(c, "startColumn"))
+                .or_else(|| arg_usize(args, "startColumn"))
+                .unwrap_or(1)
+                .max(1),
+            max_lines: arg_usize(args, "maxLines"),
+            tail_lines: if cursor.is_some() {
+                None
+            } else {
+                arg_usize(args, "tailLines")
+            },
+            max_chars,
+            expected_sha: cursor.and_then(|c| c["sha256"].as_str()),
+        },
     )
 }
 
@@ -277,7 +346,18 @@ pub fn read_many(root: &Path, args: &Value) -> Result<Value> {
         let entry = match resolve(root, p) {
             Ok(abs) => {
                 let cap = per_file_default.min(remaining);
-                match read_file_value(p, &abs, 1, None, None, cap) {
+                match read_file_value(
+                    p,
+                    &abs,
+                    ReadPage {
+                        start_line: 1,
+                        start_column: 1,
+                        max_lines: None,
+                        tail_lines: None,
+                        max_chars: cap,
+                        expected_sha: None,
+                    },
+                ) {
                     Ok(mut v) => {
                         let used = v["text"].as_str().map(|t| t.chars().count()).unwrap_or(0);
                         remaining = remaining.saturating_sub(used);
@@ -571,7 +651,9 @@ fn scan_line(
                 st.samples.push(json!({
                     "file": file_label,
                     "line": line_no,
+                    "column": line[..caps.get(0).expect("regex whole match").start()].chars().count()+1,
                     "text": truncate_chars(line, SAMPLE_TEXT_CHARS),
+                    "textTruncated":line.chars().count()>SAMPLE_TEXT_CHARS,
                 }));
                 sampled = false;
             } else if !sampled && st.samples.len() >= ctx.sample_limit {

@@ -118,6 +118,16 @@ impl<'a> TaskExecutor<'a> {
         run: &'a mut Run,
     ) -> Self {
         let deadline = run.deadline.min(unix_now() + revision.limits.max_seconds);
+        let exposed = if matches!(
+            run.source,
+            crate::runtime::types::RunSource::BoundWorkflow { .. }
+        ) {
+            super::task_store::tool_names(&revision.nodes)
+                .into_iter()
+                .collect()
+        } else {
+            HashSet::new()
+        };
         Self {
             supervisor,
             bridge,
@@ -127,7 +137,7 @@ impl<'a> TaskExecutor<'a> {
             run,
             reports: Vec::new(),
             scope: Scope::default(),
-            exposed: HashSet::new(),
+            exposed,
             budget: Budget {
                 attempts: 0,
                 expansions: 0,
@@ -141,7 +151,14 @@ impl<'a> TaskExecutor<'a> {
 
     /// 预检：检查依赖与契约版本，不做任何外部写入。
     pub async fn preflight(&self) -> Result<()> {
-        let definitions = self.supervisor.tool_definitions();
+        let definitions = if matches!(
+            self.run.source,
+            crate::runtime::types::RunSource::BoundWorkflow { .. }
+        ) {
+            self.supervisor.execution_tool_definitions()
+        } else {
+            self.supervisor.tool_definitions()
+        };
         let mut missing: Vec<String> = Vec::new();
         for node in flatten(&self.revision.nodes) {
             let tool = match node {
@@ -642,6 +659,16 @@ impl<'a> TaskExecutor<'a> {
         key: &str,
         attempt: u32,
     ) -> Result<Value> {
+        if let crate::runtime::types::RunSource::BoundWorkflow { scope_hash, .. } = &self.run.source
+            && super::task::bound_fingerprint(
+                self.revision,
+                &self.supervisor.execution_tool_definitions(),
+            )? != *scope_hash
+        {
+            return Err(Error::Conflict(
+                "本次固定任务的执行范围或工具契约已经变化".into(),
+            ));
+        }
         self.run.tool_calls += 1;
         let call = ToolCall {
             id: format!("task-{}-{}-{}-{}", self.run.id, node_id, key, attempt),
