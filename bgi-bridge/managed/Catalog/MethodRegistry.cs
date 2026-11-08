@@ -22,6 +22,7 @@ public sealed record MethodDescriptor(
     /// <summary>执行前准备声明：null=无；"ensureGameReady"=提交前由 RootBridge 通用执行
     /// 原生就绪准备（已授权的写动作才触发；只读与配置写不会因此启动游戏）。</summary>
     public string? Preparation { get; init; }
+    public bool OwnsHostCancellation { get; init; }
     public string Effect => ReadOnly ? "readOnly" : Group == "settings" ? "configurationWrite"
         : RequiresGameReady ? "gameWrite" : "hostCommand";
     public JsonElement OutputSchema => AgentSchemas.Output(Id, Guide.ResultMeaning);
@@ -68,7 +69,8 @@ public sealed class MethodRegistry
         AgentGuide? guide = null,
         string? unavailableReason = null,
         bool requiresGameReady = false,
-        string? preparation = null)
+        string? preparation = null,
+        bool ownsHostCancellation = false)
     {
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("方法 id 不能为空。", nameof(id));
         var documentation = AgentGuides.ForUser(guide ?? AgentGuides.For(id));
@@ -82,7 +84,7 @@ public sealed class MethodRegistry
             }
         }
         var descriptor = new MethodDescriptor(id, group, documentation.Purpose, readOnly, destructive,
-            schema) { Guide = documentation, UnavailableReason = unavailableReason is null ? null : AgentGuides.BetterGiName(unavailableReason), RequiresGameReady = requiresGameReady, Preparation = preparation };
+            schema) { Guide = documentation, UnavailableReason = unavailableReason is null ? null : AgentGuides.BetterGiName(unavailableReason), RequiresGameReady = requiresGameReady, Preparation = preparation, OwnsHostCancellation = ownsHostCancellation };
         if (!_methods.TryAdd(id, (descriptor, handler)))
             throw new InvalidOperationException($"方法 id 重复：{id}");
     }

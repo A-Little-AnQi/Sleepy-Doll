@@ -44,6 +44,17 @@ public static partial class CommandCatalog
 
     public static IReadOnlyList<CommandDescriptor> All => Catalog.Value.Select(x => x.Descriptor).ToList();
 
+    internal static (CommandDescriptor Descriptor, Type Owner, Type? Parameter) PlanContract(string name)
+    {
+        if (_config is null || !_config.IsMethodEnabled($"cmd.{name}", "command"))
+            throw BridgeException.Disabled("计划中的命令已禁用。");
+        var entry = Catalog.Value.FirstOrDefault(x => x.Descriptor.Name.Equals(name, StringComparison.Ordinal));
+        if (entry.Descriptor is null) throw BridgeException.NotFound($"命令不存在：cmd.{name}");
+        var source=SourceDocumentation.Find("C",entry.ViewModel,entry.Property.Name);
+        var unavailable=entry.Descriptor.UnavailableReason ?? (source?.Interaction=="nativeUiContinuation"?"命令需要后续原生窗口交互，不能作为无交互命令计划。":entry.Descriptor.RequiresGameReady&&!entry.Descriptor.IsAsync?"游戏命令没有可等待的异步处理器，不能确认执行边界。":null);
+        return (entry.Descriptor with {UnavailableReason=unavailable}, entry.ViewModel, entry.Parameter);
+    }
+
     private static IReadOnlyList<(CommandDescriptor, Type, PropertyInfo, Type?)> Build()
     {
         var result = new List<(CommandDescriptor, Type, PropertyInfo, Type?)>();
@@ -139,7 +150,7 @@ public static partial class CommandCatalog
     }
 
     /// <summary>在 UI 线程执行；这些命令操作绑定到界面的对象。</summary>
-    public static async Task<object?> Invoke(string name, JsonElement? argument, CancellationToken cancellation, string? contextId = null, JsonElement? selection = null, JsonElement? dialogInput = null)
+    public static async Task<object?> Invoke(string name, JsonElement? argument, CancellationToken cancellation, string? contextId = null, JsonElement? selection = null, JsonElement? dialogInput = null, bool ownCancellation = false, Action<IReadOnlyList<object>>? captureCreated = null)
     {
         if (_config is null || !_config.IsMethodEnabled($"cmd.{name}", "command"))
             throw BridgeException.Disabled("命令分组或该命令已禁用；通用入口不能绕过此限制。");
@@ -190,7 +201,12 @@ public static partial class CommandCatalog
                     return (object?)new{command=name,executed=true,configurationCheckpoint=checkpoint,verificationRequired=entry.Descriptor.Guide.Verification};
                 },dialogInput,source.DialogTitles,cancellation);
             using var dialog = new NativeDialogScope(dialogInput, source?.DialogTitles, cancellation);
-            await Commands.RunAsync(command, parameter);
+            var before=captureCreated is null?null:new HashSet<object>(CommandTargets.Snapshot(),ReferenceEqualityComparer.Instance);
+            var running=Commands.RunAsync(command,parameter);
+            using var ownCancellationRegistration=ownCancellation?Commands.LinkOwnCancellation(command,running,cancellation):default;
+            // UI线程内同步捕获调用启动阶段创建的上下文；跨 await 的全局差集不构成归属证据。
+            if(before is not null)captureCreated!(CommandTargets.Snapshot().Where(value=>!before.Contains(value)).ToArray());
+            await running;
             dialog.Verify();
 
             return (object?)new { command = name, executed = true, configurationCheckpoint = checkpoint, dialogsHandled = dialog.Handled };

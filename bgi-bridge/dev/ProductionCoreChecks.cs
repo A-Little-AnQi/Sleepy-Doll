@@ -5,6 +5,9 @@ using System.IO;
 using System.Text.Json.Nodes;
 using BgiBridge.Tools;
 using BgiBridge.Catalog;
+using BgiBridge.Bgi;
+using BgiBridge.Protocol;
+using System.Text.Json;
 
 static void Require(bool value, string message) { if (!value) throw new Exception(message); }
 
@@ -355,6 +358,108 @@ Require((BgiBridge.Tools.PathingPreparationTools.LookupKey(alignedFight!, "pickD
 Require(afterAlign["config"]!["pathingConfig"]!["partyName"]!.GetValue<string>() == "旧队",
     "non-target fields (partyName) preserved by alignment channel");
 
+// Runtime-only SDK arguments are resolved inside a bounded plan, not persisted handles.
+var commandPlan = JsonSerializer.SerializeToElement(new { steps = new object[] {
+    new {command="cmd.sample.open",title="打开数据上下文"},
+    new {command="cmd.sample.refresh",title="等待数据刷新"},
+    new {command="cmd.sample.use",title="使用最新对象",resolveArgument=new {collection="Items",fromStep=1,filters=new object[]{
+        new {property="Title",op="contains",value="直播"},new {property="Codes",op="notEmpty"},new {property="PublishedOn",op="todayOrLater"}},orderBy="PublishedOn",descending=true}}
+} });
+var commandHost = new CommandPlanHostStub();
+var nativePlanRegistry=new MethodRegistry();
+CommandPlanTools.Register(nativePlanRegistry);
+Require(nativePlanRegistry.TryGet("bgi.validate_command_plan",out var planValidationDescriptor,out _) && planValidationDescriptor.ReadOnly && !planValidationDescriptor.RequiresGameReady,"plan validation is discoverable and read-only");
+Require(nativePlanRegistry.TryGet("bgi.run_host_command_plan",out var hostPlanDescriptor,out _) && !hostPlanDescriptor.RequiresGameReady && hostPlanDescriptor.Effect=="hostCommand","host plan does not start a game for UI/data preparation");
+Require(nativePlanRegistry.TryGet("bgi.run_game_command_plan",out var gamePlanDescriptor,out _) && gamePlanDescriptor.RequiresGameReady && gamePlanDescriptor.Preparation=="ensureGameReady","game plan uses the ordinary readiness gate");
+Require(gamePlanDescriptor.OwnsHostCancellation,"plan cancellation is command-scoped and does not issue a global stop while reading data");
+var commandContracts = CommandPlan.Validate(commandPlan,true,commandHost);
+Require(commandHost.Calls.Count==0,"plan validation does not construct windows or execute commands");
+var commandResult=JsonSerializer.SerializeToElement(await CommandPlan.Run(commandPlan,true,commandHost,CancellationToken.None));
+Require(commandHost.Calls.SequenceEqual(new[]{"sample.open","sample.refresh","sample.use"}),"fixed commands execute in order");
+Require(commandHost.RefreshedBeforeUse && ReferenceEquals(commandHost.Used,commandHost.Created!.Items[0]),"async refresh finishes and current Job object is selected");
+Require(commandResult.GetProperty("verification").GetProperty("status").GetString()=="unknown","handler completion cannot claim business success");
+var competingHost=new CommandPlanHostStub{ForeignDuringAwait=true};
+await CommandPlan.Run(commandPlan,true,competingHost,CancellationToken.None);
+Require(ReferenceEquals(competingHost.Used,competingHost.Created!.Items[0]),"another window created during async refresh is not adopted as plan-owned context");
+var fetchPlan=JsonSerializer.SerializeToElement(new{steps=new object[]{new{command="cmd.sample.open",title="打开"},new{command="cmd.sample.refresh",title="只获取",observe=new{collection="Items",fromStep=1,filters=new object[]{new{property="Codes",op="notEmpty"}},orderBy="PublishedOn",descending=true}}}});
+var fetchHost=new CommandPlanHostStub();
+var fetchResult=JsonSerializer.SerializeToElement(await CommandPlan.Run(fetchPlan,false,fetchHost,CancellationToken.None));
+Require(fetchResult.GetProperty("verification").GetProperty("status").GetString()=="succeeded"&&fetchResult.GetProperty("verification").GetProperty("scope").GetString()=="runtimeData","host-only fetch can verify this-run data without claiming redemption");
+Require(!fetchHost.Calls.Contains("sample.use"),"fetch-only intent never adds a game action");
+var hostModeRejected=false;
+try { CommandPlan.Validate(commandPlan,false,new CommandPlanHostStub()); } catch(BridgeException){hostModeRejected=true;}
+Require(hostModeRejected,"game action cannot enter host-only plan");
+var staleHost=new CommandPlanHostStub{Fresh=false};
+var staleRejected=false;
+try { await CommandPlan.Run(commandPlan,true,staleHost,CancellationToken.None); } catch(BridgeException){staleRejected=true;}
+Require(staleRejected && !staleHost.Calls.Contains("sample.use"),"expired own data cannot fall back to a fresh object from another window");
+var swallowedRefresh=new CommandPlanHostStub{RefreshNoOp=true};
+var unchangedRejected=false;
+try{await CommandPlan.Run(commandPlan,true,swallowedRefresh,CancellationToken.None);}catch(BridgeException){unchangedRejected=true;}
+Require(unchangedRejected&&!swallowedRefresh.Calls.Contains("sample.use"),"a swallowed refresh failure cannot reuse an unchanged current-day item");
+var cancelledHost=new CommandPlanHostStub();
+using(var cancellation=new CancellationTokenSource()) {
+    cancellation.CancelAfter(10);
+    var cancelled=false;
+    try {await CommandPlan.Run(commandPlan,true,cancelledHost,cancellation.Token);} catch(OperationCanceledException){cancelled=true;}
+    Require(cancelled && !cancelledHost.Calls.Contains("sample.use"),"cancellation stops the following command");
+}
+var uncancellableHost=new CommandPlanHostStub{IgnoreCancellation=true};
+using(var cancellation=new CancellationTokenSource()) {
+    var running=CommandPlan.Run(commandPlan,true,uncancellableHost,cancellation.Token);
+    cancellation.Cancel();
+    Require(!running.IsCompleted,"cancel request cannot pretend an uncooperative native handler has ended");
+    try{await running;}catch(OperationCanceledException){}
+    Require(!uncancellableHost.Calls.Contains("sample.use"),"uncancellable handler completion still stops the following action");
+}
+var frozenPlan=JsonNode.Parse(commandPlan.GetRawText())!;
+frozenPlan["expectedContractHash"]=CommandPlan.ContractHash(commandContracts);
+var changedHost=new CommandPlanHostStub{Revision="changed"};
+var contractRejected=false;
+try {CommandPlan.Validate(JsonSerializer.SerializeToElement(frozenPlan),true,changedHost);}catch(BridgeException error){contractRejected=error.Code=="PLAN_CONTRACT_CHANGED";}
+Require(contractRejected && changedHost.Calls.Count==0,"changed native command contracts are rejected before effects");
+var selector=commandPlan.GetProperty("steps")[2].GetProperty("resolveArgument");
+var duplicate=new PlanItemStub();
+var ambiguous=false;
+try {CommandPlan.Select(new[]{duplicate,new PlanItemStub()},typeof(PlanItemStub),selector,DateTime.Now);}catch(BridgeException error){ambiguous=error.Code=="AMBIGUOUS_TARGET";}
+Require(ambiguous,"ordering ties never guess an SDK object");
+var oversized=false;
+try {CommandPlan.Select(Enumerable.Range(0,513).Select(_=>new PlanItemStub()),typeof(PlanItemStub),selector,DateTime.Now);}catch(BridgeException){oversized=true;}
+Require(oversized,"runtime object scan is bounded");
+var datedSelector=JsonSerializer.SerializeToElement(new{collection="Items",filters=new object[]{new{property="PublishedOn",op="notAfterNow"},new{property="ValidUntil",op="notBeforeNow"},new{property="Codes",op="notEmpty"}},orderBy="PublishedOn",descending=true});
+var expired=new PlanItemStub{PublishedOn=DateTime.Today.AddDays(-2).ToString("yyyy-MM-dd"),ValidUntil=DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd")};
+var unpublished=new PlanItemStub{PublishedOn=DateTime.Today.AddDays(1).ToString("yyyy-MM-dd")};
+var validCurrent=new PlanItemStub();
+Require(ReferenceEquals(CommandPlan.Select(new[]{expired,unpublished,validCurrent},typeof(PlanItemStub),datedSelector,DateTime.Now),validCurrent),"unpublished and expired items cannot become current data");
+var unknownExpiry=new PlanItemStub{ValidUntil=""};
+var attemptSelector=JsonSerializer.SerializeToElement(new{collection="Items",filters=new object[]{new{property="ValidUntil",op="notBeforeNowOrUnknown"}}});
+Require(ReferenceEquals(CommandPlan.Select(new[]{expired,unknownExpiry},typeof(PlanItemStub),attemptSelector,DateTime.Now),unknownExpiry),"known expired is skipped while user-authorized unknown validity can be attempted");
+var successReceipt=NativeCommandEvidence.Classify(new[]{"CODE-A","CODE-B"},new[]{
+    new HostLogTools.HostLogEntry(TimeSpan.Zero,"INF","Primary:S4:P123:T1","BetterGenshinImpact.GameTask.UseRedeemCode.UseRedemptionCodeTask","兑换码 CODE-A 兑换成功"),
+    new HostLogTools.HostLogEntry(TimeSpan.Zero,"INF","Primary:S4:P123:T1","BetterGenshinImpact.GameTask.UseRedeemCode.UseRedemptionCodeTask","兑换码 CODE-B 兑换成功")},123);
+Require(successReceipt.GetProperty("status").GetString()=="succeeded","actual per-code native log receipt can verify success");
+var incompleteReceipt=NativeCommandEvidence.Classify(new[]{"CODE-A","CODE-B"},new[]{new HostLogTools.HostLogEntry(TimeSpan.Zero,"INF","Primary:S4:P999:T1","UseRedemptionCodeTask","兑换码 CODE-A 兑换成功")},123);
+Require(incompleteReceipt.GetProperty("status").GetString()=="unknown","another process or incomplete receipts cannot become success");
+var failureReceipt=NativeCommandEvidence.Classify(new[]{"CODE-A"},new[]{new HostLogTools.HostLogEntry(TimeSpan.Zero,"WRN","Primary:S4:P123:T1","UseRedemptionCodeTask","兑换码 CODE-A 兑换失败，可能是过期、错误或已被使用")},123);
+Require(failureReceipt.GetProperty("status").GetString()=="failed","real failure is retained without guessing expired versus already-used");
+var hostSourceRoot=Environment.GetEnvironmentVariable("SLEEPY_DOLL_BGI_HOST_SOURCE_ROOT");
+if(!string.IsNullOrWhiteSpace(hostSourceRoot)) {
+    var source=File.ReadAllText(Path.Combine(hostSourceRoot,"BetterGenshinImpact/ViewModel/Windows/FeedWindowViewModel.cs"));
+    foreach(var fragment in new[]{"ObservableCollection<FeedItem> _cnFeedItems","private async Task GetLiveRedeemCodes()","private async Task AutoRedeemItem(FeedItem item)","private string _time","private string _valid","private List<string> _codes","Time = DateTime.Now.ToString"})
+        Require(source.Contains(fragment,StringComparison.Ordinal),"real host source contract mapping: "+fragment);
+    var main=File.ReadAllText(Path.Combine(hostSourceRoot,"BetterGenshinImpact/ViewModel/MainWindowViewModel.cs"));
+    Require(main.Contains("OpenFeed",StringComparison.Ordinal),"real host OpenFeed command exists");
+    var redeem=File.ReadAllText(Path.Combine(hostSourceRoot,"BetterGenshinImpact/GameTask/UseRedeemCode/UseRedemptionCodeTask.cs"));
+    Require(redeem.Contains("兑换码 {Code} 兑换成功",StringComparison.Ordinal)&&redeem.Contains("兑换码 {Code} 兑换失败",StringComparison.Ordinal),"receipt mapping comes from the real host's per-code log statements");
+    Console.WriteLine("real host source mapping checked: OpenFeed / GetLiveRedeemCodes / AutoRedeemItem, CnFeedItems, Title, Time, Codes, Valid; fetched Time is not publication evidence");
+}
+foreach(var forbidden in new[]{"sample.delete","sample.dialog","sample.internal"}) {
+    var body=JsonSerializer.SerializeToElement(new{steps=new[]{new{command="cmd."+forbidden,title="禁止动作"}}});
+    var denied=false;var host=new CommandPlanHostStub();
+    try{CommandPlan.Validate(body,true,host);}catch(BridgeException){denied=true;}
+    Require(denied && host.Calls.Count==0,"plan cannot elevate unsafe command: "+forbidden);
+}
+Console.WriteLine("command-plan checks passed: validation-only, runtime SDK objects, async order, stale isolation, ambiguity, bounds, cancellation, contract pin, no false completion");
 Console.WriteLine("production-core checks passed");
 
 // ---- 真实宿主形态替身（成员在文件底部） ----
@@ -367,6 +472,50 @@ internal sealed class RunnerContextShape
 internal sealed class GroupStub(string name)
 {
     public string Name { get; } = name;
+}
+
+internal sealed class PlanItemStub
+{
+    public string Title {get;set;}="直播兑换码";
+    public string PublishedOn {get;set;}=DateTime.Today.ToString("yyyy-MM-dd");
+    public string ValidUntil {get;set;}=DateTime.Today.ToString("yyyy-MM-dd");
+    public List<string> Codes {get;set;}=["CURRENT-CODE"];
+}
+internal sealed class PlanOwnerStub { public List<PlanItemStub> Items {get;set;}=[]; }
+internal sealed class PlanRootStub { }
+internal sealed class CommandPlanHostStub:ICommandPlanHost
+{
+    public bool Fresh {get;set;}=true;
+    public bool RefreshNoOp {get;set;}
+    public bool IgnoreCancellation {get;set;}
+    public bool ForeignDuringAwait {get;set;}
+    public string Revision {get;set;}="initial";
+    public List<string> Calls {get;}=[];
+    private readonly PlanRootStub root=new();
+    private readonly PlanOwnerStub foreign=new(){Items=[new PlanItemStub()]};
+    public PlanOwnerStub? Created {get;private set;}
+    public object? Used {get;private set;}
+    public bool RefreshedBeforeUse {get;private set;}
+    private bool refreshed;
+    private IReadOnlyList<object> created=[];
+    private PlanOwnerStub? competing;
+    public IReadOnlyList<object> TakeCreated(){var values=created;created=[];return values;}
+    public CommandPlanContract Describe(string name)=>new(name,name=="sample.open"?typeof(PlanRootStub):typeof(PlanOwnerStub),name=="sample.use"?typeof(PlanItemStub):null,name=="sample.use",name=="sample.delete",name=="sample.dialog",name=="sample.internal",null,Revision);
+    public object Owner(CommandPlanContract contract,IReadOnlyList<object> created)=>contract.Owner==typeof(PlanRootStub)?root:created.OfType<PlanOwnerStub>().Single();
+    public IReadOnlyList<object> Snapshot(object? source=null)=>new object[]{root,foreign}.Concat(foreign.Items).Concat(Created is null?[]:new object[]{Created}.Concat(Created.Items)).Concat(competing is null?[]:new object[]{competing}).ToArray();
+    public async Task<JsonElement?> Invoke(CommandPlanContract contract,object owner,object? argument,CancellationToken cancellation)
+    {
+        Calls.Add(contract.Name);
+        if(contract.Name=="sample.open"){Created=new(){Items=[new PlanItemStub()]};created=[Created];}
+        if(contract.Name=="sample.refresh") {
+            await Task.Delay(25,IgnoreCancellation?CancellationToken.None:cancellation);
+            if(ForeignDuringAwait)competing=new(){Items=[new PlanItemStub()]};
+            if(!RefreshNoOp)Created!.Items=[new PlanItemStub{PublishedOn=(Fresh?DateTime.Today:DateTime.Today.AddDays(-30)).ToString("yyyy-MM-dd")}];
+            refreshed=true;
+        }
+        if(contract.Name=="sample.use") {RefreshedBeforeUse=refreshed;Used=argument;}
+        return null;
+    }
 }
 
 

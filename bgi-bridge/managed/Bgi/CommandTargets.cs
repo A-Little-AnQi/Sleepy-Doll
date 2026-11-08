@@ -39,15 +39,19 @@ public static class CommandTargets
     private static bool HostObject(object value) => value.GetType().Assembly.GetName().Name == Reflect.HostAssembly;
 
     // Windows/DataContext、宿主对象的真实字段和集合构成绑定图；不调用 getter 来创建服务。
-    public static IReadOnlyList<object> Snapshot()
+    public static IReadOnlyList<object> Snapshot(object? root = null)
     {
         var queue = new Queue<object>();
         var application = Reflect.FindType("System.Windows.Application");
         var app = application is null ? null : Reflect.GetStatic(application, "Current");
-        if (app is not null && Reflect.Get(app, "Windows") is IEnumerable windows)
+        if (root is not null) queue.Enqueue(root);
+        else if (app is not null && Reflect.Get(app, "Windows") is IEnumerable windows)
             foreach (var window in windows) if (window is not null) queue.Enqueue(window);
-        foreach (var value in Owned.Values) queue.Enqueue(value);
-        foreach (var value in Borrowed.Values) if (value.TryGetTarget(out var service)) queue.Enqueue(service);
+        if (root is null)
+        {
+            foreach (var value in Owned.Values) queue.Enqueue(value);
+            foreach (var value in Borrowed.Values) if (value.TryGetTarget(out var service)) queue.Enqueue(service);
+        }
         var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
         var result = new List<object>();
         while (queue.Count > 0 && visited.Count < 4096)
@@ -88,6 +92,7 @@ public static class CommandTargets
         if (owned) Owned[id] = value;
         return id;
     }
+    internal static string RuntimeReference(object value) => Register(value);
 
     private static object Describe(object value) => new
     {

@@ -4,11 +4,13 @@ pub(crate) mod approval;
 pub mod control;
 pub mod features;
 pub(crate) mod guidance;
+mod host_close;
 pub mod mcp;
 pub(crate) mod origin;
 pub mod recovery;
 pub(crate) mod resolve;
 pub(crate) mod retrieval;
+pub(crate) mod scheduled;
 pub(crate) mod task_semantics;
 
 use std::{
@@ -425,6 +427,16 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
     let features = features::FeatureIndex::bundled()?;
     let mut definitions: Vec<BridgeToolDefinition<'_>> = vec![
         (
+            "bgi.host.close",
+            "关闭 BetterGI",
+            "关闭当前已连接的 BetterGI 工具软件，不关闭游戏；先请求正常关闭，五秒未退出时结束该进程，并核验退出。不能指定其他进程。",
+            json!({"type":"object","properties":{},"additionalProperties":false}),
+            {
+                let client = client.clone();
+                Arc::new(move |_: &Value| host_close::close(&client)) as BridgeToolFn
+            },
+        ),
+        (
             "bgi.state.get",
             "读取游戏状态",
             "读取一次 BetterGI、截图器、游戏窗口和任务锁状态。接口响应即说明连接正常；gameReady（旧字段 bridgeReady）表示游戏主界面就绪，false 不是断连。读取或保存配置、创建快捷入口不要求游戏就绪，不为它们启动游戏。",
@@ -802,7 +814,17 @@ pub fn register_tools(registry: &mut ToolRegistry, client: Arc<BgiClient>) -> Re
         ),
     ]);
     for (name, label, description, schema, function) in definitions {
-        let mut execution = if matches!(
+        let mut execution = if name == "bgi.host.close" {
+            ToolExecution {
+                effect: ToolEffect::GameWrite,
+                model_usage: crate::extension::ModelUsage::None,
+                concurrency: crate::extension::ConcurrencyMode::GameExclusive,
+                unattended: crate::extension::UnattendedPolicy::Allowed,
+                verification: crate::extension::VerificationMode::Plugin,
+                cancellation: crate::extension::CancellationMode::Unconfirmed,
+                ..ToolExecution::default()
+            }
+        } else if matches!(
             name,
             "bgi.capability.invoke" | "bgi.job.cancel" | "bgi.api.invoke"
         ) {

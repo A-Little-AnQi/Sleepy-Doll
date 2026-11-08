@@ -399,7 +399,7 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
                 {
                     cancellation.Token.ThrowIfCancellationRequested();
                     jobs.MarkRunning(job.JobId);
-                    using var hostCancellation = descriptor.RequiresGameReady
+                    using var hostCancellation = descriptor.RequiresGameReady && !descriptor.OwnsHostCancellation
                         ? new HostTaskCancellation(cancellation.Token) : null;
                     var result = await handler(arguments, cancellation.Token).ConfigureAwait(false);
                     if (hostCancellation is not null) await hostCancellation.CompleteAsync().ConfigureAwait(false);
@@ -424,10 +424,11 @@ public sealed class BridgeHost(BridgeConfig config, MethodRegistry registry, Job
         {
             try { cancellation.Cancel(); } catch (ObjectDisposedException) { }
         }
+        var ownsCancellation=registry.TryGet(job.MethodId,out var cancelledMethod,out _)&&cancelledMethod.OwnsHostCancellation;
         return new
         {
             jobId = id, state = jobs.Get(id)?.State, cancelled = false, cancellationRequested = true,
-            note = "执行游戏任务的 Job 会向宿主发送停止请求；取消请求不等于已经停止，必须查询 Job 终态。非游戏命令已发生的副作用不回退。",
+            note = ownsCancellation?"已请求当前命令自身支持的取消；不支持取消的命令仍须等待真实结束。后续步骤不会执行，须查询终态，不能把请求当已停止。":"执行游戏任务的 Job 会向宿主发送停止请求；取消请求不等于已经停止，必须查询 Job 终态。非游戏命令已发生的副作用不回退。",
         };
     }
 

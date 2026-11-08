@@ -42,6 +42,24 @@ public static class HostLogTools
 
     private static string LogDirectory =>
         Path.Combine(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar), "log");
+    internal sealed record Cursor(string Path,long Offset,DateTime CapturedAt);
+    internal static Cursor? CaptureCursor()
+    {
+        var path=Path.Combine(LogDirectory,$"{FilePrefix}{DateTime.Today:yyyyMMdd}{FileSuffix}");
+        try { return new(path,File.Exists(path)?new FileInfo(path).Length:0,DateTime.Now); }
+        catch(IOException){return null;} catch(UnauthorizedAccessException){return null;}
+    }
+    internal static List<HostLogEntry>? ReadSince(Cursor? cursor)
+    {
+        if(cursor is null)return null;
+        try {
+            using var stream=new FileStream(cursor.Path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete);
+            var size=stream.Length-cursor.Offset;
+            if(size<0||size>128*1024)return null;
+            stream.Position=cursor.Offset;var bytes=new byte[(int)size];stream.ReadExactly(bytes);
+            return Parse(Encoding.UTF8.GetString(bytes)).Where(entry=>entry.Time>=cursor.CapturedAt.TimeOfDay).ToList();
+        } catch(IOException){return null;} catch(UnauthorizedAccessException){return null;}
+    }
 
     /// <summary>记录头：<c>[HH:MM:SS.mmm] [LVL] [Primary:S4:P&lt;pid&gt;:T&lt;tid&gt;] &lt;LoggerName&gt;</c>，消息在后续行。</summary>
     private static readonly Regex Header = new(
