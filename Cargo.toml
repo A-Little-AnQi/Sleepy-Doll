@@ -97,6 +97,10 @@ path = "src/main.rs"
 required-features = ["desktop"]
 
 [[bin]]
+name = "sleepy-agent-host"
+path = "src/bin/sleepy-agent-host.rs"
+
+[[bin]]
 name = "sleepy-doll-dev"
 path = "src/bin/sleepy-doll-dev.rs"
 required-features = ["dev-ipc"]
