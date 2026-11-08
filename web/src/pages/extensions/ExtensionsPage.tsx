@@ -1,12 +1,12 @@
 import { ExtensionList, ExtensionRow } from "@sleepy-doll/ui";
 import { SearchField, EmptyState, FormField } from "@sleepy-doll/ui";
-import { Button, IconButton } from "@sleepy-doll/ui";
+import { Button, Dialog } from "@sleepy-doll/ui";
 import { useEffect, useRef, useState } from "react";
 import "./ExtensionsPage.css";
 import { api } from "../../ipc/api";
 import { Toast } from "@sleepy-doll/ui/overlay/Toast";
 import { ConfirmDialog } from "@sleepy-doll/ui/overlay/ConfirmDialog";
-import { CloseIcon, PluginIcon, PlusIcon } from "@sleepy-doll/ui/icons";
+import { PluginIcon, PlusIcon } from "@sleepy-doll/ui/icons";
 import { readError } from "../../session";
 import type { Bootstrap } from "../../ipc/types";
 import { MotionSwitch } from "@sleepy-doll/ui/controls/MotionSwitch";
@@ -40,7 +40,11 @@ export function ExtensionsPage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [pendingRemove, setPendingRemove] = useState<string | null>(null);
-  const dialog = useRef<HTMLDialogElement>(null);
+  const [open, setOpen] = useState(false);
+  const [toggling, setToggling] = useState<Map<string, boolean>>(
+    () => new Map(),
+  );
+  const pending = useRef(new Set<string>());
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
     setError("");
@@ -73,6 +77,7 @@ export function ExtensionsPage({
           detail: skill.instructions ?? "",
           error: "",
           host: false,
+          bundled: false,
         }))
       : bootstrap.plugins.map((plugin) => ({
           id: plugin.manifest.id,
@@ -94,17 +99,33 @@ export function ExtensionsPage({
                 .join("\n\n"),
           error: plugin.error ?? "",
           host: plugin.host === true,
+          bundled: plugin.bundled === true || plugin.host === true,
         }));
   const filtered = items.filter((item) =>
     (item.name + item.description).toLowerCase().includes(query.toLowerCase()),
   );
   const current = items.find((item) => item.id === selected);
-  const toggle = (id: string, enabled: boolean) =>
-    run(() =>
-      currentTab === "skills"
-        ? api.setSkillEnabled(id, enabled)
-        : api.setPluginEnabled(id, enabled),
-    );
+  const toggle = async (id: string, enabled: boolean) => {
+    const key = `${currentTab}:${id}`;
+    if (pending.current.has(key)) return;
+    pending.current.add(key);
+    setToggling((current) => new Map(current).set(key, enabled));
+    setError("");
+    try {
+      if (currentTab === "skills") await api.setSkillEnabled(id, enabled);
+      else await api.setPluginEnabled(id, enabled);
+      await reload();
+    } catch (reason) {
+      setError(readError(reason));
+    } finally {
+      pending.current.delete(key);
+      setToggling((current) => {
+        const next = new Map(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
   useEffect(() => {
     let cancelled = false;
     const scan = () => {
@@ -134,7 +155,7 @@ export function ExtensionsPage({
           onClick={() => {
             setInstall(true);
             setError("");
-            dialog.current?.showModal();
+            setOpen(true);
           }}
         >
           <PlusIcon className="button-icon" />
@@ -143,7 +164,7 @@ export function ExtensionsPage({
             : t.extensions.importPlugins}
         </Button>
       </div>
-      <div className="list-toolbar">
+      <div className="list-toolbar page-list-toolbar">
         <SlidingTabs
           ariaLabel={t.extensions.kind}
           value={currentTab}
@@ -178,7 +199,7 @@ export function ExtensionsPage({
           onChange={(event) => setQuery(event.target.value)}
         />
       </div>
-      {error && !dialog.current?.open && (
+      {error && !open && (
         <Toast message={error} onDismiss={() => setError("")} />
       )}
       <MotionSwitch viewKey={currentTab} kind="panel">
@@ -196,13 +217,15 @@ export function ExtensionsPage({
                     ? "当前未生效：" + item.unavailableReason
                     : ""
                 }
-                enabled={item.enabled}
-                disabled={busy}
+                enabled={
+                  toggling.get(`${currentTab}:${item.id}`) ?? item.enabled
+                }
+                disabled={toggling.has(`${currentTab}:${item.id}`)}
                 onOpen={() => {
                   setSelected(item.id);
                   setInstall(false);
                   setError("");
-                  dialog.current?.showModal();
+                  setOpen(true);
                 }}
                 onChange={(enabled) => void toggle(item.id, enabled)}
               />
@@ -223,152 +246,132 @@ export function ExtensionsPage({
           ></EmptyState>
         )}
       </MotionSwitch>
-      <dialog
-        ref={dialog}
-        onClick={(event) => {
-          if (event.target === dialog.current) {
-            const r = dialog.current.getBoundingClientRect();
-            if (
-              event.clientX < r.left ||
-              event.clientX > r.right ||
-              event.clientY < r.top ||
-              event.clientY > r.bottom
-            )
-              dialog.current.close();
-          }
-        }}
+      <Dialog
+        open={open}
+        compact
+        className="extensions-dialog"
+        initialFocus={install ? "field" : "dialog"}
+        onClose={() => setOpen(false)}
+        title={
+          install
+            ? currentTab === "skills"
+              ? t.extensions.importSkills
+              : t.extensions.importPlugins
+            : (current?.name ?? "")
+        }
       >
-        <div className="dialog-head">
-          <h2>
-            {install
-              ? currentTab === "skills"
-                ? t.extensions.importSkills
-                : t.extensions.importPlugins
-              : current?.name}
-          </h2>
-          <IconButton
-            aria-label={t.common.close}
-            onClick={() => dialog.current?.close()}
-          >
-            <CloseIcon className="button-icon" />
-          </IconButton>
-        </div>
-        <div className="dialog-body">
-          {error && <Toast message={error} onDismiss={() => setError("")} />}
-          {install ? (
-            <form
-              className="form-section"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void run(() =>
-                  currentTab === "skills"
-                    ? api.installSkill(path)
-                    : api.installPlugin(path),
-                ).then((ok) => {
-                  if (ok) {
-                    setPath("");
-                    dialog.current?.close();
-                  }
-                });
-              }}
-            >
-              <FormField
-                label={
-                  <>
-                    {currentTab === "skills"
-                      ? t.extensions.skillsDir
-                      : t.extensions.pluginsDir}
-                  </>
+        {error && <Toast message={error} onDismiss={() => setError("")} />}
+        {install ? (
+          <form
+            className="form-section"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void run(() =>
+                currentTab === "skills"
+                  ? api.installSkill(path)
+                  : api.installPlugin(path),
+              ).then((ok) => {
+                if (ok) {
+                  setPath("");
+                  setOpen(false);
                 }
-              >
-                <input
-                  placeholder={t.extensions.dirHint}
-                  value={path}
-                  onChange={(event) => setPath(event.target.value)}
-                />
-              </FormField>
-              {currentTab === "skills" && (
-                <p className="field-help">
-                  所选目录须包含
-                  SKILL.md。导入后保存到本机技能目录，可在此启用或停用。
-                </p>
+              });
+            }}
+          >
+            <FormField
+              label={
+                <>
+                  {currentTab === "skills"
+                    ? t.extensions.skillsDir
+                    : t.extensions.pluginsDir}
+                </>
+              }
+            >
+              <input
+                placeholder={t.extensions.dirHint}
+                value={path}
+                onChange={(event) => setPath(event.target.value)}
+              />
+            </FormField>
+            {currentTab === "skills" && (
+              <p className="field-help">
+                所选目录须包含
+                SKILL.md。导入后保存到本机技能目录，可在此启用或停用。
+              </p>
+            )}
+            <div>
+              <Button variant="primary" disabled={busy || !path.trim()}>
+                {currentTab === "skills" ? "导入技能" : "导入插件"}
+              </Button>
+            </div>
+          </form>
+        ) : (
+          current && (
+            <>
+              <p>{current.description}</p>
+              {current.error && <p>{current.error}</p>}
+              {currentTab === "skills" ? (
+                <section className="page-block">
+                  <h3>{t.extensions.commandsHeading}</h3>
+                  <pre>{current.detail || t.extensions.nothing}</pre>
+                </section>
+              ) : current.host ? (
+                <p className="muted">随产品提供，不能移除。</p>
+              ) : (
+                <section className="page-block">
+                  <h3>{t.extensions.toolsHeading}</h3>
+                  <pre>{current.detail || t.extensions.nothing}</pre>
+                </section>
               )}
-              <div>
-                <Button variant="primary" disabled={busy || !path.trim()}>
-                  {currentTab === "skills" ? "导入技能" : "导入插件"}
-                </Button>
-              </div>
-            </form>
-          ) : (
-            current && (
-              <>
-                <p>{current.description}</p>
-                {current.error && <p>{current.error}</p>}
-                {currentTab === "skills" ? (
-                  <section className="page-block">
-                    <h3>{t.extensions.commandsHeading}</h3>
-                    <pre>{current.detail || t.extensions.nothing}</pre>
-                  </section>
-                ) : current.host ? (
-                  <p className="muted">随产品提供，不能移除。</p>
-                ) : (
-                  <section className="page-block">
-                    <h3>{t.extensions.toolsHeading}</h3>
-                    <pre>{current.detail || t.extensions.nothing}</pre>
-                  </section>
-                )}
-                {currentTab === "skills" &&
-                  current.enabled &&
-                  !current.available && (
-                    <div className="detail-actions">
-                      <Button
-                        variant="secondary"
-                        onClick={() => {
-                          dialog.current?.close();
-                          setTab("plugins");
-                        }}
-                      >
-                        查看插件
-                      </Button>
-                    </div>
-                  )}
-                {currentTab === "plugins" &&
-                  current.host &&
-                  current.enabled && (
-                    <div className="detail-actions">
-                      <Button
-                        variant="secondary"
-                        onClick={() => {
-                          dialog.current?.close();
-                          onOpenHost?.();
-                        }}
-                      >
-                        打开设置
-                      </Button>
-                    </div>
-                  )}
-                {currentTab === "plugins" && !current.host && (
+              {currentTab === "skills" &&
+                current.enabled &&
+                !current.available && (
                   <div className="detail-actions">
                     <Button
                       variant="secondary"
-                      disabled={busy || current.enabled}
-                      title={
-                        current.enabled ? t.extensions.disableFirst : undefined
-                      }
                       onClick={() => {
-                        dialog.current?.close();
-                        setPendingRemove(current.id);
+                        setOpen(false);
+                        setTab("plugins");
                       }}
                     >
-                      移除插件
+                      查看插件
                     </Button>
                   </div>
                 )}
-              </>
-            )
-          )}
-        </div>
-      </dialog>
+              {currentTab === "plugins" && current.host && current.enabled && (
+                <div className="detail-actions">
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setOpen(false);
+                      onOpenHost?.();
+                    }}
+                  >
+                    打开设置
+                  </Button>
+                </div>
+              )}
+              {currentTab === "plugins" && !current.bundled && (
+                <div className="detail-actions">
+                  <Button
+                    variant="secondary"
+                    disabled={busy || current.enabled}
+                    title={
+                      current.enabled ? t.extensions.disableFirst : undefined
+                    }
+                    onClick={() => {
+                      setOpen(false);
+                      setPendingRemove(current.id);
+                    }}
+                  >
+                    移除插件
+                  </Button>
+                </div>
+              )}
+            </>
+          )
+        )}
+      </Dialog>
       <ConfirmDialog
         open={pendingRemove != null}
         title={t.extensions.remove}

@@ -198,6 +198,7 @@
   max-width: none;
 }
 .app-conversations {
+  overflow-anchor: none;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -335,18 +336,6 @@
   color: var(--text);
   font-size: var(--font-body);
   box-shadow: var(--shadow);
-  transform: scale(1.04) translateY(-2px);
-  animation: sd-lift var(--motion-fast) var(--ease-enter);
-}
-@keyframes sd-lift {
-  from {
-    transform: scale(1);
-    box-shadow: none;
-  }
-  to {
-    transform: scale(1.04) translateY(-2px);
-    box-shadow: var(--shadow);
-  }
 }
 :root[data-sd-dragging],
 :root[data-sd-dragging] * {
@@ -613,7 +602,7 @@
   margin: 0;
   padding: 10px 30px;
   background: var(--subtle);
-  font-size: 13px;
+  font-size: 15px;
 }
 .app-body {
   flex: 1;
@@ -781,21 +770,39 @@
   animation-duration: var(--motion-fast);
   animation-timing-function: var(--ease-enter);
 }
-html[data-theme-reveal="true"]::view-transition-old(root) {
-  z-index: 1;
-  mix-blend-mode: normal;
+body[data-theme-reveal="true"] {
+  background: var(--surface);
 }
-html[data-theme-reveal="true"]::view-transition-new(root) {
-  z-index: 2;
-  mix-blend-mode: normal;
-}
-html[data-theme-reveal="true"]::view-transition-group(root) {
-  animation-duration: 160ms;
-}
-/* 主题揭示期间去掉列表项的 view-transition-name，让它们跟随整页一起换。 */
-html[data-theme-reveal="true"] .app-conversations li,
-html[data-theme-reveal="true"] .app-group {
+body[data-theme-reveal="true"] .app-conversations li,
+body[data-theme-reveal="true"] .app-group {
   view-transition-name: none !important;
+}
+body[data-theme-reveal="true"]::view-transition-group(root) {
+  animation: theme-scope-hold 560ms linear;
+}
+@keyframes theme-scope-hold {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+  }
+}
+body[data-theme-reveal="true"]::view-transition-old(root) {
+  animation: none;
+  mix-blend-mode: normal;
+  z-index: 1;
+}
+body[data-theme-reveal="true"]::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+  z-index: 2;
+}
+body[data-theme-reveal-layer="old"]::view-transition-old(root) {
+  z-index: 2;
+}
+body[data-theme-reveal-layer="old"]::view-transition-new(root) {
+  z-index: 1;
 }
 @media (max-width: 1000px) {
   .app-header {
@@ -807,7 +814,6 @@ html[data-theme-reveal="true"] .app-group {
 .app-account-menu {
   padding: 8px;
   border-radius: var(--layout-radius);
-  animation: account-menu-in 180ms var(--ease-enter) both;
   box-shadow:
     0 12px 36px #00000014,
     0 2px 6px #00000008;
@@ -846,27 +852,6 @@ html[data-theme-reveal="true"] .app-group {
 }
 .app-account-menu[data-open="false"] {
   pointer-events: none;
-  animation: account-menu-out 140ms ease-in both;
-}
-@keyframes account-menu-in {
-  from {
-    opacity: 0;
-    transform: translateY(5px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-@keyframes account-menu-out {
-  from {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(3px) scale(0.985);
-  }
 }
 :root[data-theme="dark"] .app-account-menu {
   box-shadow:

@@ -95,7 +95,7 @@
   border-left: 2px solid var(--chat-detail-rule);
   border-radius: 0;
   background: transparent;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .run-plan-cluster {
@@ -120,7 +120,7 @@
   border: 0;
   background: transparent;
   color: var(--secondary);
-  font-size: 13px;
+  font-size: 15px;
   cursor: pointer;
 }
 
@@ -165,7 +165,7 @@
   margin: 2px 0 5px;
   padding-left: 20px;
   line-height: 1.9;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .save-workflow-action {
@@ -188,7 +188,7 @@
 .run-approval h3,
 .run-error h3 {
   margin: 0 0 10px;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .run-approval p,
@@ -251,7 +251,7 @@
   margin: 0;
   padding: 10px var(--page-padding) 0;
   color: var(--secondary);
-  font-size: 12px;
+  font-size: 14px;
   flex: 0 0 auto;
 }
 
@@ -367,7 +367,7 @@
   border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
   box-shadow: var(--shadow);
 }
 

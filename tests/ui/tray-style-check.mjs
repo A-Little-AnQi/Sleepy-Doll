@@ -22,7 +22,10 @@ try {
   console.log(
     JSON.stringify({ port, cleanup: "finally closes browser and Vite" }),
   );
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
+  });
   for (const dark of [true, false]) {
     const page = await browser.newPage({
       viewport: { width: 288, height: 600 },

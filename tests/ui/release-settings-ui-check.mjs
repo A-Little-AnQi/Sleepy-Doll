@@ -228,18 +228,14 @@ try {
     const checkButton = updateGroup.locator(
       ".setting-row-control .secondary-action",
     );
-    // 软件更新组只有 当前版本 + 通道 两行。
+    // 软件更新组只显示当前版本。
     assert.equal(
       await updateGroup.locator(".setting-row").count(),
-      2,
-      "更新组应只有当前版本/通道两行",
+      1,
+      "更新组应只有当前版本一行",
     );
     const hint = await updateGroup.locator(".setting-row-hint").textContent();
-    assert.equal(
-      hint,
-      `${appVersion} · ${locale === "en" ? "Stable" : "正式版"}`,
-      "当前版本和通道应与服务端状态一致",
-    );
+    assert.equal(hint, appVersion, "当前版本应与服务端状态一致");
     const aboutText = await zone.textContent();
     const bannedAbout =
       locale === "en"
@@ -253,8 +249,8 @@ try {
     }
     assert.equal(
       await zone.locator("[data-ui='select-trigger']").count(),
-      1,
-      "关于页只应有通道一个 Select",
+      0,
+      "关于页不显示通道选择",
     );
     assert.equal(
       aboutText.split(appVersion).length - 1,
@@ -295,23 +291,17 @@ try {
     await sleep(200);
     assert.deepEqual(configureCalls, [], "初始载入不应触发 release.configure");
 
-    // 初始外观验收：控件同宽与无横向溢出（desktop + narrow）。
+    // 初始外观验收：无横向溢出（desktop + narrow）。
     const widths = await zone.evaluate((node) => {
       const button = node.querySelector(
         ".release-settings .setting-row-control .secondary-action",
       );
-      const select = node.querySelector("[data-ui='select-trigger']");
       const overflow = document.documentElement.scrollWidth - window.innerWidth;
       return {
         button: button.getBoundingClientRect().width,
-        select: select.getBoundingClientRect().width,
         overflow,
       };
     });
-    assert.ok(
-      Math.abs(widths.button - widths.select) <= 1,
-      `检查更新按钮应与通道 Select 同宽：${widths.button} vs ${widths.select}`,
-    );
     assert.ok(widths.overflow <= 1, "desktop 不应横向溢出");
     await zone.screenshot({
       path: path.join(tempRoot, `about-desktop-${theme}-${locale}.png`),
@@ -411,22 +401,6 @@ try {
     // Toast 到时自动消失（默认 4000ms）。
     await toast.waitFor({ state: "detached", timeout: 6000 });
     assert.equal(await zone.locator(".release-actions").count(), 0);
-
-    // 通道变更：必须回传服务端既有统计偏好（夹具初始 analyticsEnabled=true），
-    // 换通道不得改写统计开关。
-    await zone.locator("[data-ui='select-trigger']").click();
-    await page
-      .getByRole("option", {
-        name: locale === "en" ? "Test" : "测试版",
-        exact: true,
-      })
-      .click();
-    await sleep(200);
-    assert.deepEqual(
-      configureCalls,
-      [{ analyticsEnabled: true, channel: "test" }],
-      "换通道 payload 必须保留既有 analyticsEnabled",
-    );
 
     // 错误提示：同样走 Toast，不落到列表内散排段落。
     failNextCheck = true;

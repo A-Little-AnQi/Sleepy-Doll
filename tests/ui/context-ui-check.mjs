@@ -310,14 +310,12 @@ try {
   const contextInput = page.getByLabel("上下文长度", { exact: true });
   assert.equal(await contextInput.inputValue(), "200000");
   await page.getByRole("button", { name: "获取模型", exact: true }).click();
-  await page.getByRole("button", { name: /使用建议值 · 1000k/ }).waitFor();
+  await page.getByRole("combobox", { name: "模型", exact: true }).waitFor();
   assert.equal(
     await contextInput.inputValue(),
     "200000",
     "fetch overwrote saved capacity",
   );
-  await page.getByRole("button", { name: /使用建议值 · 1000k/ }).click();
-  assert.equal(await contextInput.inputValue(), "1000000");
   await contextInput.fill("750000");
   await page.getByRole("button", { name: "获取模型", exact: true }).click();
   await page.waitForTimeout(200);

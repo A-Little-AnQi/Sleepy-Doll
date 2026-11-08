@@ -72,7 +72,7 @@
   margin-top: 6px;
 }
 .release-notes code {
-  font-size: 0.9em;
+  font-size: max(14px, 0.9em);
   overflow-wrap: anywhere;
 }
 .release-notes pre {

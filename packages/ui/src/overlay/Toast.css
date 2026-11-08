@@ -19,7 +19,7 @@
   background: var(--surface);
   box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
   color: var(--text);
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.55;
   animation: toast-enter var(--motion-base) var(--ease-enter);
 }
@@ -36,7 +36,7 @@
   border-radius: 7px;
   background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
 }
 .toast-action:hover {
   background: var(--hover);

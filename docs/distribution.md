@@ -66,9 +66,9 @@ GitHub Actions Secrets：`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`CLOUDFLA
 
 安装器使用 Slint 原生界面，启动时请求管理员权限并居中显示。缺少 WebView2 或版本低于要求时，调用微软 Evergreen 安装程序进行整机安装或升级，完成后重新检测；下载失败页提供官方下载链接与重试。安装器本身不依赖 WebView2。
 
-桌面程序启动后后台检查更新，手动检查与通道选择位于设置页「关于」标签（UI 入口：`web/src/pages/settings/AboutPage.tsx` + `web/src/app/ReleaseSettings.tsx`）。只接受 HTTPS 固定下载域名、正确版本路径和 SHA-256。下载安装包位于用户目录的 `data/updates/`；安装前再次校验。
+桌面程序启动后后台检查更新，手动检查位于设置页「关于」标签（UI 入口：`web/src/pages/settings/AboutPage.tsx` + `web/src/app/ReleaseSettings.tsx`）。只接受 HTTPS 固定下载域名、正确版本路径和 SHA-256。下载安装包位于用户目录的 `data/updates/`；安装前再次校验。
 
-当前版本同时显示构建的正式／测试属性，与用户选择的更新通道分开。新安装默认使用构建自身的通道，已有用户保存的通道选择保留。正式通道只读取 `channels/stable.json`，测试通道只读取 `channels/test.json`；两者不静默互换。官网的主下载选择正式版，测试版使用独立入口，正式版缺失时不会悄悄改下载测试包。
+界面仅显示版本号，不显示构建通道属性或通道选择控件。新安装默认使用构建自身的通道，已有用户保存的通道选择保留。正式通道只读取 `channels/stable.json`，测试通道只读取 `channels/test.json`；两者不静默互换。官网的主下载选择正式版，测试版使用独立入口，正式版缺失时不会悄悄改下载测试包。
 
 安装更新要求当前程序位于注册安装目录，且没有正在执行的任务。安装器等待原进程退出，再调用原位置更新逻辑并重新启动。未登记的便携目录通过安装器更新。配置、会话和原有快捷方式保留。
 

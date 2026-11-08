@@ -14,10 +14,10 @@
     <style>
       /* 样式表到位之前的窗口底色，取 --surface 的同一个值。 */
       html {
-        background: #fff;
+        background: var(--surface, #fff);
       }
       html[data-theme="dark"] {
-        background: #1b1b1b;
+        background: var(--surface, #1b1b1b);
       }
     </style>
   </head>

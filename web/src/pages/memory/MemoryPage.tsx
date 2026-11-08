@@ -32,6 +32,7 @@ export function MemoryPage() {
   const [loading, setLoading] = useState(true);
   const [reviewing, setReviewing] = useState(false);
   const [editing, setEditing] = useState<MemoryEntry | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
   const [draft, setDraft] = useState<MemoryExperience | null>(null);
   const [busy, setBusy] = useState(false);
   const refresh = async () => setRows((await api.memories()).entries);
@@ -88,8 +89,7 @@ export function MemoryPage() {
     try {
       await api.memoryUpdate(editing.id, editing.revision, draft);
       await refresh();
-      setEditing(null);
-      setDraft(null);
+      setEditorOpen(false);
     } catch (reason) {
       setError(readError(reason));
     } finally {
@@ -117,24 +117,24 @@ export function MemoryPage() {
   );
   return (
     <SettingsScope className="memory-page">
-      <header className="memory-page-header">
+      <header className="page-title memory-page-header">
         <div>
           <h1>{t.settings.memoryHeading}</h1>
-          <p className="memory-hint">{t.settings.memoryDescription}</p>
         </div>
         <MemoryToggle compact />
       </header>
-      <div className="memory-toolbar">
+      <div className="list-toolbar page-list-toolbar memory-toolbar">
+        {reviewing && (
+          <span className="memory-hint memory-toolbar-count" role="status">
+            {t.settings.memoryReviewing}
+          </span>
+        )}
         <SearchField
           aria-label={t.settings.memorySearch}
           placeholder={t.settings.memorySearch}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <span className="memory-hint memory-toolbar-count">
-          {t.settings.memoryCount(rows.length)}
-          {reviewing && ` · ${t.settings.memoryReviewing}`}
-        </span>
       </div>
       {error && (
         <p className="memory-error" role="alert">
@@ -165,8 +165,8 @@ export function MemoryPage() {
         ) : null}
         <div className="memory-list">
           {filteredRows.map(({ entry, compatible }) => (
-            <details key={entry.id} className="memory-entry">
-              <summary>
+            <details key={entry.id} className="memory-entry list-item">
+              <summary className="list-item-trigger">
                 <span className="memory-entry-title">
                   {entry.experience.intent}
                 </span>
@@ -216,6 +216,7 @@ export function MemoryPage() {
                       setError("");
                       setEditing(entry);
                       setDraft(structuredClone(entry.experience));
+                      setEditorOpen(true);
                     }}
                   >
                     {t.settings.memoryEdit}
@@ -238,7 +239,7 @@ export function MemoryPage() {
       </div>
       {editing && draft && (
         <Dialog
-          open
+          open={editorOpen}
           compact
           className="memory-editor-dialog"
           footer={
@@ -247,8 +248,7 @@ export function MemoryPage() {
                 variant="subtle"
                 disabled={busy}
                 onClick={() => {
-                  setEditing(null);
-                  setDraft(null);
+                  setEditorOpen(false);
                 }}
               >
                 {t.common.cancel}
@@ -270,8 +270,7 @@ export function MemoryPage() {
           title={t.settings.memoryEdit}
           onClose={() => {
             if (!busy) {
-              setEditing(null);
-              setDraft(null);
+              setEditorOpen(false);
             }
           }}
         >

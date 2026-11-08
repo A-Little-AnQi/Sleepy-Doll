@@ -1,6 +1,18 @@
 .extensions-page {
   align-content: start;
-  gap: 20px;
+  gap: var(--page-gap);
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+.extensions-page > .motion-switch {
+  display: flex;
+  flex-direction: column;
+}
+.extensions-page > .motion-switch > .extension-list {
+  flex: 0 0 auto;
+}
+.extensions-page > .motion-switch > .empty-state {
+  flex: 1;
+  min-height: 160px;
 }
 
 .extensions-page > .page-title {
@@ -55,10 +67,48 @@ dialog::backdrop {
 
 .dialog-body p {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.8;
 }
 
 .dialog-body pre {
   max-height: none;
+}
+
+.sd-dialog.extensions-dialog {
+  width: min(660px, calc(100vw - 64px));
+  max-height: min(80vh, 100%);
+  border-radius: 14px;
+}
+
+.extensions-dialog .sd-dialog-head {
+  align-items: center;
+  padding: 20px 24px;
+}
+
+.extensions-dialog .sd-dialog-head h2 {
+  font-size: 17px;
+}
+
+.extensions-dialog .sd-dialog-body {
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.extensions-dialog .sd-dialog-body p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.extensions-dialog .sd-dialog-body pre {
+  max-height: none;
+}
+
+.sd-dialog-layer:has(.extensions-dialog) .sd-dialog-scrim {
+  background: #0005;
+  backdrop-filter: blur(3px);
 }

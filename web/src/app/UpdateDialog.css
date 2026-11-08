@@ -124,7 +124,7 @@
 }
 
 .update-dialog-body h2 {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 650;
   margin: 26px 0 10px;
   line-height: 1.5;
@@ -167,7 +167,7 @@
 
 .update-dialog-body li::marker {
   color: var(--muted);
-  font-size: 0.9em;
+  font-size: max(14px, 0.9em);
 }
 
 .update-dialog-body strong {
@@ -237,7 +237,7 @@
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--subtle);
-  font-size: 0.9em;
+  font-size: max(14px, 0.9em);
 }
 
 .update-dialog-body kbd {
@@ -245,7 +245,7 @@
   border: 1px solid var(--border-strong);
   border-radius: 5px;
   background: var(--subtle);
-  font-size: 0.88em;
+  font-size: max(14px, 0.88em);
 }
 
 @keyframes update-article-in {

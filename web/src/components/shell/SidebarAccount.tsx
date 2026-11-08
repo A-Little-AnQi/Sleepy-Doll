@@ -4,6 +4,7 @@ import { ThemeSwitch } from "@sleepy-doll/ui/controls/ThemeSwitch";
 import { SettingRow } from "@sleepy-doll/ui/controls/SettingRow";
 import { useTheme, writeTheme } from "../../appearance";
 import { useT } from "../../i18n";
+import { usePresence } from "@sleepy-doll/ui/motion";
 
 export function SidebarAccount({
   onHelp,
@@ -13,7 +14,8 @@ export function SidebarAccount({
   onSettings(): void;
 }) {
   const [open, setOpen] = useState(false);
-  const [present, setPresent] = useState(false);
+  const menu = useRef<HTMLDivElement>(null);
+  const present = usePresence(open, menu);
   const t = useT();
   const theme = useTheme();
   const root = useRef<HTMLDivElement>(null);
@@ -21,25 +23,11 @@ export function SidebarAccount({
   const keyboardOpen = useRef(false);
 
   useEffect(() => {
-    if (open) {
-      setPresent(true);
-      return;
-    }
-    if (!present) return;
-    const delay = window.matchMedia?.("(prefers-reduced-motion: reduce)")
-      .matches
-      ? 0
-      : 140;
-    const timer = window.setTimeout(() => setPresent(false), delay);
-    return () => window.clearTimeout(timer);
-  }, [open, present]);
-
-  useEffect(() => {
     if (!open || !present) return;
     if (keyboardOpen.current) {
       root.current
         ?.querySelector<HTMLButtonElement>(".app-account-menu button")
-        ?.focus();
+        ?.focus({ preventScroll: true });
       keyboardOpen.current = false;
     }
     const close = (event: MouseEvent) => {
@@ -104,6 +92,8 @@ export function SidebarAccount({
       {present && (
         <div
           id="app-account-menu"
+          data-theme-control-group=""
+          ref={menu}
           className="app-account-menu"
           data-open={open}
           inert={!open}

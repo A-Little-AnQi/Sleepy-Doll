@@ -8,8 +8,10 @@
   box-sizing: border-box;
   width: min(320px, calc(100vw - 16px));
   max-height: min(320px, 60vh);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   padding: 6px;
   /* 深色下略亮于聊天主面板，浅色保持面板底色。 */
@@ -25,6 +27,7 @@
 }
 .skill-menu-popover button {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 10px;
   height: 36px;
@@ -34,7 +37,7 @@
   background: none;
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
   text-align: left;
   cursor: pointer;
 }

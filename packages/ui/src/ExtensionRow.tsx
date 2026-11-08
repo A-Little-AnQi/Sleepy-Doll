@@ -27,9 +27,9 @@ export function ExtensionRow({
   icon?: ReactNode;
 }) {
   return (
-    <div className="extension-row">
+    <div className="extension-row list-item">
       <div className="extension-glyph">{icon}</div>
-      <button className="extension-summary" onClick={onOpen}>
+      <button className="extension-summary list-item-trigger" onClick={onOpen}>
         <strong>{name}</strong>
         <span className="extension-meta">{meta}</span>
         {description && <p>{description}</p>}

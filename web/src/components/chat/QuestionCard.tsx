@@ -1,6 +1,7 @@
 import { Button } from "@sleepy-doll/ui";
 import { useEffect, useRef, useState } from "react";
 import { CheckIcon, HelpIcon } from "@sleepy-doll/ui/icons";
+import { useCssPresence } from "@sleepy-doll/ui/motion";
 import { readError } from "../../session";
 import { useT } from "../../i18n";
 import { MarkdownText } from "./Transcript";
@@ -138,6 +139,11 @@ function QuestionRequestCard({
   const [sending, setSending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
+  const motion = useRef<HTMLDivElement>(null);
+  const chip = useRef<HTMLButtonElement>(null);
+  const collapse = useRef<HTMLButtonElement>(null);
+  const expanded = !submitted && !draft.collapsed;
+  const present = useCssPresence(expanded, motion);
   // inFlight 只挡并发；acked 只在收到 ACK 后置位。失败保留草稿，
   // 卸载/切换后再回来仍能按「内容没变同 key、改内容新 key」继续。
   const inFlight = useRef(false);
@@ -187,24 +193,6 @@ function QuestionRequestCard({
     if (index < questions.length - 1) patch({ index: index + 1 });
     else void submit();
   };
-  if (submitted || draft.collapsed)
-    return (
-      <button
-        type="button"
-        className="pending-request-chip"
-        data-submitted={submitted}
-        onClick={() => patch({ collapsed: false })}
-      >
-        {submitted ? (
-          <CheckIcon className="button-icon" />
-        ) : (
-          <HelpIcon className="button-icon" />
-        )}
-        {submitted
-          ? t.chat.replySent
-          : `${t.chat.answerToContinue} · ${t.chat.questionProgress(questions.length)}`}
-      </button>
-    );
   const textChanged = (value: string) =>
     patch(
       question.options?.length
@@ -234,107 +222,161 @@ function QuestionRequestCard({
     />
   );
   return (
-    <section className="pending-request-card" aria-label={t.chat.needInfo}>
-      <header className="pending-request-header">
-        <h3>{question.header || t.chat.needInfo}</h3>
-        {questions.length > 1 && (
-          <span className="pending-request-progress">
-            {t.chat.questionProgress(questions.length, index + 1)}
-          </span>
-        )}
-        <span className="pending-request-badge">{t.chat.waitingForReply}</span>
-        <button
-          type="button"
-          className="pending-request-collapse"
-          aria-label={t.chat.collapsePanel}
-          onClick={() => patch({ collapsed: true })}
-        >
-          −
-        </button>
-      </header>
-      <div className="pending-request-body">
-        {/* MarkdownText 会渲染块级元素，容器必须是 div 而不是 p。 */}
-        <div className="pending-request-text">
-          <MarkdownText text={question.question} />
-        </div>
-        {question.options?.length ? (
-          <div
-            className="pending-request-options"
-            role="radiogroup"
-            aria-label={question.header}
-          >
-            {/* 文字输入在选项之前，填写入口始终一眼可见。 */}
-            {freeform()}
-            {question.options.map((option, optionIndex) => (
-              <label
-                key={option.label}
-                className="pending-request-option"
-                data-checked={draft.picks[question.id] === optionIndex}
-              >
-                <input
-                  type="radio"
-                  name={`${storageKey}:${question.id}`}
-                  disabled={sending}
-                  checked={ownGet(draft.picks, question.id) === optionIndex}
-                  onChange={() =>
-                    patch({
-                      picks: { ...draft.picks, [question.id]: optionIndex },
-                      // 选选项即作答：清掉旧自由文字，两种答案不并存。
-                      texts: { ...draft.texts, [question.id]: "" },
-                    })
-                  }
-                />
-                <span className="pending-request-option-label">
-                  {option.label}
-                </span>
-                {option.description && (
-                  <span className="pending-request-option-description">
-                    {option.description}
+    <div className="pending-question" data-expanded={expanded}>
+      <div
+        ref={motion}
+        className="pending-question-motion"
+        aria-hidden={!expanded}
+        inert={!expanded}
+      >
+        <div className="pending-question-inner">
+          {present && (
+            <section
+              className="pending-request-card"
+              aria-label={t.chat.needInfo}
+            >
+              <header className="pending-request-header">
+                <h3>{question.header || t.chat.needInfo}</h3>
+                {questions.length > 1 && (
+                  <span className="pending-request-progress">
+                    {t.chat.questionProgress(questions.length, index + 1)}
                   </span>
                 )}
-              </label>
-            ))}
-          </div>
-        ) : (
-          freeform()
-        )}
+                <span className="pending-request-badge">
+                  {t.chat.waitingForReply}
+                </span>
+                <button
+                  ref={collapse}
+                  type="button"
+                  className="pending-request-collapse"
+                  aria-label={t.chat.collapsePanel}
+                  onClick={() => {
+                    patch({ collapsed: true });
+                    requestAnimationFrame(() =>
+                      chip.current?.focus({ preventScroll: true }),
+                    );
+                  }}
+                >
+                  <span
+                    className="pending-request-collapse-icon"
+                    aria-hidden="true"
+                  />
+                </button>
+              </header>
+              <div className="pending-request-body">
+                {/* MarkdownText 会渲染块级元素，容器必须是 div 而不是 p。 */}
+                <div className="pending-request-text">
+                  <MarkdownText text={question.question} />
+                </div>
+                {question.options?.length ? (
+                  <div
+                    className="pending-request-options"
+                    role="radiogroup"
+                    aria-label={question.header}
+                  >
+                    {/* 文字输入在选项之前，填写入口始终一眼可见。 */}
+                    {freeform()}
+                    {question.options.map((option, optionIndex) => (
+                      <label
+                        key={option.label}
+                        className="pending-request-option"
+                        data-checked={draft.picks[question.id] === optionIndex}
+                      >
+                        <input
+                          type="radio"
+                          name={`${storageKey}:${question.id}`}
+                          disabled={sending}
+                          checked={
+                            ownGet(draft.picks, question.id) === optionIndex
+                          }
+                          onChange={() =>
+                            patch({
+                              picks: {
+                                ...draft.picks,
+                                [question.id]: optionIndex,
+                              },
+                              // 选选项即作答：清掉旧自由文字，两种答案不并存。
+                              texts: { ...draft.texts, [question.id]: "" },
+                            })
+                          }
+                        />
+                        <span className="pending-request-option-label">
+                          {option.description &&
+                          option.description !== option.label
+                            ? `${option.label}：${option.description}`
+                            : option.label}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  freeform()
+                )}
+              </div>
+              {error && (
+                <p className="pending-request-error" role="alert">
+                  {error}
+                </p>
+              )}
+              <footer className="pending-request-footer">
+                {questions.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={index === 0 || sending}
+                    onClick={() => patch({ index: index - 1 })}
+                  >
+                    {t.chat.prevQuestion}
+                  </Button>
+                )}
+                {index < questions.length - 1 && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!answerText(question, draft) || sending}
+                    onClick={() => patch({ index: index + 1 })}
+                  >
+                    {t.chat.nextQuestion}
+                  </Button>
+                )}
+                <button
+                  type="button"
+                  className="primary-action pending-request-submit"
+                  disabled={!complete || sending}
+                  onClick={() => void submit()}
+                >
+                  {sending ? t.chat.sendingReply : t.chat.sendReply}
+                </button>
+              </footer>
+            </section>
+          )}
+        </div>
       </div>
-      {error && (
-        <p className="pending-request-error" role="alert">
-          {error}
-        </p>
-      )}
-      <footer className="pending-request-footer">
-        {questions.length > 1 && (
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={index === 0 || sending}
-            onClick={() => patch({ index: index - 1 })}
-          >
-            {t.chat.prevQuestion}
-          </Button>
+      <button
+        ref={chip}
+        type="button"
+        className="pending-request-chip"
+        data-submitted={submitted}
+        aria-hidden={expanded}
+        inert={expanded}
+        onClick={() => {
+          if (submitted) return;
+          patch({ collapsed: false });
+          requestAnimationFrame(() =>
+            collapse.current?.focus({ preventScroll: true }),
+          );
+        }}
+      >
+        {submitted ? (
+          <CheckIcon className="button-icon" />
+        ) : (
+          <HelpIcon className="button-icon" />
         )}
-        {index < questions.length - 1 && (
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!answerText(question, draft) || sending}
-            onClick={() => patch({ index: index + 1 })}
-          >
-            {t.chat.nextQuestion}
-          </Button>
-        )}
-        <button
-          type="button"
-          className="primary-action pending-request-submit"
-          disabled={!complete || sending}
-          onClick={() => void submit()}
-        >
-          {sending ? t.chat.sendingReply : t.chat.sendReply}
-        </button>
-      </footer>
-    </section>
+        {submitted
+          ? t.chat.replySent
+          : `${t.chat.answerToContinue} · ${t.chat.questionProgress(questions.length)}`}
+      </button>
+    </div>
   );
 }
 

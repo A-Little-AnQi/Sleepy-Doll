@@ -151,7 +151,7 @@
 }
 
 .md-fence-lang {
-  font-size: 11px;
+  font-size: 14px;
   text-transform: lowercase;
 }
 
@@ -185,7 +185,7 @@
 
 .turn-segment > .activity-group .activity-summary {
   min-height: 27px;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .process-disclosure {
@@ -288,7 +288,7 @@
   background: transparent;
   color: inherit;
   text-align: left;
-  font-size: 13px;
+  font-size: 15px;
   cursor: pointer;
 }
 
@@ -346,7 +346,7 @@
 
 .activity-outcome {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
   white-space: nowrap;
 }
 
@@ -360,7 +360,7 @@
 
 .activity-subject {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .assistant-message img,
@@ -387,7 +387,7 @@
 .activity-item strong {
   display: block;
   margin-bottom: 8px;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .activity-subdetails + .activity-subdetails {
@@ -403,7 +403,7 @@
   border: 0;
   background: transparent;
   color: var(--secondary);
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -448,7 +448,7 @@
   background: var(--chat-user);
   color: var(--chat-user-text);
   border-radius: 18px 18px 5px 18px;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.65;
   box-shadow: 0 1px 0 #00000012;
 }
@@ -470,7 +470,7 @@
 }
 
 .assistant-message {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.72;
   overflow-wrap: anywhere;
 }
@@ -536,7 +536,7 @@
 }
 
 .assistant-message code {
-  font-size: 0.86em;
+  font-size: max(14px, 0.86em);
   background: var(--hover);
   border-radius: 4px;
   padding: 1px 5px;
@@ -552,7 +552,7 @@
   overflow: auto;
   margin: 10px 0;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .assistant-message th,

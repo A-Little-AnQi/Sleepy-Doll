@@ -24,7 +24,7 @@
 .memory-entry code {
   display: block;
   color: var(--secondary);
-  font-size: 12px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 .memory-actions {
@@ -67,11 +67,13 @@
 .memory-page {
   display: flex;
   flex-direction: column;
-  width: min(calc(100% - 64px), 920px);
+  width: 100%;
+  max-width: var(--page-width);
   height: 100%;
   min-height: 0;
   margin-inline: auto;
-  padding: 36px 0 48px;
+  padding: var(--page-padding);
+  gap: var(--page-gap);
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
@@ -89,7 +91,7 @@
 .memory-page-header h1 {
   font-size: 24px;
   line-height: 1.4;
-  margin: 0 0 8px;
+  margin: 0;
   font-weight: 600;
 }
 .memory-page-header p {
@@ -104,21 +106,8 @@
   padding-block: 0;
 }
 .memory-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin: 24px 0 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.memory-toolbar .search-field {
-  flex: 1;
-  max-width: 400px;
-  min-width: 0;
-}
-.memory-toolbar-count {
+  margin: 0;
+  padding: 0;
   flex-shrink: 0;
 }
 .memory-content {
@@ -155,12 +144,35 @@
 .memory-entry[open] > summary::after {
   transform: rotate(90deg);
 }
+
+@supports (interpolate-size: allow-keywords) and
+  (transition-behavior: allow-discrete) {
+  .memory-entry {
+    interpolate-size: allow-keywords;
+  }
+  .memory-entry::details-content {
+    block-size: 0;
+    overflow: clip;
+    transition:
+      block-size 180ms var(--ease-standard),
+      content-visibility 180ms allow-discrete;
+  }
+  .memory-entry[open]::details-content {
+    block-size: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .memory-entry::details-content {
+    transition: none;
+  }
+}
 .memory-entry-title {
-  font-size: 15px;
+  font-size: var(--font-item);
   overflow-wrap: anywhere;
 }
 .memory-entry-intro {
-  font-size: 14px;
+  font-size: var(--font-body);
   font-weight: 400;
   line-height: 1.6;
   color: var(--secondary);
@@ -192,26 +204,9 @@
   border-radius: 4px;
 }
 @media (max-width: 700px) {
-  .memory-page {
-    width: calc(100% - 40px);
-    padding-top: 24px;
-  }
   .memory-page-header {
     flex-wrap: wrap;
     gap: 16px 24px;
-  }
-  .memory-page-header > :first-child {
-    flex-basis: 260px;
-  }
-  .memory-toolbar {
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-  .memory-toolbar .search-field {
-    flex-basis: 180px;
-  }
-  .memory-toolbar-count {
-    margin-left: auto;
   }
   .memory-entry-body {
     padding-right: 0;
@@ -221,7 +216,7 @@
 .memory-editor-dialog {
   --font-body: 15px;
   --font-meta: 14px;
-  --font-label: 13px;
+  --font-label: 14px;
 }
 .memory-editor-dialog.is-compact {
   max-height: min(82vh, 100%);
@@ -233,7 +228,7 @@
   margin-block: 12px;
 }
 .memory-advanced summary {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--secondary);
   cursor: pointer;
 }

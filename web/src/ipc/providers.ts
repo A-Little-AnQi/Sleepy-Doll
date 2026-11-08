@@ -17,6 +17,7 @@ export function hostPluginEnabled(bootstrap: Pick<Bootstrap, "plugins">) {
 }
 
 export function providerOfTool(name: string, source: string) {
+  if (source === "core:web" || name.startsWith("web.")) return "web-search";
   if (source === "core:bgi" || name.startsWith("bgi.")) return HOST_PROVIDER;
   if (source.startsWith("plugin:")) {
     const id = source.slice("plugin:".length).split(":")[0];

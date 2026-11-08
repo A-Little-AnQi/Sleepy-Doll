@@ -97,7 +97,7 @@ const zh = {
   chat: {
     composerPlaceholderNew: "告诉我你想完成什么",
     composerPlaceholderBusy: "补充说明…（Enter 发送，Shift+Enter 换行）",
-    answerPlaceholder: "直接填写你的答案",
+    answerPlaceholder: "填写其他答案",
     composerPlaceholderWaiting: "等待你的回复：请在上方卡片作答或确认…",
     composerWaitingQuestion: "等待你的回答，提交后继续",
     composerWaitingApproval: "等待你确认这项操作",
@@ -360,15 +360,7 @@ const zh = {
     timeoutLabel: "响应超时（秒）",
     window: "上下文与输出",
     contextLabel: "上下文长度",
-    contextReported:
-      "建议值来自服务返回的模型容量。已保存或手动填写的值不会被自动覆盖。",
-    contextFallback:
-      "服务未报告容量；无法识别的模型以 256k 为起始值，请按实际模型核对。",
-    useContextSuggestion: "使用建议值",
-    contextLocalFallback:
-      "本机模型未报告容量，沿用 32k 起始值；请按实际加载的窗口设置。",
     maxOutputLabel: "最大输出",
-    promptCacheLabel: "提示缓存",
     setDefault: "设为默认",
     deleteNote: (name: string) =>
       `删除「${name}」。已绑定它的对话会改用默认模型。`,
@@ -652,7 +644,7 @@ const en: Dict = {
     composerPlaceholderNew: "Tell me what you want to get done",
     composerPlaceholderBusy:
       "Add details… (Enter to send, Shift+Enter for a new line)",
-    answerPlaceholder: "Type your answer",
+    answerPlaceholder: "Enter another answer",
     composerPlaceholderWaiting:
       "Waiting for your reply: answer or confirm in the card above…",
     composerWaitingQuestion:
@@ -925,15 +917,7 @@ const en: Dict = {
     timeoutLabel: "Response timeout (s)",
     window: "Context and output",
     contextLabel: "Context length",
-    contextReported:
-      "Suggested capacity is reported by the service. Saved and manual values are preserved.",
-    contextFallback:
-      "The service did not report capacity. Unknown models start at 256k; check the actual model limit.",
-    useContextSuggestion: "Use suggestion",
-    contextLocalFallback:
-      "The local model did not report capacity. Start at 32k and use the window actually loaded.",
     maxOutputLabel: "Max output",
-    promptCacheLabel: "Prompt cache",
     setDefault: "Set as default",
     deleteNote: (name: string) =>
       `Delete “${name}”? Chats bound to it will fall back to the default model.`,

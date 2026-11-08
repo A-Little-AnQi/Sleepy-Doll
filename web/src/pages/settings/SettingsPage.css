@@ -108,7 +108,7 @@
 
 .settings-group > h3 {
   margin: 0 0 8px;
-  font-size: 12px;
+  font-size: var(--font-section);
   font-weight: 600;
   color: var(--muted);
 }

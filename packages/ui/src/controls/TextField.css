@@ -20,7 +20,7 @@ textarea.sd-field {
   resize: vertical;
   line-height: 1.55;
   font:
-    12px/1.55 "Cascadia Code",
+    14px/1.55 "Cascadia Code",
     Consolas,
     monospace;
 }
@@ -47,5 +47,5 @@ textarea.sd-field {
   resize: none;
   line-height: 1.8;
   font: inherit;
-  font-size: 14px;
+  font-size: 15px;
 }

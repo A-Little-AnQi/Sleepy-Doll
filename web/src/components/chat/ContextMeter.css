@@ -61,7 +61,7 @@
   box-shadow: var(--shadow);
   background: var(--surface);
   color: var(--secondary);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 400;
   line-height: 1.6;
   white-space: normal;
@@ -87,7 +87,7 @@
   gap: 16px;
   color: var(--text);
   font-weight: 500;
-  font-size: 12px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 .sd-context-hint-row {

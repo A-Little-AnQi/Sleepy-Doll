@@ -17,6 +17,60 @@
   flex-shrink: 0;
 }
 
+.pending-question {
+  display: grid;
+  min-width: 0;
+}
+
+.pending-question-motion,
+.pending-question > .pending-request-chip {
+  grid-area: 1 / 1;
+}
+
+.pending-question-motion {
+  display: grid;
+  grid-template-rows: 0fr;
+  min-width: 0;
+  min-height: 0;
+  opacity: 0;
+  transition:
+    grid-template-rows 220ms var(--ease-standard),
+    opacity 140ms var(--ease-standard);
+}
+
+.pending-question[data-expanded="true"] > .pending-question-motion {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.pending-question-inner {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pending-question > .pending-request-chip {
+  align-self: start;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 100ms var(--ease-standard),
+    visibility 0s 100ms;
+}
+
+.pending-question[data-expanded="false"] > .pending-request-chip {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 70ms, 0s;
+}
+
+@starting-style {
+  .pending-question[data-expanded="true"] > .pending-question-motion {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
 .pending-request-card {
   /* 单卡自身 flex column：header/footer 不缩，body 内部滚动，
      长题短窗也不会把 footer 主按钮截掉。 */
@@ -24,16 +78,14 @@
   flex-direction: column;
   max-height: var(--pending-request-max-height, 70dvh);
   padding: 14px 16px;
-  border: 1px solid var(--border-strong);
+  border: var(--border-width, 1px) solid var(--border);
   border-radius: var(--layout-radius);
-  background: var(--surface, var(--subtle));
-  /* 阴影只留给 dark 主题：亮色下阴影画在圆角外，会被外层滚动容器
-     按矩形裁切成背板，因此亮色/默认直接 none。 */
+  background: var(--surface);
   box-shadow: none;
 }
 
-:root[data-theme="dark"] .pending-request-card {
-  box-shadow: 0 12px 32px rgb(0 0 0 / 22%);
+.pending-request-card:focus-within {
+  border-color: var(--border-strong);
 }
 
 .pending-request-header {
@@ -42,6 +94,12 @@
   gap: 8px;
   margin-bottom: 10px;
   flex-shrink: 0;
+}
+
+.pending-question .pending-request-header {
+  position: relative;
+  min-height: 32px;
+  padding-right: 40px;
 }
 
 .pending-request-header > svg {
@@ -53,7 +111,7 @@
 
 .pending-request-header h3 {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -63,7 +121,7 @@
 .pending-request-progress {
   flex-shrink: 0;
   color: var(--secondary);
-  font-size: 12px;
+  font-size: 14px;
   white-space: nowrap;
 }
 
@@ -73,21 +131,32 @@
   padding: 2px 8px;
   color: var(--gold);
   background: color-mix(in srgb, var(--gold) 12%, transparent);
-  font-size: 12px;
+  font-size: 14px;
   white-space: nowrap;
 }
 
 .pending-request-collapse {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
   flex-shrink: 0;
-  width: 24px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--secondary);
-  font-size: 16px;
   line-height: 1;
+}
+
+.pending-request-collapse-icon {
+  width: 18px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
 }
 
 .pending-request-collapse:hover {
@@ -107,7 +176,7 @@
 .pending-request-text {
   margin: 0 0 10px;
   color: var(--text);
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.6;
 }
 
@@ -128,8 +197,7 @@
 
 .pending-request-option {
   display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-areas: "radio label" "radio description";
+  grid-template-columns: auto minmax(0, 1fr);
   column-gap: 8px;
   align-items: start;
   padding: 8px 10px;
@@ -148,7 +216,6 @@
 }
 
 .pending-request-option input {
-  grid-area: radio;
   width: 16px;
   height: 16px;
   /* product.css 的 :where(input:not([type=checkbox])) 控件规则会给 radio
@@ -165,18 +232,12 @@
 }
 
 .pending-request-option-label {
-  grid-area: label;
-  font-size: 13px;
-  font-weight: 500;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 400;
   line-height: 20px;
-}
-
-.pending-request-option-description {
-  grid-area: description;
-  margin-top: 2px;
-  color: var(--secondary);
-  font-size: 12px;
-  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .pending-request-freeform {
@@ -189,7 +250,7 @@
   background: var(--subtle);
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
   resize: vertical;
 }
 
@@ -201,7 +262,7 @@
 .pending-request-error {
   margin: 8px 0 0;
   color: var(--danger, #c0392b);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .pending-request-footer {
@@ -213,7 +274,7 @@
 
 .pending-request-footer .muted {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .pending-request-submit {
@@ -242,7 +303,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--subtle);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 /* 收起/已答复状态的入口：与展开卡片同宽的左对齐紧凑条，不右漂、无浮层阴影。 */
@@ -254,11 +315,11 @@
   align-self: stretch;
   width: 100%;
   padding: 8px 12px;
-  border: 1px solid var(--border-strong);
+  border: var(--border-width, 1px) solid var(--border);
   border-radius: var(--layout-radius);
-  background: var(--surface, var(--subtle));
+  background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
   text-align: left;
 }
 
@@ -286,14 +347,14 @@
 
 .pending-approval-change dt {
   color: var(--secondary);
-  font-size: 12px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 
 .pending-approval-change dd {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: 15px;
   overflow-wrap: anywhere;
 }
 
@@ -312,7 +373,27 @@
   }
 }
 
+@media (max-width: 420px) {
+  .pending-question .pending-request-badge {
+    display: none;
+  }
+}
+
+@media (max-height: 680px) {
+  .pending-request-freeform {
+    min-height: 48px;
+  }
+}
+
 /* 单个问题只保留正文的一个滚动容器，避免外层也出现细小滚动条。 */
-.pending-request-layer:has(> .pending-request-card:only-child) {
+.pending-request-layer:has(> .pending-request-card:only-child),
+.pending-request-layer:has(> .pending-question:only-child) {
   overflow-y: clip;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pending-question-motion,
+  .pending-question > .pending-request-chip {
+    transition: none;
+  }
 }

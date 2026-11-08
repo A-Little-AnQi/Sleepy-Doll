@@ -9,7 +9,6 @@ import { PlusIcon, TrashIcon } from "@sleepy-doll/ui/icons";
 import { Select } from "@sleepy-doll/ui/controls/Select";
 import { MotionSwitch } from "@sleepy-doll/ui/controls/MotionSwitch";
 import { DisclosureChevron } from "@sleepy-doll/ui/controls/DisclosureChevron";
-import { Switch } from "@sleepy-doll/ui/controls/Switch";
 import type { Bootstrap, ModelInfo } from "../../ipc/types";
 import {
   MODEL_PRESETS,
@@ -629,50 +628,6 @@ export function ModelsPage({
                         />
                       </FormField>
                     </div>
-                    <div className="model-context-suggestion">
-                      <span>
-                        {contextWindows[form.model]
-                          ? t.models.contextReported
-                          : form.preset === "ollama"
-                            ? t.models.contextLocalFallback
-                            : t.models.contextFallback}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="subtle"
-                        onClick={() =>
-                          updateForm((draft) => ({
-                            ...draft,
-                            contextWindow: contextSuggestion(
-                              draft,
-                              contextWindows,
-                            ),
-                            contextWindowManual: false,
-                          }))
-                        }
-                      >
-                        {t.models.useContextSuggestion} ·{" "}
-                        {Math.round(
-                          contextSuggestion(form, contextWindows) / 1000,
-                        )}
-                        k
-                      </Button>
-                    </div>
-                    {form.protocol === "anthropic-messages" && (
-                      <label className="toggle-row">
-                        <span>{t.models.promptCacheLabel}</span>
-                        <Switch
-                          label={t.models.promptCacheLabel}
-                          checked={form.promptCache}
-                          onChange={(promptCache) =>
-                            updateForm((draft) => ({
-                              ...draft,
-                              promptCache,
-                            }))
-                          }
-                        />
-                      </label>
-                    )}
                   </div>
                 </div>
               </section>

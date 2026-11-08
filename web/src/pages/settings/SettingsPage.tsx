@@ -128,7 +128,7 @@ export function SettingsPage({
           ) : (
             <div className="settings-general">
               <h2>{t.settings.general}</h2>
-              <section className="settings-group">
+              <section className="settings-group" data-theme-control-group="">
                 <SettingRow label={t.settings.theme}>
                   <ThemeSwitch theme={theme} onChange={writeTheme} />
                 </SettingRow>
