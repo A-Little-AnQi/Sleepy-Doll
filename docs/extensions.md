@@ -7,6 +7,8 @@ Sleepy Doll 通过技能（Skill）与插件（Plugin）扩展模型能力：技
 仓库里有以下可参考实例：
 
 - [`plugins/bgi/`](../plugins/bgi/)：随产品分发的 BetterGI 领域插件。
+- [`plugins/windows-scheduler/`](../plugins/windows-scheduler/)：随产品分发、默认关闭的定时任务插件，含独立页面、受限 MCP 接口及 AI 问答、时间解释、操作与结果判定技能。
+- [`plugins/web-search/`](../plugins/web-search/)：随产品分发、默认启用的网络搜索插件，提供原生搜索和网页读取；在插件页启停，不作为独立技能或手动命令展示。
 - [`plugins/example-weather/`](../plugins/example-weather/)：HTTP 工具示例，默认停用。
 - [`plugins/zzz/`](../plugins/zzz/)：绝区零一条龙独立反射桥与领域技能。
 - [`plugins/march7th/`](../plugins/march7th/)：三月七独立桥与领域技能。
@@ -16,7 +18,7 @@ Sleepy Doll 通过技能（Skill）与插件（Plugin）扩展模型能力：技
 
 - Skill = 一个目录 + `SKILL.md`（frontmatter 元数据 + 给模型的操作说明正文），上限 128 KiB，默认最多自动装 4 个。
 - Plugin = 目录 + `.sleepy-doll-plugin/plugin.json` 清单，可含 `skills`、`httpTools`、`mcpServers`。
-- **安装与启用是两件事**：放入目录只是安装，ID 进入 `plugins.enabled` 才会注册工具。
+- **安装与启用是两件事**：宿主和网络搜索插件默认启用，可通过 `plugins.disabled` 关闭；其他插件的 ID 进入 `plugins.enabled` 才会装载。
 - 未声明执行策略的工具按最保守方式处理；声明 `readOnly` 的工具免授权，因此不要启用来源不明的插件。
 
 ## 目录
@@ -47,7 +49,7 @@ tags: bgi, route
 - 文件上限 128 KiB；默认最多自动装入 4 个。
 - 目录中存在不代表全部内容进入每次模型上下文——匹配到的正文才快照进本次运行。
 - 行尾符（LF 或 CRLF）不影响解析。
-- `userVisible: false` 将内部操作说明从用户技能列表和手动选择菜单隐藏；不影响模型发现、读取或按需匹配。未填写时默认显示。产品内置的 `operate-task`、`continue-task` 使用此标记，`create-shortcut` 保留用户入口。
+- `userVisible: false` 将内部操作说明从用户技能列表和手动选择菜单隐藏；不影响模型发现、读取或按需匹配。未填写时默认显示。产品内置的 `operate-task`、`continue-task` 使用此标记，`create-shortcut`、`create-schedule` 保留创建入口。
 
 技能来源有两类：
 
@@ -194,7 +196,7 @@ HTTP 写工具在调用动作之前明确拒绝时，可返回非成功状态及
 
 对声明不可重试的写工具，明确未提交后，同一目标版本、步骤、工具契约和相同参数不会再次派发；执行器直接保留拒绝原因结束，不依赖模型自行记住限制。参数或用户目标变化后重新校验，既定独立步骤使用各自的步骤标识。
 
-启动/提交回执的核验范围与业务结果分开：已确认启动或接纳提交时，桥可返回 `verification.status=succeeded`，并以 `verification.scope=launch/submission` 说明本次工具的完成范围；未确认启动不得带已成功核验。此范围不能证明游戏任务完成。
+启动/提交回执的核验范围与业务结果分开：已确认启动或接纳提交时，桥可返回 `verification.status=succeeded`，并以 `verification.scope=launch/submission` 说明本次工具的完成范围；未确认启动不得带已成功核验。此范围不能证明游戏任务完成。运行时对明确未提交及这两种有限范围的回执复用现有交付复核，核对最终答复中的结果、操作建议和重试次数；只读查询不因此增加复核轮次。
 
 ## 子进程隔离
 

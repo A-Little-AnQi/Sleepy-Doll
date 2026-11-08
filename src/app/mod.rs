@@ -50,13 +50,28 @@ pub struct AppController {
     extensions: RwLock<Extensions>,
     supervisor: Arc<crate::runtime::Supervisor>,
     operations: Arc<crate::runtime::operation::operations::OperationEngine>,
+    scheduler: Arc<crate::scheduler::Scheduler>,
+    bound_only: bool,
 }
 
 impl AppController {
     pub fn shutdown(&self) {
-        self.supervisor.shutdown();
+        self.scheduler.shutdown();
+        if self.bound_only {
+            self.supervisor.shutdown_bound_only();
+        } else {
+            self.supervisor.shutdown();
+        }
     }
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
+        Self::load_with_mode(path, false)
+    }
+
+    pub(crate) fn load_bound_only(path: impl AsRef<Path>) -> Result<Self> {
+        Self::load_with_mode(path, true)
+    }
+
+    fn load_with_mode(path: impl AsRef<Path>, bound_only: bool) -> Result<Self> {
         let config_path = path.as_ref().to_path_buf();
         let config = AppConfig::load(&config_path)?;
         if let Some(parent) = config.storage.database.parent() {
@@ -80,6 +95,8 @@ impl AppController {
         }
         let mut tools = ToolRegistry::default();
         let mut plugins = PluginManager::default();
+        let scheduler = crate::scheduler::Scheduler::open(&config_path, &config)?;
+        plugins.provide_mcp("windows-scheduler", scheduler.server()?);
         let bridge = Arc::new(BgiClient::new(config.bridge.clone()));
         plugins.provide_mcp(
             "bgi",
@@ -117,13 +134,19 @@ impl AppController {
         ));
         operations.configure_file_brokers(plugins.broker_specs())?;
         operations.configure_verifiers(plugins.adapters());
-        let supervisor = crate::runtime::Supervisor::new(
+        let build = if bound_only {
+            crate::runtime::Supervisor::new_bound_only
+        } else {
+            crate::runtime::Supervisor::new
+        };
+        let supervisor = build(
             config.clone(),
             skills.clone(),
             tools.clone(),
             operations.clone(),
             plugins.adapters().to_vec(),
         )?;
+        scheduler.attach(&supervisor)?;
         Ok(Self {
             _process_lock: process_lock,
             config_edit: Mutex::new(()),
@@ -137,6 +160,8 @@ impl AppController {
             }),
             supervisor,
             operations,
+            scheduler,
+            bound_only,
         })
     }
 
@@ -950,6 +975,9 @@ impl AppController {
                     .ok_or_else(|| Error::Config("launchSilently 必须是布尔值".into()))?;
                 self.set_bridge_launch_behavior(auto_start, silently)
             }
+            _ if method.starts_with("scheduler.") => {
+                crate::scheduler::handle(&self.scheduler, method, &params)
+            }
             _ => Err(Error::Config(format!("unknown IPC method: {method}"))),
         }
     }
@@ -1451,6 +1479,9 @@ impl AppController {
         }
         let mut tools = ToolRegistry::default();
         let mut plugins = PluginManager::default();
+        self.scheduler
+            .configure(config.plugin_enabled("windows-scheduler"))?;
+        plugins.provide_mcp("windows-scheduler", self.scheduler.server()?);
         let bridge = Arc::new(BgiClient::new(config.bridge.clone()));
         plugins.provide_mcp(
             "bgi",

@@ -28,9 +28,11 @@ function Get-ProductFiles {
         [pscustomobject]@{ Relative = "bridge/$name"; Source = (Join-Path $root "target/bridge/$name") }
     }
     [pscustomobject]@{ Relative = 'bridge/bridge.config.example.json'; Source = (Join-Path $root 'bgi-bridge/bridge.config.example.json') }
-    $plugins = (Resolve-Path (Join-Path $root 'plugins/bgi')).Path
-    foreach ($file in Get-ChildItem -LiteralPath $plugins -Recurse -File) {
-        [pscustomobject]@{ Relative = ('plugins/bgi/' + $file.FullName.Substring($plugins.Length + 1).Replace('\', '/')); Source = $file.FullName }
+    foreach ($pluginName in @('bgi', 'windows-scheduler', 'web-search')) {
+        $plugins = (Resolve-Path (Join-Path $root "plugins/$pluginName")).Path
+        foreach ($file in Get-ChildItem -LiteralPath $plugins -Recurse -File) {
+            [pscustomobject]@{ Relative = ('plugins/' + $pluginName + '/' + $file.FullName.Substring($plugins.Length + 1).Replace('\', '/')); Source = $file.FullName }
+        }
     }
 }
 

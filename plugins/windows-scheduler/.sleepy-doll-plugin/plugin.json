@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "windows-scheduler",
+  "name": "定时任务",
+  "version": "0.1.4",
+  "description": "为已有快捷任务设置执行时间；封装必要问答、本机时间换算、预览、创建、调整、启停和运行记录，保留执行顺序与重复任务。",
+  "skills": [
+    "./skills"
+  ],
+  "mcpServers": [
+    {
+      "id": "local",
+      "transport": "inProcess",
+      "server": "windows-scheduler",
+      "timeoutMs": 60000
+    }
+  ]
+}

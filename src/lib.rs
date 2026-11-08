@@ -8,6 +8,7 @@ pub mod extension;
 pub mod logging;
 pub mod model;
 pub mod runtime;
+pub mod scheduler;
 pub mod setup;
 pub mod webview_runtime;
 

@@ -57,16 +57,20 @@ $bridgeFiles = @(
     'BgiBridge.Recovery.runtimeconfig.json',
     'BgiBridge.Recovery.deps.json'
 )
-$pluginRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\plugins\bgi'))
+$pluginRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\plugins'))
 $pluginPrefix = $pluginRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+$pluginSources = @(
+    foreach ($pluginName in @('bgi', 'windows-scheduler', 'web-search')) {
+        Get-ChildItem -LiteralPath (Join-Path $pluginRoot $pluginName) -Recurse -File
+    }
+)
 $pluginFiles = @(
-    Get-ChildItem -LiteralPath $pluginRoot -Recurse -File |
-        ForEach-Object { 'plugins/bgi/' + $_.FullName.Substring($pluginPrefix.Length).Replace('\', '/') }
+    $pluginSources | ForEach-Object { 'plugins/' + $_.FullName.Substring($pluginPrefix.Length).Replace('\', '/') }
 )
 
 function Test-Included([string]$relative) {
     if ($relative -eq 'sleepy-doll.exe') { return $true }
-    if ($relative -like 'plugins/bgi/*') { return $relative -in $pluginFiles }
+    if ($relative -like 'plugins/*') { return $relative -in $pluginFiles }
     if ($relative -like 'bridge/*') {
         return $relative.Substring('bridge/'.Length) -in $bridgeFiles
     }
@@ -94,10 +98,10 @@ $files = @(
 )
 
 $files = @(
-    @($files | Where-Object { $_.Path -notlike 'plugins/bgi/*' }) +
-    @(Get-ChildItem -LiteralPath $pluginRoot -Recurse -File | ForEach-Object {
+    @($files | Where-Object { $_.Path -notlike 'plugins/*' }) +
+    @($pluginSources | ForEach-Object {
         [pscustomobject]@{
-            Path = 'plugins/bgi/' + $_.FullName.Substring($pluginPrefix.Length).Replace('\', '/')
+            Path = 'plugins/' + $_.FullName.Substring($pluginPrefix.Length).Replace('\', '/')
             Full = $_.FullName
             Size = $_.Length
         }

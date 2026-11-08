@@ -12,6 +12,7 @@ use crate::error::{Error, Result};
 pub const EMBEDDED_SKILLS: &[&str] = &[
     include_str!("skills/operate-task.md"),
     include_str!("skills/create-shortcut.md"),
+    include_str!("skills/create-schedule.md"),
     include_str!("skills/continue-task.md"),
 ];
 
@@ -565,7 +566,7 @@ mod visibility_tests {
                 .iter()
                 .map(|skill| skill.name.as_str())
                 .collect::<Vec<_>>(),
-            ["create-shortcut"]
+            ["create-schedule", "create-shortcut"]
         );
         for name in ["operate-task", "continue-task"] {
             let skill = registry.get(name).unwrap();
@@ -574,7 +575,7 @@ mod visibility_tests {
             assert!(registry.search(name, 8).iter().any(|s| s.name == name));
         }
         assert!(registry.get("网络搜索").is_none());
-        assert_eq!(registry.list().len(), 3);
+        assert_eq!(registry.list().len(), 4);
     }
 
     #[test]
