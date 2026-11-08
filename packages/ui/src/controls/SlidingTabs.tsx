@@ -134,6 +134,7 @@ export function SlidingTabs<T extends string>({
           key={item.id}
           type="button"
           className={value === item.id ? "is-active" : ""}
+          data-tab-id={item.id}
           data-tab-active={value === item.id ? "true" : undefined}
           aria-current={value === item.id ? "page" : undefined}
           onClick={() => onChange(item.id)}

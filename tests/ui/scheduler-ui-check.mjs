@@ -179,6 +179,9 @@ try {
   );
   const page = native ? context.pages()[0] : await context.newPage();
   page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (/invalid keyframe/i.test(message.text())) errors.push(message.text());
+  });
   if (native)
     page.on("console", (message) => {
       if (message.type() === "error")
@@ -720,6 +723,107 @@ try {
     .evaluateAll((nodes) => nodes.map((n) => n.dataset.entryKey));
   assert.equal(new Set(ids).size, 3);
   report.duplicateDrag = true;
+  const entryIds = () =>
+    queue
+      .locator("[data-entry-key]")
+      .evaluateAll((nodes) => nodes.map((node) => node.dataset.entryKey));
+  const beginReturn = async (expectedIds = ids) => {
+    const source = await dialog
+      .getByRole("button", { name: "移动第 1 项 每日委托", exact: true })
+      .boundingBox();
+    const region = await dialog.locator(".schedule-library").boundingBox();
+    await page.mouse.move(
+      source.x + source.width / 2,
+      source.y + source.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(region.x + region.width / 2, region.y + 20, {
+      steps: 10,
+    });
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector(".schedule-library")
+          ?.getAttribute("data-drop-action") === "discard",
+    );
+    assert.equal(
+      await page
+        .locator(".schedule-drag-ghost .schedule-drag-discard")
+        .evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          return rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth;
+        }),
+      true,
+      "拖回移除提示应完整显示在窗口内",
+    );
+    assert.deepEqual(
+      await entryIds(),
+      expectedIds,
+      "悬停任务库时不能提前移除执行项",
+    );
+  };
+  await beginReturn();
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await page.locator(".schedule-drag-ghost").waitFor({ state: "hidden" });
+  assert.deepEqual(await entryIds(), ids);
+  assert.equal(
+    await dialog
+      .locator('.schedule-library[data-drop-action="discard"]')
+      .count(),
+    0,
+  );
+  await page.evaluate(() =>
+    window.addEventListener(
+      "pointerdown",
+      (event) => {
+        window.__schedulePointerId = event.pointerId;
+      },
+      { once: true, capture: true },
+    ),
+  );
+  await beginReturn();
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new PointerEvent("pointercancel", {
+        pointerId: window.__schedulePointerId,
+      }),
+    ),
+  );
+  await page.mouse.up();
+  await page.locator(".schedule-drag-ghost").waitFor({ state: "hidden" });
+  assert.deepEqual(await entryIds(), ids);
+  report.dragBackCancelPreservesOrder = true;
+  await dialog.getByRole("button", { name: "默认", exact: true }).click();
+  await beginReturn();
+  await page.screenshot({
+    path: path.join(scratch, `drag-discard-${theme}.png`),
+  });
+  await page.mouse.up();
+  await page.locator(".schedule-drag-ghost").waitFor({ state: "hidden" });
+  assert.deepEqual(await names(), ["领取奖励", "每日委托"]);
+  assert.deepEqual(
+    await entryIds(),
+    ids.slice(1),
+    "拖回只能移除当前实例，保留其它同名项的身份",
+  );
+  assert.equal(await dialog.locator(".schedule-library-row").count(), 2);
+  await dialog.getByRole("button", { name: "快捷任务", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "添加 每日委托", exact: true })
+    .waitFor();
+  assert.equal(await dialog.locator(".schedule-library-row").count(), 18);
+  const restoreFirst = await queue
+    .locator(".schedule-queue-row")
+    .first()
+    .boundingBox();
+  await drag(
+    dialog.getByRole("button", { name: "添加 每日委托", exact: true }),
+    { x: restoreFirst.x + 60, y: restoreFirst.y + 2 },
+  );
+  assert.deepEqual(await names(), ["每日委托", "领取奖励", "每日委托"]);
+  assert.notEqual((await entryIds())[0], ids[0], "重新拖入应创建新的执行实例");
+  report.dragBackDiscardsOnlyEntry = true;
   await dialog.getByRole("button", { name: "默认", exact: true }).click();
   await dialog
     .getByRole("button", { name: "添加 关闭游戏", exact: true })
@@ -757,10 +861,67 @@ try {
     .locator(".schedule-queue-row")
     .first()
     .boundingBox();
-  await drag(
-    dialog.getByRole("button", { name: "移动第 3 项 每日委托", exact: true }),
-    { x: first.x + 90, y: first.y + 2 },
+  const movingEntry = await dialog
+    .getByRole("button", { name: "移动第 3 项 每日委托", exact: true })
+    .boundingBox();
+  await page.mouse.move(
+    movingEntry.x + movingEntry.width / 2,
+    movingEntry.y + movingEntry.height / 2,
   );
+  await page.mouse.down();
+  await page.mouse.move(first.x + 90, first.y + 2, { steps: 10 });
+  await page.mouse.up();
+  await page.waitForFunction(() =>
+    document
+      .querySelector(".schedule-drag-ghost")
+      ?.getAnimations()
+      .some((animation) =>
+        animation.effect.getKeyframes().some((frame) => frame.transform),
+      ),
+  );
+  const landingFlight = await page.evaluate(() => {
+    const ghost = document.querySelector(".schedule-drag-ghost");
+    const target = document.querySelector(".schedule-queue-row[data-landing]");
+    for (const animation of ghost.getAnimations()) {
+      animation.pause();
+      animation.currentTime = 300;
+    }
+    return {
+      ghostOpacity: Number(getComputedStyle(ghost).opacity),
+      targetOpacity: target ? Number(getComputedStyle(target).opacity) : null,
+      targetMoves: target
+        ?.getAnimations()
+        .some((animation) =>
+          animation.effect.getKeyframes().some((frame) => frame.transform),
+        ),
+    };
+  });
+  assert.ok(landingFlight.ghostOpacity >= 0.99, "拖影落位前不能提前淡出");
+  assert.equal(landingFlight.targetOpacity, 0, "落位时目标行应由拖影覆盖");
+  assert.equal(
+    landingFlight.targetMoves,
+    false,
+    "目标行不能同时运行 FLIP 抢走落点",
+  );
+  const handoff = await page.evaluate(async () => {
+    const ghost = document.querySelector(".schedule-drag-ghost");
+    const target = document.querySelector(".schedule-queue-row[data-landing]");
+    ghost.getAnimations().forEach((animation) => animation.finish());
+    await new Promise(requestAnimationFrame);
+    const animations = [...ghost.getAnimations(), ...target.getAnimations()];
+    for (const animation of animations) {
+      animation.pause();
+      animation.currentTime = 45;
+    }
+    const opacity =
+      Number(getComputedStyle(ghost).opacity) +
+      Number(getComputedStyle(target).opacity);
+    animations.forEach((animation) => animation.finish());
+    return opacity;
+  });
+  assert.ok(Math.abs(handoff - 1) < 0.05, "交接不能出现透明空帧或重叠闪亮");
+  await page.locator(".schedule-drag-ghost").waitFor({ state: "hidden" });
+  report.dragLandingNoOpacityGap = true;
   assert.deepEqual(await names(), ["每日委托", "每日委托", "领取奖励"]);
   assert.equal(
     await queue
@@ -941,6 +1102,63 @@ try {
     .getByRole("button", { name: "添加一份 每日委托", exact: true })
     .click();
   assert.equal((await names()).length, 4);
+  for (const mobileWidth of [560, 360]) {
+    await page.setViewportSize({ width: mobileWidth, height: 780 });
+    await dialog.getByRole("button", { name: "执行设置", exact: true }).click();
+    const mobileSource = dialog.getByRole("button", {
+      name: "移动第 4 项 每日委托",
+      exact: true,
+    });
+    await mobileSource.scrollIntoViewIfNeeded();
+    const mobileSourceBox = await mobileSource.boundingBox();
+    const mobileReturn = dialog.getByRole("button", {
+      name: "任务库",
+      exact: true,
+    });
+    const mobileReturnBox = await mobileReturn.boundingBox();
+    await page.mouse.move(
+      mobileSourceBox.x + mobileSourceBox.width / 2,
+      mobileSourceBox.y + mobileSourceBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      mobileReturnBox.x + mobileReturnBox.width / 2,
+      mobileReturnBox.y + mobileReturnBox.height / 2,
+      { steps: 10 },
+    );
+    await page.waitForFunction(
+      () =>
+        document.querySelector('.schedule-mobile-tabs [data-tab-id="library"]')
+          ?.dataset.dropAction === "discard",
+    );
+    const hintVisible = await page
+      .locator(".schedule-drag-ghost .schedule-drag-discard")
+      .evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth;
+      });
+    assert.equal(hintVisible, true, "窄窗移除提示不能被屏幕边界裁掉");
+    await page.screenshot({
+      path: path.join(
+        scratch,
+        `drag-discard-mobile-${theme}-${mobileWidth}.png`,
+      ),
+    });
+    await page.mouse.up();
+    await page.locator(".schedule-drag-ghost").waitFor({ state: "hidden" });
+    assert.deepEqual(await names(), ["每日委托", "领取奖励", "每日委托"]);
+    assert.equal(
+      await dialog
+        .getByRole("button", { name: "执行设置", exact: true })
+        .getAttribute("aria-current"),
+      "page",
+    );
+    report.mobileDragBackDiscardsEntry = true;
+    await dialog.getByRole("button", { name: "任务库", exact: true }).click();
+    await dialog
+      .getByRole("button", { name: "添加一份 每日委托", exact: true })
+      .click();
+  }
   await dialog
     .getByRole("button", { name: "移除第 4 项 每日委托", exact: true })
     .click();
@@ -1644,7 +1862,19 @@ try {
   await dialog.waitFor();
   assert.deepEqual(await names(), ["每日委托"]);
   report.detailsShortcut = true;
+  const soleEntry = await entryIds();
+  await beginReturn(soleEntry);
+  await page.mouse.up();
+  await page.locator(".schedule-drag-ghost").waitFor({ state: "hidden" });
+  assert.deepEqual(await names(), []);
+  await dialog.getByText("从右侧拖入任务", { exact: true }).waitFor();
+  assert.equal(await dialog.locator(".schedule-library-row").count(), 18);
+  report.dragBackLastEntryBecomesEmpty = true;
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "放弃更改？", exact: true })
+    .getByRole("button", { name: "放弃更改", exact: true })
+    .click();
   await dialog.waitFor({ state: "hidden" });
   libraryFixture = [
     {

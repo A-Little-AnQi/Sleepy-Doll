@@ -519,6 +519,15 @@
 .schedule-queue-row[data-dragging] {
   opacity: 0.35;
 }
+.schedule-queue-row[data-landing] {
+  opacity: 0;
+  pointer-events: none;
+}
+.schedule-library[data-drop-action="discard"],
+.schedule-mobile-tabs button[data-drop-action="discard"] {
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
 .schedule-drag-handle {
   border: 0;
   background: none;
@@ -720,6 +729,32 @@
   pointer-events: none;
   opacity: 0;
   will-change: transform;
+}
+.schedule-drag-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.schedule-drag-discard {
+  display: none;
+  flex: none;
+  order: -1;
+  margin-right: 12px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.schedule-drag-ghost[data-drop-action="discard"] .schedule-drag-discard {
+  display: block;
+}
+@media (max-width: 420px) {
+  .schedule-drag-ghost[data-drop-action="discard"] .schedule-drag-title {
+    display: none;
+  }
+  .schedule-drag-ghost[data-drop-action="discard"] .schedule-drag-discard {
+    margin-right: 0;
+  }
 }
 .schedule-dialog .schedule-mobile-tabs,
 .schedule-dialog .schedule-mobile-add {

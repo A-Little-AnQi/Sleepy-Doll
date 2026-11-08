@@ -345,8 +345,13 @@ export function ScheduleEditor({
     });
     return entry.entryId;
   };
-  const drag = useScheduleDrag(queue, library, insert);
-  useFlipList(queue, entries.map((entry) => entry.entryId).join(","));
+  const removeEntry = (key: string) =>
+    setEntries((current) => current.filter((entry) => entry.entryId !== key));
+  const drag = useScheduleDrag(queue, library, insert, removeEntry);
+  useFlipList(
+    queue,
+    `${pane}:${entries.map((entry) => entry.entryId).join(",")}`,
+  );
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -763,6 +768,7 @@ export function ScheduleEditor({
               <div
                 className="schedule-queue"
                 ref={queue}
+                tabIndex={-1}
                 aria-label="执行任务列表"
               >
                 {entries.length ? (
@@ -773,6 +779,15 @@ export function ScheduleEditor({
                       data-entry-key={entry.entryId}
                       data-sd-slot=""
                       data-sd-id={entry.entryId}
+                      data-sd-flip-skip={
+                        drag.landingKey === entry.entryId ||
+                        (drag.source?.kind === "entry" &&
+                          drag.source.key === entry.entryId) ||
+                        undefined
+                      }
+                      data-landing={
+                        drag.landingKey === entry.entryId || undefined
+                      }
                       data-dragging={
                         (drag.source?.kind === "entry" &&
                           drag.source.key === entry.entryId) ||
@@ -820,13 +835,7 @@ export function ScheduleEditor({
                       </span>
                       <IconButton
                         aria-label={`移除第 ${index + 1} 项 ${entry.title}`}
-                        onClick={() =>
-                          setEntries((current) =>
-                            current.filter(
-                              (item) => item.entryId !== entry.entryId,
-                            ),
-                          )
-                        }
+                        onClick={() => removeEntry(entry.entryId)}
                       >
                         <CloseIcon className="button-icon" />
                       </IconButton>
@@ -954,9 +963,12 @@ export function ScheduleEditor({
           createPortal(
             <>
               <div ref={drag.ghost} className="schedule-drag-ghost">
-                {drag.source.kind === "library"
-                  ? drag.source.action.title
-                  : drag.source.title}
+                <span className="schedule-drag-title">
+                  {drag.source.kind === "library"
+                    ? drag.source.action.title
+                    : drag.source.title}
+                </span>
+                <span className="schedule-drag-discard">松手移除</span>
               </div>
               <div className="schedule-drop-marker" ref={drag.marker} />
             </>,

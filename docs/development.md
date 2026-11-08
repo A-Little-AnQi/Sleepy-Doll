@@ -95,6 +95,8 @@ MCP 协议测试使用 `tests/runtime/mcp-fixture.mjs` 作为独立 Node 测试�
 
 浮层用 `usePresence`，需要真实布局空间的折叠区用 `useCssPresence`，按实际动画完成卸载。取消或被新目标替代的动画不得执行完成清理。列表以真实 ID 保持节点身份，`useFlipList` 集中读取几何后应用 FLIP，并保留阅读锚点。
 
+拖影负责落位时，目标行以 `data-sd-flip-skip` 跳过自身的位移动画，保持真实落点稳定。拖影到位后与目标行交叉淡入，最后在同次语义提交中交接显隐；不能用提前结束的定时淡出留下透明空帧。`flushSync` 仅用于手势提交与显隐交接，不进入逐帧移动。
+
 聊天滚动统一由 `useConversationScroll` 协调。跟随最新、用户阅读和输入框伸缩共用一个控制器，避免另加原生 `smooth` 滚动争抢位置。支持时由原生 `field-sizing: content` 调整输入框，旧浏览器保留兼容测量；流式文字按真实数据更新，使用 `useDeferredValue` 让后台 Markdown 渲染让出交互优先级，不用计时器逐字追赶。
 
 `node tests/ui/motion-ui-check.mjs` 使用真实 React 页面和演示 IPC，验证连续反向、退场重开、取消拖拽、提交次数预算、内容及图片增高后的阅读位置和宽窄窗口；`--production` 对已构建的 `target/ui/` 运行相同交互检查。使用已安装的 Edge，结果及截图写入 `target/.tmp/web-motion/`，工具临时文件归 `target/tmp/web-motion/`；测试关闭自建浏览器与服务器，任务结束后按删除通道清理数据。`--baseline` 只采集修改前指标，不创建源码副本。

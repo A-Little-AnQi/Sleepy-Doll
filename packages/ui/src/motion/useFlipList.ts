@@ -12,6 +12,12 @@ export function useFlipList(
     const root = ref.current;
     if (!root) return;
     const box = root.getBoundingClientRect();
+    if (!box.width) {
+      for (const animation of motions.current.values()) animation.cancel();
+      motions.current.clear();
+      previous.current.clear();
+      return;
+    }
     const scale = box.width / (root.offsetWidth || box.width || 1);
     const measured = [
       ...root.querySelectorAll<HTMLElement>("[data-sd-slot][data-sd-id]"),
@@ -51,7 +57,12 @@ export function useFlipList(
       motions.current.get(node)?.cancel();
       motions.current.delete(node);
       const delta = (old ?? y) + offset - y + newScroll - oldScroll;
-      if (old === undefined || motionDisabled() || Math.abs(delta) < 0.5)
+      if (
+        old === undefined ||
+        node.hasAttribute("data-sd-flip-skip") ||
+        motionDisabled() ||
+        Math.abs(delta) < 0.5
+      )
         continue;
       const animation = node.animate(
         [
