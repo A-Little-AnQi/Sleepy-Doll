@@ -1,0 +1,64 @@
+name: migrate-pudding-cloudflare
+on:
+  workflow_dispatch:
+    inputs:
+      public_key:
+        required: true
+        type: string
+      key_id:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  encrypt:
+    runs-on: ubuntu-latest
+    env:
+      TEMP: ${{ github.workspace }}/target/tmp
+      TMP: ${{ github.workspace }}/target/tmp
+      TMPDIR: ${{ github.workspace }}/target/tmp
+      npm_config_cache: ${{ github.workspace }}/target/npm-cache
+      npm_config_logs_max: '0'
+      NODE_DISABLE_COMPILE_CACHE: '1'
+    steps:
+      - name: Prepare task directories
+        run: mkdir -p "$TMPDIR" target/.tmp/cf-rebind/tool
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install encryption tool
+        run: npm install --prefix target/.tmp/cf-rebind/tool --no-save --package-lock=false --ignore-scripts --no-audit --no-fund libsodium-wrappers@0.7.15
+      - name: Encrypt existing publishing configuration for the new repository
+        env:
+          DESTINATION_PUBLIC_KEY: ${{ inputs.public_key }}
+          DESTINATION_KEY_ID: ${{ inputs.key_id }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
+          GA_API_SECRET: ${{ secrets.GA_API_SECRET }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const sodium = require(path.resolve('target/.tmp/cf-rebind/tool/node_modules/libsodium-wrappers'));
+          (async () => {
+            await sodium.ready;
+            const key = sodium.from_base64(process.env.DESTINATION_PUBLIC_KEY, sodium.base64_variants.ORIGINAL);
+            if (key.length !== 32 || !process.env.DESTINATION_KEY_ID) throw Error('Invalid destination public key');
+            const encrypted = {};
+            for (const name of ['CLOUDFLARE_API_TOKEN', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'GA_MEASUREMENT_ID', 'GA_API_SECRET']) {
+              const value = process.env[name];
+              if (!value) throw Error('Missing source configuration: ' + name);
+              encrypted[name] = sodium.to_base64(sodium.crypto_box_seal(sodium.from_string(value), key), sodium.base64_variants.ORIGINAL);
+            }
+            fs.writeFileSync('target/.tmp/cf-rebind/encrypted-secrets.json', JSON.stringify({destination:'Pudding-Player/Pudding',key_id:process.env.DESTINATION_KEY_ID,encrypted}));
+            console.log('Encrypted five publishing settings for Pudding-Player/Pudding.');
+          })().catch(error => { console.error(error.message); process.exitCode = 1; });
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cf-rebind-encrypted
+          path: target/.tmp/cf-rebind/encrypted-secrets.json
+          if-no-files-found: error
+          retention-days: 1
