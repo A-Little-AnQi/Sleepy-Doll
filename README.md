@@ -1,3 +1,5 @@
+> Pudding 主仓、发布配置与 Cloudflare 部署流程已迁移至 [Pudding-Player/Pudding](https://github.com/Pudding-Player/Pudding)。本仓库保留历史源码与发行物，后续维护请前往新仓库。
+
 # Sleepy Doll
 
 用于游戏脚本工具的本地桌面助手，目前已适配 BetterGI（BGI）。用户用自然语言提出目标，助手负责检索资料、配置任务、调用工具和核对结果；游戏操作由接入的脚本工具执行。
